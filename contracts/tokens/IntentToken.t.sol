@@ -56,9 +56,9 @@ contract IntentTokenIntegrationTest is Test {
   }
 
   /**
-   * @dev Production order. Registry → implementation → rules (bound to the predicted hook) → attest rules → hook with
-   *      its initial rules (bound to the predicted proxy) → attest hook and implementation → proxy. The token is live
-   *      with its policy at deploy; the timelock only governs later changes
+   * @dev Production order. Registry → implementation → rules → attest rules → hook with its initial rules (bound to the
+   *      predicted proxy) → attest hook and implementation → proxy. Rules are hook-agnostic, so they can be deployed
+   *      first and shared across tokens. The token is live with its policy at deploy; the timelock only governs changes
    */
   function _deployStack(
     bool _withRules
@@ -67,16 +67,12 @@ contract IntentTokenIntegrationTest is Test {
     _identity = new MockIdentityRegistry();
     _impl = new IntentToken();
 
-    uint256 _nonce = vm.getNonce(address(this));
-    address _predictedHook = vm.computeCreateAddress(address(this), _nonce + 1);
-    address _predictedProxy = vm.computeCreateAddress(address(this), _nonce + 2);
-
-    _identityRule = new IdentityRule(_predictedHook, IIdentityRegistry(address(_identity)));
+    _identityRule = new IdentityRule(IIdentityRegistry(address(_identity)));
     vm.prank(_attester);
     _registry.attest(address(_identityRule).codehash, IPolicyRegistry.AttestKind.RULE, 'ipfs://rule-review');
 
+    address _predictedProxy = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
     _hook = new ComplianceHook(_admin, _registry, _predictedProxy, _withRules ? _one(_identityRule) : _none());
-    assertEq(address(_hook), _predictedHook, 'hook address prediction');
 
     vm.startPrank(_attester);
     _registry.attest(address(_hook).codehash, IPolicyRegistry.AttestKind.HOOK, 'ipfs://hook-review');
@@ -288,7 +284,7 @@ contract IntentTokenIntegration_Intents is IntentTokenIntegrationTest {
 
 contract IntentTokenIntegration_Safety is IntentTokenIntegrationTest {
   function test_WhenARuleReentersTheToken_TheTransferReverts() external {
-    MockReentrantRule _reentrant = new MockReentrantRule(address(_hook));
+    MockReentrantRule _reentrant = new MockReentrantRule();
     vm.prank(_attester);
     _registry.attest(address(_reentrant).codehash, IPolicyRegistry.AttestKind.RULE, 'ipfs://mock');
     IComplianceRule[] memory _ruleSet = new IComplianceRule[](2);

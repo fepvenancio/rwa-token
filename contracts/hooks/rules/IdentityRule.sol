@@ -20,13 +20,11 @@ contract IdentityRule is BaseRule, IIdentityRule {
 
   /**
    * @notice Deploys the rule
-   * @param _hook The hook allowed to call `after_`
    * @param _identity The identity registry
    */
   constructor(
-    address _hook,
     IIdentityRegistry _identity
-  ) BaseRule(_hook) {
+  ) {
     if (address(_identity) == address(0)) revert IdentityRule_ZeroAddress();
     IDENTITY = _identity;
   }

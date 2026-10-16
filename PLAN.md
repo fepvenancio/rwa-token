@@ -15,7 +15,9 @@ Brief v2 ("Gated Token Stack") replaced the original executor-only brief on 2026
 | 2026-10-16 | **Security tooling:** Slither is the gate. Mythril is dropped (no Cancun/transient support; noted in the brief). Halmos is kept because it was verified to run (see below). Aderyn is not needed. |
 | 2026-10-16 | **Interfaces frozen.** `contracts/test/InterfaceFreeze.t.sol` pins every ERC-165 id, event topic and reason code. Exact ERC-7943 conformance will come later as a separate adapter interface. |
 | 2026-10-16 | **Compiler:** one setting for the `default` and `production` profiles (optimizer on, 200 runs), so tests run on the deployed bytecode. `ContractSizes.t.sol` asserts EIP-170; the size limit is never lifted. |
-| 2026-10-16 | Use `network.create()` in TS tests. `network.connect()` (brief §9) is `@deprecated` in Hardhat 3.20. |
+| 2026-10-16 | Use `network.create()` / `getOrCreate()` in TS tests; `connect()` is `@deprecated` in Hardhat 3.20. Brief §9 is updated from the installed typings. |
+| 2026-10-16 | **Hook-agnostic rules:** `BaseRule.onlyHook(ctx)` checks `IPolicyGated(ctx.token).policyHook() == msg.sender`; there is no `HOOK` immutable. Rules are deployed once and shared, and survive hook replacement. |
+| 2026-10-16 | **One rule instance per `ruleId` per hook:** `_setRules` rejects duplicate `ruleId`s, reusing `ComplianceHook_DuplicateRule`. The frozen interface got a NatSpec-only change under explicit owner instruction; ABI and ids are unchanged. |
 
 ## Owner decisions (2026-10-16, answers to the open questions)
 1. **Freeze**, after one change: `IntentCancelled(address indexed _from, bytes32 indexed _nonce)`, with no fake zero hash. Pin the ERC-165 ids in a test. Exact ERC-7943 conformance comes later as a separate adapter interface and does not block the freeze.
@@ -71,7 +73,7 @@ Not built yet: the `IntentExecutor` contract (Phase 3), `SettlementWindow`/`MaxH
 
 ### Owner-decision changes (2026-10-16)
 - `IntentCancelled(address indexed _from, bytes32 indexed _nonce)`; the fake zero hash is gone.
-- `ComplianceHook(admin, registry, token, initialRules[])`, sharing the internal `_setRules` with `setRules`. A test confirms the rules don't affect the codehash. **Deploy order:** predict the hook address → deploy the rules (bound to it) → attest the rules → deploy the hook with its rules (bound to the predicted proxy) → attest the hook and implementation → deploy the proxy.
+- `ComplianceHook(admin, registry, token, initialRules[])`, sharing the internal `_setRules` with `setRules`. A test confirms the rules don't affect the codehash. **Deploy order:** deploy the rules (hook-agnostic; can be shared and attested once) → attest the rules → deploy the hook with its rules (bound to the predicted proxy) → attest the hook and implementation → deploy the proxy.
 - The optimizer is on in `default`; `ContractSizes.t.sol` runs in CI.
 - `solhint-community@4.0.1` is pinned. Scripts: `lint:sol` (`--max-warnings 0`), `fmt:check`, `typecheck`, `test`, `test:halmos`. `.solhintignore` skips tests.
 - CI (`.github/workflows/ci.yml`):
@@ -83,16 +85,19 @@ Not built yet: the `IntentExecutor` contract (Phase 3), `SettlementWindow`/`MaxH
 - **Slither gate:** `slither.config.json` excludes only detectors that are false project-wide (naming, assembly, timestamp, calls-loop). The 3 accepted instances are suppressed inline with reasons. It exits 0 on clean code and 255 when a finding is reintroduced (verified).
 
 ### Phase 4 design notes (from external review, validated)
-- **`BaseRule.HOOK` is immutable**, so a rule instance serves one hook and one token, and every token needs its rules redeployed and re-attested. Proposal: `onlyHook` checks `msg.sender == IPolicyGated(ctx.token).policyHook()`. One attested rule could then serve many tokens, and rules could be deployed before the hook. `BaseRule` also doesn't reject a zero hook.
-- **`setRules` dedupes by address only.** Two instances of the same rule type share a `ruleId`, which also makes `RuleSetChanged` ambiguous. Proposal: reject duplicate `ruleId`s too.
-- **`isUserAllowed` builds a MINT context with amount 0.** `MaxHoldersRule` must decide whether a zero-amount mint counts against the cap, or `isUserAllowed` will report "not allowed" for verified users whenever the cap is full.
+- ✅ **Rules are hook-agnostic** (owner decision). `BaseRule` has no `HOOK`, so the zero-hook gap is gone with it. Tests cover:
+  - one instance serving two tokens, each hook accepted only for its own token;
+  - a replaced hook losing access at once;
+  - an identical codehash for identical configuration.
+- ✅ **Duplicate `ruleId`s are rejected** (owner decision; regression test went red first).
+- Open for `MaxHoldersRule`: `isUserAllowed` builds a MINT context with amount 0, so the rule must decide whether a zero-amount mint counts against the cap.
 
 ### New fact for Phase 7
 `UUPSUpgradeable` stores `address(this)` in an immutable, so **every implementation deployment has its own codehash**. IMPLEMENTATION attestations therefore cover one deployed instance, not a source version (tested).
 
 ### Verification
 ```
-npm test             →  150 passing (149 solidity, 1 nodejs), incl. 2 invariants × 256 runs, size + freeze guards
+npm test             →  154 passing (153 solidity, 1 nodejs), incl. 2 invariants × 256 runs, size + freeze guards
 npm run typecheck    →  clean
 npm run lint:sol     →  0 warnings
 npm run fmt:check    →  clean
@@ -115,5 +120,4 @@ npm run test:halmos  →  4 passed; 0 failed
 - **Smoke test:** `test/nodejs/smoke.test.ts` is kept so the node runner isn't empty until Phase 6.
 
 ### Open questions for the owner
-1. **Phase 4 design notes above.** Should `BaseRule` take the token's current hook (shareable rules) and should duplicate `ruleId`s be rejected? Both should be decided before more rules are written.
-2. **Brief §9** still says `network.connect()`, which is deprecated in Hardhat 3.20. Switch the brief to `network.create()`?
+1. **Push target.** `fepvenancio/rwa-token` is public; the code is proprietary (rule 15). Make it private before pushing, or push as-is?

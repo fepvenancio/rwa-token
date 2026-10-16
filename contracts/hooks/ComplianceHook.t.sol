@@ -201,6 +201,16 @@ contract ComplianceHookUnit_SetRules is ComplianceHookUnitTest {
     _install(_two(_rule, _rule));
   }
 
+  /// @dev Regression: two instances of the same rule type (same `ruleId`) were accepted, making
+  ///      `RuleSetChanged` ambiguous for indexers. One instance of each rule type per hook
+  function test_WhenTwoRulesShareARuleId_ItReverts() external {
+    IComplianceRule _first = _newRule('identity', false);
+    IComplianceRule _second = _newRule('identity-second-instance', false);
+    vm.mockCall(address(_second), abi.encodeCall(IComplianceRule.ruleId, ()), abi.encode(keccak256('identity')));
+    vm.expectRevert(abi.encodeWithSelector(IComplianceHook.ComplianceHook_DuplicateRule.selector, address(_second)));
+    _install(_two(_first, _second));
+  }
+
   function test_WhenValid_ItStoresTheOrderAndEmits() external {
     IComplianceRule _a = _newRule('a', false);
     IComplianceRule _b = _newRule('b', true);

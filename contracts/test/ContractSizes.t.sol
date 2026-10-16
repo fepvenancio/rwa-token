@@ -27,7 +27,7 @@ contract ContractSizesTest is Test {
       'ComplianceHook',
       address(new ComplianceHook(address(this), IPolicyRegistry(_registry), address(this), new IComplianceRule[](0)))
     );
-    _assertFits('IdentityRule', address(new IdentityRule(address(this), IIdentityRegistry(address(this)))));
+    _assertFits('IdentityRule', address(new IdentityRule(IIdentityRegistry(address(this)))));
   }
 
   function _assertFits(

@@ -199,7 +199,7 @@ Semantics to spec in NatSpec and enforce in tests:
 
 ## 6. Hook development — every policy check is a rule
 
-**Topology.** One `ComplianceHook` per token (per-instrument rule sets). Rules are the unit developers write; the hook is the dispatcher. Rules must key any storage by `ctx.token` so one deployment can serve many tokens.
+**Topology.** One `ComplianceHook` per token (per-instrument rule sets). Rules are the unit developers write; the hook is the dispatcher. Rules must key any storage by `ctx.token` so one deployment can serve many tokens. Rules are hook-agnostic: `BaseRule.onlyHook(ctx)` accepts whichever hook `ctx.token` currently has installed (`IPolicyGated(ctx.token).policyHook()`). So one attested instance serves every token and survives hook replacement, and its codehash does not depend on any hook. This is sound only because state is keyed by `ctx.token`: a fake token can authorise writes to its own key and nothing else. `ruleId` is the rule type, and a hook accepts one instance per `ruleId`; a second configuration of the same logic needs a distinct id (e.g. `IdentityRule.secondary.v1`).
 
 **Dispatcher rules (`ComplianceHook`).**
 
@@ -212,7 +212,7 @@ Semantics to spec in NatSpec and enforce in tests:
 
 **Writing a new rule.**
 
-1. `contracts/hooks/rules/<Name>Rule.sol` inheriting `BaseRule` (`ruleId`, `wantsAfter` default false, `onlyHook`).
+1. `contracts/hooks/rules/<Name>Rule.sol` inheriting `BaseRule` (`ruleId`, `wantsAfter` default false, `onlyHook(ctx)` on `after_`).
 2. Implement `check`. Read only own storage and registries injected at construction.
 3. Add reason codes to `Errors.sol` if new.
 4. `<Name>Rule.t.sol`: accept, each reject, fuzz, view-ness.
@@ -252,7 +252,13 @@ Each phase: update `PLAN.md` → tests → impl → `npx hardhat test` → stop 
 * `.t.sol` files, Foundry-style `setUp()` / `test*` / `testFuzz*` / `invariant*`, `forge-std` `Test`.
 * No inline NatSpec fuzz config; no fixture cheatcodes. Fuzz runs via config.
 * `npx hardhat test solidity` / `npx hardhat test nodejs` / `npx hardhat test`.
-* ESM project; `node:test` + `viem` via `network.connect()`.
+* ESM project; `node:test` + `viem` via `network.create()` (a fresh, isolated connection) or `network.getOrCreate()` (reuse one). `network.connect()` is `@deprecated` in Hardhat 3.20 and will be removed.
+* Toolbox-viem (hardhat-viem 3.0.10, hardhat-viem-assertions 3.1.4):
+  * `const { viem, networkHelpers } = await network.create()`.
+  * Contracts: `viem.deployContract`, `viem.getContractAt`.
+  * Clients: `viem.getPublicClient`, `viem.getWalletClients`.
+  * Assertions: `viem.assertions.revertWithCustomErrorWithArgs`, `emitWithArgs`, `balancesHaveChanged`.
+* Verify APIs against `node_modules/hardhat` typings and `.agents/skills/hardhat*`, not memory or older docs.
 
 ## 10. Definition of done (per phase)
 

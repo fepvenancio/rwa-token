@@ -8,6 +8,7 @@ import {Reasons} from 'interfaces/Errors.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IIdentityRule} from 'interfaces/IIdentityRule.sol';
+import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 
 import {IdentityRule} from 'contracts/hooks/rules/IdentityRule.sol';
@@ -16,13 +17,23 @@ import {Helpers} from 'contracts/test/Helpers.sol';
 contract IdentityRuleUnitTest is Helpers {
   IdentityRule internal _rule;
   address internal _hook = makeAddr('hook');
+  address internal _token;
   address internal _identity;
   address internal _from = makeAddr('from');
   address internal _to = makeAddr('to');
 
   function setUp() public virtual {
     _identity = _mockContract('identity');
-    _rule = new IdentityRule(_hook, IIdentityRegistry(_identity));
+    _token = _mockContract('token');
+    _currentHook(_token, _hook);
+    _rule = new IdentityRule(IIdentityRegistry(_identity));
+  }
+
+  function _currentHook(
+    address _forToken,
+    address _policyHook
+  ) internal {
+    vm.mockCall(_forToken, abi.encodeCall(IPolicyGated.policyHook, ()), abi.encode(_policyHook));
   }
 
   function _verified(
@@ -38,7 +49,7 @@ contract IdentityRuleUnitTest is Helpers {
     address _receiver
   ) internal view returns (IPolicyHook.TransferContext memory _context) {
     _context = IPolicyHook.TransferContext({
-      token: address(this),
+      token: _token,
       from: _sender,
       to: _receiver,
       id: 0,
@@ -62,12 +73,17 @@ contract IdentityRuleUnitTest is Helpers {
 contract IdentityRuleUnit_Constructor is IdentityRuleUnitTest {
   function test_WhenIdentityIsZero_ItReverts() external {
     vm.expectRevert(IIdentityRule.IdentityRule_ZeroAddress.selector);
-    new IdentityRule(_hook, IIdentityRegistry(address(0)));
+    new IdentityRule(IIdentityRegistry(address(0)));
   }
 
-  function test_WhenValid_ItSetsTheImmutables() external view {
-    assertEq(_rule.HOOK(), _hook);
+  function test_WhenValid_ItSetsTheIdentityRegistry() external view {
     assertEq(address(_rule.IDENTITY()), _identity);
+  }
+
+  /// @dev The codehash no longer depends on any hook, so one attestation covers every token using this configuration
+  function test_WhenDeployedTwiceWithTheSameRegistry_ItKeepsTheCodehash() external {
+    IdentityRule _twin = new IdentityRule(IIdentityRegistry(_identity));
+    assertEq(address(_twin).codehash, address(_rule).codehash);
   }
 }
 
@@ -133,14 +149,44 @@ contract IdentityRuleUnit_Check is IdentityRuleUnitTest {
 }
 
 contract IdentityRuleUnit_After is IdentityRuleUnitTest {
-  function test_WhenCallerIsNotTheHook_ItReverts() external {
+  function test_WhenCallerIsNotTheTokensHook_ItReverts() external {
     address _caller = makeAddr('stranger');
     vm.expectRevert(abi.encodeWithSelector(IComplianceRule.ComplianceRule_OnlyHook.selector, _caller));
     vm.prank(_caller);
     _rule.after_(_ctx(IPolicyHook.TransferKind.TRANSFER, _from, _to));
   }
 
-  function test_WhenCallerIsTheHook_ItDoesNothing() external {
+  function test_WhenCallerIsTheTokensHook_ItAsksTheTokenAndSucceeds() external {
+    vm.expectCall(_token, abi.encodeCall(IPolicyGated.policyHook, ()));
+    vm.prank(_hook);
+    _rule.after_(_ctx(IPolicyHook.TransferKind.TRANSFER, _from, _to));
+  }
+
+  /// @dev One instance serves many tokens: each token's own hook is accepted, but only for that token's context
+  function test_WhenSharedByTwoTokens_EachHookIsAcceptedOnlyForItsOwnToken() external {
+    address _otherToken = _mockContract('otherToken');
+    address _otherHook = makeAddr('otherHook');
+    _currentHook(_otherToken, _otherHook);
+    IPolicyHook.TransferContext memory _otherCtx = _ctx(IPolicyHook.TransferKind.TRANSFER, _from, _to);
+    _otherCtx.token = _otherToken;
+
+    vm.prank(_otherHook);
+    _rule.after_(_otherCtx);
+
+    vm.expectRevert(abi.encodeWithSelector(IComplianceRule.ComplianceRule_OnlyHook.selector, _otherHook));
+    vm.prank(_otherHook);
+    _rule.after_(_ctx(IPolicyHook.TransferKind.TRANSFER, _from, _to));
+  }
+
+  /// @dev Replacing a token's hook needs no rule redeploy, and the replaced hook loses access at once
+  function test_WhenTheTokenReplacesItsHook_OnlyTheNewHookIsAccepted() external {
+    address _newHook = makeAddr('newHook');
+    _currentHook(_token, _newHook);
+
+    vm.prank(_newHook);
+    _rule.after_(_ctx(IPolicyHook.TransferKind.TRANSFER, _from, _to));
+
+    vm.expectRevert(abi.encodeWithSelector(IComplianceRule.ComplianceRule_OnlyHook.selector, _hook));
     vm.prank(_hook);
     _rule.after_(_ctx(IPolicyHook.TransferKind.TRANSFER, _from, _to));
   }

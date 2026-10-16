@@ -146,11 +146,13 @@ contract ComplianceHook is ERC165, IComplianceHook {
       if (!REGISTRY.isAttested(address(_rule), IPolicyRegistry.AttestKind.RULE)) {
         revert ComplianceHook_NotAttested(address(_rule));
       }
+      // `ruleId` is the rule type: one instance of each type per hook. The same contract twice shares an id too.
+      bytes32 _ruleId = _rule.ruleId();
       for (uint256 _j; _j < _i; ++_j) {
-        if (_newRules[_j] == _rule) revert ComplianceHook_DuplicateRule(address(_rule));
+        if (_ruleIds[_j] == _ruleId) revert ComplianceHook_DuplicateRule(address(_rule));
       }
       _rules.push(_rule);
-      _ruleIds[_i] = _rule.ruleId();
+      _ruleIds[_i] = _ruleId;
       if (_rule.wantsAfter()) _mask |= 1 << _i;
     }
     _afterMask = _mask;

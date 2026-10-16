@@ -27,8 +27,9 @@ interface IComplianceHook is IPolicyHook {
   //////////////////////////////////////////////////////////////*/
 
   /**
-   * @notice Thrown when a rule appears twice in a rule set
-   * @param _rule The duplicated rule
+   * @notice Thrown when a rule set contains two rules of the same type: the same contract twice, or two contracts with
+   *         the same `ruleId`. One instance of each rule type per hook
+   * @param _rule The later of the two rules
    */
   error ComplianceHook_DuplicateRule(address _rule);
 

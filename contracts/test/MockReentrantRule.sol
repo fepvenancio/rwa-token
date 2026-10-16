@@ -15,18 +15,10 @@ import {BaseRule} from 'contracts/hooks/BaseRule.sol';
  * @notice Rule that tries to re-enter the token from `after_`; the token's reentrancy guard must block it
  */
 contract MockReentrantRule is BaseRule {
-  /**
-   * @notice Deploys the rule
-   * @param _hook The hook allowed to call `after_`
-   */
-  constructor(
-    address _hook
-  ) BaseRule(_hook) {}
-
   /// @inheritdoc IComplianceRule
   function after_(
     IPolicyHook.TransferContext calldata _ctx
-  ) external override onlyHook {
+  ) external override onlyHook(_ctx) {
     IERC20(_ctx.token).transfer(_ctx.to, 0);
   }
 
