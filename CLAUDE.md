@@ -153,7 +153,7 @@ struct TransferIntent {
     address from;
     address to;
     uint256 amount;
-    bytes32 nonce;       // ERC-3009-style random nonce, bitmap-tracked per signer
+    bytes32 nonce;       // ERC-3009-style random nonce, tracked per signer in a used/unused map
     uint256 deadline;    // inclusive
     bytes32 ref;         // off-chain reference (ISO 20022 msgId hash / bizId)
 }
@@ -241,11 +241,11 @@ Each phase: update `PLAN.md` → tests → impl → `npx hardhat test` → stop 
 * **Phase 0 — scaffold.** `npx hardhat --init` (TypeScript, ESM, node:test + viem). OZ v5. Solc pin, cancun, optimizer profile. `hardhat-keystore`. Lockfile committed.
 * **Phase 1 — interfaces + errors.** §4 and §5 verbatim with NatSpec. Freeze.
 * **Phase 2 — registry + base.** `PolicyRegistry` (immutable, tests: attest/revoke/kind, codehash comparison, role gates). `PolicyGatedERC20Upgradeable`: `ERC20PermitUpgradeable` + `AccessControlUpgradeable` + `PausableUpgradeable` + `UUPSUpgradeable` + `ReentrancyGuardTransient`, enforcement core, guardian, `_update` → hook. Tests with mock hooks: every entry point's role gate; guardian can pause and cannot unpause; `setPolicyHook` and `_authorizeUpgrade` reject unattested targets; frozen math; forced unfreezes; mint/burn reach hook with zero addresses; hook reject ⇒ no state change; `permit`; invariants `sum(balances) == totalSupply`, `frozen(u) <= balanceOf(u)`.
-* **Phase 3 — IntentSettled + IntentToken + executor.** EIP-712, nonce bitmap, `executeTransfer`, `cancelIntent`. `IntentExecutor` with `EXECUTOR_ROLE`. Tests: replay, expired, wrong domain/chainId, cancel race, malleability, role gating, `canExecute` parity.
+* **Phase 3 — IntentSettled + IntentToken + executor.** EIP-712, per-signer used-nonce map (random nonces chosen by the signer's HSM/client, independent of executor state), `executeTransfer`, `cancelIntent`. `IntentExecutor` with `EXECUTOR_ROLE`. Tests: replay, expired, wrong domain/chainId, cancel race, malleability, role gating, `canExecute` parity.
 * **Phase 4 — hooks.** `ComplianceHook`, `BaseRule`, initial rules, mocks. Ordering, short-circuit, reentrancy, cap.
 * **Phase 5 — vaults.** `Gated4626Vault`, `Gated7540Vault`. Share mint/burn gated; gating-aware `max*`; 7540 request/fulfil/claim lifecycle; operator semantics.
 * **Phase 6 — viem integration.** `signTypedData` → execute; vault flows; event decoding; pre-flight parity from the TypeScript side.
-* **Phase 7 — deploy + security.** Ignition module: registry → attest implementations/hook/rules → timelock (≥7d, guardian as canceller) → proxies → roles → guardian multisig. `npx @openzeppelin/upgrades-core validate`. Slither clean (`slither .`, accepted findings documented in `slither.config.json` and inline). Halmos on the nonce/signature and frozen-balance paths (`npm run test:halmos`; verified on 2026-10-16 that it runs on the proxied token with transient storage and kills planted bugs). **No Mythril:** it has no Cancun support (TSTORE/TLOAD/MCOPY), so it cannot analyse `ReentrancyGuardTransient` or the transient context slots.
+* **Phase 7 — deploy + security.** Ignition module: registry → attest implementations/hook/rules (one implementation per template, deployed and attested once, one proxy per token; UUPS gives each implementation deployment its own codehash) → timelock (≥7d, guardian as canceller) → proxies → roles → guardian multisig. `npx @openzeppelin/upgrades-core validate`. Slither clean (`slither .`, accepted findings documented in `slither.config.json` and inline). Halmos on the nonce/signature and frozen-balance paths (`npm run test:halmos`; verified on 2026-10-16 that it runs on the proxied token with transient storage and kills planted bugs). **No Mythril:** it has no Cancun support (TSTORE/TLOAD/MCOPY), so it cannot analyse `ReentrancyGuardTransient` or the transient context slots.
 
 ## 9. Hardhat 3 specifics
 

@@ -1,6 +1,6 @@
 # PLAN
 
-Status: **Phase 1 interfaces FROZEN (2026-10-16). Imported stack integrated through partial Phases 2–4. Next: Phase 3 `IntentExecutor`, then the Phase 4 rules.**
+Status: **Phase 3 (`IntentExecutor`) — plan written, awaiting review. No Phase 3 code yet.**
 
 Brief v2 ("Gated Token Stack") replaced the original executor-only brief on 2026-10-16. On the same day the owner supplied a reference implementation in `Imported/` (now deleted; its contents live in `contracts/`) and approved, in chat, integrating it with the major findings fixed, a common-bug sweep, and the Wonderland Solidity standards.
 
@@ -18,6 +18,13 @@ Brief v2 ("Gated Token Stack") replaced the original executor-only brief on 2026
 | 2026-10-16 | Use `network.create()` / `getOrCreate()` in TS tests; `connect()` is `@deprecated` in Hardhat 3.20. Brief §9 is updated from the installed typings. |
 | 2026-10-16 | **Hook-agnostic rules:** `BaseRule.onlyHook(ctx)` checks `IPolicyGated(ctx.token).policyHook() == msg.sender`; there is no `HOOK` immutable. Rules are deployed once and shared, and survive hook replacement. |
 | 2026-10-16 | **One rule instance per `ruleId` per hook:** `_setRules` rejects duplicate `ruleId`s, reusing `ComplianceHook_DuplicateRule`. The frozen interface got a NatSpec-only change under explicit owner instruction; ABI and ids are unchanged. |
+
+| 2026-10-16 | **Proprietary `LICENSE`**: Copyright (c) 2026 Filipe Venancio, all rights reserved. The repo is private, and the license is in place for a possible switch to public. |
+| 2026-10-16 | **Nonces stay a per-signer bool map** (not a bitmap). Random nonces are chosen independently by the HSM/client, with no coupling to executor state. The brief is fixed. |
+| 2026-10-16 | **No Multicall in the base:** keep the base minimal; Safe and the timelock already batch. Many-intents-per-tx belongs on the executor as `executeBatch` (Phase 3). |
+| 2026-10-16 | **Phase 7: one implementation per template**, deployed and attested once, with one proxy per token (recorded in the brief). |
+| 2026-10-16 | **Hook gas (review #1) and the telemetry flag (review #5): leave as is.** The brief's "rule list loaded into memory once" stands. |
+| 2026-10-16 | **README**: architecture, commands, security model, and the deviations-from-brief list. |
 
 ## Owner decisions (2026-10-16, answers to the open questions)
 1. **Freeze**, after one change: `IntentCancelled(address indexed _from, bytes32 indexed _nonce)`, with no fake zero hash. Pin the ERC-165 ids in a test. Exact ERC-7943 conformance comes later as a separate adapter interface and does not block the freeze.
@@ -119,5 +126,61 @@ npm run test:halmos  →  4 passed; 0 failed
 - **Mocks:** the brief's `MockAcceptHook`/`MockRejectHook` are replaced by `vm.mockCall`, per Wonderland. `MockAsset` waits for the vaults.
 - **Smoke test:** `test/nodejs/smoke.test.ts` is kept so the node runner isn't empty until Phase 6.
 
-### Open questions for the owner
-1. **Push target.** `fepvenancio/rwa-token` is public; the code is proprietary (rule 15). Make it private before pushing, or push as-is?
+## Phase 3 — IntentExecutor (PLAN, awaiting review)
+
+### Already done in Phase 3 scope
+`IntentSettledUpgradeable` and `IntentToken` were integrated earlier and are tested for:
+- replay, expiry (with an inclusive deadline), wrong chain and wrong token domain;
+- high-s malleability, ERC-1271 signers, and a tampered intent;
+- cancel then execute, role gating, and `canExecute` parity.
+
+What's left is the executor.
+
+### Goal
+`contracts/intents/IntentExecutor.sol`, the replaceable, role-gated layer that submits holder-signed intents to tokens:
+- `execute(token, intent, sig)`, implementing the frozen `IIntentExecutor`;
+- `executeBatch(token, intents[], sigs[])` for many intents in one transaction.
+
+### Design (defaults; changes need review)
+- **Immutable, not a proxy.** "Replaceable" means deploy a new executor, have the token's timelock grant it `EXECUTOR_ROLE`, and revoke the old one. There is no registry attestation (`AttestKind` has no EXECUTOR kind); the token's role grant is the authorisation.
+- **Access:** OZ `AccessControl`. `DEFAULT_ADMIN_ROLE` is the timelock. `OPERATOR_ROLE` is the bank/relayer keys allowed to submit. (The token-side role stays `EXECUTOR_ROLE`, held by this contract.)
+- **Forward only.** The executor calls `ITransferIntent(token).executeTransfer(intent, sig)` and returns its hash. The token stays the single source of truth for signature, nonce, deadline, freeze, pause and policy, so nothing is checked twice. Token reverts bubble up unchanged (`PolicyGated_TransferRejected(reason)`).
+- **Audit trail.** The token's `IntentExecuted` records the executor contract; the operator is the transaction's caller. No extra executor event: the executor has no state of its own.
+- **Interface:** `IIntentExecutor` stays frozen. `executeBatch`, its error and (if chosen) pause semantics go in a **new** `IIntentExecutorBatch` interface, which is ERC-165-advertised and added to `InterfaceFreeze.t.sol` once approved.
+
+### Tests first (red run shown before the implementation)
+- **Unit** (`vm.mockCall` on the token):
+  - only `OPERATOR_ROLE` can call;
+  - forwards the exact calldata and returns the token's hash;
+  - token revert data bubbles up byte-for-byte;
+  - batch length mismatch reverts;
+  - an empty batch is a no-op;
+  - batch atomicity, per D3;
+  - pause behaviour, per D1;
+  - ERC-165.
+- **Integration:** a real `IntentToken`, `ComplianceHook` and `IdentityRule`, with the executor granted `EXECUTOR_ROLE`:
+  - an operator settles a signed intent, and `IntentExecuted` shows the executor;
+  - a non-operator is rejected;
+  - once the token revokes the role, execution fails;
+  - a batch of N signed intents settles in one transaction;
+  - a bad intent in the batch behaves per D3;
+  - `canExecute` from the executor's address agrees with execution.
+- **Guards:** a size check for `IntentExecutor`; freeze pins for the new interface.
+
+### Decisions needed (my recommendation first)
+- **D1. Executor kill switch.**
+  - **(a) Recommended:** the guardian pauses the executor instantly; the timelock unpauses. This uses OZ `Pausable` errors, so no new error. Otherwise, stopping only the executor means revoking `EXECUTOR_ROLE` through the 7-day timelock.
+  - (b) No executor pause; use the token pause or a timelocked revoke.
+- **D2. Token scope.**
+  - **(a) Recommended:** any token that has granted the executor `EXECUTOR_ROLE`. No allowlist.
+  - (b) A timelock-managed allowlist of tokens. This needs new errors and events in the new interface.
+- **D3. Batch semantics.**
+  - **(a) Recommended: atomic.** One bad intent reverts the whole batch with its reason. This is simple, predictable and DvP-aligned; operators pre-flight with `canExecute`.
+  - (b) Best effort: per-intent `try/catch`, skipping failures and reporting per-item results. This needs result events and makes partial settlement possible.
+- **D4. Where `executeBatch` lives.**
+  - **(a) Recommended:** the new `IIntentExecutorBatch`, leaving the frozen `IIntentExecutor` untouched.
+  - (b) Add it to `IIntentExecutor`. That unfreezes it and changes its pinned id.
+
+## Open questions for the owner
+1. D1–D4 above.
+2. Push: the `LICENSE`, README and Phase 3 commits will be pushed after Phase 3 is approved and green, unless you want them pushed sooner.
