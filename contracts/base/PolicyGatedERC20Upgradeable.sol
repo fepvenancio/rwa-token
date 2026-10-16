@@ -75,7 +75,7 @@ abstract contract PolicyGatedERC20Upgradeable is
   function mint(
     address _to,
     uint256 _amount
-  ) external onlyRole(MINTER_ROLE) {
+  ) external virtual onlyRole(MINTER_ROLE) {
     _mint(_to, _amount);
   }
 
@@ -83,7 +83,7 @@ abstract contract PolicyGatedERC20Upgradeable is
   function burn(
     address _from,
     uint256 _amount
-  ) external onlyRole(BURNER_ROLE) {
+  ) external virtual onlyRole(BURNER_ROLE) {
     _releaseFrozen(_from, _amount);
     _burn(_from, _amount);
   }
@@ -135,16 +135,10 @@ abstract contract PolicyGatedERC20Upgradeable is
     address _to,
     uint256 _amount
   ) external view returns (bool _ok, bytes32 _reason) {
-    address _operator = _from == address(0) ? _msgSender() : _from;
-    _reason = _check(_context(_from, _to, _amount, _operator, _inferKind(_from, _to), bytes32(0), 0), _policyHook());
+    _reason = _canTransfer(_from, _to, _amount);
+    // Compares a reason code with a constant, not a balance.
+    // slither-disable-next-line incorrect-equality
     _ok = _reason == Reasons.TRANSFER_OK;
-  }
-
-  /// @inheritdoc IPolicyGated
-  function getFrozen(
-    address _user
-  ) external view returns (uint256 _amount) {
-    _amount = _getPolicyGatedStorage().frozen[_user];
   }
 
   /// @inheritdoc IPolicyGated
@@ -153,6 +147,8 @@ abstract contract PolicyGatedERC20Upgradeable is
   ) external view returns (bool _allowed) {
     IPolicyHook _hook = _policyHook();
     if (address(_hook) == address(0)) return false;
+    // Compares a reason code with a constant, not a balance.
+    // slither-disable-next-line incorrect-equality
     _allowed = _hook.beforeTransfer(
       _context(address(0), _user, 0, _msgSender(), IPolicyHook.TransferKind.MINT, bytes32(0), 0)
     ) == Reasons.TRANSFER_OK;
@@ -166,6 +162,13 @@ abstract contract PolicyGatedERC20Upgradeable is
   /// @inheritdoc IPolicyGated
   function registry() external view returns (address _registry) {
     _registry = address(_getPolicyGatedStorage().registry);
+  }
+
+  /// @inheritdoc IPolicyGated
+  function getFrozen(
+    address _user
+  ) public view returns (uint256 _amount) {
+    _amount = _getPolicyGatedStorage().frozen[_user];
   }
 
   /// @inheritdoc AccessControlUpgradeable
@@ -282,6 +285,23 @@ abstract contract PolicyGatedERC20Upgradeable is
     if (!_getPolicyGatedStorage().registry.isAttested(_newImplementation, IPolicyRegistry.AttestKind.IMPLEMENTATION)) {
       revert PolicyGated_NotAttested(_newImplementation, IPolicyRegistry.AttestKind.IMPLEMENTATION);
     }
+  }
+
+  /**
+   * @notice The pre-flight behind `canTransfer`, shared with templates (e.g. vault `max*`)
+   * @dev Simulates a holder-driven movement: the operator is `_from`, or the caller for a mint
+   * @param _from The sender, or address(0) for a mint
+   * @param _to The receiver, or address(0) for a burn
+   * @param _amount The amount
+   * @return _reason The reason code
+   */
+  function _canTransfer(
+    address _from,
+    address _to,
+    uint256 _amount
+  ) internal view returns (bytes32 _reason) {
+    address _operator = _from == address(0) ? _msgSender() : _from;
+    _reason = _check(_context(_from, _to, _amount, _operator, _inferKind(_from, _to), bytes32(0), 0), _policyHook());
   }
 
   /**

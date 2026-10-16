@@ -15,6 +15,7 @@ import {Helpers} from 'contracts/test/Helpers.sol';
 
 contract LockupRuleUnitTest is Helpers {
   bytes32 internal constant _AGENT_ROLE = keccak256('AGENT_ROLE');
+  bytes32 internal constant _BURNER_ROLE = keccak256('BURNER_ROLE');
   uint256 internal constant _NOW = 1_792_198_800; // Sat 2026-10-17 01:00 UTC
 
   LockupRule internal _rule;
@@ -23,12 +24,15 @@ contract LockupRuleUnitTest is Helpers {
   address internal _stranger = makeAddr('stranger');
   address internal _holder = makeAddr('holder');
   address internal _to = makeAddr('to');
+  address internal _burner = makeAddr('burner');
 
   function setUp() public virtual {
     vm.warp(_NOW);
     _token = _mockContract('token');
     _role(_token, _agent, true);
     _role(_token, _stranger, false);
+    vm.mockCall(_token, abi.encodeCall(IAccessControl.hasRole, (_BURNER_ROLE, _burner)), abi.encode(true));
+    vm.mockCall(_token, abi.encodeCall(IAccessControl.hasRole, (_BURNER_ROLE, _holder)), abi.encode(false));
     _rule = new LockupRule();
   }
 
@@ -151,11 +155,28 @@ contract LockupRuleUnit_Check is LockupRuleUnitTest {
     assertEq(_rule.check(_ctx(_restrictedKind(_seed))), Reasons.TRANSFER_OK);
   }
 
-  function test_WhenLocked_ForcedBurnAndMintAreExempt() external {
+  function test_WhenLocked_ForcedAndMintAreExempt() external {
     _lock(_holder, _NOW + 30 days);
     assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.FORCED)), Reasons.TRANSFER_OK);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.BURN)), Reasons.TRANSFER_OK);
     assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.MINT)), Reasons.TRANSFER_OK);
+  }
+
+  /// @dev V1 regression: a holder-initiated burn (e.g. an ERC-4626 redeem) let a locked holder exit
+  function test_WhenLockedAndTheHolderBurns_ItReturnsLocked() external {
+    _lock(_holder, _NOW + 30 days);
+    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.BURN)), Reasons.LOCKED);
+  }
+
+  function test_WhenLockedAndAnEnforcementBurnerBurns_ItIsExempt() external {
+    _lock(_holder, _NOW + 30 days);
+    IPolicyHook.TransferContext memory _burnCtx = _ctx(IPolicyHook.TransferKind.BURN);
+    _burnCtx.operator = _burner;
+    assertEq(_rule.check(_burnCtx), Reasons.TRANSFER_OK);
+  }
+
+  function test_WhenNotLocked_ABurnNeverAsksTheTokenForRoles() external {
+    vm.expectCall(_token, abi.encodeWithSelector(IAccessControl.hasRole.selector), 0);
+    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.BURN)), Reasons.TRANSFER_OK);
   }
 
   function test_WhenCalledWithStaticcall_ItDoesNotWrite() external {

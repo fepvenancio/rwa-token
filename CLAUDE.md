@@ -224,7 +224,7 @@ Semantics to spec in NatSpec and enforce in tests:
 * `IdentityRule` — `isVerified(from)` unless MINT; `isVerified(to)` unless BURN. Applies to FORCED.
 * `SettlementWindowRule` — EXECUTED only. A daily UTC window `[open, close)` (overnight when `open > close`) plus a weekday mask (Mon = 0, `MON_TO_FRI` default; weekday = `((ts / 1 days) + 3) % 7`). An overnight session belongs to the day it opened. Installed but unconfigured fails closed.
 * `MaxHoldersRule` — `wantsAfter()`; maintains the holder count per token (holder = balance > 0; zero amounts never add one). Only movements that add a new holder are capped, net of a sender who leaves. FORCED is exempt from the cap but still counted. `cap == 0` fails closed. `seedHolderCount` (token admin) is only legitimate while the rule is not active.
-* `LockupRule` — per-(token, holder) unlock timestamp set by the token's `AGENT_ROLE` (a past or present timestamp clears it); rejects TRANSFER/EXECUTED before it; exempts FORCED, BURN and MINT.
+* `LockupRule` — per-(token, holder) unlock timestamp set by the token's `AGENT_ROLE` (a past or present timestamp clears it); rejects TRANSFER/EXECUTED and holder-initiated BURN (vault redemptions) before it; exempts FORCED, MINT, and BURN whose operator holds the token's `BURNER_ROLE` (enforcement).
 
 ## 7. Vault templates
 

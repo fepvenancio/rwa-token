@@ -15,6 +15,7 @@ import {MaxHoldersRule} from 'contracts/hooks/rules/MaxHoldersRule.sol';
 import {SettlementWindowRule} from 'contracts/hooks/rules/SettlementWindowRule.sol';
 import {IntentExecutor} from 'contracts/intents/IntentExecutor.sol';
 import {IntentToken} from 'contracts/tokens/IntentToken.sol';
+import {Gated4626Vault} from 'contracts/vaults/Gated4626Vault.sol';
 
 /**
  * @notice EIP-170 guard. The default build profile matches the production one, so these are the deployed sizes.
@@ -26,6 +27,7 @@ contract ContractSizesTest is Test {
   function test_WhenDeployed_EveryContractFitsTheEip170Limit() external {
     address _registry = address(new PolicyRegistry(address(this), address(this)));
     _assertFits('IntentToken', address(new IntentToken()));
+    _assertFits('Gated4626Vault', address(new Gated4626Vault()));
     _assertFits('PolicyRegistry', _registry);
     _assertFits(
       'ComplianceHook',

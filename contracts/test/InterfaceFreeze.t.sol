@@ -7,6 +7,7 @@ import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+import {IGated4626Vault} from 'interfaces/IGated4626Vault.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IIdentityRule} from 'interfaces/IIdentityRule.sol';
 import {IIntentExecutor} from 'interfaces/IIntentExecutor.sol';
@@ -38,6 +39,8 @@ contract InterfaceFreezeTest is Test {
     assertEq(type(ILockupRule).interfaceId, bytes4(0xaafb038e), 'ILockupRule');
     assertEq(type(ISettlementWindowRule).interfaceId, bytes4(0xf2058aff), 'ISettlementWindowRule');
     assertEq(type(IMaxHoldersRule).interfaceId, bytes4(0xa13cb93c), 'IMaxHoldersRule');
+    // Added in Phase 5a (2026-10-17)
+    assertEq(type(IGated4626Vault).interfaceId, bytes4(0xb008690c), 'IGated4626Vault');
     assertEq(type(IIdentityRule).interfaceId, bytes4(0x150c4aea), 'IIdentityRule');
     assertEq(type(IIdentityRegistry).interfaceId, bytes4(0xb9209e33), 'IIdentityRegistry');
   }

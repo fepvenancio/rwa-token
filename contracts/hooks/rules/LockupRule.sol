@@ -19,6 +19,9 @@ contract LockupRule is BaseRule, ILockupRule {
   /// @inheritdoc ILockupRule
   bytes32 public constant AGENT_ROLE = keccak256('AGENT_ROLE');
 
+  /// @notice The token role whose burns are enforcement actions, exempt from lockups
+  bytes32 private constant _BURNER_ROLE = keccak256('BURNER_ROLE');
+
   /// @notice Unlock time per token and holder; 0 when not locked
   mapping(address _token => mapping(address _holder => uint256 _unlockTime)) internal _unlockTimes;
 
@@ -39,9 +42,17 @@ contract LockupRule is BaseRule, ILockupRule {
   function check(
     IPolicyHook.TransferContext calldata _ctx
   ) external view returns (bytes32 _reason) {
-    bool _holderDriven =
-      _ctx.kind == IPolicyHook.TransferKind.TRANSFER || _ctx.kind == IPolicyHook.TransferKind.EXECUTED;
-    if (_holderDriven && block.timestamp < _unlockTimes[_ctx.token][_ctx.from]) return Reasons.LOCKED;
+    // Storage first: the role lookup only happens while a lockup is active.
+    if (block.timestamp >= _unlockTimes[_ctx.token][_ctx.from]) return Reasons.TRANSFER_OK;
+    if (_ctx.kind == IPolicyHook.TransferKind.TRANSFER || _ctx.kind == IPolicyHook.TransferKind.EXECUTED) {
+      return Reasons.LOCKED;
+    }
+    // A burn is an enforcement action only when the token's BURNER_ROLE drives it; a holder-initiated burn (e.g. an
+    // ERC-4626 redeem) is an exit and respects the lockup.
+    if (_ctx.kind == IPolicyHook.TransferKind.BURN && !IAccessControl(_ctx.token).hasRole(_BURNER_ROLE, _ctx.operator))
+    {
+      return Reasons.LOCKED;
+    }
     _reason = Reasons.TRANSFER_OK;
   }
 

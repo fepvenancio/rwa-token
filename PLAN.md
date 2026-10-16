@@ -1,6 +1,6 @@
 # PLAN
 
-Status: **Phase 4 pushed (`59fd218`). Phase 5 (vaults): V1–V5 decided (defaults); plan written, awaiting review. No Phase 5 code yet.**
+Status: **Phase 5a (`Gated4626Vault` + V1) implemented and green — awaiting review. 5b (`Gated7540Vault`) waits on R1–R3.**
 
 Brief v2 ("Gated Token Stack") replaced the original executor-only brief on 2026-10-16. On the same day the owner supplied a reference implementation in `Imported/` (now deleted; its contents live in `contracts/`) and approved, in chat, integrating it with the major findings fixed, a common-bug sweep, and the Wonderland Solidity standards.
 
@@ -296,11 +296,12 @@ npm run test:halmos  →  4 passed; 0 failed
   - brief §7: `maxRedeem = balance - frozen` (gated), and `maxWithdraw = _convertToAssets(maxRedeem, Floor)`.
 - **Verification:** `npm test` gives 242 passing (241 solidity, 1 nodejs). Lint, typecheck, fmt, Slither (0) and Halmos (4/4) are clean.
 
-## Phase 5 — vaults (PLAN, awaiting review)
+## Phase 5 — vaults (plan approved 2026-10-17; 5a in progress)
 
 ### Owner decisions (2026-10-17, all defaults)
 - **V1 (a):** `LockupRule` exempts BURN **only** when `ctx.operator` holds the token's `BURNER_ROLE`. Holder-initiated burns (vault redemptions, 7540 requests) respect the lockup.
-- **V2 (a):** 7540 burns shares **at `requestRedeem`**, so the vault never holds shares.
+- **V2 (owner reversed, 2026-10-17): ESCROW.** `requestRedeem` *transfers* the shares to the vault, as a TRANSFER, so the lockup, frozen, identity and pause checks all apply. They are BURNed at fulfilment. Brief §7 stays as written. The vault address must be registered as a verified holder in the identity registry (a bank-controlled contract, normal practice in ERC-3643 deployments).
+  - Note: the hole cited for the reversal (a locked holder exiting through a redemption BURN) was already closed by V1. Escrow is kept for its other benefits: reversible via reject, and pending state visible for reconciliation.
 - **V3 (a):** `FULFILLER_ROLE` fulfils with explicit amounts priced off-chain at NAV, with partial fulfilment allowed. Deposited assets go to a custody address at fulfilment; redemption assets are pulled from the fulfiller at fulfilment.
 - **V4:**
   - deposit and redeem both async;
@@ -371,19 +372,61 @@ Each gets red tests, then the implementation, then green, then a stop for review
   - `controller == msg.sender` or an operator.
 - **`max*`** return the claimable amounts, gated as in §7. Async `preview*` revert.
 
-### Open questions (recommendation first)
-- **Q1. Issuer `mint` / `burn` on vault shares.** Minting shares without assets dilutes holders; burning without paying out confiscates.
-  - **(a) Recommended:** both revert on the vaults (`Vault_Unsupported`); enforcement uses `forcedTransfer` and freezes.
-  - (b) Keep them.
-- **Q2. Gate `requestDeposit` at request time.** There's no cancellation (V4), so assets from an account that can't hold shares would be stuck.
-  - **(a) Recommended:** `requestDeposit` reverts unless `canTransfer(0, controller, 1)` is OK (and the vault is not paused).
-  - (b) Check only at claim.
-- **Q3. 7540 `totalAssets` / `convertTo*` under off-chain pricing.**
-  - **(a) Recommended:** a "last fulfilment price" (assets per share, updated on each fulfilment); `totalAssets = totalSupply × lastPrice` (informational).
-  - (b) Revert or return 0.
-- **Q4. Custody address.** **Recommended:** an initializer parameter, changeable only by the token's `DEFAULT_ADMIN_ROLE` (timelock), emitting `CustodySet`.
-- **Q5. Split into 5a and 5b with separate reviews**, as above. Recommended.
-- **Brief impact:** brief §7 says "deposit/redeem claim into gated shares (MINT/BURN through the hook)". With V2, the BURN happens at `requestRedeem` rather than at claim, so the brief will be updated to match.
+### Owner decisions on Q1–Q5 (2026-10-17)
+- **Q1:** `mint` and `burn` **hard-revert** on both vaults (`<Vault>_Unsupported`); supply moves only through the deposit and redeem flows. `MINTER_ROLE` and `BURNER_ROLE` are never granted on a vault; the Phase 7 deploy module asserts it ("belt and braces").
+- **Q2:** `requestDeposit` reverts unless `canTransfer(0, controller, 1)` is OK. **New in 5b:** `FULFILLER_ROLE` gets `rejectDepositRequest(controller)` (assets returned) and `rejectRedeemRequest(controller)` (escrowed shares returned). Eligibility can change between request and fulfilment, and without ERC-7887 these are the only ways to unstick a request.
+- **Q3:**
+  - `convertTo*` use the last fulfilment price.
+  - `totalAssets` is derived from it and is **indicative**, as the NatSpec will say.
+  - **Every fulfilment emits `Fulfilled(price, assets, shares)`**, putting the NAV history on-chain.
+  - Async `preview*` revert, per the spec.
+- **Q4:** an initializer parameter that only the timelock can change, emitting `CustodyChanged(old, new)`.
+- **Q5:** 5a is `Gated4626Vault` plus V1; 5b is `Gated7540Vault`.
+
+### 5b questions (do not block 5a), recommendation first
+- **R1. The escrow vault and `MaxHoldersRule`.** While the vault holds escrowed shares, it counts as a holder.
+  - If the cap is full and the vault holds nothing, the vault is a *new* holder, so a **partial** redemption request is rejected with `MAX_HOLDERS`. **Exits get blocked by the cap.**
+  - The vault also takes up one investor slot.
+  - **(a) Recommended:** a per-token *excluded holders* list in `MaxHoldersRule`, set by the token admin (the vault gets added). Excluded accounts are neither counted nor capped. This means **new functions on the pushed `IMaxHoldersRule`**, so it needs an explicit instruction and a re-pin.
+  - (b) No rule change: the vault keeps a permanent dust balance, so it's always an existing holder, and the cap is set to legal cap + 1. That's operationally fragile.
+- **R2. How `rejectRedeemRequest` returns the shares** (vault → controller).
+  - **(a) Recommended: as FORCED.** It's a privileged fulfiller action, so it bypasses pause, the cap and the lockup, while `IdentityRule` still requires a verified receiver. If the controller has since been de-verified, the agent's `forcedTransfer` to a treasury is the fallback.
+  - (b) As TRANSFER: the return fails at a full cap or while paused.
+  - Either way, shares and assets go back to the **controller**: with `requestId = 0`, state is per controller and the original owner isn't kept.
+- **R3. The `Fulfilled` event.**
+  - **Recommended:** `Fulfilled(address indexed controller, bool indexed isDeposit, uint256 price, uint256 assets, uint256 shares)`. That's your fields plus the controller and the direction, so the NAV history can be reconciled per request.
+  - `price` = assets per whole share = `assets * 10**decimals() / shares` (rounded down).
+
+### 5a, as approved (now in progress)
+- **V1 `LockupRule`:** BURN is locked unless `ctx.operator` holds the token's `BURNER_ROLE`. The check reads storage first and only calls `hasRole` when a lockup is active. `ILockupRule` gets a NatSpec-only change (V1 instruction); its id is unchanged.
+- **Base:** `mint` / `burn` become `virtual`, so a vault can hard-revert them (Q1). An internal `_canTransfer` is shared by `canTransfer` and the vault `max*` functions, and `getFrozen` becomes `public`. `IPolicyGated` is unchanged.
+- **`Gated4626Vault`:** as planned above. Plus Q1: `mint(address,uint256)` and `burn(address,uint256)` revert with `Gated4626Vault_Unsupported`.
+- **Test note on brief §7's "`deposit(maxDeposit+1)` reverts, `deposit(maxDeposit)` succeeds":**
+  - For an *allowed* receiver, `maxDeposit` is `type(uint256).max`, so "+1" overflows.
+  - For a *blocked* receiver, `deposit(0)` still reverts, because `IdentityRule` rejects regardless of amount.
+  - So the tests assert the meaningful form. Blocked receivers get `maxDeposit == 0` and `deposit(1)` reverts. Allowed receivers can deposit. For redemptions, the exact form holds: `redeem(maxRedeem+1)` reverts and `redeem(maxRedeem)` succeeds.
+
+### 5a as built (2026-10-17)
+- **V1 `LockupRule`:** holder-initiated BURN is locked. The fix had a regression test that went red first. BURN by a `BURNER_ROLE` operator is exempt. The rule reads storage first, so there's no role lookup when the holder isn't locked (tested). `ILockupRule` got a NatSpec-only change (id unchanged; the freeze test still passes), and brief §6 is updated.
+- **Base:**
+  - `mint` / `burn` are `virtual`;
+  - an internal `_canTransfer` is shared by `canTransfer` and the vault `max*`;
+  - `getFrozen` is `public`;
+  - two inline Slither suppressions (comparing a reason code with a constant).
+  - Behaviour is unchanged: 244 tests passed before and after.
+- **`Gated4626Vault`** (16,038 B; `IGated4626Vault` id `0xb008690c`, pinned):
+  - OZ `ERC4626Upgradeable` + the base, with the `_update` and `decimals` diamonds resolved;
+  - gated `max*` per brief §7 (including the rounding rule);
+  - `_decimalsOffset = 6`;
+  - `mint` / `burn` hard-revert (Q1).
+- **Tests** (red first: the vault was missing):
+  - **Unit:** wiring and initialisation locks; Q1 reverts even for role holders; hook contexts (MINT and BURN with the caller as operator, including a spender); every `max*` branch (allowed, hook rejection, pause, frozen); `redeem(maxRedeem+1)` reverts and `redeem(maxRedeem)` succeeds; `withdraw(maxWithdraw)` always succeeds under price moves; the inflation attack; ERC-165.
+  - **Integration** (real Identity + Lockup + MaxHolders): an unverified receiver is blocked; at the cap a new investor is blocked while holders can top up; a locked holder can't redeem (pre-flight says `LOCKED`, `maxRedeem` is 0) until the unlock; a de-verified holder's exit is gated; a full exit frees a holder slot.
+  - **Invariants:** `Σ shares == totalSupply`, `frozen ≤ balance`, **assets conserved** (vault assets = ghost in − ghost out), and **shares always backed**.
+  - **Mutation check (3 mutants, all killed):** `maxRedeem` ignoring frozen (3 tests); `maxWithdraw` rounding up (the rounding test); `decimalsOffset` set to 0.
+  - The offset-0 mutant was first caught only by the `decimals()` check. **The inflation test was strengthened** with a victim-loss bound (≤ donation/1e6 + rounding) and now kills it too.
+- **Verification:** `npm test` gives 273 passing (272 solidity, 1 nodejs). Lint, typecheck and fmt are clean, Slither reports 0, Halmos 4/4.
 
 ## Open questions for the owner
-1. Q1–Q5 above (or "defaults"). Then 5a starts: tests first, red run, implementation.
+1. Review 5a. Once approved, I'll push it.
+2. R1–R3 for 5b (above).

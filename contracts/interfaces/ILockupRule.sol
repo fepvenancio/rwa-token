@@ -5,8 +5,9 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 
 /**
  * @title ILockupRule
- * @notice Per-(token, holder) lockup: TRANSFER and EXECUTED from a holder are rejected with `Reasons.LOCKED` until its
- *         unlock time. FORCED, BURN and MINT are exempt. The lock covers the holder's whole balance
+ * @notice Per-(token, holder) lockup: TRANSFER, EXECUTED and holder-initiated BURN (e.g. an ERC-4626 redeem) from a
+ *         holder are rejected with `Reasons.LOCKED` until its unlock time. FORCED, MINT, and BURN driven by the token's
+ *         BURNER_ROLE (enforcement) are exempt. The lock covers the holder's whole balance
  * @dev Lockups are set by the token's own AGENT_ROLE, checked live; state is keyed by token
  */
 interface ILockupRule is IComplianceRule {
