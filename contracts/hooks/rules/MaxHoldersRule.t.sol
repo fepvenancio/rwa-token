@@ -134,6 +134,32 @@ contract MaxHoldersRuleUnit_Admin is MaxHoldersRuleUnitTest {
   }
 }
 
+contract MaxHoldersRuleUnit_FakeToken is MaxHoldersRuleUnitTest {
+  /// @dev Sound because state is keyed by token: a fake token can only authorise writes to its own key
+  function test_WhenAFakeTokenAuthorisesAnAttacker_OnlyTheFakeTokensKeyChanges() external {
+    _cap(3);
+    _seed(2);
+    address _fakeToken = _mockContract('fakeToken');
+    address _attacker = makeAddr('attacker');
+    vm.mockCall(_fakeToken, abi.encodeCall(IAccessControl.hasRole, (_ADMIN_ROLE, _attacker)), abi.encode(true));
+    vm.mockCall(_fakeToken, abi.encodeCall(IPolicyGated.policyHook, ()), abi.encode(_attacker));
+    vm.mockCall(_fakeToken, abi.encodeCall(IERC20.balanceOf, (_to)), abi.encode(uint256(1)));
+
+    vm.startPrank(_attacker);
+    _rule.setCap(_fakeToken, type(uint256).max);
+    _rule.seedHolderCount(_fakeToken, 1000);
+    IPolicyHook.TransferContext memory _fakeCtx = _ctx(IPolicyHook.TransferKind.MINT, address(0), _to, 1);
+    _fakeCtx.token = _fakeToken;
+    _rule.after_(_fakeCtx);
+    vm.stopPrank();
+
+    assertEq(_rule.capOf(_fakeToken), type(uint256).max);
+    assertEq(_rule.holderCount(_fakeToken), 1001);
+    assertEq(_rule.capOf(_token), 3);
+    assertEq(_rule.holderCount(_token), 2);
+  }
+}
+
 contract MaxHoldersRuleUnit_Check is MaxHoldersRuleUnitTest {
   function test_WhenTheAmountIsZero_ItIsOkEvenUnconfigured() external view {
     assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.MINT, address(0), _to, 0)), Reasons.TRANSFER_OK);
@@ -309,12 +335,15 @@ contract MaxHoldersRuleUnit_Metadata is MaxHoldersRuleUnitTest {
 /// @notice Drives mint, transfer, forced and burn moves on a real token for the holder-count invariant
 contract MaxHoldersHandler is Test {
   IntentToken internal _token;
+  MaxHoldersRule internal _rule;
   address[4] internal _actors;
 
   constructor(
-    IntentToken _target
+    IntentToken _target,
+    MaxHoldersRule _maxHoldersRule
   ) {
     _token = _target;
+    _rule = _maxHoldersRule;
     _actors = [makeAddr('actor0'), makeAddr('actor1'), makeAddr('actor2'), makeAddr('actor3')];
   }
 
@@ -337,6 +366,22 @@ contract MaxHoldersHandler is Test {
     address _sender = _actor(_from);
     vm.prank(_sender);
     _token.transfer(_actor(_to), bound(_amount, 0, _token.balanceOf(_sender)));
+  }
+
+  /// @dev Freezes change which moves succeed, never the holder count
+  function setFrozen(
+    uint256 _user,
+    uint256 _amount
+  ) external {
+    address _account = _actor(_user);
+    _token.setFrozen(_account, bound(_amount, 0, _token.balanceOf(_account)));
+  }
+
+  /// @dev Cap changes, including lowering it below the current count, never change the holder count
+  function setCap(
+    uint256 _cap
+  ) external {
+    _rule.setCap(address(_token), bound(_cap, 0, 5));
   }
 
   function forcedTransfer(
@@ -393,10 +438,11 @@ contract MaxHoldersRuleInvariantTest is Test {
     );
     _rule.setCap(address(_token), 3); // below the 4 actors, so rejections are exercised
 
-    _handler = new MaxHoldersHandler(_token);
+    _handler = new MaxHoldersHandler(_token, _rule);
     _token.grantRole(_token.MINTER_ROLE(), address(_handler));
     _token.grantRole(_token.BURNER_ROLE(), address(_handler));
     _token.grantRole(_token.AGENT_ROLE(), address(_handler));
+    _token.grantRole(_token.DEFAULT_ADMIN_ROLE(), address(_handler)); // so the handler can change the cap
     targetContract(address(_handler));
   }
 

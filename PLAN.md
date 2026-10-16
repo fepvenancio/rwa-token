@@ -1,6 +1,6 @@
 # PLAN
 
-Status: **Phase 4 (rules) implemented and green — awaiting review. Next: Phase 5 (vaults).**
+Status: **Phase 4 implemented, green and reviewed (external review validated 2026-10-16). Phase 5 (vaults): questions V1–V5 open.**
 
 Brief v2 ("Gated Token Stack") replaced the original executor-only brief on 2026-10-16. On the same day the owner supplied a reference implementation in `Imported/` (now deleted; its contents live in `contracts/`) and approved, in chat, integrating it with the major findings fixed, a common-bug sweep, and the Wonderland Solidity standards.
 
@@ -276,5 +276,68 @@ slither .            →  0 results
 npm run test:halmos  →  4 passed; 0 failed
 ```
 
+### External review of Phase 4 (2026-10-16): validation and follow-ups
+- **Confirmed true:**
+  - live role delegation;
+  - the window math and the two overnight tests;
+  - the `MaxHoldersRule` branch logic;
+  - the rule-order rationale;
+  - `amount = 1` making `maxDeposit` cap-aware;
+  - the `maxWithdraw` rounding rule;
+  - the vault-lockup gap and the 7540 custody question.
+- **Corrected:**
+  - there are no `_requireTokenAgent` / `_requireTokenAdmin` helpers (it's an inline check, and the `onlyTokenAdmin` modifier in `MaxHoldersRule`);
+  - burns use `BURNER_ROLE`, not `ISSUER_ROLE`;
+  - the lockup reason code is `LOCKED`, not `LOCKUP_ACTIVE`;
+  - the invariant had 4 actors and 4 actions, with no freeze and no cap changes.
+- **Fixed:**
+  - added the missing `MaxHoldersRule` fake-token isolation test (setters and `after_`);
+  - the invariant handler now also fuzzes `setFrozen` and `setCap`, including lowering the cap below the count. It is still mutation-checked: dropping the exit decrement is caught;
+  - brief §7: `maxRedeem = balance - frozen` (gated), and `maxWithdraw = _convertToAssets(maxRedeem, Floor)`.
+- **Verification:** `npm test` gives 242 passing (241 solidity, 1 nodejs). Lint, typecheck, fmt, Slither (0) and Halmos (4/4) are clean.
+
+## Phase 5 — vaults (questions before planning)
+
+ERC-7540 facts, from the spec (eips.ethereum.org/EIPS/eip-7540):
+- `requestRedeem` "MUST" remove shares from the owner's custody. They MAY be locked in the vault or burned at once, and must be burned by Claimed.
+- `requestDeposit` takes custody of the assets immediately.
+- Cancellation is **not** in the core spec.
+- `requestId == 0` means one aggregated request per controller.
+- Async `preview*` functions MUST revert.
+
+### V1. `LockupRule` and vault exits (a redemption is a BURN)
+OZ's `_withdraw` calls `_burn(owner, …)`, so a holder's `redeem` / `withdraw` arrives as **BURN**, with the redeemer as operator, and `LockupRule` exempts BURN. Today a locked investor can therefore exit through a vault.
+- **(a) Recommended:** `LockupRule` exempts BURN **only** when `ctx.operator` holds the token's `BURNER_ROLE` (enforcement burns). Holder-initiated burns (vault redemptions, 7540 requests) respect the lockup. `maxRedeem`'s pre-flight then reports `LOCKED` as well. It's a view call (P2) and a small change to the Phase 4 rule (not pushed yet).
+- (b) Document the boundary: `LockupRule` is a secondary-transfer lock only, and vault exit locks belong to 7540 epochs.
+
+### V2. 7540: how pending-redemption shares leave the owner
+- **(a) Recommended: burn at request.**
+  - The burn is a BURN from the owner, so `IdentityRule` checks the owner, the lockup (with V1) applies, and `MaxHoldersRule` decrements on a full exit.
+  - The vault never becomes a holder.
+  - The vault tracks pending shares so pricing and NAV stay correct.
+- (b) Escrow to the vault address, then burn at claim.
+  - The escrow move is a TRANSFER: the vault must be identity-verified and counts as a holder (the cap is off by one), and the lockup and window rules apply to the escrow move.
+  - Needs exemptions in the rules.
+
+### V3. 7540: pricing and asset custody
+- **(a) Recommended:** `FULFILLER_ROLE` (the bank) fulfils with **explicit amounts**:
+  - `fulfillDeposit(controller, assets, shares)` and `fulfillRedeem(controller, shares, assets)`, priced off-chain at NAV; partial fulfilment is allowed.
+  - Deposited assets go to a configured custody address at fulfilment.
+  - Redemption assets are pulled from the fulfiller at fulfilment and held for the claim.
+- (b) On-chain pricing (`totalAssets / totalSupply` at fulfilment), with assets kept in the vault.
+
+### V4. 7540 scope
+- **Recommended:**
+  - deposits and redemptions are both async, per the brief;
+  - `requestId = 0`, aggregated per controller;
+  - **no cancellation** in Phase 5 (ERC-7887 could follow later);
+  - `setOperator` is honoured for claims only, per the brief;
+  - async `preview*` functions revert, per the spec.
+
+### V5. `Gated4626Vault`: first-depositor inflation protection
+- **(a) Recommended:** OZ virtual shares with `_decimalsOffset() = 6`. It's a constant per implementation.
+- (b) Offset 0, plus a mandatory issuer seed deposit (dead shares) in the deploy module.
+
 ## Open questions for the owner
-1. Review Phase 4. Once approved, I'll push it and plan Phase 5 (vaults).
+1. Approve Phase 4 plus this review follow-up for push.
+2. Answer V1–V5 (or "defaults"). I'll then write the Phase 5 plan and stop for review before tests and code.
