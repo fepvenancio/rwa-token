@@ -19,16 +19,17 @@ IntentToken (+ IntentSettledUpgradeable)  holder-signed EIP-712 TransferIntent, 
 ComplianceHook (one per token, immutable) ──► ordered list of ≤16 attested IComplianceRule (first rejection wins)
 IdentityRule, (planned) SettlementWindowRule, MaxHoldersRule, LockupRule   hook-agnostic, shareable across tokens
 PolicyRegistry (one per deployment, immutable)  codehash allowlist: HOOK / RULE / IMPLEMENTATION
-(planned) IntentExecutor                         replaceable, role-gated submitter of intents
+IntentExecutor (immutable)                       replaceable, role-gated submitter: execute + atomic executeBatch
 ```
 
 | Path | Contents |
 |---|---|
-| `contracts/interfaces/` | Frozen ABI: `IPolicyGated`, `IPolicyHook`, `IComplianceRule`, `IComplianceHook`, `IPolicyRegistry`, `ITransferIntent`, `IIntentExecutor`, `IIdentityRule`, `IIdentityRegistry`, `Errors.sol` (reason codes) |
+| `contracts/interfaces/` | Frozen ABI: `IPolicyGated`, `IPolicyHook`, `IComplianceRule`, `IComplianceHook`, `IPolicyRegistry`, `ITransferIntent`, `IIntentExecutor`, `IIntentExecutorBatch`, `IIdentityRule`, `IIdentityRegistry`, `Errors.sol` (reason codes) |
 | `contracts/base/` | `PolicyGatedERC20Upgradeable` |
 | `contracts/governance/` | `PolicyRegistry` |
 | `contracts/mixins/`, `contracts/tokens/` | `IntentSettledUpgradeable`, `IntentToken` |
 | `contracts/hooks/` | `ComplianceHook`, `BaseRule`, `rules/IdentityRule` |
+| `contracts/intents/` | `IntentExecutor` |
 | `contracts/test/` | Test helpers and mocks, interface-freeze and contract-size guards, Halmos properties |
 
 Every contract has its `.t.sol` next to it. [`PLAN.md`](PLAN.md) tracks phases and decisions;
@@ -43,7 +44,9 @@ Every contract has its `.t.sol` next to it. [`PLAN.md`](PLAN.md) tracks phases a
 | `UPGRADER_ROLE` | timelock | ≥ 7 days | upgrade, only to an implementation attested as `IMPLEMENTATION` |
 | `MINTER_ROLE` / `BURNER_ROLE` | issuer | none | mint, and burn (enforcement burns can take frozen tokens) |
 | `AGENT_ROLE` | issuer | none | `forcedTransfer` (clawback; bypasses pause and freeze, still policy-checked), `setFrozen` |
-| `EXECUTOR_ROLE` | executor | none | settle holder-signed intents; it cannot alter them |
+| `EXECUTOR_ROLE` | `IntentExecutor` contract | none | settle holder-signed intents; it cannot alter them |
+| `OPERATOR_ROLE` (executor) | bank / relayer keys | none | submit intents via `execute` / `executeBatch` (all-or-nothing) |
+| `GUARDIAN_ROLE` (executor) | multisig | none | pause the executor only; the timelock unpauses |
 | `ATTESTER_ROLE` (registry) | security council | none | attest / revoke codehashes |
 
 - **Attested code only.** Hooks, rules and implementations are installed only if their runtime codehash is attested.
@@ -98,7 +101,7 @@ CI (`.github/workflows/ci.yml`) runs all of the above on every push and pull req
 The brief is in [`CLAUDE.md`](CLAUDE.md). Where the code intentionally differs, it is recorded here:
 
 - **More interface files.** There are three beyond those listed in brief §3: `IComplianceHook`, `IIdentityRule` and
-  `IIdentityRegistry`. Wonderland standards give every contract an interface. Structs and enums live inside their
+  `IIdentityRegistry`. (`IIntentExecutorBatch` is listed in the brief.) Wonderland standards give every contract an interface. Structs and enums live inside their
   interfaces, so there is no `Types.sol`.
 - **Error naming.** Errors follow `<Contract>_<Name>`, e.g. `PolicyGated_TransferRejected(bytes32)`. Event
   parameters are `_camelCase`; topics are unaffected.

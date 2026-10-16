@@ -53,7 +53,7 @@ Separate contracts, separate concerns:
 
 ```
 contracts/
-  interfaces/   IPolicyGated.sol  IPolicyHook.sol  IComplianceRule.sol  IPolicyRegistry.sol  ITransferIntent.sol  IIntentExecutor.sol  Errors.sol
+  interfaces/   IPolicyGated.sol  IPolicyHook.sol  IComplianceRule.sol  IPolicyRegistry.sol  ITransferIntent.sol  IIntentExecutor.sol  IIntentExecutorBatch.sol  Errors.sol
   base/         PolicyGatedERC20Upgradeable.sol  PolicyGatedERC20Upgradeable.t.sol
   governance/   PolicyRegistry.sol  PolicyRegistry.t.sol
   mixins/       IntentSettledUpgradeable.sol  IntentSettledUpgradeable.t.sol
@@ -241,7 +241,7 @@ Each phase: update `PLAN.md` → tests → impl → `npx hardhat test` → stop 
 * **Phase 0 — scaffold.** `npx hardhat --init` (TypeScript, ESM, node:test + viem). OZ v5. Solc pin, cancun, optimizer profile. `hardhat-keystore`. Lockfile committed.
 * **Phase 1 — interfaces + errors.** §4 and §5 verbatim with NatSpec. Freeze.
 * **Phase 2 — registry + base.** `PolicyRegistry` (immutable, tests: attest/revoke/kind, codehash comparison, role gates). `PolicyGatedERC20Upgradeable`: `ERC20PermitUpgradeable` + `AccessControlUpgradeable` + `PausableUpgradeable` + `UUPSUpgradeable` + `ReentrancyGuardTransient`, enforcement core, guardian, `_update` → hook. Tests with mock hooks: every entry point's role gate; guardian can pause and cannot unpause; `setPolicyHook` and `_authorizeUpgrade` reject unattested targets; frozen math; forced unfreezes; mint/burn reach hook with zero addresses; hook reject ⇒ no state change; `permit`; invariants `sum(balances) == totalSupply`, `frozen(u) <= balanceOf(u)`.
-* **Phase 3 — IntentSettled + IntentToken + executor.** EIP-712, per-signer used-nonce map (random nonces chosen by the signer's HSM/client, independent of executor state), `executeTransfer`, `cancelIntent`. `IntentExecutor` with `EXECUTOR_ROLE`. Tests: replay, expired, wrong domain/chainId, cancel race, malleability, role gating, `canExecute` parity.
+* **Phase 3 — IntentSettled + IntentToken + executor.** EIP-712, per-signer used-nonce map (random nonces chosen by the signer's HSM/client, independent of executor state), `executeTransfer`, `cancelIntent`. `IntentExecutor` (immutable; `OPERATOR_ROLE` submits, guardian pauses, timelock unpauses; forward-only) holding the token's `EXECUTOR_ROLE`, with atomic `executeBatch` in the separate `IIntentExecutorBatch`. Tests: replay, expired, wrong domain/chainId, cancel race, malleability, role gating, `canExecute` parity.
 * **Phase 4 — hooks.** `ComplianceHook`, `BaseRule`, initial rules, mocks. Ordering, short-circuit, reentrancy, cap.
 * **Phase 5 — vaults.** `Gated4626Vault`, `Gated7540Vault`. Share mint/burn gated; gating-aware `max*`; 7540 request/fulfil/claim lifecycle; operator semantics.
 * **Phase 6 — viem integration.** `signTypedData` → execute; vault flows; event decoding; pre-flight parity from the TypeScript side.

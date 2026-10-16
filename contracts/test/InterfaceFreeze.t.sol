@@ -10,6 +10,7 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IIdentityRule} from 'interfaces/IIdentityRule.sol';
 import {IIntentExecutor} from 'interfaces/IIntentExecutor.sol';
+import {IIntentExecutorBatch} from 'interfaces/IIntentExecutorBatch.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
@@ -28,6 +29,8 @@ contract InterfaceFreezeTest is Test {
     assertEq(type(IPolicyRegistry).interfaceId, bytes4(0x947f9fc8), 'IPolicyRegistry');
     assertEq(type(ITransferIntent).interfaceId, bytes4(0x7a2b1b79), 'ITransferIntent');
     assertEq(type(IIntentExecutor).interfaceId, bytes4(0xd2319653), 'IIntentExecutor');
+    // Added in Phase 3 (2026-10-16): executeBatch, pause, unpause
+    assertEq(type(IIntentExecutorBatch).interfaceId, bytes4(0x117727cb), 'IIntentExecutorBatch');
     assertEq(type(IIdentityRule).interfaceId, bytes4(0x150c4aea), 'IIdentityRule');
     assertEq(type(IIdentityRegistry).interfaceId, bytes4(0xb9209e33), 'IIdentityRegistry');
   }

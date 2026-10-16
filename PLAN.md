@@ -1,6 +1,6 @@
 # PLAN
 
-Status: **Phase 3 (`IntentExecutor`) — plan written, awaiting review. No Phase 3 code yet.**
+Status: **Phase 3 (`IntentExecutor`) implemented and green — awaiting review. Next: Phase 4 rules.**
 
 Brief v2 ("Gated Token Stack") replaced the original executor-only brief on 2026-10-16. On the same day the owner supplied a reference implementation in `Imported/` (now deleted; its contents live in `contracts/`) and approved, in chat, integrating it with the major findings fixed, a common-bug sweep, and the Wonderland Solidity standards.
 
@@ -126,7 +126,7 @@ npm run test:halmos  →  4 passed; 0 failed
 - **Mocks:** the brief's `MockAcceptHook`/`MockRejectHook` are replaced by `vm.mockCall`, per Wonderland. `MockAsset` waits for the vaults.
 - **Smoke test:** `test/nodejs/smoke.test.ts` is kept so the node runner isn't empty until Phase 6.
 
-## Phase 3 — IntentExecutor (PLAN, awaiting review)
+## Phase 3 — IntentExecutor ✅ (awaiting review)
 
 ### Already done in Phase 3 scope
 `IntentSettledUpgradeable` and `IntentToken` were integrated earlier and are tested for:
@@ -167,20 +167,28 @@ What's left is the executor.
   - `canExecute` from the executor's address agrees with execution.
 - **Guards:** a size check for `IntentExecutor`; freeze pins for the new interface.
 
-### Decisions needed (my recommendation first)
-- **D1. Executor kill switch.**
-  - **(a) Recommended:** the guardian pauses the executor instantly; the timelock unpauses. This uses OZ `Pausable` errors, so no new error. Otherwise, stopping only the executor means revoking `EXECUTOR_ROLE` through the 7-day timelock.
-  - (b) No executor pause; use the token pause or a timelocked revoke.
-- **D2. Token scope.**
-  - **(a) Recommended:** any token that has granted the executor `EXECUTOR_ROLE`. No allowlist.
-  - (b) A timelock-managed allowlist of tokens. This needs new errors and events in the new interface.
-- **D3. Batch semantics.**
-  - **(a) Recommended: atomic.** One bad intent reverts the whole batch with its reason. This is simple, predictable and DvP-aligned; operators pre-flight with `canExecute`.
-  - (b) Best effort: per-intent `try/catch`, skipping failures and reporting per-item results. This needs result events and makes partial settlement possible.
-- **D4. Where `executeBatch` lives.**
-  - **(a) Recommended:** the new `IIntentExecutorBatch`, leaving the frozen `IIntentExecutor` untouched.
-  - (b) Add it to `IIntentExecutor`. That unfreezes it and changes its pinned id.
+### Owner decisions (2026-10-16)
+- **D1 (a):** the guardian pauses the executor; the timelock unpauses (OZ `Pausable`).
+- **D2 (a):** any token that grants `EXECUTOR_ROLE`; no allowlist.
+- **D3 (a):** all-or-nothing. A batch is one accounting event. It reverts with `IntentExecutor_BatchItemFailed(index, tokenRevertData)` so the operator can drop the failing intent and resubmit.
+- **D4 (a):** `IIntentExecutorBatch` is a separate interface with ERC-165 id `0x117727cb`, pinned in `InterfaceFreeze.t.sol`. `IIntentExecutor` stays frozen.
+
+### As built
+- `contracts/interfaces/IIntentExecutorBatch.sol` contains `executeBatch`, `pause` and `unpause`, plus the errors `IntentExecutor_BatchItemFailed`, `IntentExecutor_LengthMismatch` and `IntentExecutor_ZeroAddress`.
+- `contracts/intents/IntentExecutor.sol`: OZ `AccessControl` + `Pausable`, immutable, forward-only. `execute` bubbles the token's revert unchanged; `executeBatch` wraps a failure with its index.
+- `IntentExecutor.t.sol` (24 tests):
+  - **unit:** role gating, exact forwarding, revert bubbling, length mismatch, empty batch, ordered hashes, failing index with the token's reason (fuzzed position), pause asymmetry, ERC-165;
+  - **integration** on the real stack: settlement with the executor recorded in `IntentExecuted`, `canExecute` from the executor's address, role revocation, executor pause not blocking other executors, atomic batch failure (no balance or nonce change), and drop-and-resubmit.
+- Process: the tests were red first (the executor was missing); the implementation went green on its first run. **Mutation check:** making the batch best-effort is caught by 3 tests.
+- `ContractSizes.t.sol` covers `IntentExecutor`; the brief and README are updated.
+
+### Verification
+```
+npm test             →  178 passing (177 solidity, 1 nodejs)
+lint / typecheck / fmt  →  clean
+slither .            →  0 results
+npm run test:halmos  →  4 passed; 0 failed
+```
 
 ## Open questions for the owner
-1. D1–D4 above.
-2. Push: the `LICENSE`, README and Phase 3 commits will be pushed after Phase 3 is approved and green, unless you want them pushed sooner.
+1. Review Phase 3. Once approved, I'll push it and plan Phase 4 (rules), starting with the `MaxHoldersRule` zero-amount-mint decision.

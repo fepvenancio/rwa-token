@@ -10,6 +10,7 @@ import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {PolicyRegistry} from 'contracts/governance/PolicyRegistry.sol';
 import {ComplianceHook} from 'contracts/hooks/ComplianceHook.sol';
 import {IdentityRule} from 'contracts/hooks/rules/IdentityRule.sol';
+import {IntentExecutor} from 'contracts/intents/IntentExecutor.sol';
 import {IntentToken} from 'contracts/tokens/IntentToken.sol';
 
 /**
@@ -27,6 +28,7 @@ contract ContractSizesTest is Test {
       'ComplianceHook',
       address(new ComplianceHook(address(this), IPolicyRegistry(_registry), address(this), new IComplianceRule[](0)))
     );
+    _assertFits('IntentExecutor', address(new IntentExecutor(address(this), address(this))));
     _assertFits('IdentityRule', address(new IdentityRule(IIdentityRegistry(address(this)))));
   }
 
