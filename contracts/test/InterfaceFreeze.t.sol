@@ -11,9 +11,12 @@ import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IIdentityRule} from 'interfaces/IIdentityRule.sol';
 import {IIntentExecutor} from 'interfaces/IIntentExecutor.sol';
 import {IIntentExecutorBatch} from 'interfaces/IIntentExecutorBatch.sol';
+import {ILockupRule} from 'interfaces/ILockupRule.sol';
+import {IMaxHoldersRule} from 'interfaces/IMaxHoldersRule.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
+import {ISettlementWindowRule} from 'interfaces/ISettlementWindowRule.sol';
 import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
 
 /**
@@ -31,6 +34,10 @@ contract InterfaceFreezeTest is Test {
     assertEq(type(IIntentExecutor).interfaceId, bytes4(0xd2319653), 'IIntentExecutor');
     // Added in Phase 3 (2026-10-16): executeBatch, pause, unpause
     assertEq(type(IIntentExecutorBatch).interfaceId, bytes4(0x117727cb), 'IIntentExecutorBatch');
+    // Added in Phase 4 (2026-10-16)
+    assertEq(type(ILockupRule).interfaceId, bytes4(0xaafb038e), 'ILockupRule');
+    assertEq(type(ISettlementWindowRule).interfaceId, bytes4(0xf2058aff), 'ISettlementWindowRule');
+    assertEq(type(IMaxHoldersRule).interfaceId, bytes4(0xa13cb93c), 'IMaxHoldersRule');
     assertEq(type(IIdentityRule).interfaceId, bytes4(0x150c4aea), 'IIdentityRule');
     assertEq(type(IIdentityRegistry).interfaceId, bytes4(0xb9209e33), 'IIdentityRegistry');
   }
@@ -54,6 +61,18 @@ contract InterfaceFreezeTest is Test {
     );
     assertEq(
       IComplianceHook.RuleSetChanged.selector, 0x1a22bda7b05ed1fb294fe52899bc63d685e2b75bb9f93e1e840f5016038b3893
+    );
+    // Added in Phase 4 (2026-10-16)
+    assertEq(ILockupRule.LockupSet.selector, 0xd3de67b8116f1abe42856d12f29c6dd6798dc57c837e1d2083e129b58d2e323a);
+    assertEq(
+      ISettlementWindowRule.WindowSet.selector, 0xcfbaf2575cd70ccd40d11716312d33d4c45312c933586af58b3ccc959f81b96c
+    );
+    assertEq(IMaxHoldersRule.CapSet.selector, 0x113914a326da83d9b14b874c5cc74c6602b1ef1dc38916f0a4b3f618952f77ab);
+    assertEq(
+      IMaxHoldersRule.HolderCountSeeded.selector, 0x3b207bf9da27269642fda4f809efc7efaa06f42ec179fcf59ca932eb094bda34
+    );
+    assertEq(
+      IMaxHoldersRule.HolderCountUpdated.selector, 0x3b44d433ae622a035b92513dcb4121b917fffdfa7ee90319d0e224a265504819
     );
   }
 

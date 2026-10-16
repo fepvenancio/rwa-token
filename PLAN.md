@@ -1,6 +1,6 @@
 # PLAN
 
-Status: **Phase 3 approved and pushed (`49e7f4e`). Phase 4 (rules): plan written, awaiting review. No Phase 4 code yet.**
+Status: **Phase 4 (rules) implemented and green — awaiting review. Next: Phase 5 (vaults).**
 
 Brief v2 ("Gated Token Stack") replaced the original executor-only brief on 2026-10-16. On the same day the owner supplied a reference implementation in `Imported/` (now deleted; its contents live in `contracts/`) and approved, in chat, integrating it with the major findings fixed, a common-bug sweep, and the Wonderland Solidity standards.
 
@@ -190,7 +190,7 @@ slither .            →  0 results
 npm run test:halmos  →  4 passed; 0 failed
 ```
 
-## Phase 4 — rules (PLAN, awaiting review)
+## Phase 4 — rules ✅ (awaiting review)
 
 ### Already done in Phase 4 scope
 - `ComplianceHook`: ordering, short-circuit, the 16-rule cap, constructor rules, fail-closed, one instance per `ruleId`.
@@ -204,37 +204,42 @@ What's left is the three rules from brief §6.
 - **Interfaces** (Wonderland: events and errors in the interface): `ISettlementWindowRule`, `IMaxHoldersRule` and `ILockupRule`, as new files in `contracts/interfaces/`, pinned in `InterfaceFreeze.t.sol` once built. The existing frozen files are untouched.
 - **Reason codes:** `OUTSIDE_SETTLEMENT_WINDOW`, `MAX_HOLDERS` and `LOCKED` already exist, so no new codes.
 
-### Rule designs (defaults; the open choices are P1–P6)
-- **`LockupRule`** (`ruleId` `LockupRule.v1`). It holds an unlock timestamp per (token, holder).
-  - **Check:** TRANSFER and EXECUTED return `LOCKED` while `block.timestamp < unlock[token][from]`. FORCED, BURN and MINT are exempt (a mint only adds to a balance).
-  - **Scope:** the lock covers the holder's whole balance, including tokens received later, as the brief specifies.
-  - **Setter:** `setLockup(token, holder, unlockTime)`, callable by the token's `AGENT_ROLE` (operational, no delay; the agent can already freeze, so this adds no power). It emits `LockupSet`, and bulk issuance batches through the Safe.
-- **`SettlementWindowRule`** (`ruleId` `SettlementWindowRule.v1`). It applies to EXECUTED only, and outside the window it returns `OUTSIDE_SETTLEMENT_WINDOW`. Window shape: P6.
-- **`MaxHoldersRule`** (`ruleId` `MaxHoldersRule.v1`, `wantsAfter() == true`). It keeps a cap and a holder count per token.
-  - **Check:** a movement that *adds* a holder is rejected with `MAX_HOLDERS` if the net count would exceed the cap. An account is "added" when it gets a non-zero amount while holding zero; the sender drops out if its balance goes to zero. Moving a full balance to a new holder at the cap is therefore allowed.
-  - **Reductions are never blocked**, even if the cap is later lowered below the current count.
-  - **`after_`:** updates the count from post-movement balances. Self-transfers and zero amounts never change it.
+### Owner decisions (2026-10-16)
+- **P1. Configuration authority.** Rule configuration is authorised live through `IAccessControl(token).hasRole(…)`:
+  - the token's `DEFAULT_ADMIN_ROLE` sets the cap and the window;
+  - its `AGENT_ROLE` sets lockups.
 
-### Decisions needed (my recommendation first)
-- **P1. Who configures per-token parameters** (cap, window), and how deployment avoids a 7-day dead token.
-  - **(a) Recommended: the token's own roles, checked live.** The rule asks `IAccessControl(token).hasRole(…)`, as `onlyHook` does: policy parameters (cap, window) need the token's `DEFAULT_ADMIN_ROLE` (the timelock), and per-holder data (lockups) needs its `AGENT_ROLE`. It's sound for the same reason as `onlyHook`: a fake token can only write its own key. One shared instance per rule type, parameter changes need no redeploy, and holder counts survive.
-    - **Bootstrap (Phase 7):** "configure, then hand over". The deploy script initialises the token with the deployer as temporary admin, configures the rules, grants the timelock admin and renounces, all in one deployment.
-  - (b) Immutable parameters per rule instance. There's no bootstrap issue, but each new cap or window means a new instance and re-attestation, and **swapping a `MaxHoldersRule` loses its holder counts**.
-- **P2. Amend brief §6 so rules can make *view* calls to `ctx.token`.** `MaxHoldersRule` must read `balanceOf`, and P1(a) reads `hasRole`. The brief's "read only own storage" and "no call back into the token" would forbid both.
-  - **Recommended:** amend to "view calls to `ctx.token` are allowed; state-changing calls are forbidden (`MockReentrantRule` still proves the latter)". This is the reading already applied to `onlyHook`.
-  - The alternative is to mirror every balance inside the rule: double storage writes per transfer, and it drifts if the rule is added to a live token.
-- **P3. Zero-amount movements and `isUserAllowed`.** `isUserAllowed` simulates a zero-amount mint.
-  - **Recommended:** zero amounts never add a holder, so `isUserAllowed` answers "may this account hold the token?" (identity, lockups) independently of whether the cap is full.
-  - The alternative makes it report `false` while the cap is full.
-- **P4. Which movements the cap applies to.**
-  - **Recommended:** every kind that can add a holder (TRANSFER, EXECUTED, MINT, FORCED), counted net. BURN can't add one.
-  - The alternative exempts FORCED so a clawback into a new treasury account can't be blocked; the default handles that by keeping the treasury a holder or using net counting.
-- **P5. Adding `MaxHoldersRule` to a token that already has holders.**
-  - **Recommended:** supported from genesis, through constructor rules or before the first mint. Adding it to a live token needs a one-time `seedHolderCount(token, n)` by the token's admin (timelock), allowed only while the count is untracked, with `n` verified off-chain.
-  - Removing the rule from a hook and re-adding it later also requires a re-seed (documented).
-- **P6. Window shape.**
-  - **Recommended:** a daily UTC window `[open, close)` in seconds of the day (an overnight window is allowed when `open > close`), plus a weekday mask (default Mon–Fri). Holidays are not on-chain; use the executor pause or don't submit.
-  - An unconfigured token **fails closed**: every EXECUTED movement is rejected.
+  "Configure, then hand over" is a single Ignition module (Phase 7). Its last step **asserts the deployer holds no role on the token, the hook, or any rule.**
+- **P2. View calls into the token.** Brief §6 now reads: "Rules may make view calls to the token (`balanceOf`, `hasRole`, `policyHook`, `getFrozen`). State-changing calls are forbidden and blocked by the guard."
+- **P3. Holder definition.** A holder is any account with balance > 0, and zero amounts never add one. `isUserAllowed` stays "may hold", not "may hold right now".
+- **P4 (changed from my recommendation). FORCED and the cap.** FORCED is **exempt from the cap check** in `check()`, but **still counted** in `after_()`. MINT, TRANSFER and EXECUTED are capped, counted net.
+- **P5. Seeding the count.** `seedHolderCount(token, n)` is callable by the token's `DEFAULT_ADMIN_ROLE` **at any time** and emits `HolderCountSeeded(token, old, new)`. It is documented as legitimate only while the rule is not in the token's active set; the correct value can be recomputed from `Transfer` events. The invariant test covers continuous operation only.
+- **P6. Settlement window.**
+  - Shape: a daily UTC window plus a weekday mask, with Mon–Fri as the default. An installed but unconfigured window fails closed.
+  - Weekday: `((ts / 1 days) + 3) % 7`, with Mon = 0. Verified against calendar dates.
+  - Same-day window: `isDay(today) && t >= open && t < close`.
+  - Overnight window: `(isDay(today) && t >= open) || (isDay(yesterday) && t < close)`.
+  - The tests cover Monday 01:00 and Saturday 01:00 for an overnight window.
+
+### Rule designs (final)
+- **`MaxHoldersRule`** (`MaxHoldersRule.v1`, `wantsAfter() == true`). It keeps a cap and a count per token.
+  - **`check()`** uses pre-transfer balances, in order:
+    1. `amount == 0 || from == to || to == address(0)` → OK.
+    2. `balanceOf(to) > 0` → OK (a lowered cap never blocks existing holders).
+    3. `kind == FORCED` → OK (P4).
+    4. Otherwise, with `senderLeaves = from != 0 && balanceOf(from) == amount`, reject with `MAX_HOLDERS` if `cap == 0` (fail closed) or `count + (senderLeaves ? 0 : 1) > cap`.
+  - **`after_()`** (only the token's hook) uses post-transfer balances:
+    - return early if `amount == 0 || from == to`;
+    - `to` became a holder iff `to != 0 && balanceOf(to) == amount`, so the count goes up;
+    - `from` left iff `from != 0 && balanceOf(from) == 0`, so the count goes down.
+  - **Unseeded count:** the arithmetic is checked. If the rule is active on a live token with an unseeded or wrong count, an exit that would take the count below zero reverts, so the token fails closed until the admin re-seeds.
+  - **Admin (token `DEFAULT_ADMIN_ROLE`):** `setCap(token, cap)` emits `CapSet(token, old, new)`; `seedHolderCount(token, n)` emits `HolderCountSeeded`.
+- **`LockupRule`** (`LockupRule.v1`).
+  - **Check:** TRANSFER and EXECUTED return `LOCKED` while `block.timestamp < unlock[token][from]`. FORCED, BURN and MINT are exempt.
+  - **Setter:** `setLockup(token, holder, t)`, by the token's `AGENT_ROLE`. **A `t <= block.timestamp` clears the lockup** (stored as 0). Emits `LockupSet`.
+- **`SettlementWindowRule`** (`SettlementWindowRule.v1`).
+  - **Check:** EXECUTED only, per P6.
+  - **Setter:** `setWindow(token, open, close, dayMask)`, by the token's `DEFAULT_ADMIN_ROLE`. It requires `open, close < 1 days`, `open != close`, and a non-zero 7-bit mask. `MON_TO_FRI = 0x1F` is the default value to pass. Emits `WindowSet`.
 
 ### Tests first (red run shown before each implementation)
 - **Per rule `<Name>Rule.t.sol`** (brief §6 step 4), unit tests with `vm.mockCall` on the token:
@@ -249,5 +254,27 @@ What's left is the three rules from brief §6.
 - **Recommended full order:** Identity → Lockup → SettlementWindow → MaxHolders (cheap static checks first, the stateful counter last).
 - **Guards:** a size check per rule; freeze pins for the 3 new interfaces; Slither and Halmos stay green.
 
+### As built (Phase 4)
+- **Interfaces** (new files; the existing frozen ones are untouched): `ILockupRule` `0xaafb038e`, `ISettlementWindowRule` `0xf2058aff`, `IMaxHoldersRule` `0xa13cb93c`. These ids and the 5 new event topics are pinned in `InterfaceFreeze.t.sol`. Each value was computed independently with `cast` and matches the compiler.
+- **Rules:** `LockupRule`, `SettlementWindowRule` and `MaxHoldersRule`, implemented exactly per the owner decisions and math above. Two small additions:
+  - `SettlementWindowRule.isOpen(token, ts)`, a view for operators;
+  - `HolderCountUpdated(token, count)`, emitted only when the count changes (Wonderland: an event on every state change).
+- **Tests** (each red first, because the rules were missing; then green on the first implementation run):
+  - **Unit:** every `check()` / `after_()` branch in spec order; setter auth through the token's roles; fake-token key isolation; staticcall view-ness; fuzzed boundaries (unlock second, window edges, cap ± 1, full-balance move at the cap); the owner's Monday-01:00 and Saturday-01:00 overnight cases; `isOpen` agreeing with `check`; the fail-closed underflow; events; ERC-165.
+  - **Invariant:** `MaxHoldersRuleInvariantTest` runs on a **real** token deployed "configure, then hand over", with cap 3 and 4 actors. **Mutation check:** dropping the exit decrement, or the self-transfer skip, is caught.
+  - **Integration** (`RuleSetIntegration.t.sol`, brief §6 step 5): all four rules in the recommended order on the real stack, with `canTransfer` / `canExecute` agreeing with the state-changing calls. It shows identity rejecting before the cap does, FORCED exempt but counted, a full-balance move at the cap, and the legitimate P5 seed (before the rule is active).
+- **Slither gate:** it caught 6 new results. All were triaged and suppressed **inline at the exact lines, with reasons**; the global exclusion list is unchanged.
+  - `weak-prng` (3): calendar modulo on the timestamp, not randomness.
+  - `incorrect-equality` (3): the exact balance equalities are the owner's holder definition, read inside the token's guarded `_update`.
+- **Brief §6** is updated: the P2 wording, rule-writing step 2, and the final definitions of the three rules.
+
+### Verification (Phase 4)
+```
+npm test             →  241 passing (240 solidity, 1 nodejs)
+lint / typecheck / fmt  →  clean
+slither .            →  0 results
+npm run test:halmos  →  4 passed; 0 failed
+```
+
 ## Open questions for the owner
-1. P1–P6 above. "defaults" accepts every recommendation.
+1. Review Phase 4. Once approved, I'll push it and plan Phase 5 (vaults).

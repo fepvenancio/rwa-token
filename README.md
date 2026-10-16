@@ -17,18 +17,19 @@ IntentToken (+ IntentSettledUpgradeable)  holder-signed EIP-712 TransferIntent, 
 (planned) Gated4626Vault, Gated7540Vault
 
 ComplianceHook (one per token, immutable) ──► ordered list of ≤16 attested IComplianceRule (first rejection wins)
-IdentityRule, (planned) SettlementWindowRule, MaxHoldersRule, LockupRule   hook-agnostic, shareable across tokens
+IdentityRule, LockupRule, SettlementWindowRule, MaxHoldersRule   hook-agnostic, shared across tokens; per-token
+                                                 config authorised live by the token's own roles
 PolicyRegistry (one per deployment, immutable)  codehash allowlist: HOOK / RULE / IMPLEMENTATION
 IntentExecutor (immutable)                       replaceable, role-gated submitter: execute + atomic executeBatch
 ```
 
 | Path | Contents |
 |---|---|
-| `contracts/interfaces/` | Frozen ABI: `IPolicyGated`, `IPolicyHook`, `IComplianceRule`, `IComplianceHook`, `IPolicyRegistry`, `ITransferIntent`, `IIntentExecutor`, `IIntentExecutorBatch`, `IIdentityRule`, `IIdentityRegistry`, `Errors.sol` (reason codes) |
+| `contracts/interfaces/` | Frozen ABI: `IPolicyGated`, `IPolicyHook`, `IComplianceRule`, `IComplianceHook`, `IPolicyRegistry`, `ITransferIntent`, `IIntentExecutor`, `IIntentExecutorBatch`, `IIdentityRule`, `IIdentityRegistry`, `ILockupRule`, `ISettlementWindowRule`, `IMaxHoldersRule`, `Errors.sol` (reason codes) |
 | `contracts/base/` | `PolicyGatedERC20Upgradeable` |
 | `contracts/governance/` | `PolicyRegistry` |
 | `contracts/mixins/`, `contracts/tokens/` | `IntentSettledUpgradeable`, `IntentToken` |
-| `contracts/hooks/` | `ComplianceHook`, `BaseRule`, `rules/IdentityRule` |
+| `contracts/hooks/` | `ComplianceHook`, `BaseRule`, `rules/` `IdentityRule`, `LockupRule`, `SettlementWindowRule`, `MaxHoldersRule` (recommended order) |
 | `contracts/intents/` | `IntentExecutor` |
 | `contracts/test/` | Test helpers and mocks, interface-freeze and contract-size guards, Halmos properties |
 
@@ -48,6 +49,8 @@ Every contract has its `.t.sol` next to it. [`PLAN.md`](PLAN.md) tracks phases a
 | `OPERATOR_ROLE` (executor) | bank / relayer keys | none | submit intents via `execute` / `executeBatch` (all-or-nothing) |
 | `GUARDIAN_ROLE` (executor) | multisig | none | pause the executor only; the timelock unpauses |
 | `ATTESTER_ROLE` (registry) | security council | none | attest / revoke codehashes |
+| token `DEFAULT_ADMIN_ROLE` → rules | timelock | ≥ 7 days | set a token's holder cap, seed its holder count, set its settlement window |
+| token `AGENT_ROLE` → rules | issuer | none | set or clear per-holder lockups |
 
 - **Attested code only.** Hooks, rules and implementations are installed only if their runtime codehash is attested.
   Attestation is checked at install time; revoking it later does not silently change a live token.

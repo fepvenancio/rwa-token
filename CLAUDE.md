@@ -208,12 +208,12 @@ Semantics to spec in NatSpec and enforce in tests:
 3. `after_` runs only for rules with `wantsAfter()`, after balances moved, inside the token's `ReentrancyGuardTransient`.
 4. Hard cap 16 rules. The initial rule set is passed to the constructor, so the token is live with its policy at deploy. Later changes replace the whole ordered set atomically with `setRules` (`onlyTimelock`). Both paths emit `RuleSetChanged(bytes32[] ruleIds)` and revert unless every rule satisfies `registry.isAttested(rule, RULE)`. An empty set fails closed (`NO_RULES`).
 5. Rule list loaded into memory once per call.
-6. No rule may call back into the token. `MockReentrantRule` proves it.
+6. Rules may make view calls to the token (`balanceOf`, `hasRole`, `policyHook`, `getFrozen`). State-changing calls are forbidden and blocked by the guard; `MockReentrantRule` proves it.
 
 **Writing a new rule.**
 
 1. `contracts/hooks/rules/<Name>Rule.sol` inheriting `BaseRule` (`ruleId`, `wantsAfter` default false, `onlyHook(ctx)` on `after_`).
-2. Implement `check`. Read only own storage and registries injected at construction.
+2. Implement `check`. Read your own storage, registries injected at construction, and view functions of `ctx.token`. Per-token configuration is authorised live by the token's own roles (`IAccessControl(token).hasRole`): `DEFAULT_ADMIN_ROLE` for policy parameters, `AGENT_ROLE` for per-holder operational data.
 3. Add reason codes to `Errors.sol` if new.
 4. `<Name>Rule.t.sol`: accept, each reject, fuzz, view-ness.
 5. Integration test registering the rule in `ComplianceHook`, asserting `canTransfer`/`canExecute` agree with the state-changing call.
@@ -222,9 +222,9 @@ Semantics to spec in NatSpec and enforce in tests:
 **Initial rule set (Phase 4).**
 
 * `IdentityRule` — `isVerified(from)` unless MINT; `isVerified(to)` unless BURN. Applies to FORCED.
-* `SettlementWindowRule` — EXECUTED only; rejects outside configured UTC window.
-* `MaxHoldersRule` — `wantsAfter()`; maintains holder count per token.
-* `LockupRule` — per-(token, holder) unlock timestamp; rejects TRANSFER/EXECUTED before it; exempts FORCED and BURN.
+* `SettlementWindowRule` — EXECUTED only. A daily UTC window `[open, close)` (overnight when `open > close`) plus a weekday mask (Mon = 0, `MON_TO_FRI` default; weekday = `((ts / 1 days) + 3) % 7`). An overnight session belongs to the day it opened. Installed but unconfigured fails closed.
+* `MaxHoldersRule` — `wantsAfter()`; maintains the holder count per token (holder = balance > 0; zero amounts never add one). Only movements that add a new holder are capped, net of a sender who leaves. FORCED is exempt from the cap but still counted. `cap == 0` fails closed. `seedHolderCount` (token admin) is only legitimate while the rule is not active.
+* `LockupRule` — per-(token, holder) unlock timestamp set by the token's `AGENT_ROLE` (a past or present timestamp clears it); rejects TRANSFER/EXECUTED before it; exempts FORCED, BURN and MINT.
 
 ## 7. Vault templates
 
