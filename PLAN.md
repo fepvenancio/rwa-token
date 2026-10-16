@@ -1,6 +1,6 @@
 # PLAN
 
-Status: **Phase 4 implemented, green and reviewed (external review validated 2026-10-16). Phase 5 (vaults): questions V1–V5 open.**
+Status: **Phase 4 pushed (`59fd218`). Phase 5 (vaults): V1–V5 decided (defaults); plan written, awaiting review. No Phase 5 code yet.**
 
 Brief v2 ("Gated Token Stack") replaced the original executor-only brief on 2026-10-16. On the same day the owner supplied a reference implementation in `Imported/` (now deleted; its contents live in `contracts/`) and approved, in chat, integrating it with the major findings fixed, a common-bug sweep, and the Wonderland Solidity standards.
 
@@ -296,48 +296,94 @@ npm run test:halmos  →  4 passed; 0 failed
   - brief §7: `maxRedeem = balance - frozen` (gated), and `maxWithdraw = _convertToAssets(maxRedeem, Floor)`.
 - **Verification:** `npm test` gives 242 passing (241 solidity, 1 nodejs). Lint, typecheck, fmt, Slither (0) and Halmos (4/4) are clean.
 
-## Phase 5 — vaults (questions before planning)
+## Phase 5 — vaults (PLAN, awaiting review)
 
-ERC-7540 facts, from the spec (eips.ethereum.org/EIPS/eip-7540):
-- `requestRedeem` "MUST" remove shares from the owner's custody. They MAY be locked in the vault or burned at once, and must be burned by Claimed.
-- `requestDeposit` takes custody of the assets immediately.
-- Cancellation is **not** in the core spec.
-- `requestId == 0` means one aggregated request per controller.
-- Async `preview*` functions MUST revert.
-
-### V1. `LockupRule` and vault exits (a redemption is a BURN)
-OZ's `_withdraw` calls `_burn(owner, …)`, so a holder's `redeem` / `withdraw` arrives as **BURN**, with the redeemer as operator, and `LockupRule` exempts BURN. Today a locked investor can therefore exit through a vault.
-- **(a) Recommended:** `LockupRule` exempts BURN **only** when `ctx.operator` holds the token's `BURNER_ROLE` (enforcement burns). Holder-initiated burns (vault redemptions, 7540 requests) respect the lockup. `maxRedeem`'s pre-flight then reports `LOCKED` as well. It's a view call (P2) and a small change to the Phase 4 rule (not pushed yet).
-- (b) Document the boundary: `LockupRule` is a secondary-transfer lock only, and vault exit locks belong to 7540 epochs.
-
-### V2. 7540: how pending-redemption shares leave the owner
-- **(a) Recommended: burn at request.**
-  - The burn is a BURN from the owner, so `IdentityRule` checks the owner, the lockup (with V1) applies, and `MaxHoldersRule` decrements on a full exit.
-  - The vault never becomes a holder.
-  - The vault tracks pending shares so pricing and NAV stay correct.
-- (b) Escrow to the vault address, then burn at claim.
-  - The escrow move is a TRANSFER: the vault must be identity-verified and counts as a holder (the cap is off by one), and the lockup and window rules apply to the escrow move.
-  - Needs exemptions in the rules.
-
-### V3. 7540: pricing and asset custody
-- **(a) Recommended:** `FULFILLER_ROLE` (the bank) fulfils with **explicit amounts**:
-  - `fulfillDeposit(controller, assets, shares)` and `fulfillRedeem(controller, shares, assets)`, priced off-chain at NAV; partial fulfilment is allowed.
-  - Deposited assets go to a configured custody address at fulfilment.
-  - Redemption assets are pulled from the fulfiller at fulfilment and held for the claim.
-- (b) On-chain pricing (`totalAssets / totalSupply` at fulfilment), with assets kept in the vault.
-
-### V4. 7540 scope
-- **Recommended:**
-  - deposits and redemptions are both async, per the brief;
+### Owner decisions (2026-10-17, all defaults)
+- **V1 (a):** `LockupRule` exempts BURN **only** when `ctx.operator` holds the token's `BURNER_ROLE`. Holder-initiated burns (vault redemptions, 7540 requests) respect the lockup.
+- **V2 (a):** 7540 burns shares **at `requestRedeem`**, so the vault never holds shares.
+- **V3 (a):** `FULFILLER_ROLE` fulfils with explicit amounts priced off-chain at NAV, with partial fulfilment allowed. Deposited assets go to a custody address at fulfilment; redemption assets are pulled from the fulfiller at fulfilment.
+- **V4:**
+  - deposit and redeem both async;
   - `requestId = 0`, aggregated per controller;
-  - **no cancellation** in Phase 5 (ERC-7887 could follow later);
-  - `setOperator` is honoured for claims only, per the brief;
-  - async `preview*` functions revert, per the spec.
+  - no cancellation;
+  - operators honoured for claims;
+  - async `preview*` revert.
+- **V5 (a):** `_decimalsOffset() = 6`.
 
-### V5. `Gated4626Vault`: first-depositor inflation protection
-- **(a) Recommended:** OZ virtual shares with `_decimalsOffset() = 6`. It's a constant per implementation.
-- (b) Offset 0, plus a mandatory issuer seed deposit (dead shares) in the deploy module.
+### Verified standard facts
+These ERC-165 ids were recomputed from the signatures with `cast`, and all four match the spec:
+
+| Interface | Composition | ID |
+|---|---|---|
+| ERC-7540 operator | `isOperator` ^ `setOperator` | `0xe3bc4e65` |
+| ERC-7540 async deposit | `requestDeposit` ^ `pendingDepositRequest` ^ `claimableDepositRequest` ^ **`deposit(uint256,address,address)` ^ `mint(uint256,address,address)`** | `0xce3bbe50` |
+| ERC-7540 async redeem | `requestRedeem` ^ `pendingRedeemRequest` ^ `claimableRedeemRequest` | `0x620ee8e4` |
+| ERC-7575 | **every ERC-4626 vault function + `share()`** | `0x2f0a18c5` |
+
+Our interface files are split exactly along these lines, so the compiled ids equal the standard's; they'll be pinned in `InterfaceFreeze.t.sol`.
+
+OZ 5.6.1 provides `ERC4626Upgradeable`, with hooks `_deposit`, `_withdraw`, `_decimalsOffset`, `_convertTo*` and the `max*` functions. It has no 7540 interface or contract.
+
+### Proposed split: two review checkpoints
+- **5a:** V1 (the `LockupRule` change) and `Gated4626Vault`.
+- **5b:** `Gated7540Vault`.
+
+Each gets red tests, then the implementation, then green, then a stop for review.
+
+### 5a-1. `LockupRule` (V1)
+- `check`: TRANSFER and EXECUTED are locked as today. BURN is locked too, unless `IAccessControl(token).hasRole(BURNER_ROLE, ctx.operator)` (a view call, allowed by P2). FORCED and MINT stay exempt.
+- `ILockupRule` is a frozen file. No new function or error is needed, but the NatSpec changes, so this edit is made under the owner's V1 instruction. Brief §6 is updated.
+- **Tests:**
+  - holder-initiated BURN is locked;
+  - a BURN by a `BURNER_ROLE` operator is exempt;
+  - a vault `redeem` by a locked holder is rejected with `LOCKED`, and `maxRedeem` returns 0 (integration).
+
+### 5a-2. `Gated4626Vault` (`contracts/vaults/`)
+- **Inheritance:** OZ `ERC4626Upgradeable` + `PolicyGatedERC20Upgradeable`. The diamonds are resolved explicitly: `_update` overrides both `ERC20Upgradeable` and the base, and `decimals` overrides both `ERC20Upgradeable` and `ERC4626Upgradeable`. UUPS, with `_disableInitializers` in the implementation constructor.
+- **Share movements go through the hook:** `deposit`/`mint` arrive as MINT to the receiver, `withdraw`/`redeem` as BURN from the owner (operator = caller). The asset leg is a plain ERC-20 movement and is not hooked.
+- **Gated `max*`** (brief §7):
+  - `maxDeposit` / `maxMint` return 0 if paused or if `canTransfer(0, receiver, 1)` is not OK; otherwise OZ's value.
+  - `maxRedeem` returns 0 if paused or if `canTransfer(owner, 0, 1)` is not OK; otherwise `balanceOf - getFrozen`.
+  - `maxWithdraw` is `_convertToAssets(maxRedeem, Floor)`.
+  - `preview*` stay pure conversions.
+- **V5:** `_decimalsOffset() = 6`.
+- **ERC-165:** IERC4626 (`0x87dfe5a0`, informational), plus everything the base advertises.
+- **Tests:**
+  - **Unit** (mocked hook/registry): every `max*` branch; `deposit(maxDeposit+1)` reverts and `deposit(maxDeposit)` succeeds (brief §7); the hook sees MINT/BURN contexts with the right operator; pause; frozen shares cap `maxRedeem`/`maxWithdraw`; the rounding rule (`withdraw(maxWithdraw)` always succeeds, fuzzed); the inflation-attack scenario is unprofitable with offset 6.
+  - **Integration** (real Identity + MaxHolders + Lockup): unverified receivers get `maxDeposit` 0 and deposits revert; at the cap a new investor gets `maxDeposit` 0 while an existing one can top up; a locked holder can't redeem; vault shares count as holders.
+  - **Invariant:** `sum(balances) == totalSupply`, `frozen <= balance`, and assets are conserved (vault asset balance = deposits - withdrawals).
+
+### 5b. `Gated7540Vault` (`contracts/vaults/`)
+- **Interfaces** (new files, spec-exact):
+  - `IERC7540Operator`, `IERC7540Deposit`, `IERC7540Redeem` and `IERC7575`;
+  - `IGated7540Vault` (Wonderland: errors, plus fulfilment events `DepositFulfilled` and `RedeemFulfilled`, and `CustodySet`).
+- **Requests** (`requestId = 0`):
+  - **`requestDeposit(assets, controller, owner)`:** `owner == msg.sender` or an operator. It pulls the assets into the vault and adds them to `pendingDeposit[controller]`. It emits `DepositRequest`.
+  - **`requestRedeem(shares, controller, owner)`:** `owner == msg.sender`, an operator, or an ERC-20 allowance (operators skip the allowance; non-infinite allowances are deducted). It **burns** the shares from `owner` (a BURN through the hook, so Identity, Lockup with V1, and MaxHolders all apply) and adds them to `pendingRedeem[controller]`. It emits `RedeemRequest`.
+- **Fulfilment** (`FULFILLER_ROLE`, V3):
+  - **`fulfillDeposit(controller, assets, shares)`:** moves pending to claimable and sends `assets` to `custody`.
+  - **`fulfillRedeem(controller, shares, assets)`:** moves pending to claimable and pulls `assets` from the fulfiller into the vault.
+  - Partial fulfilment is fine.
+- **Claims:**
+  - `deposit(assets, receiver, controller)` and `mint(shares, receiver, controller)` mint shares (a MINT through the hook, so the receiver must be verified and under the cap).
+  - `redeem(shares, receiver, controller)` and `withdraw(assets, receiver, controller)` pay out claimable assets pro-rata; rounding favours the vault.
+  - The 4626-signature `deposit`/`mint`/`redeem`/`withdraw` act with `controller = msg.sender`.
+  - `controller == msg.sender` or an operator.
+- **`max*`** return the claimable amounts, gated as in §7. Async `preview*` revert.
+
+### Open questions (recommendation first)
+- **Q1. Issuer `mint` / `burn` on vault shares.** Minting shares without assets dilutes holders; burning without paying out confiscates.
+  - **(a) Recommended:** both revert on the vaults (`Vault_Unsupported`); enforcement uses `forcedTransfer` and freezes.
+  - (b) Keep them.
+- **Q2. Gate `requestDeposit` at request time.** There's no cancellation (V4), so assets from an account that can't hold shares would be stuck.
+  - **(a) Recommended:** `requestDeposit` reverts unless `canTransfer(0, controller, 1)` is OK (and the vault is not paused).
+  - (b) Check only at claim.
+- **Q3. 7540 `totalAssets` / `convertTo*` under off-chain pricing.**
+  - **(a) Recommended:** a "last fulfilment price" (assets per share, updated on each fulfilment); `totalAssets = totalSupply × lastPrice` (informational).
+  - (b) Revert or return 0.
+- **Q4. Custody address.** **Recommended:** an initializer parameter, changeable only by the token's `DEFAULT_ADMIN_ROLE` (timelock), emitting `CustodySet`.
+- **Q5. Split into 5a and 5b with separate reviews**, as above. Recommended.
+- **Brief impact:** brief §7 says "deposit/redeem claim into gated shares (MINT/BURN through the hook)". With V2, the BURN happens at `requestRedeem` rather than at claim, so the brief will be updated to match.
 
 ## Open questions for the owner
-1. Approve Phase 4 plus this review follow-up for push.
-2. Answer V1–V5 (or "defaults"). I'll then write the Phase 5 plan and stop for review before tests and code.
+1. Q1–Q5 above (or "defaults"). Then 5a starts: tests first, red run, implementation.
