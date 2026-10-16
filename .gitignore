@@ -37,3 +37,7 @@
 .repo-audit/
 .letta/
 .DS_Store
+
+# forge (fmt / Slither builds)
+/forge-out
+/forge-cache

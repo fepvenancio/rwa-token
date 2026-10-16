@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  HARDHAT_DISABLE_TELEMETRY: "true"
+
+jobs:
+  test:
+    name: Lint, typecheck, test (incl. EIP-170 size + interface freeze)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      # forge-std is a public git dependency recorded as git+ssh in the lockfile; fetch it over https.
+      - run: git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+      - run: npm ci
+      - run: npm run lint:sol
+      - run: npm run typecheck
+      # Default and production profiles share one compiler config, so ContractSizes.t.sol checks deployed sizes.
+      - run: npm test
+
+  analysis:
+    name: Format, Slither gate, Halmos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+      - run: npm ci
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.8.1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install slither-analyzer==0.11.5 halmos==0.3.3
+      - run: npm run fmt:check
+      - run: slither .
+      - run: npm run test:halmos

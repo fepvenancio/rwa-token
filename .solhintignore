@@ -1,0 +1,3 @@
+# Tests and test support are not linted (Wonderland lints production sources with the strict config)
+contracts/**/*.t.sol
+contracts/test/

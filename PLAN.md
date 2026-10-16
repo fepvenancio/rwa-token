@@ -1,67 +1,119 @@
 # PLAN
 
-Status: **Phase 0 — scaffold (done, awaiting review)**
+Status: **Phase 1 interfaces FROZEN (2026-10-16). Imported stack integrated through partial Phases 2–4. Next: Phase 3 `IntentExecutor`, then the Phase 4 rules.**
 
-## Phase 0 — scaffold
+Brief v2 ("Gated Token Stack") replaced the original executor-only brief on 2026-10-16. On the same day the owner supplied a reference implementation in `Imported/` (now deleted; its contents live in `contracts/`) and approved, in chat, integrating it with the major findings fixed, a common-bug sweep, and the Wonderland Solidity standards.
 
-### Goal
-An empty Hardhat 3 project that compiles and runs both test runners green, with the toolchain pinned per CLAUDE.md §2 and §6. No product contracts yet.
-
-### Versions (checked against npm on 2026-10-16)
-| Package | Version |
+## Standing decisions
+| Date | Decision |
 |---|---|
-| hardhat | 3.20.0 |
-| @nomicfoundation/hardhat-toolbox-viem | 5.0.7 |
-| @nomicfoundation/hardhat-keystore | 3.1.2 |
-| @openzeppelin/contracts | 5.6.1 |
-| @openzeppelin/contracts-upgradeable | 5.6.1 |
-| forge-std | v1.16.2 (git dep from `hardhat --init`, commit pinned in lockfile) |
-| viem / typescript / hardhat-ignition | 2.57.7 / 6.0.3 / 3.1.9 (from template, pinned exactly) |
-| solc | **0.8.30**, pinned exactly (conservative choice); source pragmas `^0.8.28` |
+| 2026-10-16 | `rwaToken/` is its own git repo. |
+| 2026-10-16 | solc 0.8.30 pinned in config, `cancun`; source pragmas `^0.8.28`. |
+| 2026-10-16 | **License: proprietary, all rights reserved; use requires the owners' approval.** SPDX `UNLICENSED` everywhere; `package.json` is `private` + `UNLICENSED` (CLAUDE.md rule 15). |
+| 2026-10-16 | **Wonderland Solidity standards** (CLAUDE.md rule 16). Lint config `.solhint.json`; formatting config `foundry.toml [fmt]`; imports through `remappings.txt`. |
+| 2026-10-16 | Adopting the imported code settles the interface questions: the brief's names, **no ERC-7943 interface id** (its names and returns differ); frozen ≤ balance; keccak256 reason codes (`TRANSFER_OK` ≠ 0, fail-closed); guardian pauses, timelock unpauses. |
+| 2026-10-16 | **Security tooling:** Slither is the gate. Mythril is dropped (no Cancun/transient support; noted in the brief). Halmos is kept because it was verified to run (see below). Aderyn is not needed. |
+| 2026-10-16 | **Interfaces frozen.** `contracts/test/InterfaceFreeze.t.sol` pins every ERC-165 id, event topic and reason code. Exact ERC-7943 conformance will come later as a separate adapter interface. |
+| 2026-10-16 | **Compiler:** one setting for the `default` and `production` profiles (optimizer on, 200 runs), so tests run on the deployed bytecode. `ContractSizes.t.sol` asserts EIP-170; the size limit is never lifted. |
+| 2026-10-16 | Use `network.create()` in TS tests. `network.connect()` (brief §9) is `@deprecated` in Hardhat 3.20. |
 
-Decisions (2026-10-16): git repo is `rwaToken/` itself. solc is 0.8.30. Mythril and Halmos are dropped from Phase 6: Mythril 0.24.8 has no TSTORE/TLOAD/MCOPY support, so it can't analyse `ReentrancyGuardTransient` under cancun, and Halmos is covered well enough by fuzz/invariant tests. Phase 6 = Slither + `upgrades-core validate`.
+## Owner decisions (2026-10-16, answers to the open questions)
+1. **Freeze**, after one change: `IntentCancelled(address indexed _from, bytes32 indexed _nonce)`, with no fake zero hash. Pin the ERC-165 ids in a test. Exact ERC-7943 conformance comes later as a separate adapter interface and does not block the freeze.
+2. **Constructor rules:** `ComplianceHook(admin, registry, token, initialRules[])`, each checked against the registry in the constructor. The token is live at deploy; the timelock governs only changes. The rules live in storage, so the codehash is unaffected.
+3. **Optimizer on in the default build** (200 runs): tests run on the deployed bytecode. Do not lift the size limit; add a size assertion to CI.
+4. **solhint** pinned, with a lint script, run in CI.
+5. **Delete `Imported/`.** Originals are kept outside the repo.
+6. **Drop Mythril** (no Cancun/transient support), and note why in the brief. Slither is the gate. Keep Halmos only if it really runs on the nonce/signature and frozen-balance paths; otherwise use Aderyn plus the invariant tests.
 
-All npm deps are pinned exactly (no `^`) in `package.json`.
+## Phase 0 — scaffold ✅ (`764b8ac`)
+- **Toolchain:** Hardhat 3.20.0 (TypeScript, ESM, node:test + viem). Pinned exactly: OZ 5.6.1 (both packages), hardhat-keystore 3.1.2, forge-std v1.16.2, viem 2.57.7, typescript 6.0.3.
+- **Profiles:** fuzz runs are 256. The compiler profiles were later unified (see decisions).
 
-### Steps
-1. **Git.** `rwaToken/` is not its own repo right now. It sits untracked inside `/Users/address0/Documents/Repos`, which is a repo with no commits. Proposal: `git init -b main` inside `rwaToken/` so the project has its own history. *(Needs confirmation, see Open questions.)*
-   → verify: `git rev-parse --show-toplevel` prints `.../rwaToken`.
-2. **Init.** Run `npx hardhat --init` and pick Hardhat 3, the TypeScript node:test + viem template, ESM. Then delete the sample `Counter.sol`, `Counter.t.sol`, sample test and sample ignition module. They don't belong in the layout in §3.
-   → verify: `npx hardhat --version` prints 3.20.0.
-3. **Deps.** `npm i -E @openzeppelin/contracts@5.6.1 @openzeppelin/contracts-upgradeable@5.6.1 @nomicfoundation/hardhat-keystore@3.1.2`.
-4. **`hardhat.config.ts`**:
-   - `solidity.profiles.default`: `version: "0.8.37"`, `evmVersion: "cancun"`, optimizer off (fast test builds).
-   - `solidity.profiles.production`: same, plus optimizer `enabled: true, runs: 200`. No `viaIR` unless a later phase needs it.
-   - Register `hardhat-keystore`. Any future RPC URL or key goes in as `configVariable(...)`, which the keystore resolves. No `.env`.
-   - Fuzz runs set in config (`test.solidity.fuzz.runs`, start at 256), not in inline NatSpec.
-5. **Layout.** Create empty dirs from §3 with `.gitkeep`: `contracts/{interfaces,token,hooks,intents,test}`, `test/nodejs`, `ignition/modules`.
-6. **Smoke tests.** These are temporary and get deleted at the start of Phase 1:
-   - `contracts/test/Smoke.t.sol` imports `forge-std/Test.sol` and one OZ upgradeable import, and asserts `true`. This proves remappings and solc work.
-   - `test/nodejs/smoke.test.ts` calls `network.connect()` and reads `chainId` through viem. This proves the node runner works.
-7. **`.gitignore`**: `node_modules`, `artifacts`, `cache`, `types`, `coverage`, `ignition/deployments/chain-31337`, `.env*`, `.repo-audit/`, `.letta/`, `.DS_Store`.
-8. **Verify.** Run `npx hardhat test` and paste the summary line.
-9. **Commit** `package.json`, `package-lock.json`, the config, `.gitignore`, `CLAUDE.md`, `PLAN.md` and the skeleton. Message: `chore: phase 0 scaffold`.
+## Integration of the imported stack
 
-### Done when
-- `npx hardhat test` passes both runners and the output is pasted.
-- solc is pinned exactly, evm is cancun, and the lockfile is committed.
-- Nothing exists outside the §3 layout except standard config files.
+### What exists now
+| Area | Files |
+|---|---|
+| Interfaces | `Errors.sol` (`library Reasons`), `IPolicyGated`, `IPolicyHook` (+`TransferKind`, `TransferContext`), `IComplianceRule`, `IComplianceHook`, `IPolicyRegistry` (+`AttestKind`), `ITransferIntent` (+`TransferIntent`), `IIntentExecutor`, `IIdentityRule`, `IIdentityRegistry` |
+| Base | `PolicyGatedERC20Upgradeable` |
+| Governance | `PolicyRegistry` |
+| Mixin / token | `IntentSettledUpgradeable`, `IntentToken` |
+| Hooks | `ComplianceHook`, `BaseRule`, `rules/IdentityRule` |
+| Test support | `test/Helpers.sol` (mock-and-expect), `PolicyGatedHarness`, `MockIdentityRegistry`, `MockReentrantRule`, `InterfaceFreeze.t.sol`, `ContractSizes.t.sol`, `halmos/IntentTokenHalmos.t.sol` |
+| Tests | One `.t.sol` next to every contract. Unit tests isolate each contract with `vm.mockCall`; `IntentToken.t.sol` is the integration suite; there are 2 invariants (`Σbalances == totalSupply`, `frozen ≤ balance`). |
 
-### Open questions
-1. **Git root.** Should I `git init` inside `rwaToken/`, or do you want it committed into the parent `Repos` repo? I recommend `git init` inside `rwaToken/`.
-2. **solc pin.** 0.8.37 is the latest release. Should I use it, or a more conservative one, for example 0.8.30?
-3. **`hardhat --init` is interactive.** I can drive it through your terminal tab, or hand-write the same files the template produces. I recommend running the real init so the output is canonical.
+Not built yet: the `IntentExecutor` contract (Phase 3), `SettlementWindow`/`MaxHolders`/`Lockup` rules (Phase 4), vaults (Phase 5), viem tests (Phase 6), Ignition (Phase 7).
 
-### As built (deviations from the steps above)
-- **`network.create()`, not `network.connect()`.** `connect` is `@deprecated` in Hardhat 3.20 ("will be removed in a future version"). CLAUDE.md §6 still says `connect()`.
-- **Keystore.** `hardhat-keystore` is already registered by `hardhat-toolbox-viem`. It's also listed explicitly in `package.json` and `plugins` so the dependency is intentional and pinned.
-- **Template extras.** Kept `.agents/skills/` and the `.claude -> .agents` symlink (official Hardhat 3 / viem reference skills) and `.npmignore`. Removed `AGENTS.md`, because its layout conflicts with CLAUDE.md §3. Also removed `README.md`, `scripts/`, and the Counter contract/tests/ignition samples.
-- **Networks.** Dropped the template's `hardhatOp` / `sepolia` examples. Phase 6 adds networks via `configVariable` (keystore-resolved).
-- **Fuzz config.** `test.solidity.fuzz.runs = 256`. Invariant settings are left at defaults until Phase 2 needs them.
-- **Expected solc warning.** solc warns about `tstore` in OZ `TransientSlot.sol`. This is the reentrancy-guard case the warning itself calls safe.
+### Fixes (each has a regression test that went red first)
+| # | Severity | Fix |
+|---|---|---|
+| F1 | High | `ComplianceHook` **fails closed**: an empty rule set returns `NO_RULES` (appended reason code). Before, a fresh token was ungated until the first timelocked `setRules`. The constructor now takes `initialRules[]` (each attested), so a token is live with its policy at deploy and the timelock only governs changes. |
+| F2 | High | `IdentityRule` no longer checks `from` on FORCED, so a clawback from a de-verified holder works. `to` is still checked. Burns still check `from`, which keeps vault-exit gating; the enforcement path is clawback to a verified treasury, then burn. |
+| F3 | Medium | `burn()` (BURNER_ROLE) can burn frozen tokens and releases the frozen amount, emitting `Frozen` before `Transfer`, as `forcedTransfer` does. A shared `_releaseFrozen` helper also checks balance first, so over-burns revert with `ERC20InsufficientBalance`. |
+| F4 | Medium | `ComplianceHook.ADMIN` is `immutable`, so it is part of the attested codehash and a clone with another admin is no longer attested. |
+| — | Low | `canTransfer` simulates a transfer *by `from`*: the operator is `from`, or the caller for a mint. Before, it was whoever made the pre-flight call. |
+| — | Low | The hook is read **once** per `_update`; the same hook decides and receives `afterTransfer`. |
+| — | Low | `ComplianceHook` caches each rule's `wantsAfter` as a bitmask at install time, so a rule can't change its answer later and there are fewer external calls per transfer. |
+| — | Low | `PolicyRegistry.attest` rejects codehash `0` and `keccak256("")`, which could never match. |
+| — | Info | `setFrozen` above the balance reverts with `PolicyGated_FrozenExceedsBalance` instead of a misused ERC-20 error. A dead `tstore` clear in `_moveAs` was removed (a revert already rolls transient storage back). |
+
+### Common-bug sweep (checked, no change needed)
+- **Signatures:**
+  - Replay is blocked by the per-signer nonce.
+  - Cross-chain and cross-token replay are blocked by the EIP-712 domain.
+  - High-s malleability is rejected by OZ ECDSA.
+  - ERC-1271 is checked via staticcall.
+  - Permit and intents use distinct typehashes and nonces.
+- **Reentrancy:** `_update` is `nonReentrant` (transient), and rule calls into the token revert (integration-tested).
+- **Upgrades:** the implementation is locked by `_disableInitializers`; double init is blocked; an upgrade needs `UPGRADER_ROLE` plus an attested implementation; state survives an upgrade (tested); ERC-7201 slots were verified with `cast index-erc7201`.
+- **ERC-20 semantics:** `transfer` reverts rather than returning false; allowance is spent before `_update`; mint and burn to or from address(0) are guarded by OZ.
+- **Bounded loops:** at most 16 rules.
+
+### Owner-decision changes (2026-10-16)
+- `IntentCancelled(address indexed _from, bytes32 indexed _nonce)`; the fake zero hash is gone.
+- `ComplianceHook(admin, registry, token, initialRules[])`, sharing the internal `_setRules` with `setRules`. A test confirms the rules don't affect the codehash. **Deploy order:** predict the hook address → deploy the rules (bound to it) → attest the rules → deploy the hook with its rules (bound to the predicted proxy) → attest the hook and implementation → deploy the proxy.
+- The optimizer is on in `default`; `ContractSizes.t.sol` runs in CI.
+- `solhint-community@4.0.1` is pinned. Scripts: `lint:sol` (`--max-warnings 0`), `fmt:check`, `typecheck`, `test`, `test:halmos`. `.solhintignore` skips tests.
+- CI (`.github/workflows/ci.yml`):
+  - **test job:** lint, typecheck, `hardhat test`.
+  - **analysis job:** `forge fmt --check`, `slither .`, Halmos.
+  - Tools are pinned: Foundry v1.8.1, slither 0.11.5, halmos 0.3.3, Node 24.
+  - GitHub SSH is rewritten to HTTPS because forge-std is a git dependency. This was verified with SSH disabled.
+- **Halmos verdict: keep.** It runs on the real proxied `IntentToken` (transient storage, delegatecall, symbolic `ecrecover`); 4 properties pass. **Mutation check:** each of 4 planted bugs (nonce not consumed, cancel not recorded, frozen check skipped, burn not releasing frozen) is killed by its property. Halmos discards reverting paths, so liveness properties assert on revert explicitly.
+- **Slither gate:** `slither.config.json` excludes only detectors that are false project-wide (naming, assembly, timestamp, calls-loop). The 3 accepted instances are suppressed inline with reasons. It exits 0 on clean code and 255 when a finding is reintroduced (verified).
+
+### Phase 4 design notes (from external review, validated)
+- **`BaseRule.HOOK` is immutable**, so a rule instance serves one hook and one token, and every token needs its rules redeployed and re-attested. Proposal: `onlyHook` checks `msg.sender == IPolicyGated(ctx.token).policyHook()`. One attested rule could then serve many tokens, and rules could be deployed before the hook. `BaseRule` also doesn't reject a zero hook.
+- **`setRules` dedupes by address only.** Two instances of the same rule type share a `ruleId`, which also makes `RuleSetChanged` ambiguous. Proposal: reject duplicate `ruleId`s too.
+- **`isUserAllowed` builds a MINT context with amount 0.** `MaxHoldersRule` must decide whether a zero-amount mint counts against the cap, or `isUserAllowed` will report "not allowed" for verified users whenever the cap is full.
+
+### New fact for Phase 7
+`UUPSUpgradeable` stores `address(this)` in an immutable, so **every implementation deployment has its own codehash**. IMPLEMENTATION attestations therefore cover one deployed instance, not a source version (tested).
 
 ### Verification
 ```
-npx hardhat test   →  2 passing (1 solidity, 1 nodejs)
-npx tsc --noEmit   →  clean
+npm test             →  150 passing (149 solidity, 1 nodejs), incl. 2 invariants × 256 runs, size + freeze guards
+npm run typecheck    →  clean
+npm run lint:sol     →  0 warnings
+npm run fmt:check    →  clean
+slither .            →  0 results (exit 0)
+npm run test:halmos  →  4 passed; 0 failed
 ```
+**Accepted Slither findings** (by config or inline, with reasons):
+- `reentrancy-events`: the events come after the guarded, attested `afterTransfer`.
+- `uninitialized-local`: `_mask` starts at 0 by design.
+- `calls-loop`: at most 16 attested rules.
+- `timestamp`: the intent deadline.
+- `assembly`: ERC-7201 accessors.
+- `naming-convention`: Wonderland uses `_camelCase`.
+
+### Deviations from the brief
+- **Interface files:** there are three more than brief §3 lists: `IComplianceHook`, `IIdentityRule` and `IIdentityRegistry`. Wonderland gives every contract an interface. Structs and enums live inside their interfaces, so there is no `Types.sol`.
+- **Error names:** errors are `<Contract>_<Name>` (e.g. `PolicyGated_TransferRejected(bytes32)`). Event parameters are `_camelCase`; topics are unaffected.
+- **Rule management:** initial rules come through the constructor; `setRules` replaces the whole list atomically instead of add/remove/reorder. The brief is updated to match.
+- **Mocks:** the brief's `MockAcceptHook`/`MockRejectHook` are replaced by `vm.mockCall`, per Wonderland. `MockAsset` waits for the vaults.
+- **Smoke test:** `test/nodejs/smoke.test.ts` is kept so the node runner isn't empty until Phase 6.
+
+### Open questions for the owner
+1. **Phase 4 design notes above.** Should `BaseRule` take the token's current hook (shareable rules) and should duplicate `ruleId`s be rejected? Both should be decided before more rules are written.
+2. **Brief §9** still says `network.connect()`, which is deprecated in Hardhat 3.20. Switch the brief to `network.create()`?

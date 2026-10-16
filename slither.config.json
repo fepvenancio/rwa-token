@@ -1,0 +1,6 @@
+{
+  "compile_force_framework": "foundry",
+  "foundry_out_directory": "forge-out",
+  "filter_paths": "node_modules|contracts/test/|\\.t\\.sol$",
+  "detectors_to_exclude": "naming-convention,assembly,timestamp,calls-loop"
+}

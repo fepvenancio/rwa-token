@@ -1,129 +1,263 @@
-# Executor-Settled Permissioned Token — Build Brief
+# Gated Token Stack — Build Brief
 
 Drop this file in the repo root as `CLAUDE.md`. It is the standing instruction set for every Claude Code session in this project.
 
 ## 1. What we are building
 
-A permissioned ERC-20 where transfers are **holder-signed intents executed by an EXECUTOR role**, with compliance and identity enforced through **external policy hooks**. Reference implementation for a possible future ERC; for now it is a well-tested library.
+A family of permissioned ERC-20-derived templates for institutional RWAs. All share one base that guarantees access control on mint, burn and transfer, exposes standard enforcement primitives (forced transfer / clawback, freeze, pause), and routes every policy decision (identity, jurisdiction, lock-ups, holder caps, settlement windows) through an external, overridable hook made of small rules. One template adds executor-settled transfers: holder-signed EIP-712 intents executed by an EXECUTOR role.
 
-Three layers, kept separate:
+```
+PolicyGatedERC20Upgradeable          abstract base: roles, enforcement core, _update → hook
+        ▲
+   ┌────┴──────────────┬────────────────────┬────────────────────┐
+IntentToken         Gated4626Vault       Gated7540Vault       (later: Gated3643, 721/1155)
+(+IntentSettled)    OZ ERC4626 + base    async request/claim + base
+```
 
-1. **Token** — `IntentToken`: OZ v5 upgradeable ERC-20 (UUPS). Plain `transfer`/`transferFrom` are gated by the policy hook like any 3643-style token. Adds executor-settled transfers.
-2. **Policy hook** — one `IPolicyHook` address per token, timelocked replacement. Compliance, identity, sanctions, settlement-window checks live in hook implementations, never in the token.
-3. **Executor** — `IntentExecutor`: role-gated contract that validates an EIP-712 `TransferIntent` signature and calls the token. Later extended to multi-leg atomic DvP.
+Separate contracts, separate concerns:
+
+1. Base — accounting, roles, enforcement primitives, hook pointer. The only thing that cannot be hot-swapped.
+2. Policy hook — one `IPolicyHook` per token (`ComplianceHook`), timelocked replacement, dispatching to an ordered list of `IComplianceRule`.
+3. Mixins — `IntentSettled` (EIP-712 intents, nonces, `executeTransfer`). Opt-in per template.
+4. Executor — `IntentExecutor`: role-gated caller that validates and submits intents. Replaceable. Grows into multi-leg DvP later.
 
 ## 2. Non-negotiable rules
 
 1. OpenZeppelin v5 (`@openzeppelin/contracts`, `@openzeppelin/contracts-upgradeable`) only. No Solady. No other libs without asking.
-2. No refactors outside the task you were given. Do not "improve" adjacent code.
+2. No refactors outside the task you were given.
 3. Before any change touching more than one file, write or update `PLAN.md` and stop for review.
 4. `contracts/interfaces/*.sol` are frozen after Phase 1. Changing them requires an explicit instruction.
-5. Every contract ships with a `.t.sol` next to it. Tests are written **before** implementation and the failing run is shown.
+5. Every contract ships with a `.t.sol` next to it. Tests are written before implementation and the failing run is shown.
 6. Run `npx hardhat test` (both runners) before reporting any task as done. Paste the summary line.
-7. `transfer()` must never return `true` without moving balance. If the hook rejects, revert with a typed error.
+7. `transfer()` never returns `true` without moving balance. Rejections revert with a typed error carrying a `bytes32` reason.
 8. No secrets in `.env`. Use `hardhat-keystore`.
-9. Solidity `^0.8.28` (pin exact in config), `evmVersion: "cancun"`.
-10. Follow OZ's own patterns as the oracle. When unsure how to do nonces/domains/roles, mirror `ERC20Permit`, `EIP712Upgradeable`, `AccessControlUpgradeable`.
+9. Solidity `^0.8.28` pragma, exact version pinned in config (0.8.30 unless told otherwise), `evmVersion: "cancun"`.
+10. Mirror OZ's own patterns (`ERC20Permit`, `EIP712Upgradeable`, `AccessControlUpgradeable`, `ERC4626Upgradeable`) rather than inventing.
+11. No business logic in the base. If you write an `if` about who, where or when inside the base or a template, stop — it is a rule.
+12. Hooks and rules are immutable contracts, never proxies. They are installed only if their `codehash` is attested in the `PolicyRegistry`. Changing one means deploying a new one and swapping.
+13. Base upgrades fix bugs; features migrate. Any upgrade goes through the timelock (≥7 days) and must target an implementation attested in the registry.
+14. Events and reason codes are part of the frozen interface. Extend `TransferContext` only through `extra`.
+15. Proprietary code, all rights reserved: any use requires the owners' approval. Every source file carries `// SPDX-License-Identifier: UNLICENSED`, and `package.json` has `"license": "UNLICENSED"` and `"private": true`. Do not add, suggest or switch to an open-source license. Do not change this rule without an explicit instruction.
+16. Wonderland Solidity standards (handbook.wonderland.xyz → Development/Solidity, Testing):
+    - Lint with the Wonderland `.solhint.json`. Format with `forge fmt` using the `[fmt]` profile in `foundry.toml`: 2-space indent, single quotes, 120 columns.
+    - Interfaces are separate from contracts. Events, errors, structs and enums are defined in the interface.
+    - Errors are named `<Contract>_<Name>`. Events are past tense and emitted on every state change.
+    - Constants and immutables are `UPPER_SNAKE`. Private and internal state, locals, arguments and return names are `_camelCase`.
+    - Named imports only, via `remappings.txt` (`interfaces/…`, `contracts/…`). Order: external libraries → internal libraries → interfaces → contracts.
+    - Full NatSpec on every item (`@param`/`@return`, `@inheritdoc` on overrides).
+    - Unit tests isolate the unit with `vm.mockCall` + `vm.expectCall`. Integration tests cover happy and sad paths. Fuzz with `bound`, never `vm.assume`.
+
+    Where this conflicts with the brief, the brief wins: tests sit next to the contract (rule 5), and ERC-7201 storage structs and the `$` pointer stay in the contract, as in OZ (rule 10).
 
 ## 3. Repo layout
 
 ```
 contracts/
-  interfaces/   ITransferIntent.sol  IPolicyHook.sol  IIntentExecutor.sol  Errors.sol
-  token/        IntentToken.sol  IntentToken.t.sol
-  hooks/        IdentityHook.sol  ComplianceHook.sol  hooks.t.sol
+  interfaces/   IPolicyGated.sol  IPolicyHook.sol  IComplianceRule.sol  IPolicyRegistry.sol  ITransferIntent.sol  IIntentExecutor.sol  Errors.sol
+  base/         PolicyGatedERC20Upgradeable.sol  PolicyGatedERC20Upgradeable.t.sol
+  governance/   PolicyRegistry.sol  PolicyRegistry.t.sol
+  mixins/       IntentSettledUpgradeable.sol  IntentSettledUpgradeable.t.sol
+  tokens/       IntentToken.sol  IntentToken.t.sol
+  vaults/       Gated4626Vault.sol  Gated7540Vault.sol  (+ .t.sol)
+  hooks/        ComplianceHook.sol  ComplianceHook.t.sol  BaseRule.sol
+  hooks/rules/  IdentityRule.sol  SettlementWindowRule.sol  MaxHoldersRule.sol  LockupRule.sol  (+ .t.sol)
   intents/      IntentExecutor.sol  IntentExecutor.t.sol
-  test/         MockRejectHook.sol  MockAcceptHook.sol  MockIdentityRegistry.sol
-test/nodejs/    *.test.ts   (viem + node:test: EIP-712 signing, settlement flows)
+  test/         MockAcceptHook.sol  MockRejectHook.sol  MockReentrantRule.sol  MockIdentityRegistry.sol  MockAsset.sol
+test/nodejs/    *.test.ts   (viem + node:test: EIP-712 signing, settlement flows, vault flows)
 ignition/modules/
 PLAN.md
 ```
 
-## 4. Interfaces (Phase 1 target — implement exactly, then freeze)
+## 4. Base: roles and enforcement core (`PolicyGatedERC20Upgradeable`)
+
+Shaped on ERC-7943 (uRWA, Last Call) so external tooling (compliance engines, explorers) can discover it via ERC-165. Implements `IPolicyGated`:
 
 ```solidity
+interface IPolicyGated {
+    // ---- enforcement primitives (role-gated, 7943-aligned names) ----
+    function mint(address to, uint256 amount) external;                              // MINTER_ROLE
+    function burn(address from, uint256 amount) external;                            // BURNER_ROLE
+    function forcedTransfer(address from, address to, uint256 amount) external;      // AGENT_ROLE; unfreezes as needed
+    function setFrozen(address user, uint256 amount) external;                       // AGENT_ROLE; absolute frozen amount
+    function getFrozen(address user) external view returns (uint256);
+    function pause() external;                                                       // PAUSER_ROLE
+    function unpause() external;                                                     // PAUSER_ROLE
+
+    // ---- read path for integrators ----
+    function canTransfer(address from, address to, uint256 amount) external view returns (bool ok, bytes32 reason);
+    function isUserAllowed(address user) external view returns (bool);
+    function policyHook() external view returns (address);
+
+    // ---- governance ----
+    function setPolicyHook(address newHook) external;                                // onlyTimelock; newHook must be registry-attested
+    function registry() external view returns (address);                             // immutable after init
+
+    event ForcedTransfer(address indexed from, address indexed to, uint256 amount, address indexed agent);
+    event Frozen(address indexed user, uint256 amount);
+    event PolicyHookChanged(address indexed oldHook, address indexed newHook);
+}
+```
+
+The base also implements ERC-2612 `permit` (`ERC20PermitUpgradeable`); it shares the EIP-712 domain with `IntentSettled`.
+
+**Roles.** `DEFAULT_ADMIN_ROLE` = TimelockController. `MINTER_ROLE`, `BURNER_ROLE`, `AGENT_ROLE`, `UPGRADER_ROLE`, `EXECUTOR_ROLE` (only used by `IntentSettled`). Role admins all resolve to the timelock.
+
+**Guardian** (built into the base, by default). `GUARDIAN_ROLE`, held by a multisig, is the only power with no delay. It can: `pause()`; and cancel any pending timelock operation (it holds the timelock's `CANCELLER_ROLE`). It cannot `unpause()`, change the hook, grant roles, or upgrade — those are timelock-only. Asymmetry is deliberate: the guardian can only stop things. `PAUSER_ROLE` is therefore replaced by `GUARDIAN_ROLE` for `pause()`; `unpause()` is `onlyTimelock`. Guardian membership changes go through the timelock.
+
+**Policy registry** (one per deployment, `PolicyRegistry`). Immutable contract. Maps `codehash → attested kind` (`HOOK`, `RULE`, `IMPLEMENTATION`). `ATTESTER_ROLE` (security council multisig) attests after review and revokes; `DEFAULT_ADMIN_ROLE` (timelock) manages attesters. Checks are by `extcodehash` of the target, so targets must be plain contracts (rule 12). Enforced at:
+
+* `setPolicyHook(newHook)` — `isAttested(newHook, HOOK)`.
+* `ComplianceHook` constructor (`initialRules`) and `setRules(rules)` — `isAttested(rule, RULE)` for every rule.
+* `_authorizeUpgrade(newImpl)` — `isAttested(newImpl, IMPLEMENTATION)`.
+
+Attestation is checked at install time only. Revocation emits `AttestationRevoked(codehash)` and does not alter running tokens; governance removes the component, guardian can pause meanwhile. This avoids a revoke silently dropping a check or bricking transfers.
+
+**What the base enforces itself** (mechanical, not policy): paused ⇒ reject everything except `kind == FORCED`; `balanceOf(from) - frozen(from) >= amount` for all kinds except `FORCED` and `BURN` by agent; role checks at entry points; registry attestation at install/upgrade; ERC-20 arithmetic; hook pointer and timelock.
+
+**What the base delegates** (everything else): the hook, via a single `_update` override that builds a `TransferContext` and calls `beforeTransfer`, moves balances, then `afterTransfer`. Mint and burn pass `address(0)` so issuance and supply rules are rules too. `FORCED` still runs the hook; rules decide exemptions (e.g. `IdentityRule` requires `to` verified even on forced).
+
+## 5. Interfaces (Phase 1 — implement exactly, then freeze)
+
+```solidity
+enum TransferKind { TRANSFER, EXECUTED, FORCED, MINT, BURN }
+
+struct TransferContext {
+    address token;
+    address from;        // address(0) on MINT
+    address to;          // address(0) on BURN
+    uint256 id;          // 0 for fungibles; tokenId / id for future 721/1155 templates
+    uint256 amount;
+    address operator;    // msg.sender into the token: holder, spender, agent, minter, or executor
+    TransferKind kind;
+    bytes32 ref;         // intent.ref for EXECUTED, else 0
+    uint256 deadline;    // intent.deadline for EXECUTED, else 0
+    bytes   extra;       // reserved; empty today
+}
+
+interface IPolicyHook {
+    /// MUST be view. Returns TRANSFER_OK or a reason code. Never reverts on a policy decision.
+    function beforeTransfer(TransferContext calldata ctx) external view returns (bytes32 reason);
+    /// Called after balances move, only if wantsAfter(). Inside the token's reentrancy guard.
+    function afterTransfer(TransferContext calldata ctx) external;
+    function wantsAfter() external view returns (bool);
+}
+
+interface IComplianceRule {
+    function check(TransferContext calldata ctx) external view returns (bytes32 reason);
+    function after_(TransferContext calldata ctx) external;      // onlyHook
+    function wantsAfter() external view returns (bool);
+    function ruleId() external pure returns (bytes32);
+}
+
 struct TransferIntent {
     address from;
     address to;
     uint256 amount;
-    bytes32 nonce;      // ERC-3009-style random nonce, bitmap-tracked
-    uint256 deadline;   // unix seconds, inclusive
-    bytes32 ref;        // off-chain reference (ISO 20022 msgId hash / bizId)
+    bytes32 nonce;       // ERC-3009-style random nonce, bitmap-tracked per signer
+    uint256 deadline;    // inclusive
+    bytes32 ref;         // off-chain reference (ISO 20022 msgId hash / bizId)
 }
 
 interface ITransferIntent {
     event IntentExecuted(bytes32 indexed intentHash, address indexed from, address indexed to, uint256 amount, address executor, bytes32 ref);
-    event IntentCancelled(bytes32 indexed intentHash, address indexed from, bytes32 nonce);
+    event IntentCancelled(address indexed from, bytes32 indexed nonce);
 
     function canExecute(TransferIntent calldata intent) external view returns (bool ok, bytes32 reason);
-    function executeTransfer(TransferIntent calldata intent, bytes calldata sig) external returns (bytes32 intentHash);
+    function executeTransfer(TransferIntent calldata intent, bytes calldata sig) external returns (bytes32 intentHash);  // EXECUTOR_ROLE
     function cancelIntent(bytes32 nonce) external;
     function intentHash(TransferIntent calldata intent) external view returns (bytes32);
     function nonceUsed(address signer, bytes32 nonce) external view returns (bool);
 }
 
-interface IPolicyHook {
-    /// MUST be view. Returns its own selector on accept; reverts with a typed error carrying the bytes32 reason otherwise.
-    function beforeTransfer(address from, address to, uint256 amount, address operator, bytes calldata hookData) external view returns (bytes4);
-    function afterTransfer(address from, address to, uint256 amount, address operator, bytes calldata hookData) external returns (bytes4);
-    function permissions() external view returns (bool before, bool after_);
-}
-
 interface IIntentExecutor {
     function execute(address token, TransferIntent calldata intent, bytes calldata sig) external returns (bytes32);
+}
+
+enum AttestKind { NONE, HOOK, RULE, IMPLEMENTATION }
+
+interface IPolicyRegistry {
+    event Attested(bytes32 indexed codehash, AttestKind kind, address indexed attester, string uri);
+    event AttestationRevoked(bytes32 indexed codehash, address indexed attester);
+
+    function attest(bytes32 codehash, AttestKind kind, string calldata uri) external;   // ATTESTER_ROLE; uri → audit report
+    function revoke(bytes32 codehash) external;                                         // ATTESTER_ROLE
+    function isAttested(address target, AttestKind kind) external view returns (bool);  // compares target.codehash
+    function kindOf(bytes32 codehash) external view returns (AttestKind);
 }
 ```
 
 Semantics to spec in NatSpec and enforce in tests:
 
-- `canExecute` MUST run the same `beforeTransfer` check as `executeTransfer`. Pre-flight never lies.
-- `executeTransfer` callable only by `EXECUTOR_ROLE`. Executor cannot alter the intent, only execute or not.
-- Nonces are per-signer, random, single-use. Cancel marks the nonce used.
-- Deadline check is `block.timestamp <= deadline`.
-- EIP-712 domain: name = token name, version `"1"`, chainId, verifyingContract. Use `EIP712Upgradeable`.
-- `beforeTransfer` is called via `staticcall` semantics (it is `view`). `afterTransfer` runs after balances update, inside `ReentrancyGuardTransient`.
-- Hook address is read once per execution into a local; a registry change mid-tx cannot alter the outcome.
-- Hook replacement goes through `TimelockController`. Emits `PolicyHookChanged(old, new)`.
-- Reason codes: `bytes32` constants in `Errors.sol`, ERC-1594 style (`TRANSFER_OK`, `SENDER_NOT_VERIFIED`, `RECEIVER_NOT_VERIFIED`, `COMPLIANCE_REJECTED`, `INTENT_EXPIRED`, `NONCE_USED`, `BAD_SIGNATURE`).
-- ERC-165 for all three interfaces.
+* `canTransfer` / `canExecute` run the exact same path as the state-changing call minus the write. Pre-flight never lies.
+* `executeTransfer` only by `EXECUTOR_ROLE`. Executor cannot alter the intent, only execute or not.
+* Nonces per-signer, random, single-use. Cancel marks the nonce used. Deadline check `block.timestamp <= deadline`.
+* EIP-712 domain: name = token name, version `"1"`, chainId, verifyingContract. `EIP712Upgradeable`.
+* Hook address read once per `_update` into a local; mid-tx changes cannot alter the outcome.
+* Reason codes in `Errors.sol`, ERC-1594 style: `TRANSFER_OK`, `PAUSED`, `INSUFFICIENT_UNFROZEN`, `SENDER_NOT_VERIFIED`, `RECEIVER_NOT_VERIFIED`, `OUTSIDE_SETTLEMENT_WINDOW`, `MAX_HOLDERS`, `LOCKED`, `INTENT_EXPIRED`, `NONCE_USED`, `BAD_SIGNATURE`.
+* ERC-165 for `IPolicyGated`, `IPolicyHook`, `IComplianceRule`, `IPolicyRegistry`, `ITransferIntent`, plus the matching ERC-7943 fungible interface ID where the function set overlaps.
+* Events and reason codes are frozen with the interfaces. New reason codes may be appended, never renamed or renumbered.
 
-## 5. Phases
+## 6. Hook development — every policy check is a rule
+
+**Topology.** One `ComplianceHook` per token (per-instrument rule sets). Rules are the unit developers write; the hook is the dispatcher. Rules must key any storage by `ctx.token` so one deployment can serve many tokens.
+
+**Dispatcher rules (`ComplianceHook`).**
+
+1. Iterate rules in order; return on first non-`TRANSFER_OK`.
+2. `check` is called with `staticcall` semantics. A rule that mutates state in `check` fails tests.
+3. `after_` runs only for rules with `wantsAfter()`, after balances moved, inside the token's `ReentrancyGuardTransient`.
+4. Hard cap 16 rules. The initial rule set is passed to the constructor, so the token is live with its policy at deploy. Later changes replace the whole ordered set atomically with `setRules` (`onlyTimelock`). Both paths emit `RuleSetChanged(bytes32[] ruleIds)` and revert unless every rule satisfies `registry.isAttested(rule, RULE)`. An empty set fails closed (`NO_RULES`).
+5. Rule list loaded into memory once per call.
+6. No rule may call back into the token. `MockReentrantRule` proves it.
+
+**Writing a new rule.**
+
+1. `contracts/hooks/rules/<Name>Rule.sol` inheriting `BaseRule` (`ruleId`, `wantsAfter` default false, `onlyHook`).
+2. Implement `check`. Read only own storage and registries injected at construction.
+3. Add reason codes to `Errors.sol` if new.
+4. `<Name>Rule.t.sol`: accept, each reject, fuzz, view-ness.
+5. Integration test registering the rule in `ComplianceHook`, asserting `canTransfer`/`canExecute` agree with the state-changing call.
+6. Update `PLAN.md` with purpose and position in the order.
+
+**Initial rule set (Phase 4).**
+
+* `IdentityRule` — `isVerified(from)` unless MINT; `isVerified(to)` unless BURN. Applies to FORCED.
+* `SettlementWindowRule` — EXECUTED only; rejects outside configured UTC window.
+* `MaxHoldersRule` — `wantsAfter()`; maintains holder count per token.
+* `LockupRule` — per-(token, holder) unlock timestamp; rejects TRANSFER/EXECUTED before it; exempts FORCED and BURN.
+
+## 7. Vault templates
+
+`Gated4626Vault` = OZ `ERC4626Upgradeable` + `PolicyGatedERC20Upgradeable`. Shares are the gated ERC-20; `deposit`/`mint` to `receiver` arrive at the hook as `MINT`, `withdraw`/`redeem` as `BURN`, so identity gating on vault entry/exit is automatic. The asset leg is an ordinary ERC-20 pull/push and is not hooked. Resolve the `_update` diamond explicitly (`override(ERC20Upgradeable, PolicyGatedERC20Upgradeable)`).
+
+**Gating-aware `max*` (both vaults).** This is how ERC-4626 expresses permissioning and what integrators check before calling. `maxDeposit(receiver)` / `maxMint(receiver)` return `0` when paused or when `canTransfer(address(0), receiver, 1)` is not OK. `maxWithdraw(owner)` / `maxRedeem(owner)` subtract `getFrozen(owner)` and return `0` when paused or when `canTransfer(owner, address(0), 1)` is not OK. `preview*` stay pure conversions; the gating lives in `max*`. Tests assert `deposit(maxDeposit(r)+1)` reverts and `deposit(maxDeposit(r))` succeeds.
+
+`Gated7540Vault` — implement against the EIP-7540 interface (OZ does not ship one): `requestDeposit`/`requestRedeem` record pending claims per controller; a `FULFILLER_ROLE` (the bank) fulfils; `deposit`/`redeem` claim into gated shares (`MINT`/`BURN` through the hook). 7540 is already request/claim, so do not add `IntentSettled` on top of it — the request is the intent and `FULFILLER_ROLE` is the executor. 7540 `setOperator` is honoured for claims only.
+
+## 8. Phases
 
 Each phase: update `PLAN.md` → tests → impl → `npx hardhat test` → stop for review.
 
-**Phase 0 — scaffold**
-`npx hardhat --init` (TypeScript, ESM, node:test + viem). Add OZ v5. Configure solc pin, cancun, optimizer profile. Add `hardhat-keystore`. Commit lockfile.
+* **Phase 0 — scaffold.** `npx hardhat --init` (TypeScript, ESM, node:test + viem). OZ v5. Solc pin, cancun, optimizer profile. `hardhat-keystore`. Lockfile committed.
+* **Phase 1 — interfaces + errors.** §4 and §5 verbatim with NatSpec. Freeze.
+* **Phase 2 — registry + base.** `PolicyRegistry` (immutable, tests: attest/revoke/kind, codehash comparison, role gates). `PolicyGatedERC20Upgradeable`: `ERC20PermitUpgradeable` + `AccessControlUpgradeable` + `PausableUpgradeable` + `UUPSUpgradeable` + `ReentrancyGuardTransient`, enforcement core, guardian, `_update` → hook. Tests with mock hooks: every entry point's role gate; guardian can pause and cannot unpause; `setPolicyHook` and `_authorizeUpgrade` reject unattested targets; frozen math; forced unfreezes; mint/burn reach hook with zero addresses; hook reject ⇒ no state change; `permit`; invariants `sum(balances) == totalSupply`, `frozen(u) <= balanceOf(u)`.
+* **Phase 3 — IntentSettled + IntentToken + executor.** EIP-712, nonce bitmap, `executeTransfer`, `cancelIntent`. `IntentExecutor` with `EXECUTOR_ROLE`. Tests: replay, expired, wrong domain/chainId, cancel race, malleability, role gating, `canExecute` parity.
+* **Phase 4 — hooks.** `ComplianceHook`, `BaseRule`, initial rules, mocks. Ordering, short-circuit, reentrancy, cap.
+* **Phase 5 — vaults.** `Gated4626Vault`, `Gated7540Vault`. Share mint/burn gated; gating-aware `max*`; 7540 request/fulfil/claim lifecycle; operator semantics.
+* **Phase 6 — viem integration.** `signTypedData` → execute; vault flows; event decoding; pre-flight parity from the TypeScript side.
+* **Phase 7 — deploy + security.** Ignition module: registry → attest implementations/hook/rules → timelock (≥7d, guardian as canceller) → proxies → roles → guardian multisig. `npx @openzeppelin/upgrades-core validate`. Slither clean (`slither .`, accepted findings documented in `slither.config.json` and inline). Halmos on the nonce/signature and frozen-balance paths (`npm run test:halmos`; verified on 2026-10-16 that it runs on the proxied token with transient storage and kills planted bugs). **No Mythril:** it has no Cancun support (TSTORE/TLOAD/MCOPY), so it cannot analyse `ReentrancyGuardTransient` or the transient context slots.
 
-**Phase 1 — interfaces + errors**
-Write the four interface files from §4 with full NatSpec. No implementation. Freeze.
+## 9. Hardhat 3 specifics
 
-**Phase 2 — token**
-`IntentToken`: `ERC20Upgradeable` + `EIP712Upgradeable` + `AccessControlUpgradeable` + `UUPSUpgradeable` + `ReentrancyGuardTransient`. Single `_update` override that calls the policy hook. Executor-settled path. Tests: unit, fuzz on amount/nonce/deadline, invariants (`sum(balances) == totalSupply`; no execution without valid sig; cancelled nonce never executes; hook reject ⇒ no balance change).
+* `.t.sol` files, Foundry-style `setUp()` / `test*` / `testFuzz*` / `invariant*`, `forge-std` `Test`.
+* No inline NatSpec fuzz config; no fixture cheatcodes. Fuzz runs via config.
+* `npx hardhat test solidity` / `npx hardhat test nodejs` / `npx hardhat test`.
+* ESM project; `node:test` + `viem` via `network.connect()`.
 
-**Phase 3 — hooks**
-`IdentityHook` (adapter over an `IIdentityRegistry` with `isVerified(address)`), `ComplianceHook` (ordered list of `IComplianceRule`, first failure wins), mocks. Tests: ordering, short-circuit, permissions flags respected, hook cannot reenter token.
-
-**Phase 4 — executor**
-`IntentExecutor` with `EXECUTOR_ROLE`, calls `token.executeTransfer`. Tests: role gating, replay, expired, wrong domain/chainId, cancel-before-execute race, signature malleability.
-
-**Phase 5 — viem integration**
-`test/nodejs/`: `signTypedData` → execute; same cases as Phase 4 from the TypeScript side; event decoding; `canExecute` parity with `executeTransfer`.
-
-**Phase 6 — deploy + security**
-Ignition module deploying proxies + timelock. `npx @openzeppelin/upgrades-core validate` on artifacts. Slither clean (document any accepted findings).
-
-## 6. Hardhat 3 specifics
-
-- Solidity tests: `.t.sol` files, Foundry-style `setUp()` / `test*` / `testFuzz*` / `invariant*`. Cheatcodes via `forge-std` `Test`.
-- No inline NatSpec fuzz config; no fixture cheatcodes. Use config for fuzz runs.
-- `npx hardhat test solidity` / `npx hardhat test nodejs` / `npx hardhat test` for both.
-- ESM project: `.ts` imports with explicit extensions where required; `node:test` + `viem` from `hardhat/viem` via `network.connect()`.
-- Stack traces and `console.log` work in `.t.sol`.
-
-## 7. Definition of done (per phase)
+## 10. Definition of done (per phase)
 
 1. `PLAN.md` reflects what was built.
 2. All tests pass in both runners; output pasted.
-3. New contracts have NatSpec on every external function.
-4. No interface drift (diff `contracts/interfaces/` against Phase 1 is empty).
+3. NatSpec on every external function.
+4. `contracts/interfaces/` unchanged since Phase 1.
 5. No files touched outside the phase scope.

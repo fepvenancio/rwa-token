@@ -1,0 +1,23 @@
+# Hardhat builds and tests this project. This file only configures `forge fmt` (Wonderland formatting) and the
+# `forge build` that Slither runs; forge outputs are kept apart so they never touch Hardhat's `artifacts/` or `cache/`.
+[profile.default]
+src = 'contracts'
+libs = ['node_modules']
+out = 'forge-out'
+cache_path = 'forge-cache'
+solc_version = '0.8.30'
+evm_version = 'cancun'
+optimizer = true
+optimizer_runs = 200
+# Hardhat resolves npm packages itself; forge needs forge-std's src/ mapped explicitly.
+remappings = ['forge-std/=node_modules/forge-std/src/']
+
+[fmt]
+line_length = 120
+tab_width = 2
+bracket_spacing = false
+int_types = 'long'
+quote_style = 'single'
+number_underscore = 'thousands'
+multiline_func_header = 'params_first'
+sort_imports = true
