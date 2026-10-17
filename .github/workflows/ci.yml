@@ -25,6 +25,8 @@ jobs:
       - run: git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
       - run: npm ci
       - run: npm run lint:sol
+      # The TS tests are typed by the ABI declarations Hardhat writes into artifacts/, so build before typechecking.
+      - run: npx hardhat build
       - run: npm run typecheck
       # Default and production profiles share one compiler config, so ContractSizes.t.sol checks deployed sizes.
       - run: npm test

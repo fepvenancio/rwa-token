@@ -738,6 +738,12 @@ An Ignition deployment of the whole stack:
 - `npx hardhat test`: **415 passing (360 solidity, 55 nodejs)**.
 - solhint, `tsc` and `forge fmt` clean; Slither 0 results; Halmos 4/4; upgrades-core: 3 upgradeable contracts, 3 passed.
 
+### CI fix found while closing Phase 7
+- **CI failed on the Phase 6 push (`a2082b8`), in typecheck only.** CI ran `tsc` before anything had compiled, so the ABI typings in `artifacts/` were missing and every contract type was `unknown`: 253 errors.
+  - This reproduces locally by removing `artifacts/`; building first fixes it.
+  - Local runs had hidden it because the artifacts already existed.
+- **Fix:** CI now runs `npx hardhat build` before `npm run typecheck`.
+
 ### Open finding (decision needed)
 - **upgrades-core warns that both vaults call initializers out of order.** `__ERC4626_init` comes before the base's `__PolicyGatedERC20_init`, which contains `__ERC20_init` and `__ERC20Permit_init`.
   - It is a warning, not an error, and as far as I can tell behaviour-neutral: `__ERC4626_init` only records the asset and its decimals.
