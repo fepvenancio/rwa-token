@@ -866,7 +866,7 @@ An Ignition deployment of the whole stack:
 - **Result:** 435 passing (378 solidity, 57 nodejs).
 
 ### Independent review (2026-10-17): validation and test fixes
-- **Validation:** every security and logic finding was real (M-1, M-2, M-3, L-1 to L-5). Of the test findings, only "the `requestDeposit` eligibility check survives" was outdated (4 tests kill it on the current code), and "no `count <= cap` invariant" is by design: a lowered cap and FORCED moves can push the count over the cap.
+- **Validation:** every security and logic finding was real (M-1, M-2, M-3, L-1 to L-5). Of the test findings, I first called "the `requestDeposit` eligibility check survives" outdated because 4 tests kill the *deleted*-check mutant. That was wrong: the reviewer's mutant *swaps the subject* (checks the owner instead of the controller), and it survived because every test used owner == controller. It is now killed by `test_WhenAVerifiedOwnerRequestsForAnUnverifiedController_ItIsRefused` (verified on a scratch copy; correction relayed by a teammate session). Also, "no `count <= cap` invariant" is by design: a lowered cap and FORCED moves can push the count over the cap.
 - **Code findings, awaiting owner decisions:**
   - M-1: guardian permanent freeze (a brief §4 change);
   - M-2: a reject steered past the cap (reverses R2);
@@ -894,6 +894,8 @@ An Ignition deployment of the whole stack:
   - all 9 vault access mutants are now killed (6 survived before);
   - "kind slot not cleared" and "`forcedTransfer` keeps frozen" are killed;
   - "ref slot not cleared" survives as an equivalent mutant: the ref is read only when the kind slot is set, and every movement that sets the kind rewrites it first.
+- **Mutation hygiene (teammate session's note, adopted):** the runs above edited the real `contracts/` files in place and restored them afterwards, but an interrupted run would have left a missing access check one `git commit -a` away (one mutant was live during the teammate's snapshot). From now on mutants run only in a scratch copy (`git ls-files` → rsync, `node_modules` symlinked); the eligibility-subject mutant was checked that way.
+- **Owner decision pending (teammate's suggestion):** an `isolated` Hardhat test profile (`isolate: true`) plus a CI step `npx hardhat test solidity --test-profile isolated` (about 25 s). It reproduced the 11 nonce-dependent fixture failures before the CREATE2 fix, so it would stop that class returning.
 
 ### Remaining brief items (deferred until the first external integrator is known)
 - **ERC-3643 `IToken` read adapter.**

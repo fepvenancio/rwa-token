@@ -1117,6 +1117,18 @@ contract Gated7540VaultIntegration_Lifecycle is Gated7540VaultIntegrationTest {
     vm.prank(_eve);
     _vault.requestDeposit(10, _eve, _eve);
   }
+
+  /// @dev Eligibility is about who will hold the shares: a verified owner cannot open a request for an unverified
+  ///      controller. Kills the mutant that checks the owner instead (every other test uses owner == controller)
+  function test_WhenAVerifiedOwnerRequestsForAnUnverifiedController_ItIsRefused() external {
+    vm.expectRevert(
+      abi.encodeWithSelector(
+        IGated7540Vault.Gated7540Vault_ControllerNotEligible.selector, Reasons.RECEIVER_NOT_VERIFIED
+      )
+    );
+    vm.prank(_alice);
+    _vault.requestDeposit(10, _eve, _alice);
+  }
 }
 
 contract Gated7540VaultIntegration_Escrow is Gated7540VaultIntegrationTest {
