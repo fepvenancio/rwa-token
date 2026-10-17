@@ -31,11 +31,15 @@ The operator is whoever called the token, so it changes with the entry point. Fo
 | `Gated7540Vault.requestRedeem` (owner to vault) | `TRANSFER` | inferred |
 | `executeTransfer` | `EXECUTED` | announced by `_moveAs` |
 | `forcedTransfer` | `FORCED` | announced |
-| `Gated7540Vault.rejectRedeemRequest`, `recoverRedeemRequest` (vault to controller or recovery account) | `FORCED` | announced |
+| `Gated7540Vault.rejectRedeemRequest` (vault to controller) | `TRANSFER` | inferred. A plain transfer since v0.2.0, so the full policy applies |
+| `Gated7540Vault.recoverRedeemRequest` (vault to recovery account) | `FORCED` | announced |
+| `Gated7540Vault.recoverClaimable` (claimable deposit shares to a recovery account) | `FORCED`, with `from` = 0 | announced by `_mintAs` |
 | `IntentToken.mint`, `Gated4626Vault.deposit`/`mint`, `Gated7540Vault` deposit claims | `MINT` | inferred |
 | `IntentToken.burn`, `Gated4626Vault.withdraw`/`redeem`, `Gated7540Vault.fulfillRedeem` | `BURN` | inferred |
 
-Code: `PolicyGatedERC20Upgradeable._consumePending`, `_moveAs`, `_inferKind`.
+`FORCED` with `from` = 0 is an enforcement mint. Rules treat it as `FORCED`: exempt from the cap, the pause and lockups, and `IdentityRule` still needs `to` verified. `MaxHoldersRule` still counts the new holder. `FORCED` with `to` = 0 is reserved and currently unused. Every standard rule is tested against `FORCED` with `from` = 0.
+
+Code: `PolicyGatedERC20Upgradeable._consumePending`, `_moveAs`, `_mintAs`, `_inferKind`.
 
 ## The steps inside `_update`
 
@@ -189,8 +193,9 @@ Each code is `keccak256` of its name, so `TRANSFER_OK` is not zero. A hook or ru
 | `IntentExecutor.execute` | the token's revert, unchanged |
 | `IntentExecutor.executeBatch` | revert `IntentExecutor_BatchItemFailed(index, reason)`, where `reason` is the token's revert data. The whole batch is undone |
 | `Gated4626Vault.deposit`, `mint`, `withdraw`, `redeem` when the matching `max*` is lower than the request | OpenZeppelin's `ERC4626ExceededMaxDeposit`, `ERC4626ExceededMaxMint`, `ERC4626ExceededMaxWithdraw`, `ERC4626ExceededMaxRedeem`, before `_update` runs. The vault's `max*` functions ask the hook through a view call, so for a non-zero amount a policy rejection appears as a max of 0 and this error, not as `PolicyGated_TransferRejected`. A zero-amount call passes the max check. It reverts with `PolicyGated_TransferRejected` if the token is paused, or if the hook rejects a zero-amount movement: `IdentityRule` does for an unverified receiver (`deposit`, `mint`) or owner (`withdraw`, `redeem`), and `LockupRule` does for a locked owner. `MaxHoldersRule` does not |
-| `Gated7540Vault.requestDeposit` | `Gated7540Vault_ControllerNotEligible(reason)` |
-| `Gated7540Vault.redeem`, `withdraw` while paused | OpenZeppelin's `EnforcedPause`, with no hook call |
+| `Gated7540Vault.requestDeposit`, and the claims `deposit`, `mint`, `redeem`, `withdraw` | `Gated7540Vault_ControllerNotEligible(reason)` when the controller fails its pre-flight (claims re-check it since v0.2.0) |
+| `Gated7540Vault.redeem`, `withdraw` while paused | OpenZeppelin's `EnforcedPause`, before the controller check |
+| `Gated7540Vault.recoverClaimable` | `Gated7540Vault_RecipientNotEligible(reason)` when the recovery account fails the identity check |
 
 `transfer` never returns `false`. A rejected transfer reverts.
 

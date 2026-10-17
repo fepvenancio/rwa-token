@@ -73,6 +73,7 @@ flowchart LR
   Vault -->|"step 2: fulfillDeposit: assets"| Custody["Custody address"]
   Vault -.->|"step 3: claim: new shares minted"| Receiver["Receiver"]
   Vault -->|"rejectDepositRequest: assets back"| Controller["Controller"]
+  Vault -.->|"recoverClaimable: claimable shares minted"| Recovery["Recovery account"]
 ```
 
 ### Redemption
@@ -83,7 +84,9 @@ flowchart LR
   Fulfiller["Fulfiller"] -->|"step 2: fulfillRedeem: assets"| Vault
   Vault -.->|"step 2: escrowed shares burned"| Burned["Supply reduced"]
   Vault -->|"step 3: claim: assets"| Receiver["Receiver"]
-  Vault -.->|"reject or recover: shares back"| Back["Controller or recovery account"]
+  Vault -.->|"reject: shares back"| Controller["Controller"]
+  Vault -.->|"recoverRedeemRequest: shares"| Recovery["Recovery account"]
+  Vault -->|"recoverClaimable: claimable assets"| Recovery
 ```
 
 Solid arrows are the asset. Dotted arrows are shares.
@@ -94,7 +97,8 @@ Solid arrows are the asset. Dotted arrows are shares.
 |---|---|
 | `fulfillDeposit` | the `custody` address |
 | `rejectDepositRequest` | the controller of the request |
-| `redeem`, `withdraw` | the `receiver` chosen by the controller or its operator |
+| `redeem`, `withdraw` | the `receiver` chosen by the controller or its operator, once the controller passes its claim-time check |
+| `recoverClaimable` | the verified recovery account chosen by the agent |
 
 The asset comes in on `requestDeposit` (from the owner) and on `fulfillRedeem` (from the fulfiller's wallet). `custody` is a plain address, set at initialisation. The timelock can change it with `setCustody`. The code makes no assumption about what it is.
 
@@ -133,4 +137,4 @@ Rounding always favours the vault, and a claim of everything is exact. In raw un
 
 A claim that would compute zero shares or zero assets reverts with `Gated7540Vault_ZeroAmount`.
 
-Code: `Gated7540Vault._recordPrice`, `_convertToShares`, `_convertToAssets`, `_claimDeposit`, `_claimMint`, `redeem`, `withdraw`, `fulfillDeposit`, `fulfillRedeem`, `rejectDepositRequest`, `setCustody`.
+Code: `Gated7540Vault._recordPrice`, `_convertToShares`, `_convertToAssets`, `_claimDeposit`, `_claimMint`, `redeem`, `withdraw`, `fulfillDeposit`, `fulfillRedeem`, `rejectDepositRequest`, `recoverClaimable`, `setCustody`.

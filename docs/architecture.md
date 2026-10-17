@@ -19,7 +19,8 @@ The base does only mechanical work: roles, pause, frozen balances, forced transf
 | `IntentExecutor` | `contracts/intents/` | immutable | Role-gated caller that submits signed intents to a token, one at a time or as an atomic batch |
 | `ProxyDeployer` | `contracts/deploy/` | immutable | Creates each token proxy at an address that can be computed before the hook exists |
 | `TokenProxy` | `contracts/deploy/` | the proxy | OpenZeppelin's `ERC1967Proxy`, constructible without init data |
-| `TimelockController` | OpenZeppelin, not in this repo | immutable | Holds the admin powers once deployment is finished |
+| `GovernanceTimelock` | `contracts/governance/` | immutable | The main timelock: OpenZeppelin's `TimelockController` plus a `RECOVERY_ROLE` that can only revoke `CANCELLER_ROLE`. Holds the admin powers once deployment is finished |
+| Recovery `TimelockController` | OpenZeppelin, not in this repo | immutable | Same delay, no cancellers. Can only unpause and remove the guardian (see [governance-and-deployment.md](governance-and-deployment.md#the-recovery-timelock)) |
 
 Two things sit outside the repo. The identity registry is any contract with `isVerified(address)`, and `IdentityRule` reads it. The vault asset is any ERC-20.
 
@@ -125,7 +126,7 @@ Code: `Gated4626Vault._update`, `Gated7540Vault._update`, `supportsInterface` in
 |---|---|---|
 | `IntentToken` | `executeTransfer`, `cancelIntent`, `canExecute`, `intentHash`, `nonceUsed` | used-nonce map per signer |
 | `Gated4626Vault` | OZ ERC-4626 with a decimals offset of 6, and `maxDeposit`, `maxMint`, `maxRedeem`, `maxWithdraw` that reflect the hook | none |
-| `Gated7540Vault` | request, fulfil and claim for deposits and redemptions, reject, recover, operators, custody address, last fulfilment price | per-controller deposit and redemption state, operator approvals, custody, `lastPrice` |
+| `Gated7540Vault` | request, fulfil and claim for deposits and redemptions, claim-time controller checks, reject, recover pending and claimable amounts, operators, custody address, last fulfilment price | per-controller deposit and redemption state, operator approvals, custody, `lastPrice` |
 
 On both vaults the base's `mint(address,uint256)` and `burn(address,uint256)` always revert with `Gated4626Vault_Unsupported` or `Gated7540Vault_Unsupported`. Shares are created only by deposits (or deposit claims) and destroyed only by redemptions (or redemption fulfilments).
 
@@ -141,9 +142,9 @@ The base and each template keep their state in ERC-7201 namespaced slots, so a l
 | `gated.storage.IntentSettled` | `nonces[signer][nonce]` |
 | `gated.storage.Gated7540Vault` | `custody`, `lastPrice`, `deposits[controller]`, `redeems[controller]`, `operators[controller][operator]` |
 
-The base also uses three transient-storage slots, `gated.transient.kind`, `gated.transient.ref` and `gated.transient.deadline`. A function that moves tokens as `FORCED` or `EXECUTED` writes them just before calling `_transfer`. `_update` reads them and clears them. The token cannot infer these two kinds from the addresses, so this is how the hook learns them. The transient slots live for one transaction.
+The base also uses three transient-storage slots, `gated.transient.kind`, `gated.transient.ref` and `gated.transient.deadline`. A function that moves tokens as `FORCED` or `EXECUTED` writes them just before calling `_transfer` (`_moveAs`), and an enforcement mint writes `FORCED` just before calling `_mint` (`_mintAs`). `_update` reads them and clears them. The token cannot infer these two kinds from the addresses, so this is how the hook learns them. The transient slots live for one transaction.
 
-Code: `PolicyGatedERC20Upgradeable._moveAs`, `_consumePending`, `_getPolicyGatedStorage`.
+Code: `PolicyGatedERC20Upgradeable._moveAs`, `_mintAs`, `_consumePending`, `_getPolicyGatedStorage`.
 
 ## What can be replaced, and by whom
 

@@ -32,10 +32,11 @@ Other documents in the repo: [README.md](../README.md) has the security model su
 | Context | The `TransferContext` struct the token builds for each movement and passes to the hook and rules |
 | Reason code | A `bytes32` returned instead of `TRANSFER_OK` to reject a movement. Listed in `contracts/interfaces/Errors.sol` |
 | Attested | A runtime codehash recorded in `PolicyRegistry` as `HOOK`, `RULE` or `IMPLEMENTATION` |
-| Timelock | OpenZeppelin's `TimelockController`. It holds the admin powers after deployment |
-| Guardian | A multisig that can pause tokens and the executor, and cancel timelock operations. It can do nothing else |
+| Timelock | The main timelock, `GovernanceTimelock` (OpenZeppelin's `TimelockController` plus one revoke-only recovery power). It holds the admin powers after deployment |
+| Recovery timelock | A second timelock nobody can cancel. It can only unpause and remove the guardian |
+| Guardian | A multisig that can pause tokens and the executor, and cancel main-timelock operations. It can do nothing else, and cannot block its own removal by the recovery timelock |
 | Council | The security council multisig, holder of `ATTESTER_ROLE` on the registry |
-| Agent | The holder of `AGENT_ROLE`: forced transfers, freezes, lockups, redemption recovery |
+| Agent | The holder of `AGENT_ROLE`: forced transfers, freezes, lockups, recovery of pending redemptions and of claimable balances |
 | Operator | Three different things. See [roles.md](roles.md) |
 | Intent | A transfer the holder signs (EIP-712) and an executor submits |
 | Frozen | An amount of a holder's balance that the holder cannot move, set by the agent |

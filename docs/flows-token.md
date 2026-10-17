@@ -247,10 +247,10 @@ sequenceDiagram
   Note over T: movements resume
 ```
 
-`pause()` works at once. `unpause()` needs `DEFAULT_ADMIN_ROLE`, which is the timelock, so it takes the full delay. The guardian holds `CANCELLER_ROLE` on the timelock and can cancel the scheduled unpause. See [roles.md](roles.md#what-the-guardian-can-do).
+`pause()` works at once. `unpause()` needs `DEFAULT_ADMIN_ROLE`, which is the timelock, so it takes the full delay. The guardian holds `CANCELLER_ROLE` on the timelock and can cancel the scheduled unpause. If it keeps doing that, the recovery timelock, which nobody can cancel, can unpause after its own delay and remove the guardian. See [roles.md](roles.md#what-the-guardian-can-do).
 
 While paused, these still work: `approve`, `permit`, `cancelIntent`, `setFrozen`, `setLockup`, `forcedTransfer`, role changes and every view function.
 
-`IntentExecutor` has its own pause. The guardian calls `pause()` on it and the timelock calls `unpause()`. It stops `execute` and `executeBatch` without touching the token.
+`IntentExecutor` has its own pause. The guardian calls `pause()` on it and the timelock (or the recovery timelock) calls `unpause()`. It stops `execute` and `executeBatch` without touching the token.
 
 Code: `PolicyGatedERC20Upgradeable.pause`, `unpause`; `IntentExecutor.pause`, `unpause`.

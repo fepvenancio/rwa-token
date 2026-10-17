@@ -115,6 +115,7 @@ sequenceDiagram
   A-->>C: assets
 
   K->>V: deposit(assets, receiver, controller)
+  V->>V: canTransfer(0, controller, 1) must be TRANSFER_OK
   V->>V: shares from the claimable ratio, rounded down
   V->>V: _mint(receiver, shares), kind MINT
   V->>H: beforeTransfer, then afterTransfer if a rule wants it
@@ -122,7 +123,7 @@ sequenceDiagram
 
 - **Request.** The caller must be `owner` or an operator `owner` approved with `setOperator`. Checks run in this order: assets not zero, controller not zero, caller allowed, then the controller must be able to receive shares (`Gated7540Vault_ControllerNotEligible(reason)` otherwise). There is no cancel, so the vault refuses assets from a controller that could not hold the shares. That includes a full holder cap: if the controller holds no shares and the cap is reached, the request reverts with reason `MAX_HOLDERS`. Assets are pulled from `owner`. They sit in the vault until the fulfiller acts.
 - **Fulfil.** The fulfiller picks both numbers: how many pending assets it fulfils and how many shares they buy. The checks run in this order: both numbers non-zero (`Gated7540Vault_ZeroAmount`), something pending for the controller (`Gated7540Vault_NothingPending`), then `assets` not above `pendingAssets` (`Gated7540Vault_ExceedsPending`). It can fulfil a request in several parts. The assets go straight to `custody`. The vault emits `Fulfilled(controller, true, price, assets, shares, fulfiller)`. No hook call happens here and pause does not block it.
-- **Claim.** Only the controller or an operator of it can claim (`Gated7540Vault_Unauthorized` otherwise). The caller picks the `receiver` of the shares. The shares are minted through the hook as `MINT` with `receiver` as `to`.
+- **Claim.** Only the controller or an operator of it can claim (`Gated7540Vault_Unauthorized` otherwise). The controller is checked again at claim time with the same probe as `maxDeposit`, `canTransfer(0, controller, 1)`, so a controller that lost verification after the fulfilment cannot claim (`Gated7540Vault_ControllerNotEligible(reason)`), even to a verified receiver. The caller picks the `receiver` of the shares. The shares are minted through the hook as `MINT` with `receiver` as `to`, so the receiver is checked too.
 
 Claim arithmetic, with `full` meaning the request equals everything claimable on that side:
 
@@ -166,13 +167,14 @@ sequenceDiagram
   Note over F,A: the fulfiller must have approved the vault on the asset
 
   K->>V: redeem(shares, receiver, controller)
+  V->>V: canTransfer(controller, 0, 0) must be TRANSFER_OK
   V->>V: assets from the claimable ratio, rounded down
   V->>A: transfer(receiver, assets)
 ```
 
 - **Request.** `shares` and `controller` must be non-zero. If the caller is neither `owner` nor an operator of `owner`, the vault spends the caller's ERC-20 share allowance from `owner`. The shares move from `owner` to the vault as an ordinary `TRANSFER`, so the same checks apply as for a transfer: pause, frozen balance, `IdentityRule` on the owner and on the vault, `LockupRule` on the owner. The vault must therefore be verified by the identity registry. `Activate` also exempts the vault from the holder cap, so escrow never fills a slot.
 - **Fulfil.** The fulfiller picks `shares` and the `assets` they pay. The checks are the same as for a deposit fulfilment: both non-zero, something pending, and `shares` not above `pendingShares`. The escrowed shares are burned as `BURN` from the vault. Then the vault pulls `assets` from the fulfiller's wallet with `transferFrom`. While the token is paused the burn is rejected, so fulfilment waits.
-- **Claim.** `redeem` and `withdraw` pay the assets to a `receiver` the caller picks. They do not call the hook and move no shares, because the burn already happened. They revert with `EnforcedPause` while paused.
+- **Claim.** `redeem` and `withdraw` pay the assets to a `receiver` the caller picks. They move no shares, because the burn already happened. Before paying, they check the controller with a zero-amount burn probe, `canTransfer(controller, 0, 0)`: the controller's identity and any lockup on it, without the frozen-balance check (the controller usually holds no shares by now). A controller that lost verification after the fulfilment cannot collect (`Gated7540Vault_ControllerNotEligible(reason)`). The `receiver` of the assets is not checked; the agent's `recoverClaimable` covers a controller that must not be paid. They revert with `EnforcedPause` while paused.
 
 | Call | Reverts if | Result |
 |---|---|---|
@@ -181,18 +183,21 @@ sequenceDiagram
 
 ### Redemption: reject and recover
 
-Both return the escrowed shares without a fulfilment. Both clear the controller's whole `pendingShares`, and both move the shares out of the vault as `FORCED`.
+Both return the escrowed shares without a fulfilment and clear the controller's whole `pendingShares`. They differ in how the shares move.
 
 | | `rejectRedeemRequest(controller)` | `recoverRedeemRequest(controller, to)` |
 |---|---|---|
 | Caller | `FULFILLER_ROLE` | `AGENT_ROLE` |
 | Shares go to | the controller | `to`, which must not be the zero address |
+| Moved as | `TRANSFER`: the full policy applies | `FORCED`: an enforcement action |
 | Event | `RedeemRequestRejected` | `RedeemRequestRecovered(controller, to, shares, agent)` |
-| Use | the bank declines the request | the controller lost verification and cannot receive the shares back |
+| Use | the bank declines the request | the reject is blocked, e.g. the controller lost verification, the holder cap is full, or the escrow is frozen |
 
-Because the move is `FORCED`, it ignores pause and `LockupRule`, and `MaxHoldersRule` does not apply its cap. `IdentityRule` still needs the receiving account verified. If the controller is no longer verified, `rejectRedeemRequest` reverts with `PolicyGated_TransferRejected(RECEIVER_NOT_VERIFIED)`, nothing changes, and the shares stay in escrow until the agent recovers them to a verified account. If the agent has frozen part of the vault's own balance, the move lowers that frozen amount first, as `forcedTransfer` does.
+A reject is an ordinary transfer from the vault to the controller, so pause, the frozen balance on the escrow, `LockupRule` and `MaxHoldersRule` all apply, and `IdentityRule` needs the controller verified. If any of them refuses, the reject reverts with `PolicyGated_TransferRejected(reason)`, nothing changes, and the shares stay in escrow until the agent recovers them.
 
-The controller is named by the person who made the request, and it can be a different account from the owner who escrowed the shares. A reject returns the shares to the controller.
+This matters because the controller is named by whoever made the request, and it can be a different account from the owner who escrowed the shares. A reject must not be a way to move shares to a new holder past a full cap. Before v0.2.0 a reject was `FORCED`, which skipped the cap and the pause; the 2026-10-17 review showed a holder could use that, and it was reversed (owner decision M-2).
+
+A recovery is `FORCED`: it ignores pause and `LockupRule`, and `MaxHoldersRule` does not apply its cap (but still counts the new holder). `IdentityRule` still needs `to` verified. If the agent has frozen part of the vault's own balance, the recovery lowers that frozen amount first, as `forcedTransfer` does.
 
 ### What pause stops
 
@@ -203,8 +208,9 @@ The controller is named by the person who made the request, and it can be a diff
 | `fulfillDeposit` | works. No hook call and no pause check |
 | `fulfillRedeem` | rejected: `PolicyGated_TransferRejected(PAUSED)` |
 | `rejectDepositRequest` | works. It is an asset transfer |
-| `rejectRedeemRequest`, `recoverRedeemRequest` | work. `FORCED` ignores pause |
-| `deposit`, `mint` (claims) | rejected: `PolicyGated_TransferRejected(PAUSED)` |
+| `rejectRedeemRequest` | rejected: `PolicyGated_TransferRejected(PAUSED)`. It is a plain `TRANSFER` |
+| `recoverRedeemRequest`, `recoverClaimable` | work. Enforcement moves ignore pause |
+| `deposit`, `mint` (claims) | rejected: `Gated7540Vault_ControllerNotEligible(PAUSED)`, from the claim-time controller check |
 | `redeem`, `withdraw` (claims) | rejected: `EnforcedPause` |
 | `setOperator`, `setCustody` | work |
 
@@ -215,7 +221,7 @@ The controller is named by the person who made the request, and it can be a diff
 - as `owner`: the operator can call `requestDeposit` and `requestRedeem` for that account. For `requestDeposit` it moves the owner's assets into the vault, which still needs the owner's asset allowance to the vault. For `requestRedeem` it needs no share allowance.
 - as `controller`: the operator can claim with `deposit`, `mint`, `redeem` and `withdraw`, and chooses the `receiver`.
 
-The ERC-7540 standard treats operators as trusted, and so does the code.
+The ERC-7540 standard treats operators as full delegates, and so does the code: an approved operator can also open requests that pull the owner's assets or shares under any controller, its own included. Owners should approve only custodians they would trust with the assets (owner decision L-5; a test pins this so nobody narrows it to claims).
 
 ### Prices and views
 
@@ -223,7 +229,7 @@ The ERC-7540 standard treats operators as trusted, and so does the code.
 - `convertToShares` and `convertToAssets` use `lastPrice`. `totalAssets()` is `convertToAssets(totalSupply)`, rounded down. It is indicative: the assets are in custody, not in the vault.
 - Claims do not use `lastPrice`. They use each controller's own claimable ratio.
 - `previewDeposit`, `previewMint`, `previewRedeem` and `previewWithdraw` always revert with `Gated7540Vault_AsyncOnly`, as ERC-7540 requires.
-- `maxDeposit` and `maxMint` return the controller's claimable assets and shares, or 0 if the controller could not receive shares. `maxRedeem` and `maxWithdraw` return the claimable shares and assets, or 0 while paused.
+- `maxDeposit` and `maxMint` return the controller's claimable assets and shares, or 0 if the controller could not receive shares. `maxRedeem` and `maxWithdraw` return the claimable shares and assets, or 0 if the payout probe `canTransfer(controller, 0, 0)` refuses (paused, unverified, locked), so they match what `redeem` and `withdraw` will do.
 - `pendingDepositRequest`, `claimableDepositRequest`, `pendingRedeemRequest` and `claimableRedeemRequest` ignore the request id.
 - `mint(address,uint256)` and `burn(address,uint256)` from the base always revert with `Gated7540Vault_Unsupported`.
 
@@ -239,6 +245,7 @@ stateDiagram-v2
   Pending --> Claimable: fulfillDeposit
   Pending --> [*]: rejectDepositRequest
   Claimable --> [*]: deposit or mint claims all
+  Claimable --> [*]: recoverClaimable (agent)
 ```
 
 Redemption side, for one controller:
@@ -252,17 +259,17 @@ stateDiagram-v2
   Pending --> [*]: rejectRedeemRequest
   Pending --> [*]: recoverRedeemRequest
   Claimable --> [*]: redeem or withdraw claims all
+  Claimable --> [*]: recoverClaimable (agent)
 ```
 
 Partial fulfilments and partial claims leave a controller with amounts in more than one state.
 
-### What cannot be undone once fulfilled
+### Compliance after fulfilment
 
-The reject and recover functions act only on pending amounts. After `fulfillDeposit` or `fulfillRedeem` the amounts are claimable, and only the controller or an operator can use them:
+Fulfilled amounts are claimable, but compliance still applies to them (owner decision M-3, v0.2.0):
 
-- A deposit claim mints through the hook. If the receiver cannot receive shares when the claim is made (not verified, holder cap full, token paused), the claim reverts and the claimable amounts stay where they are until it can.
-- A redemption claim calls no hook. A controller who lost verification after the fulfilment can still collect the assets, and the receiver address is not checked.
+- **Claims are checked again.** A deposit claim re-runs `canTransfer(0, controller, 1)` and a redemption payout re-runs `canTransfer(controller, 0, 0)`, as described above. A controller that lost verification, or was locked, after its request was fulfilled cannot claim.
+- **The agent can recover claimable balances.** `recoverClaimable(controller, to)` (`AGENT_ROLE`) pays the controller's claimable redemption assets to `to` and delivers its claimable deposit shares to `to` as an enforcement mint (`FORCED` with `from` = 0). `to` must pass `IdentityRule`; typically it is custody, the treasury, or the controller's own verified recovery account. It clears every claimable amount for the controller and emits `ClaimableRecovered(controller, to, assets, shares, agent)`. It reverts with `Gated7540Vault_NothingClaimable` if there is nothing claimable and `Gated7540Vault_RecipientNotEligible(reason)` if `to` fails the identity check.
+- **Stranded deposits.** If the holder cap fills up after a deposit was fulfilled, the controller's own claim reverts with `MAX_HOLDERS`. The enforcement mint is exempt from the cap (the new holder is still counted), so the agent can deliver the shares. It also works while the token is paused.
 
-[PLAN.md](../PLAN.md) lists these behaviours as review items waiting for an owner decision.
-
-Code: `Gated7540Vault.requestDeposit`, `requestRedeem`, `fulfillDeposit`, `fulfillRedeem`, `rejectDepositRequest`, `rejectRedeemRequest`, `recoverRedeemRequest`, `_claimDeposit`, `_claimMint`, `redeem`, `withdraw`, `_recordPrice`, `setOperator`.
+Code: `Gated7540Vault.requestDeposit`, `requestRedeem`, `fulfillDeposit`, `fulfillRedeem`, `rejectDepositRequest`, `rejectRedeemRequest`, `recoverRedeemRequest`, `recoverClaimable`, `_claimDeposit`, `_claimMint`, `_requireDepositClaimEligible`, `_payoutReason`, `redeem`, `withdraw`, `_recordPrice`, `setOperator`; base `_mintAs`.
