@@ -1,0 +1,4 @@
+# Analysis tools installed in CI. Compile the hashed lock with:
+#   uv pip compile ci/requirements.in --universal --python-version 3.12 --generate-hashes -o ci/requirements.txt
+slither-analyzer==0.11.5
+halmos==0.3.3

@@ -47,5 +47,8 @@
 /forge-repro-cache
 /aderyn-report.json
 
+# Pinned tool binaries fetched by scripts/fetch-tool.sh (see tools.lock)
+/.tools
+
 # Release reference build (manifest + build-info), produced by `npm run verify:reproducible`
 /release-build

@@ -144,8 +144,8 @@ playing the council and the identity provider, and ends with the post-deploy che
 
 ## Commands
 
-Requires Node 24 (as in CI). Foundry v1.8.1, slither 0.11.5 and halmos 0.3.3 are needed only for the analysis
-commands.
+Requires Node 24 (CI pins 24.21.0). Foundry v1.8.1, Python 3.12 with `ci/requirements.txt` (slither, halmos) and the
+pinned Aderyn binary are needed only for the analysis commands.
 
 ```bash
 npm ci
@@ -172,7 +172,15 @@ slither .             # static-analysis gate; accepted findings in slither.confi
 ```
 
 ```bash
+scripts/fetch-tool.sh aderyn   # installs the sha256-pinned Aderyn release binary (tools.lock) into .tools/bin
+```
+
+```bash
 npm run aderyn        # second static-analysis gate (Cyfrin Aderyn); exclusions in aderyn.toml, the rest inline
+```
+
+```bash
+pip install --require-hashes -r ci/requirements.txt   # slither + halmos with every dependency hash-pinned
 ```
 
 ```bash

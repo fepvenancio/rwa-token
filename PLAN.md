@@ -827,6 +827,21 @@ An Ignition deployment of the whole stack:
 - **Mutation check:** removing one inline suppression fails the gate (1 high).
 - **Supply-chain note:** the package downloads its binary in `postinstall` from Cyfrin's GitHub release, without a checksum. Recorded in `SECURITY.md`.
 
+### Toolchain supply chain (owner, 2026-10-17): fixed, not just recorded
+- **Owner:** "An unverified binary download in the pipeline that gates attested code is the one line an auditor will flag." Fix Aderyn, and give every run-time fetch the same treatment. Cancun is confirmed as the target EVM.
+- **Aderyn:** the `@cyfrin/aderyn` npm package (whose `postinstall` downloaded the binary without a checksum) is removed. `tools.lock` pins the release assets' sha256, and `scripts/fetch-tool.sh` downloads (https only), verifies and installs into `.tools/bin`; `npm run aderyn` uses only that binary.
+  - The pinned hashes were checked against three agreeing sources: the downloaded file, GitHub's asset digest, and the project's `.sha256`.
+  - Aderyn has no attestation.
+- **forge:** `foundry-rs/foundry-toolchain` (version-pinned only) is replaced by `scripts/fetch-tool.sh foundry`, with the sha256 pinned and Foundry's sigstore provenance verified once (`gh attestation verify -R foundry-rs/foundry`).
+- **Slither and Halmos:** `ci/requirements.in` → `ci/requirements.txt` (uv, `--universal --python-version 3.12 --generate-hashes`): 61 packages, installed with `pip install --require-hashes`.
+  - Verified in a fresh 3.12 venv: Slither 0 results, Halmos 4/4.
+  - Corrupted hashes make pip refuse the install.
+- **GitHub Actions:** pinned to commit SHAs (checkout v4.4.0, setup-node v4.4.0, setup-python v5.6.0).
+- **Runtimes:** Node 24.21.0 (24.22.0 was only 3 days old) and Python 3.12.15.
+- **npm:** `npm ci --ignore-scripts`. Remaining install scripts (esbuild, keccak, secp256k1, fsevents) ship prebuilt binaries inside their integrity-checked tarballs; the full suite passes (430) on a clean `--ignore-scripts` install. forge-std is pinned to a git commit.
+- **solc:** Hardhat, forge and Aderyn each download it and verify it against soliditylang.org's hashes. Documented.
+- **Tamper checks:** a one-character change to a `tools.lock` hash makes `fetch-tool.sh` fail; an unknown tool or platform is refused.
+
 ### Remaining brief items (deferred until the first external integrator is known)
 - **ERC-3643 `IToken` read adapter.**
 - **Exact ERC-7943 conformance,** once the ERC is Final. Today there is no 7943 interface ID, because the function names and return types differ (README deviations).

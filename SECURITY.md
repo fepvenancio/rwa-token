@@ -120,7 +120,8 @@ Inline suppressions (each carries its reason on the line above, in the source):
 | `ProxyDeployer` `deploy` | `unused-return` | `initialize` returns nothing; success is checked by the post-init assertions |
 | `TokenProxy` `_unsafeAllowUninitialized` | `dead-code` | Called from `ERC1967Proxy`'s constructor; Slither does not trace it through the override |
 
-Aderyn 0.6.8 (Cyfrin) runs as a second CI gate (`npm run aderyn`, 0 findings). First run: 5 high and 13 low
+Aderyn 0.6.8 (Cyfrin) runs as a second CI gate (`npm run aderyn`, 0 findings), from the sha256-pinned release binary
+(§6). First run: 5 high and 13 low
 detector types. One real fix: `ProxyDeployer`'s constructor parameter shadowed `Ownable._owner` and was renamed. Every
 other finding is acknowledged below. Where a finding is a real property rather than a false positive, a test pins it.
 
@@ -149,10 +150,6 @@ Inline acknowledgements (reason on the line above each `aderyn-ignore`):
 | `literal-instead-of-constant` | calendar arithmetic; `10 ** decimals()` | Calendar constants; `decimals()` is read at runtime | Window and vault tests |
 | `empty-block`, `modifier-used-only-once` | `BaseRule.after_`, `__IntentSettled_init`, `onlyAdmin` | By design | n/a |
 
-Supply-chain note: the `@cyfrin/aderyn` npm package downloads its binary in `postinstall` from Cyfrin's GitHub
-release `aderyn-v0.6.8`, without checksum verification. It runs only in development and CI and never affects deployed
-bytecode.
-
 solhint (Wonderland config, `--max-warnings 0`):
 - `style-guide-casing` is disabled on getters of `UPPER_SNAKE` constants and immutables and on OZ-style `__X_init`
   functions;
@@ -178,7 +175,24 @@ Each row is a bug deliberately planted, the run that caught it, then restored fr
 | Aderyn gate | one inline suppression removed | `npm run aderyn` fails (1 high) |
 | Reproducibility | metadata hash re-enabled | `verify:reproducible`: every contract differs across jobs |
 
-## 6. Verification commands
+## 6. Toolchain supply chain
+
+Everything CI fetches at run time is pinned, and verified wherever the distribution allows:
+
+| Component | Pin | Verification |
+|---|---|---|
+| GitHub Actions (`checkout`, `setup-node`, `setup-python`) | Full commit SHA, release tag in a comment | Git object identity |
+| Node, Python | Exact versions (24.21.0, 3.12.15) | Fetched by the SHA-pinned setup actions |
+| npm packages | `package-lock.json` | Lockfile integrity (sha512); `npm ci --ignore-scripts`, so no package install script runs; forge-std pinned to a git commit |
+| Slither, Halmos and all 61 Python dependencies | `ci/requirements.txt` | `pip install --require-hashes` |
+| forge 1.8.1 | `tools.lock` | sha256 checked by `scripts/fetch-tool.sh`; also checked once against GitHub's asset digest, Foundry's `.sha256` and its sigstore attestation (`gh attestation verify`) |
+| Aderyn 0.6.8 | `tools.lock` | sha256 checked by `scripts/fetch-tool.sh`; also checked once against GitHub's asset digest and Aderyn's `.sha256`. Aderyn publishes no attestation. The npm package, whose installer downloaded the binary unverified, was removed |
+| solc 0.8.30 | `hardhat.config.ts`, `foundry.toml` | Downloaded by Hardhat, forge and Aderyn, each verifying against soliditylang.org's published hashes |
+
+Tamper checks: one changed character in a `tools.lock` hash makes `fetch-tool.sh` fail. Corrupted hashes in
+`ci/requirements.txt` make pip refuse the install. The suite passes on an `--ignore-scripts` install.
+
+## 7. Verification commands
 
 ```bash
 npm ci
@@ -197,6 +211,10 @@ slither .
 ```
 
 ```bash
+scripts/fetch-tool.sh aderyn
+```
+
+```bash
 npm run aderyn
 ```
 
@@ -212,7 +230,7 @@ npm run validate:upgrades
 npm run verify:reproducible
 ```
 
-Tool versions: Node 24, Hardhat 3.20.0, Foundry v1.8.1, slither 0.11.5, Aderyn 0.6.8, halmos 0.3.3,
+Tool versions: Node 24.21.0, Python 3.12.15, Hardhat 3.20.0, Foundry v1.8.1, slither 0.11.5, Aderyn 0.6.8, halmos 0.3.3,
 `@openzeppelin/upgrades-core` 1.46.0. CI (`.github/workflows/ci.yml`) runs all of them on every push, except `verify:reproducible`, which runs on
 pull requests into `main` and, through `release.yml`, on every `v*` tag. Mythril is not used: it has no Cancun support
 (TSTORE/TLOAD/MCOPY).

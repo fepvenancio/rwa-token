@@ -1,0 +1,10 @@
+# Binaries fetched at run time, pinned by sha256. `scripts/fetch-tool.sh <tool>` refuses anything not listed here.
+#
+# Each hash was checked on 2026-10-17 against three sources that agreed: the downloaded file, GitHub's recorded asset
+# digest, and the project's published .sha256. Foundry additionally verified with `gh attestation verify -R
+# foundry-rs/foundry` (sigstore build provenance); Aderyn publishes no attestations.
+#
+# tool    version  platform      sha256                                                            url
+aderyn    0.6.8    linux-x64     ffd6ca658962e211a3ac821c646f69c8e14bf1b1001cbfe091bcd4535a691e46  https://github.com/Cyfrin/aderyn/releases/download/aderyn-v0.6.8/aderyn-x86_64-unknown-linux-gnu.tar.xz
+aderyn    0.6.8    darwin-arm64  624c6652bb9478b38ddc255c27819cd5c6cb0448f5deb72036cc9cf5a27d4aac  https://github.com/Cyfrin/aderyn/releases/download/aderyn-v0.6.8/aderyn-aarch64-apple-darwin.tar.xz
+foundry   1.8.1    linux-x64     37b45855232e57624d90113b049ca54f0c92055bb5c1997fcbdc3076c7b89c10  https://github.com/foundry-rs/foundry/releases/download/v1.8.1/foundry_v1.8.1_linux_amd64.tar.gz
