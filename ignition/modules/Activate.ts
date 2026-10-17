@@ -7,7 +7,8 @@ import { ROLES, TOKENS } from "./roles.js";
  * bound to it, so every later step (configuration, roles, hand-over) runs only for correctly bound tokens. Then:
  *
  * 1. Configure while the deployer is the tokens' admin: settlement window, holder caps, the 7540 escrow exemption.
- * 2. Grant the operational roles; UPGRADER_ROLE goes to the timelock only; the guardian becomes a timelock canceller.
+ * 2. Grant the operational roles; UPGRADER_ROLE goes to the timelock only; the guardian becomes a timelock canceller;
+ *    the recovery timelock gets RECOVERY_ROLE (unpause and revoke GUARDIAN_ROLE only) on every token and the executor.
  * 3. Hand over: DEFAULT_ADMIN_ROLE to the timelock on the tokens and the executor; the deployer renounces everywhere,
  *    and `ProxyDeployer` ownership moves to the timelock.
  *
@@ -21,7 +22,8 @@ export default buildModule("Activate", (m) => {
   const registry = p("registry");
   const asset = p("asset");
 
-  const timelock = m.contractAt("TimelockController", timelockAddress);
+  const timelock = m.contractAt("GovernanceTimelock", timelockAddress);
+  const recoveryTimelock = m.contractAt("TimelockController", p("recoveryTimelock"), { id: "recoveryTimelock" });
   const proxyDeployer = m.contractAt("ProxyDeployer", p("proxyDeployer"));
   const executor = m.contractAt("IntentExecutor", p("executor"));
   const windowRule = m.contractAt("SettlementWindowRule", p("windowRule"));
@@ -80,7 +82,12 @@ export default buildModule("Activate", (m) => {
   ];
 
   // 2. Roles.
-  const grant = (key: string, contract: (typeof tokens)[keyof typeof tokens] | typeof executor | typeof timelock, role: string, to: unknown) =>
+  const grant = (
+    key: string,
+    contract: (typeof tokens)[keyof typeof tokens] | typeof executor | typeof timelock | typeof recoveryTimelock,
+    role: string,
+    to: unknown,
+  ) =>
     m.call(contract, "grantRole", [role, to as string], { id: `${key}_grant`, after: deploys });
   const granted = [
     grant("intent_minter", intent, ROLES.MINTER, p("minter")),
@@ -93,6 +100,10 @@ export default buildModule("Activate", (m) => {
     ]),
     grant("executor_operator", executor, ROLES.OPERATOR, p("operator")),
     grant("timelock_canceller", timelock, ROLES.CANCELLER, guardian),
+    // M-1: the recovery timelock may unpause and remove the guardian on every token and the executor (the main
+    // timelock already names it in its constructor for CANCELLER_ROLE revocation).
+    ...Object.entries(tokens).map(([key, token]) => grant(`${key}_recovery`, token, ROLES.RECOVERY, recoveryTimelock)),
+    grant("executor_recovery", executor, ROLES.RECOVERY, recoveryTimelock),
   ];
 
   // 3. Hand over, strictly after every call that needs the deployer's admin rights.
@@ -102,6 +113,15 @@ export default buildModule("Activate", (m) => {
     m.call(contract, "renounceRole", [ROLES.DEFAULT_ADMIN, deployer], { id: `${key}_admin_renounce`, after: [handed] });
   }
   m.call(timelock, "renounceRole", [ROLES.DEFAULT_ADMIN, deployer], { id: "timelock_admin_renounce", after });
+  // The recovery timelock has no cancellers: OZ made governance one as a proposer, so revoke it, then renounce.
+  const noCancellers = m.call(recoveryTimelock, "revokeRole", [ROLES.CANCELLER, p("governance")], {
+    id: "recovery_no_cancellers",
+    after: deploys,
+  });
+  m.call(recoveryTimelock, "renounceRole", [ROLES.DEFAULT_ADMIN, deployer], {
+    id: "recovery_admin_renounce",
+    after: [noCancellers],
+  });
   // Any later token goes through governance: the deployer EOA can no longer place one.
   m.call(proxyDeployer, "transferOwnership", [timelock], { id: "proxyDeployer_owner", after: deploys });
 

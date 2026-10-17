@@ -58,7 +58,8 @@ interface IIntentExecutorBatch {
 
   /**
    * @notice Resumes settlement through this executor
-   * @dev Only DEFAULT_ADMIN_ROLE (timelock)
+   * @dev Only DEFAULT_ADMIN_ROLE (the main timelock) or RECOVERY_ROLE (the recovery timelock, which the guardian
+   *      cannot cancel)
    */
   function unpause() external;
 }

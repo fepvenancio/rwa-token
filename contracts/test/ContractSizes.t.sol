@@ -8,6 +8,7 @@ import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 
 import {ProxyDeployer} from 'contracts/deploy/ProxyDeployer.sol';
+import {GovernanceTimelock} from 'contracts/governance/GovernanceTimelock.sol';
 import {PolicyRegistry} from 'contracts/governance/PolicyRegistry.sol';
 import {ComplianceHook} from 'contracts/hooks/ComplianceHook.sol';
 import {IdentityRule} from 'contracts/hooks/rules/IdentityRule.sol';
@@ -48,6 +49,10 @@ contract ContractSizesTest is Test {
     _assertFits('MaxHoldersRule', address(new MaxHoldersRule()));
     _assertFits('IdentityRule', address(new IdentityRule(IIdentityRegistry(address(this)))));
     _assertFits('ProxyDeployer', address(new ProxyDeployer(address(this))));
+    _assertFits(
+      'GovernanceTimelock',
+      address(new GovernanceTimelock(7 days, new address[](0), new address[](0), address(this), address(this)))
+    );
   }
 
   function _isInstrumented(

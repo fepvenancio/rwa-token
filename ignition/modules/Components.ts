@@ -3,8 +3,9 @@ import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
 /**
  * Stage 1 of 3. Everything that does not depend on a token address:
  *
- * - The timelock: proposer and executor are the governance multisig only. The deployer is its admin only until
- *   `Activate` grants the guardian CANCELLER_ROLE, then it renounces.
+ * - The recovery timelock (plain OZ TimelockController, governance as proposer and executor) and the main timelock
+ *   (`GovernanceTimelock`: proposer and executor are the governance multisig only; the recovery timelock may revoke
+ *   CANCELLER_ROLE there and nothing else). The deployer is the admin of both only until `Activate` finishes.
  * - The registry, administered by the timelock from the start.
  * - The shared rules, one implementation per template, the `ProxyDeployer`, and the intent executor (administered by
  *   the deployer until `Activate` hands it over).
@@ -19,7 +20,12 @@ export default buildModule("Components", (m) => {
   const identityRegistry = m.getParameter<string>("identityRegistry");
   const minDelay = m.getParameter<bigint>("minDelay", 7n * 24n * 3_600n);
 
-  const timelock = m.contract("TimelockController", [minDelay, [governance], [governance], deployer]);
+  // M-1: the recovery timelock (same delay, governance proposes and executes, no cancellers, guardian holds nothing)
+  // can only unpause and remove the guardian everywhere; deployed first so the main timelock can name it.
+  const recoveryTimelock = m.contract("TimelockController", [minDelay, [governance], [governance], deployer], {
+    id: "recoveryTimelock",
+  });
+  const timelock = m.contract("GovernanceTimelock", [minDelay, [governance], [governance], deployer, recoveryTimelock]);
   const registry = m.contract("PolicyRegistry", [timelock, council]);
 
   const identityRule = m.contract("IdentityRule", [identityRegistry]);
@@ -36,6 +42,7 @@ export default buildModule("Components", (m) => {
 
   return {
     timelock,
+    recoveryTimelock,
     registry,
     identityRule,
     lockupRule,

@@ -33,7 +33,7 @@ In scope, all under `contracts/` (`.t.sol` files and `contracts/test/` are test 
 | Templates | `tokens/IntentToken`, `vaults/Gated4626Vault`, `vaults/Gated7540Vault` |
 | Mixin | `mixins/IntentSettledUpgradeable` |
 | Policy | `hooks/ComplianceHook`, `hooks/BaseRule`, `hooks/rules/{Identity,Lockup,SettlementWindow,MaxHolders}Rule` |
-| Governance | `governance/PolicyRegistry` |
+| Governance | `governance/PolicyRegistry`, `governance/GovernanceTimelock` (the main timelock: OZ `TimelockController` plus a revoke-`CANCELLER_ROLE`-only `RECOVERY_ROLE`) |
 | Settlement | `intents/IntentExecutor` |
 | Deployment | `deploy/ProxyDeployer`, `deploy/TokenProxy` |
 | Interfaces | `interfaces/*` (frozen; ERC-165 ids, event topics and reason codes pinned by `contracts/test/InterfaceFreeze.t.sol`) |
@@ -41,7 +41,7 @@ In scope, all under `contracts/` (`.t.sol` files and `contracts/test/` are test 
 Also in scope: `ignition/modules/{Components,Tokens,Activate,roles}.ts`, which carry the deployment order, role grants,
 the hand-over to the timelock and each token's rule list (`RULE_ORDER`).
 
-Out of scope: OpenZeppelin 5.6.1 (`@openzeppelin/contracts`, `-upgradeable`; `TimelockController` is used unmodified),
+Out of scope: OpenZeppelin 5.6.1 (`@openzeppelin/contracts`, `-upgradeable`; `TimelockController` is used unmodified for the recovery timelock and as the base of `GovernanceTimelock`),
 the external identity registry (`IIdentityRegistry` is an assumption about it), and test mocks.
 
 Build: solc 0.8.30, `evmVersion: cancun`, optimizer 200 runs, no metadata hash, the same in Hardhat and forge.
@@ -186,6 +186,8 @@ Each row is a bug deliberately planted, the run that caught it, then restored fr
 | `Gated7540Vault` price (L-3) | the minimum price of 1 removed | 3 tests (`Gated7540VaultUnit_ZeroPrice` and the fulfilment fuzz) |
 | `Gated7540Vault` claims (M-3) | deposit-claim, mint-claim, redeem or withdraw eligibility check removed; `maxRedeem` back to pause-only; `recoverClaimable` without the recipient check; enforcement mint downgraded to a plain MINT; payout probe with amount 1 | 1 to 11 tests each (`Gated7540VaultIntegration_Claimable`). The amount-1 probe breaks 11, since it would block payouts to controllers holding no shares |
 | `Gated7540Vault` reject (M-2) | rejected shares returned as FORCED again (the old R2) | 5 tests, including the steering attack at a full cap, the paused reject and the frozen escrow |
+| Recovery timelock (M-1) | base or executor `revokeRole` lets RECOVERY_ROLE revoke any role, or not the guardian; recovery cannot `unpause`; `GovernanceTimelock` lets it revoke any role, or not CANCELLER | 1 to 2 tests each (`PolicyGatedUnit_Recovery`, `IntentExecutorUnit_Recovery`, `GovernanceTimelockUnitTest`) |
+| Recovery deployment (M-1) | `Activate` skips the executor's RECOVERY_ROLE, or leaves governance as a recovery-timelock canceller | The hand-over check, which pins the recovery timelock's exact role set and its lack of cancellers (59 TS tests fail) |
 | Base enforcement | `forcedTransfer` keeps frozen tokens | `invariant_FrozenNeverExceedsBalance` and 2 unit tests. With the old no-op handler, the invariant missed it |
 | Base transient context | ref slot not cleared | Not killable: an equivalent mutant. The ref is read only when the kind slot is set, and every movement that sets the kind rewrites the ref first |
 | Reproducibility | metadata hash re-enabled | `verify:reproducible`: every contract differs across jobs |

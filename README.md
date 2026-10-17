@@ -45,7 +45,8 @@ The audit package (scope, suppressions, mutation results, findings an auditor sh
 | Power | Holder | Delay | Can |
 |---|---|---|---|
 | `DEFAULT_ADMIN_ROLE` | TimelockController | ≥ 7 days | grant/revoke every role, `unpause`, `setPolicyHook`, change hook rules, manage attesters |
-| `GUARDIAN_ROLE` | multisig | none | `pause` the token and cancel pending timelock operations. **It can only stop things:** no unpause, no upgrades, no role or hook changes |
+| `GUARDIAN_ROLE` | multisig | none | `pause` the token and cancel pending main-timelock operations. **It can only stop things:** no unpause, no upgrades, no role or hook changes, and no veto over its own removal (see `RECOVERY_ROLE`) |
+| `RECOVERY_ROLE` | recovery timelock | ≥ 7 days | on every token, vault and the executor: `unpause` and revoke `GUARDIAN_ROLE`; on the main timelock: revoke `CANCELLER_ROLE`. Nothing else. Governance proposes and executes; nobody can cancel |
 | `UPGRADER_ROLE` | timelock | ≥ 7 days | upgrade, only to an implementation attested as `IMPLEMENTATION` |
 | `MINTER_ROLE` / `BURNER_ROLE` | issuer | none | mint, and burn (enforcement burns can take frozen tokens) |
 | `AGENT_ROLE` | issuer | none | `forcedTransfer` (clawback; bypasses pause and freeze, still policy-checked), `setFrozen`; on the 7540 vault, `recoverRedeemRequest` (escrow → verified recovery account) and `recoverClaimable` (claimable assets and shares → verified recovery account, even while paused or at a full cap) |
@@ -83,8 +84,9 @@ previous stages' addresses as parameters. `test/nodejs/fixtures.ts` runs this ex
 playing the council and the identity provider, and ends with the post-deploy checks below.
 
 1. **`Components`** (deployer):
-   - the TimelockController: minimum delay ≥ 7 days; proposer **and** executor are the governance multisig only;
-     the deployer is its admin until `Activate`;
+   - the recovery timelock (plain OZ `TimelockController`, ≥ 7 days, governance multisig as proposer and executor),
+     then the main timelock (`GovernanceTimelock`: ≥ 7 days, proposer **and** executor the governance multisig only;
+     the recovery timelock may revoke `CANCELLER_ROLE` there). The deployer is the admin of both until `Activate`;
    - the `PolicyRegistry`: admin = timelock, attester = council;
    - the four rules, one implementation per template, `ProxyDeployer` (owner = deployer), and `IntentExecutor`.
 
@@ -138,9 +140,15 @@ playing the council and the identity provider, and ends with the post-deploy che
    - every token's `policyHook()` is the hook address the council recorded in step 4, that hook's `TOKEN` is the
      token, and its `rules()` equals `RULE_ORDER`. A twin hook with the same immutables but other rules carries the same
      attested codehash and passes `ProxyDeployer`; this check is what refuses it;
-   - the guardian can cancel timelock operations but cannot propose or execute them;
+   - the guardian can cancel main-timelock operations but cannot propose or execute them, and holds nothing on the
+     recovery timelock;
+   - the recovery timelock holds exactly `RECOVERY_ROLE` on each token, vault, the executor and the main timelock,
+     nothing elsewhere, and has no cancellers (governance's automatic one is revoked in `Activate`);
    - `ProxyDeployer.owner()` is the timelock;
-   - `getMinDelay() ≥ 7 days`.
+   - `getMinDelay() ≥ 7 days` on both timelocks.
+
+   The recovery timelock's proposer and executor is the governance multisig. A compromised governance multisig is
+   out of scope for this control, by design: recovery bounds the guardian, not governance.
 
 ## Commands
 

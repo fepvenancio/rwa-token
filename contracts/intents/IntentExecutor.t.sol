@@ -413,3 +413,47 @@ contract IntentExecutorIntegration_ExecuteBatch is IntentExecutorIntegrationTest
     }
   }
 }
+
+/// @dev M-1: on the executor too, RECOVERY_ROLE can only unpause and revoke GUARDIAN_ROLE
+contract IntentExecutorUnit_Recovery is IntentExecutorUnitTest {
+  address internal _recovery = makeAddr('recoveryTimelock');
+
+  function setUp() public override {
+    super.setUp();
+    bytes32 _role = _executor.RECOVERY_ROLE();
+    vm.prank(_admin);
+    _executor.grantRole(_role, _recovery);
+    vm.prank(_guardian);
+    _executor.pause();
+  }
+
+  function test_WhenRecoveryUnpausesAndRevokesTheGuardian_BothWork() external {
+    bytes32 _guardianRole = _executor.GUARDIAN_ROLE();
+    vm.startPrank(_recovery);
+    _executor.unpause();
+    _executor.revokeRole(_guardianRole, _guardian);
+    vm.stopPrank();
+    assertFalse(_executor.paused());
+    assertFalse(_executor.hasRole(_guardianRole, _guardian));
+  }
+
+  function test_WhenRecoveryTouchesAnyOtherRole_ItReverts() external {
+    bytes32 _adminRole = _executor.DEFAULT_ADMIN_ROLE();
+    bytes32 _operatorRole = _executor.OPERATOR_ROLE();
+    bytes32 _guardianRole = _executor.GUARDIAN_ROLE();
+    vm.startPrank(_recovery);
+    vm.expectRevert(_unauthorized(_recovery, _adminRole));
+    _executor.revokeRole(_operatorRole, _operator);
+    vm.expectRevert(_unauthorized(_recovery, _adminRole));
+    _executor.grantRole(_guardianRole, _recovery);
+    vm.expectRevert(_unauthorized(_recovery, _adminRole));
+    _executor.grantRole(_operatorRole, _recovery);
+    vm.stopPrank();
+  }
+
+  function test_WhenAStrangerUnpauses_ItStillReverts() external {
+    vm.expectRevert(_unauthorized(_stranger, _executor.DEFAULT_ADMIN_ROLE()));
+    vm.prank(_stranger);
+    _executor.unpause();
+  }
+}

@@ -824,3 +824,78 @@ contract PolicyGatedUnit_MintAs is PolicyGatedUnitTest {
     _token.transfer(_alice, 1);
   }
 }
+
+/// @dev M-1: RECOVERY_ROLE (the recovery timelock) can only unpause and revoke GUARDIAN_ROLE; the guardian cannot block it
+contract PolicyGatedUnit_Recovery is PolicyGatedUnitTest {
+  address internal _recovery = makeAddr('recoveryTimelock');
+
+  function setUp() public override {
+    super.setUp();
+    bytes32 _role = _token.RECOVERY_ROLE(); // read first: an inline call would consume the prank
+    vm.prank(_admin);
+    _token.grantRole(_role, _recovery);
+    vm.prank(_guardian);
+    _token.pause();
+  }
+
+  function test_WhenRecoveryUnpauses_ItUnpauses() external {
+    vm.prank(_recovery);
+    _token.unpause();
+    assertFalse(_token.paused());
+  }
+
+  function test_WhenRecoveryRevokesTheGuardian_TheGuardianCanNoLongerPause() external {
+    bytes32 _guardianRole = _token.GUARDIAN_ROLE();
+    vm.prank(_recovery);
+    _token.revokeRole(_guardianRole, _guardian);
+    assertFalse(_token.hasRole(_guardianRole, _guardian));
+    vm.prank(_recovery);
+    _token.unpause();
+    vm.expectRevert(_unauthorized(_guardian, _guardianRole));
+    vm.prank(_guardian);
+    _token.pause();
+  }
+
+  function test_WhenRecoveryRevokesAnyOtherRole_ItReverts() external {
+    bytes32 _adminRole = _token.DEFAULT_ADMIN_ROLE();
+    bytes32 _agentRole = _token.AGENT_ROLE();
+    bytes32 _upgraderRole = _token.UPGRADER_ROLE();
+    vm.startPrank(_recovery);
+    vm.expectRevert(_unauthorized(_recovery, _adminRole));
+    _token.revokeRole(_agentRole, _agent);
+    vm.expectRevert(_unauthorized(_recovery, _adminRole));
+    _token.revokeRole(_adminRole, _admin);
+    vm.expectRevert(_unauthorized(_recovery, _adminRole));
+    _token.revokeRole(_upgraderRole, _admin);
+    vm.stopPrank();
+  }
+
+  function test_WhenRecoveryGrantsAnyRole_ItReverts() external {
+    bytes32 _adminRole = _token.DEFAULT_ADMIN_ROLE();
+    bytes32 _guardianRole = _token.GUARDIAN_ROLE();
+    bytes32 _recoveryRole = _token.RECOVERY_ROLE();
+    vm.startPrank(_recovery);
+    vm.expectRevert(_unauthorized(_recovery, _adminRole));
+    _token.grantRole(_guardianRole, _recovery);
+    vm.expectRevert(_unauthorized(_recovery, _adminRole));
+    _token.grantRole(_recoveryRole, _stranger);
+    vm.stopPrank();
+  }
+
+  function test_WhenRecoveryChangesTheHookOrUpgrades_ItReverts() external {
+    bytes32 _adminRole = _token.DEFAULT_ADMIN_ROLE();
+    bytes32 _upgraderRole = _token.UPGRADER_ROLE();
+    vm.startPrank(_recovery);
+    vm.expectRevert(_unauthorized(_recovery, _adminRole));
+    _token.setPolicyHook(makeAddr('otherHook'));
+    vm.expectRevert(_unauthorized(_recovery, _upgraderRole));
+    _token.upgradeToAndCall(makeAddr('otherImpl'), '');
+    vm.stopPrank();
+  }
+
+  function test_WhenAStrangerUnpauses_ItStillReverts() external {
+    vm.expectRevert(_unauthorized(_stranger, _token.DEFAULT_ADMIN_ROLE()));
+    vm.prank(_stranger);
+    _token.unpause();
+  }
+}

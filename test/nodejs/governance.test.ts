@@ -223,4 +223,97 @@ describe("governance through the timelock", async function () {
     await op.execute();
     assert.equal(await s.token.read.hasRole([await s.token.read.GUARDIAN_ROLE(), newGuardian]), true);
   });
+
+  /** Schedules a batch on the recovery timelock (governance proposes; no one can cancel). */
+  async function scheduleRecovery(s: Stack, calls: { target: Address; data: Hex }[]) {
+    const governance = s.wallets.governance.account;
+    const delay = await s.recoveryTimelock.read.getMinDelay();
+    const targets = calls.map((c) => c.target);
+    const values = calls.map(() => 0n);
+    const payloads = calls.map((c) => c.data);
+    const salt = keccak256(toHex(`recovery-${saltCounter++}`));
+    await s.recoveryTimelock.write.scheduleBatch([targets, values, payloads, zeroHash, salt, delay], { account: governance });
+    return {
+      id: await s.recoveryTimelock.read.hashOperationBatch([targets, values, payloads, zeroHash, salt]),
+      execute: () => s.recoveryTimelock.write.executeBatch([targets, values, payloads, zeroHash, salt], { account: governance }),
+      delay,
+    };
+  }
+  const call = (target: { address: Address; abi: unknown }, functionName: string, args: readonly unknown[] = []) => ({
+    target: target.address,
+    data: encodeFunctionData({ abi: target.abi as Abi, functionName, args } as never),
+  });
+
+  it("M-1: the guardian vetoes the main-timelock unpause; the recovery timelock still unpauses after the delay", async function () {
+    const s = await networkHelpers.loadFixture(stack);
+    const guardian = s.wallets.guardian.account;
+    await s.token.write.pause({ account: guardian });
+
+    const viaMain = await schedule(s, s.token.address, encodeFunctionData({ abi: s.token.abi, functionName: "unpause" }));
+    await s.timelock.write.cancel([viaMain.id], { account: guardian }); // the veto
+
+    const viaRecovery = await scheduleRecovery(s, [call(s.token, "unpause")]);
+    await viem.assertions.revertWithCustomError(
+      s.recoveryTimelock.write.cancel([viaRecovery.id], { account: guardian }),
+      s.recoveryTimelock,
+      "AccessControlUnauthorizedAccount",
+    );
+    await viem.assertions.revertWithCustomError(viaRecovery.execute(), s.recoveryTimelock, "TimelockUnexpectedOperationState");
+    await networkHelpers.time.increase(viaRecovery.delay);
+    await viaRecovery.execute();
+    assert.equal(await s.token.read.paused(), false);
+  });
+
+  it("M-1: one recovery batch strips the guardian everywhere, including its cancel right on the main timelock", async function () {
+    const s = await networkHelpers.loadFixture(stack);
+    const guardian = s.wallets.guardian.account;
+    await s.token.write.pause({ account: guardian });
+    await s.executor.write.pause({ account: guardian });
+
+    const removal = await scheduleRecovery(s, [
+      call(s.token, "unpause"),
+      call(s.executor, "unpause"),
+      call(s.token, "revokeRole", [ROLES.GUARDIAN, guardian.address]),
+      call(s.vault4626, "revokeRole", [ROLES.GUARDIAN, guardian.address]),
+      call(s.vault7540, "revokeRole", [ROLES.GUARDIAN, guardian.address]),
+      call(s.executor, "revokeRole", [ROLES.GUARDIAN, guardian.address]),
+      call(s.timelock, "revokeRole", [ROLES.CANCELLER, guardian.address]),
+    ]);
+    await networkHelpers.time.increase(removal.delay);
+    await removal.execute();
+
+    for (const c of [s.token, s.vault4626, s.vault7540, s.executor]) {
+      assert.equal(await c.read.hasRole([ROLES.GUARDIAN, guardian.address]), false, `guardian kept on ${c.address}`);
+    }
+    assert.equal(await s.timelock.read.hasRole([ROLES.CANCELLER, guardian.address]), false);
+    assert.equal(await s.token.read.paused(), false);
+    assert.equal(await s.executor.read.paused(), false);
+    const next = await schedule(s, s.token.address, encodeFunctionData({ abi: s.token.abi, functionName: "unpause" }));
+    await viem.assertions.revertWithCustomError(
+      s.timelock.write.cancel([next.id], { account: guardian }),
+      s.timelock,
+      "AccessControlUnauthorizedAccount",
+    );
+  });
+
+  it("M-1: the recovery timelock cannot grant roles, change hooks, upgrade, or propose on the main timelock", async function () {
+    const s = await networkHelpers.loadFixture(stack);
+    const recovery = s.recoveryTimelock.address;
+    const forbidden = [
+      call(s.token, "grantRole", [ROLES.MINTER, recovery]),
+      call(s.token, "revokeRole", [ROLES.AGENT, s.wallets.agent.account.address]),
+      call(s.token, "setPolicyHook", [s.hooks.token.address]),
+      call(s.token, "upgradeToAndCall", [s.implementations.token.address, "0x"]),
+      call(s.executor, "grantRole", [ROLES.OPERATOR, recovery]),
+      call(s.timelock, "grantRole", [ROLES.CANCELLER, recovery]),
+      call(s.timelock, "revokeRole", [ROLES.PROPOSER, s.wallets.governance.account.address]),
+      call(s.timelock, "schedule", [s.token.address, 0n, "0x", zeroHash, zeroHash, 7n * 86_400n]),
+    ];
+    for (const f of forbidden) {
+      const op = await scheduleRecovery(s, [f]);
+      await networkHelpers.time.increase(op.delay);
+      const failure = await revertOf(op.execute(), [...s.recoveryTimelock.abi, ...s.token.abi, ...s.timelock.abi] as Abi);
+      assert.equal(failure?.errorName, "AccessControlUnauthorizedAccount", `allowed: ${f.data.slice(0, 10)}`);
+    }
+  });
 });

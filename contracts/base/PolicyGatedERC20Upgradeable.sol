@@ -60,6 +60,10 @@ abstract contract PolicyGatedERC20Upgradeable is
   /// @notice Role allowed to upgrade to an attested implementation
   bytes32 public constant UPGRADER_ROLE = keccak256('UPGRADER_ROLE');
 
+  /// @notice Role of the recovery timelock: may only `unpause` and revoke GUARDIAN_ROLE, a path the guardian cannot
+  ///         cancel (owner decision M-1). Granted and revoked by DEFAULT_ADMIN_ROLE like any role
+  bytes32 public constant RECOVERY_ROLE = keccak256('RECOVERY_ROLE');
+
   /// @notice keccak256(abi.encode(uint256(keccak256('gated.storage.PolicyGatedERC20')) - 1)) & ~bytes32(uint256(0xff))
   bytes32 private constant _POLICY_GATED_STORAGE_LOCATION =
     0xe8c11567602593a5bc8df6eb5a119138618a3fad68d46d33c073939016673d00;
@@ -117,8 +121,16 @@ abstract contract PolicyGatedERC20Upgradeable is
     _pause();
   }
 
-  /// @inheritdoc IPolicyGated
-  function unpause() external onlyRole(DEFAULT_ADMIN_ROLE) {
+  /**
+   * @inheritdoc IPolicyGated
+   * @dev DEFAULT_ADMIN_ROLE (the main timelock) or RECOVERY_ROLE (the recovery timelock, which the guardian cannot
+   *      cancel). Anyone else gets the usual AccessControl error for DEFAULT_ADMIN_ROLE
+   */
+  function unpause() external {
+    address _sender = _msgSender();
+    if (!hasRole(DEFAULT_ADMIN_ROLE, _sender) && !hasRole(RECOVERY_ROLE, _sender)) {
+      revert AccessControlUnauthorizedAccount(_sender, DEFAULT_ADMIN_ROLE);
+    }
     _unpause();
   }
 
@@ -162,6 +174,23 @@ abstract contract PolicyGatedERC20Upgradeable is
   /// @inheritdoc IPolicyGated
   function registry() external view returns (address _registry) {
     _registry = address(_getPolicyGatedStorage().registry);
+  }
+
+  /**
+   * @inheritdoc AccessControlUpgradeable
+   * @dev RECOVERY_ROLE may revoke GUARDIAN_ROLE and nothing else; every other revocation needs the role's admin
+   */
+  function revokeRole(
+    bytes32 _role,
+    address _account
+  ) public override {
+    if (_role == GUARDIAN_ROLE && hasRole(RECOVERY_ROLE, _msgSender())) {
+      // _revokeRole returns false only if the role was not held; either way the account ends up without it.
+      // aderyn-ignore-next-line(unchecked-return)
+      _revokeRole(_role, _account);
+      return;
+    }
+    super.revokeRole(_role, _account);
   }
 
   /// @inheritdoc IPolicyGated

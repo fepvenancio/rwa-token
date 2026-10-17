@@ -110,7 +110,17 @@ export async function deployUntilActivate(connection: NetworkConnection) {
       },
     },
   });
-  const { timelock, registry, identityRule, lockupRule, windowRule, maxHoldersRule, proxyDeployer, executor } =
+  const {
+    timelock,
+    recoveryTimelock,
+    registry,
+    identityRule,
+    lockupRule,
+    windowRule,
+    maxHoldersRule,
+    proxyDeployer,
+    executor,
+  } =
     components;
   const attest = async (target: Address, kind: number, uri: string) => {
     const code = await publicClient.getCode({ address: target });
@@ -148,6 +158,8 @@ export async function deployUntilActivate(connection: NetworkConnection) {
     ...addresses,
     executor: executor.address,
     guardian: address(guardian),
+    governance: address(governance),
+    recoveryTimelock: recoveryTimelock.address,
     asset: asset.address,
     custody: address(custody),
     intentHook: hooks.intentHook.address,
@@ -179,6 +191,7 @@ export async function deployUntilActivate(connection: NetworkConnection) {
       wallets: { deployer, governance, attester, guardian, minter, burner, agent, operator, fulfiller, custody, recovery },
       holders: { alice, bob, carol, dave, eve },
       timelock,
+      recoveryTimelock,
       registry,
       identity,
       rules: { identityRule, lockupRule, windowRule, maxHoldersRule },
@@ -211,24 +224,66 @@ export type Stack = Awaited<ReturnType<typeof deployStack>>;
  * - every token runs the hook the council reviewed, bound to it, administered by the timelock, with the intended
  *   ordered rule list (`RULE_ORDER`); rules have no access control of their own;
  * - the guardian can cancel timelock operations but cannot propose or execute them;
- * - `ProxyDeployer` is owned by the timelock, so no token can be placed outside governance.
+ * - `ProxyDeployer` is owned by the timelock, so no token can be placed outside governance;
+ * - the recovery timelock holds exactly RECOVERY_ROLE on each token, the executor and the main timelock (nothing else,
+ *   nowhere else), has no cancellers, and the guardian holds nothing on it.
  */
 async function assertHandedOver(s: Omit<Stack, "holders" | "identity" | "asset" | "implementations">) {
   const deployer = s.wallets.deployer.account.address;
   const timelock = s.timelock.address;
   const known = Object.values(s.wallets).map((w) => w.account.address);
-  for (const c of [s.timelock, s.registry, s.token, s.vault4626, s.vault7540, s.executor]) {
+  type Gated = { address: Address; abi: unknown };
+  /** Every role id the contract exposes through a `*_ROLE()` getter, so a role added later is covered. */
+  const rolesOf = async (c: Gated) => {
     const abi = c.abi as Abi;
     const roles: Hex[] = [];
     for (const item of abi) {
       if (item.type !== "function" || !item.name.endsWith("_ROLE") || item.inputs.length !== 0) continue;
       roles.push((await s.publicClient.readContract({ address: c.address, abi, functionName: item.name })) as Hex);
     }
-    const hasRole = (role: Hex, account: Address) =>
-      s.publicClient.readContract({ address: c.address, abi, functionName: "hasRole", args: [role, account] });
-    for (const role of roles) assert.equal(await hasRole(role, deployer), false, `deployer holds ${role} on ${c.address}`);
-    assert.equal(await hasRole(ROLES.DEFAULT_ADMIN, timelock), true, `timelock lacks DEFAULT_ADMIN_ROLE on ${c.address}`);
+    return roles;
+  };
+  const heldBy = async (c: Gated, account: Address) => {
+    const held: Hex[] = [];
+    for (const role of await rolesOf(c)) {
+      const has = await s.publicClient.readContract({
+        address: c.address,
+        abi: c.abi as Abi,
+        functionName: "hasRole",
+        args: [role, account],
+      });
+      if (has) held.push(role);
+    }
+    return held.sort();
+  };
+  for (const c of [s.timelock, s.recoveryTimelock, s.registry, s.token, s.vault4626, s.vault7540, s.executor]) {
+    assert.deepEqual(await heldBy(c, deployer), [], `deployer holds roles on ${c.address}`);
   }
+  for (const c of [s.timelock, s.registry, s.token, s.vault4626, s.vault7540, s.executor]) {
+    assert.ok((await heldBy(c, timelock)).includes(ROLES.DEFAULT_ADMIN), `timelock lacks DEFAULT_ADMIN_ROLE on ${c.address}`);
+  }
+  // M-1: the recovery timelock's complete role set, pinned so a change that widens it fails the deploy.
+  const recovery = s.recoveryTimelock.address;
+  const expectedRecoveryRoles: [Gated, Hex[]][] = [
+    [s.timelock, [ROLES.RECOVERY]],
+    [s.token, [ROLES.RECOVERY]],
+    [s.vault4626, [ROLES.RECOVERY]],
+    [s.vault7540, [ROLES.RECOVERY]],
+    [s.executor, [ROLES.RECOVERY]],
+    [s.registry, []],
+    [s.recoveryTimelock, [ROLES.DEFAULT_ADMIN]], // OZ makes every timelock its own admin
+  ];
+  for (const [c, roles] of expectedRecoveryRoles) {
+    assert.deepEqual(await heldBy(c, recovery), [...roles].sort(), `recovery timelock role set on ${c.address}`);
+  }
+  assert.deepEqual(await heldBy(s.recoveryTimelock, s.wallets.guardian.account.address), [], "guardian holds roles on the recovery timelock");
+  for (const account of known) {
+    assert.equal(await s.recoveryTimelock.read.hasRole([ROLES.CANCELLER, account]), false, `${account} can cancel recovery`);
+  }
+  const governance = s.wallets.governance.account.address;
+  assert.equal(await s.recoveryTimelock.read.hasRole([await s.recoveryTimelock.read.PROPOSER_ROLE(), governance]), true);
+  assert.equal(await s.recoveryTimelock.read.hasRole([await s.recoveryTimelock.read.EXECUTOR_ROLE(), governance]), true);
+  assert.ok((await s.recoveryTimelock.read.getMinDelay()) >= 7n * 86_400n, "recovery timelock delay below 7 days");
   for (const t of [s.token, s.vault4626, s.vault7540]) {
     assert.equal(await t.read.hasRole([ROLES.UPGRADER, timelock]), true, `timelock lacks UPGRADER_ROLE on ${t.address}`);
     for (const account of known) assert.equal(await t.read.hasRole([ROLES.UPGRADER, account]), false, `${account} can upgrade`);

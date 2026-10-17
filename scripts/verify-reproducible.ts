@@ -30,6 +30,7 @@ const ATTESTED = {
 } as const;
 const DEPLOYED = {
   PolicyRegistry: "governance",
+  GovernanceTimelock: "governance",
   IntentExecutor: "intents",
   ProxyDeployer: "deploy",
   TokenProxy: "deploy",

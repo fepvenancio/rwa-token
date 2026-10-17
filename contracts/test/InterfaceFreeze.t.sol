@@ -13,6 +13,7 @@ import {IERC7540Redeem} from 'interfaces/IERC7540Redeem.sol';
 import {IERC7575} from 'interfaces/IERC7575.sol';
 import {IGated4626Vault} from 'interfaces/IGated4626Vault.sol';
 import {IGated7540Vault} from 'interfaces/IGated7540Vault.sol';
+import {IGovernanceTimelock} from 'interfaces/IGovernanceTimelock.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IIdentityRule} from 'interfaces/IIdentityRule.sol';
 import {IIntentExecutor} from 'interfaces/IIntentExecutor.sol';
@@ -60,6 +61,8 @@ contract InterfaceFreezeTest is Test {
     assertEq(type(IIdentityRegistry).interfaceId, bytes4(0xb9209e33), 'IIdentityRegistry');
     // Added in Phase 7 (2026-10-17), after ProxyDeployer moved to OZ Ownable
     assertEq(type(IProxyDeployer).interfaceId, bytes4(0x886d8cd8), 'IProxyDeployer');
+    // Added in v0.2.0 (owner decision M-1)
+    assertEq(type(IGovernanceTimelock).interfaceId, bytes4(0x31993a1c), 'IGovernanceTimelock');
   }
 
   function test_WhenInterfacesCompile_TheirEventTopicsArePinned() external pure {
