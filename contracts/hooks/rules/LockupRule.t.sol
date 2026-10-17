@@ -207,7 +207,7 @@ contract LockupRuleUnit_TokenCallsAreStatic is LockupRuleUnitTest {
     _stateful.hasRole(_AGENT_ROLE, _agent); // control: the same read writes when called with CALL
     assertEq(_stateful.writes(), 1);
 
-    vm.expectRevert();
+    vm.expectRevert(bytes('')); // a write inside a STATICCALL reverts with empty data, bubbled by the rule
     vm.prank(_agent);
     _rule.setLockup(address(_stateful), _holder, _NOW + 1 days);
     assertEq(_rule.unlockTime(address(_stateful), _holder), 0);

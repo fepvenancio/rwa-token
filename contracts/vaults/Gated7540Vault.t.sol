@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import {IAccessControl} from '@openzeppelin/contracts/access/IAccessControl.sol';
 import {IERC4626} from '@openzeppelin/contracts/interfaces/IERC4626.sol';
+import {IERC20Errors} from '@openzeppelin/contracts/interfaces/draft-IERC6093.sol';
 import {ERC1967Proxy} from '@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol';
 import {Initializable} from '@openzeppelin/contracts/proxy/utils/Initializable.sol';
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
@@ -243,6 +244,13 @@ contract Gated7540VaultUnit_Operators is Gated7540VaultUnitTest {
 }
 
 contract Gated7540VaultUnit_RequestDeposit is Gated7540VaultUnitTest {
+  function test_WhenTheControllerIsZero_ItReverts() external {
+    vm.expectRevert(IGated7540Vault.Gated7540Vault_ZeroAddress.selector);
+    vm.prank(_alice);
+    _vault.requestDeposit(100, address(0), _alice);
+    assertEq(_asset.balanceOf(address(_vault)), 0);
+  }
+
   function test_WhenTheOwnerRequests_ItTakesTheAssetsAndEmits(
     uint256 _assets
   ) external {
@@ -398,30 +406,38 @@ contract Gated7540VaultUnit_ClaimDeposit is Gated7540VaultUnitTest {
     assertEq(_vault.maxMint(_alice), 0);
   }
 
-  /// @dev Rounding in the vault's favour, and the remainder claim clears exactly: never more than the fulfilled shares
+  /// @dev A genuine split: the first step always yields at least one share, then the remainder clears exactly
   function test_WhenClaimedInTwoStepsByAssets_SharesNeverExceedTheFulfilment(
     uint256 _assets,
     uint256 _shares,
     uint256 _first
   ) external {
     _assets = bound(_assets, 2, _FUNDS);
-    _shares = bound(_shares, 1, _FUNDS);
-    _first = bound(_first, 1, _assets - 1);
+    _shares = bound(_shares, 2, _FUNDS);
+    // Smallest first step that floors to >= 1 share; <= _assets - 1 because _shares >= 2.
+    _first = bound(_first, Math.ceilDiv(_assets, _shares), _assets - 1);
     _requestDeposit(_alice, _assets);
     _fulfillDeposit(_alice, _assets, _shares);
 
-    uint256 _expected = Math.mulDiv(_first, _shares, _assets);
     vm.startPrank(_alice);
-    if (_expected == 0) {
-      vm.expectRevert(IGated7540Vault.Gated7540Vault_ZeroAmount.selector);
-      _vault.deposit(_first, _alice, _alice);
-    } else {
-      assertEq(_vault.deposit(_first, _alice, _alice), _expected);
-    }
-    _vault.deposit(_vault.maxDeposit(_alice), _alice, _alice);
+    uint256 _firstShares = _vault.deposit(_first, _alice, _alice);
+    assertEq(_firstShares, Math.mulDiv(_first, _shares, _assets));
+    assertGt(_firstShares, 0);
+    uint256 _secondShares = _vault.deposit(_vault.maxDeposit(_alice), _alice, _alice);
     vm.stopPrank();
+
+    assertEq(_firstShares + _secondShares, _shares, 'exactly the fulfilled shares');
     assertEq(_vault.balanceOf(_alice), _shares);
-    assertEq(_vault.maxMint(_alice), 0);
+    assertEq(_vault.maxDeposit(_alice) + _vault.maxMint(_alice), 0, 'nothing stranded');
+  }
+
+  function test_WhenAPartialDepositRoundsToZeroShares_ItReverts() external {
+    _requestDeposit(_alice, 10);
+    _fulfillDeposit(_alice, 10, 1);
+    vm.expectRevert(IGated7540Vault.Gated7540Vault_ZeroAmount.selector);
+    vm.prank(_alice);
+    _vault.deposit(9, _alice, _alice);
+    assertEq(_vault.maxDeposit(_alice), 10, 'the failed claim consumed nothing');
   }
 
   function test_WhenMintingPartially_TheAssetsRoundUp(
@@ -436,9 +452,16 @@ contract Gated7540VaultUnit_ClaimDeposit is Gated7540VaultUnitTest {
     _fulfillDeposit(_alice, _assets, _shares);
 
     uint256 _cost = Math.mulDiv(_first, _assets, _shares, Math.Rounding.Ceil);
-    vm.prank(_alice);
+    vm.startPrank(_alice);
     assertEq(_vault.mint(_first, _alice, _alice), _cost);
     assertEq(_vault.claimableDepositRequest(0, _alice), _assets - _cost);
+    // The remainder clears exactly, even when the round-up left fewer assets than shares (or none).
+    uint256 _secondCost = _vault.mint(_vault.maxMint(_alice), _alice, _alice);
+    vm.stopPrank();
+
+    assertEq(_cost + _secondCost, _assets, 'exactly the fulfilled assets');
+    assertEq(_vault.balanceOf(_alice), _shares);
+    assertEq(_vault.maxDeposit(_alice) + _vault.maxMint(_alice), 0, 'nothing stranded');
   }
 
   function test_WhenClaimingMoreThanClaimable_ItReverts() external {
@@ -469,6 +492,14 @@ contract Gated7540VaultUnit_ClaimDeposit is Gated7540VaultUnitTest {
 }
 
 contract Gated7540VaultUnit_RequestRedeem is Gated7540VaultUnitTest {
+  function test_WhenTheControllerIsZero_ItReverts() external {
+    _holdShares(_alice, 100);
+    vm.expectRevert(IGated7540Vault.Gated7540Vault_ZeroAddress.selector);
+    vm.prank(_alice);
+    _vault.requestRedeem(30, address(0), _alice);
+    assertEq(_vault.balanceOf(_alice), 100);
+  }
+
   function test_WhenTheOwnerRequests_TheSharesAreEscrowedThroughTheHookAsATransfer(
     uint256 _shares
   ) external {
@@ -506,9 +537,10 @@ contract Gated7540VaultUnit_RequestRedeem is Gated7540VaultUnitTest {
     assertEq(_vault.pendingRedeemRequest(0, _alice), 30);
   }
 
+  /// @dev A non-operator needs a share allowance from the owner, as for ERC-20 `transferFrom`
   function test_WhenAStrangerRequests_ItReverts() external {
     _holdShares(_alice, 100);
-    vm.expectRevert();
+    vm.expectRevert(abi.encodeWithSelector(IERC20Errors.ERC20InsufficientAllowance.selector, _stranger, 0, 30));
     vm.prank(_stranger);
     _vault.requestRedeem(30, _stranger, _alice);
   }
@@ -571,27 +603,44 @@ contract Gated7540VaultUnit_FulfillAndClaimRedeem is Gated7540VaultUnitTest {
     assertEq(_vault.maxWithdraw(_alice), 0);
   }
 
+  /// @dev A genuine split: the first step always pays at least one asset, then the remainder clears exactly
   function test_WhenRedeemingPartially_TheAssetsRoundDown(
     uint256 _assets,
     uint256 _first
   ) external {
-    _assets = bound(_assets, 1, _FUNDS);
-    _first = bound(_first, 1, 49);
+    // >= 2 assets for 50 shares is always splittable; 1 asset is the zero-rounding case tested separately.
+    _assets = bound(_assets, 2, _FUNDS);
+    // Smallest first step that floors to >= 1 asset (<= 25 here), kept below the full 50 shares.
+    _first = bound(_first, Math.ceilDiv(50, _assets), 49);
     _holdShares(_alice, 50);
     _requestRedeem(_alice, 50);
     _fulfillRedeem(_alice, 50, _assets);
+    uint256 _before = _asset.balanceOf(_alice);
 
-    uint256 _expected = Math.mulDiv(_first, _assets, 50);
-    vm.prank(_alice);
-    if (_expected == 0) {
-      vm.expectRevert(IGated7540Vault.Gated7540Vault_ZeroAmount.selector);
-      _vault.redeem(_first, _alice, _alice);
-    } else {
-      assertEq(_vault.redeem(_first, _alice, _alice), _expected);
-    }
+    vm.startPrank(_alice);
+    uint256 _firstAssets = _vault.redeem(_first, _alice, _alice);
+    assertEq(_firstAssets, Math.mulDiv(_first, _assets, 50));
+    assertGt(_firstAssets, 0);
+    uint256 _secondAssets = _vault.redeem(_vault.maxRedeem(_alice), _alice, _alice);
+    vm.stopPrank();
+
+    assertEq(_firstAssets + _secondAssets, _assets, 'exactly the fulfilled assets');
+    assertEq(_asset.balanceOf(_alice) - _before, _assets);
+    assertEq(_vault.maxRedeem(_alice) + _vault.maxWithdraw(_alice), 0, 'nothing stranded');
   }
 
-  /// @dev Ceil on the shares deducted: a tiny withdrawal can never take assets for zero shares
+  function test_WhenAPartialRedeemRoundsToZeroAssets_ItReverts() external {
+    _holdShares(_alice, 50);
+    _requestRedeem(_alice, 50);
+    _fulfillRedeem(_alice, 50, 1);
+    vm.expectRevert(IGated7540Vault.Gated7540Vault_ZeroAmount.selector);
+    vm.prank(_alice);
+    _vault.redeem(49, _alice, _alice);
+    assertEq(_vault.maxRedeem(_alice), 50, 'the failed claim consumed nothing');
+  }
+
+  /// @dev Ceil on the shares deducted: a tiny withdrawal can never take assets for zero shares. The remainder then
+  ///      clears exactly, including when the round-up consumed every share and only assets are left
   function test_WhenWithdrawingPartially_TheSharesRoundUp(
     uint256 _assets,
     uint256 _first
@@ -601,12 +650,19 @@ contract Gated7540VaultUnit_FulfillAndClaimRedeem is Gated7540VaultUnitTest {
     _holdShares(_alice, 50);
     _requestRedeem(_alice, 50);
     _fulfillRedeem(_alice, 50, _assets);
+    uint256 _before = _asset.balanceOf(_alice);
 
     uint256 _burned = Math.mulDiv(_first, 50, _assets, Math.Rounding.Ceil);
-    vm.prank(_alice);
+    vm.startPrank(_alice);
     assertEq(_vault.withdraw(_first, _alice, _alice), _burned);
     assertGt(_burned, 0);
     assertEq(_vault.maxRedeem(_alice), 50 - _burned);
+    uint256 _secondBurned = _vault.withdraw(_vault.maxWithdraw(_alice), _alice, _alice);
+    vm.stopPrank();
+
+    assertEq(_burned + _secondBurned, 50, 'exactly the fulfilled shares');
+    assertEq(_asset.balanceOf(_alice) - _before, _assets, 'exactly the fulfilled assets');
+    assertEq(_vault.maxRedeem(_alice) + _vault.maxWithdraw(_alice), 0, 'nothing stranded');
   }
 
   function test_WhenClaimsArePaused_MaxIsZeroAndClaimsRevert() external {
@@ -1032,10 +1088,24 @@ contract Gated7540VaultIntegration_Escrow is Gated7540VaultIntegrationTest {
 
 /// @notice Drives requests, fulfilments, claims and rejects across a few controllers
 contract Gated7540Handler is Test {
+  /// @dev What an action needs an actor to have; the handler picks the first actor (from the fuzzed seed) that has it
+  enum Need {
+    PendingDeposit,
+    ClaimableDepositAssets,
+    ClaimableDepositShares,
+    Shares,
+    PendingRedeem,
+    ClaimableRedeemShares,
+    ClaimableRedeemAssets
+  }
+
   Gated7540Vault internal _vault;
   MockAsset internal _asset;
   address internal _fulfiller;
   address[3] internal _actors;
+
+  /// @notice Ghost counters: how many times each action actually executed in the current run
+  mapping(bytes32 _action => uint256 _count) public executed;
 
   constructor(
     Gated7540Vault _target,
@@ -1067,6 +1137,7 @@ contract Gated7540Handler is Test {
     _asset.mint(_actor, _assets);
     vm.prank(_actor);
     _vault.requestDeposit(_assets, _actor, _actor);
+    ++executed['requestDeposit'];
   }
 
   function fulfillDeposit(
@@ -1074,30 +1145,48 @@ contract Gated7540Handler is Test {
     uint256 _assets,
     uint256 _shares
   ) external {
-    address _actor = _actors[_seed % 3];
-    _assets = bound(_assets, 1, _vault.pendingDepositRequest(0, _actor));
+    (address _actor, uint256 _max) = _firstWith(_seed, Need.PendingDeposit);
+    if (_max == 0) return;
     vm.prank(_fulfiller);
-    _vault.fulfillDeposit(_actor, _assets, bound(_shares, 1, 1e15));
+    _vault.fulfillDeposit(_actor, bound(_assets, 1, _max), bound(_shares, 1, 1e15));
+    ++executed['fulfillDeposit'];
   }
 
+  /// @dev Floor on shares: a partial claim that would round to zero shares is taken in full instead
   function claimDeposit(
     uint256 _seed,
     uint256 _assets
   ) external {
-    address _actor = _actors[_seed % 3];
-    _assets = bound(_assets, 1, _vault.maxDeposit(_actor));
+    (address _actor, uint256 _max) = _firstWith(_seed, Need.ClaimableDepositAssets);
+    if (_max == 0) return;
+    _assets = bound(_assets, 1, _max);
+    if (_assets < _max && Math.mulDiv(_assets, _vault.maxMint(_actor), _max) == 0) _assets = _max;
     vm.prank(_actor);
     _vault.deposit(_assets, _actor, _actor);
+    ++executed['claimDeposit'];
+  }
+
+  /// @dev Ceil on assets consumed; a mint never reverts for rounding
+  function claimMint(
+    uint256 _seed,
+    uint256 _shares
+  ) external {
+    (address _actor, uint256 _max) = _firstWith(_seed, Need.ClaimableDepositShares);
+    if (_max == 0) return;
+    vm.prank(_actor);
+    _vault.mint(bound(_shares, 1, _max), _actor, _actor);
+    ++executed['claimMint'];
   }
 
   function requestRedeem(
     uint256 _seed,
     uint256 _shares
   ) external {
-    address _actor = _actors[_seed % 3];
-    _shares = bound(_shares, 1, _vault.balanceOf(_actor));
+    (address _actor, uint256 _max) = _firstWith(_seed, Need.Shares);
+    if (_max == 0) return;
     vm.prank(_actor);
-    _vault.requestRedeem(_shares, _actor, _actor);
+    _vault.requestRedeem(bound(_shares, 1, _max), _actor, _actor);
+    ++executed['requestRedeem'];
   }
 
   function fulfillRedeem(
@@ -1105,42 +1194,94 @@ contract Gated7540Handler is Test {
     uint256 _shares,
     uint256 _assets
   ) external {
-    address _actor = _actors[_seed % 3];
-    _shares = bound(_shares, 1, _vault.pendingRedeemRequest(0, _actor));
+    (address _actor, uint256 _max) = _firstWith(_seed, Need.PendingRedeem);
+    if (_max == 0) return;
     _assets = bound(_assets, 1, 1e15);
     _asset.mint(_fulfiller, _assets);
     vm.prank(_fulfiller);
-    _vault.fulfillRedeem(_actor, _shares, _assets);
+    _vault.fulfillRedeem(_actor, bound(_shares, 1, _max), _assets);
+    ++executed['fulfillRedeem'];
   }
 
+  /// @dev Floor on assets: a partial claim that would round to zero assets is taken in full instead
   function claimRedeem(
     uint256 _seed,
     uint256 _shares
   ) external {
-    address _actor = _actors[_seed % 3];
-    _shares = bound(_shares, 1, _vault.maxRedeem(_actor));
+    (address _actor, uint256 _max) = _firstWith(_seed, Need.ClaimableRedeemShares);
+    if (_max == 0) return;
+    _shares = bound(_shares, 1, _max);
+    if (_shares < _max && Math.mulDiv(_shares, _vault.maxWithdraw(_actor), _max) == 0) _shares = _max;
     vm.prank(_actor);
     _vault.redeem(_shares, _actor, _actor);
+    ++executed['claimRedeem'];
+  }
+
+  /// @dev Ceil on shares deducted; can leave assets claimable with zero shares, which the exact-clearing path pays out
+  function claimWithdraw(
+    uint256 _seed,
+    uint256 _assets
+  ) external {
+    (address _actor, uint256 _max) = _firstWith(_seed, Need.ClaimableRedeemAssets);
+    if (_max == 0) return;
+    vm.prank(_actor);
+    _vault.withdraw(bound(_assets, 1, _max), _actor, _actor);
+    ++executed['claimWithdraw'];
   }
 
   function rejectDeposit(
     uint256 _seed
   ) external {
+    (address _actor, uint256 _max) = _firstWith(_seed, Need.PendingDeposit);
+    if (_max == 0) return;
     vm.prank(_fulfiller);
-    _vault.rejectDepositRequest(_actors[_seed % 3]);
+    _vault.rejectDepositRequest(_actor);
+    ++executed['rejectDeposit'];
   }
 
   function rejectRedeem(
     uint256 _seed
   ) external {
+    (address _actor, uint256 _max) = _firstWith(_seed, Need.PendingRedeem);
+    if (_max == 0) return;
     vm.prank(_fulfiller);
-    _vault.rejectRedeemRequest(_actors[_seed % 3]);
+    _vault.rejectRedeemRequest(_actor);
+    ++executed['rejectRedeem'];
   }
 
   function recoverRedeem(
     uint256 _seed
   ) external {
-    _vault.recoverRedeemRequest(_actors[_seed % 3], _actors[(_seed + 1) % 3]);
+    (address _actor, uint256 _max) = _firstWith(_seed, Need.PendingRedeem);
+    if (_max == 0) return;
+    _vault.recoverRedeemRequest(_actor, _actors[(_seed + 1) % 3]);
+    ++executed['recoverRedeem'];
+  }
+
+  /// @dev The first actor, scanning from `_seed`, with a non-zero amount of `_need`; (seed actor, 0) if none has any
+  function _firstWith(
+    uint256 _seed,
+    Need _need
+  ) internal view returns (address _actor, uint256 _amount) {
+    for (uint256 _k; _k < 3; ++_k) {
+      _actor = _actors[(_seed + _k) % 3];
+      _amount = _amountOf(_actor, _need);
+      if (_amount > 0) return (_actor, _amount);
+    }
+    _actor = _actors[_seed % 3];
+  }
+
+  function _amountOf(
+    address _actor,
+    Need _need
+  ) internal view returns (uint256 _amount) {
+    if (_need == Need.PendingDeposit) return _vault.pendingDepositRequest(0, _actor);
+    if (_need == Need.ClaimableDepositAssets) return _vault.maxDeposit(_actor);
+    if (_need == Need.ClaimableDepositShares) return _vault.maxMint(_actor);
+    if (_need == Need.Shares) return _vault.balanceOf(_actor);
+    if (_need == Need.PendingRedeem) return _vault.pendingRedeemRequest(0, _actor);
+    if (_need == Need.ClaimableRedeemShares) return _vault.maxRedeem(_actor);
+    return _vault.maxWithdraw(_actor);
   }
 }
 
@@ -1174,6 +1315,49 @@ contract Gated7540VaultInvariantTest is Gated7540VaultUnitTest {
       _pending += _vault.pendingRedeemRequest(0, _all[_i]);
     }
     assertEq(_vault.balanceOf(address(_vault)), _pending);
+  }
+
+  /// @dev Nothing is stranded: claimable assets are always fully withdrawable, and claimable shares always mintable
+  function invariant_ClaimsCanAlwaysBeClearedInFull() external {
+    address[3] memory _all = _handler.actors();
+    for (uint256 _i; _i < 3; ++_i) {
+      uint256 _snapshot = vm.snapshotState();
+      uint256 _assets = _vault.maxWithdraw(_all[_i]);
+      if (_assets > 0) {
+        vm.prank(_all[_i]);
+        _vault.withdraw(_assets, _all[_i], _all[_i]);
+        assertEq(_vault.maxWithdraw(_all[_i]) + _vault.maxRedeem(_all[_i]), 0, 'redemption fully cleared');
+      }
+      uint256 _shares = _vault.maxMint(_all[_i]);
+      if (_shares > 0) {
+        vm.prank(_all[_i]);
+        _vault.mint(_shares, _all[_i], _all[_i]);
+        assertEq(_vault.maxMint(_all[_i]) + _vault.maxDeposit(_all[_i]), 0, 'deposit fully cleared');
+      }
+      vm.revertToState(_snapshot);
+    }
+  }
+
+  /// @dev Non-vacuity: every run must have executed every action at least once, so the invariants above are checked
+  ///      against vaults that went through deposits, mint and withdraw claims, rejections and recoveries. Runs reach
+  ///      400+ executed actions, so a missing action means the handler regressed into no-ops, not bad luck.
+  function afterInvariant() external view {
+    string[11] memory _actions = [
+      'requestDeposit',
+      'fulfillDeposit',
+      'claimDeposit',
+      'claimMint',
+      'requestRedeem',
+      'fulfillRedeem',
+      'claimRedeem',
+      'claimWithdraw',
+      'rejectDeposit',
+      'rejectRedeem',
+      'recoverRedeem'
+    ];
+    for (uint256 _i; _i < _actions.length; ++_i) {
+      assertGt(_handler.executed(bytes32(bytes(_actions[_i]))), 0, _actions[_i]);
+    }
   }
 
   function invariant_SupplyIsHeldByActorsAndEscrow() external view {

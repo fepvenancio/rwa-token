@@ -262,7 +262,7 @@ contract SettlementWindowRuleUnit_TokenCallsAreStatic is SettlementWindowRuleUni
   function test_WhenTheTokenTriesToWriteDuringTheRoleCheck_SetWindowReverts() external {
     MockStatefulToken _stateful = new MockStatefulToken();
     uint8 _days = _rule.MON_TO_FRI(); // read first: an external call would consume expectRevert and the prank
-    vm.expectRevert();
+    vm.expectRevert(bytes('')); // a write inside a STATICCALL reverts with empty data, bubbled by the rule
     vm.prank(_admin);
     _rule.setWindow(address(_stateful), 9 hours, 17 hours, _days);
   }

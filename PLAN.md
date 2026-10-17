@@ -842,6 +842,29 @@ An Ignition deployment of the whole stack:
 - **solc:** Hardhat, forge and Aderyn each download it and verify it against soliditylang.org's hashes. Documented.
 - **Tamper checks:** a one-character change to a `tools.lock` hash makes `fetch-tool.sh` fail; an unknown tool or platform is refused.
 
+### Test-quality review (2026-10-17): validated, real findings fixed
+- **Validation:** 4 of the 6 findings were real. False: the "TamperedHook" parity test (doesn't exist), the Halmos finding (quoted code not in the repo; the "nonce not consumed" mutant proves the success branch is reachable), the `|revert` regexes (none exist), "NO_HOOK unused" (used at `PolicyGatedERC20Upgradeable.sol:329`; defensive, unreachable), rule constructor admin checks (the rules have no constructor).
+- **Fixed, test-only (bytecode identical to v0.1.0):**
+  1. **7540 invariant handler:**
+     - each action picks the first actor (from the fuzzed seed) that has something to act on, instead of `bound(x, 1, 0)` reverting; partial claims that would round to zero are taken in full;
+     - new `claimMint` and `claimWithdraw` actions (the round-up paths);
+     - new invariant `invariant_ClaimsCanAlwaysBeClearedInFull` (from any reachable state, claimable assets withdraw and claimable shares mint to exactly zero);
+     - `afterInvariant()` asserts every one of the 11 actions executed in every run.
+     - Measured: runs execute 400+ real actions.
+     - The previous invariants were not vacuous: a probe confirmed the fuzzer reached the handler. The all-zero counters seen first were a shrinking artefact of an always-failing probe.
+     - Mutant: a no-op `claimWithdraw` fails `afterInvariant`.
+  2. **Partial-claim fuzz tests:**
+     - the deposit-by-assets and redeem tests now bound the first step so it yields at least one unit, making every run a genuine split;
+     - all four (deposit, mint, redeem, withdraw) claim the remainder and assert exact totals with nothing left claimable;
+     - the zero-rounding reverts have their own deterministic tests.
+  3. **Zero `controller`** on `requestDeposit` and `requestRedeem`: tested (`Gated7540Vault_ZeroAddress`, nothing moved).
+  4. **No bare `vm.expectRevert()` remains:**
+     - the stranger request pins `ERC20InsufficientAllowance(stranger, 0, 30)`;
+     - the `ProxyDeployer` cases pin `HookTokenMismatch` and `PolicyGated_NotAttested`;
+     - the STATICCALL tests pin an empty revert (`bytes('')`, strict in EDR, verified by probe);
+     - the non-payable upgrade pins `Errors.FailedCall` (OZ `Address` wraps the empty revert).
+- **Result:** 435 passing (378 solidity, 57 nodejs).
+
 ### Remaining brief items (deferred until the first external integrator is known)
 - **ERC-3643 `IToken` read adapter.**
 - **Exact ERC-7943 conformance,** once the ERC is Final. Today there is no 7943 interface ID, because the function names and return types differ (README deviations).

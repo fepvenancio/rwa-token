@@ -565,11 +565,11 @@ contract MaxHoldersRuleUnit_TokenCallsAreStatic is MaxHoldersRuleUnitTest {
   function test_WhenTheTokenTriesToWriteDuringTheRoleCheck_AdminWritesRevert() external {
     MockStatefulToken _stateful = new MockStatefulToken();
     vm.startPrank(_admin);
-    vm.expectRevert();
+    vm.expectRevert(bytes('')); // a write inside a STATICCALL reverts with empty data, bubbled by the rule
     _rule.setCap(address(_stateful), 3);
-    vm.expectRevert();
+    vm.expectRevert(bytes('')); // a write inside a STATICCALL reverts with empty data, bubbled by the rule
     _rule.seedHolderCount(address(_stateful), 1);
-    vm.expectRevert();
+    vm.expectRevert(bytes('')); // a write inside a STATICCALL reverts with empty data, bubbled by the rule
     _rule.setExemptHolder(address(_stateful), _to, true);
     vm.stopPrank();
   }
@@ -578,7 +578,7 @@ contract MaxHoldersRuleUnit_TokenCallsAreStatic is MaxHoldersRuleUnitTest {
     MockStatefulToken _stateful = new MockStatefulToken();
     IPolicyHook.TransferContext memory _ctxStateful = _ctx(IPolicyHook.TransferKind.MINT, address(0), _to, 1);
     _ctxStateful.token = address(_stateful);
-    vm.expectRevert();
+    vm.expectRevert(bytes('')); // a write inside a STATICCALL reverts with empty data, bubbled by the rule
     _rule.after_(_ctxStateful);
     assertEq(_rule.holderCount(address(_stateful)), 0);
   }

@@ -173,6 +173,7 @@ Each row is a bug deliberately planted, the run that caught it, then restored fr
 | Ignition `Activate` | UPGRADER to an ops account; deployer keeps timelock admin; deployer keeps `ProxyDeployer` ownership; hooks built with rules reversed | 54 / 54 / 55 / 55 failing |
 | upgrades-core | upgrade-unsafe state initialiser | `validate` FAILED |
 | Aderyn gate | one inline suppression removed | `npm run aderyn` fails (1 high) |
+| 7540 invariant handler | an action silently turned into a no-op | `afterInvariant` fails (every action must execute in every run) |
 | Reproducibility | metadata hash re-enabled | `verify:reproducible`: every contract differs across jobs |
 
 ## 6. Toolchain supply chain

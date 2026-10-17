@@ -132,7 +132,11 @@ contract ProxyDeployerUnit_Deploy is ProxyDeployerUnitTest {
   function test_WhenTheHookWasBoundElsewhere_TheSaltStaysFreeForTheCorrectHook() external {
     address _predicted = _deployer.predict('INT', address(_impl));
     _bindHook(_otherHook, makeAddr('elsewhere'));
-    vm.expectRevert();
+    vm.expectRevert(
+      abi.encodeWithSelector(
+        IProxyDeployer.ProxyDeployer_HookTokenMismatch.selector, _otherHook, makeAddr('elsewhere'), _predicted
+      )
+    );
     _deploy('INT', _init('INT', _otherHook), _otherHook);
     assertFalse(_deployer.saltUsed(keccak256('INT')));
 
@@ -175,7 +179,9 @@ contract ProxyDeployerUnit_Deploy is ProxyDeployerUnitTest {
   function test_WhenInitialisationReverts_TheSameSymbolDeploysAfterTheFix() external {
     address _predicted = _deployer.predict('INT', address(_impl));
     vm.mockCall(_registry, abi.encodeWithSelector(IPolicyRegistry.isAttested.selector), abi.encode(false));
-    vm.expectRevert();
+    vm.expectRevert(
+      abi.encodeWithSelector(IPolicyGated.PolicyGated_NotAttested.selector, _hook, IPolicyRegistry.AttestKind.HOOK)
+    );
     _deploy('INT', _init('INT', _hook), _hook);
 
     vm.mockCall(_registry, abi.encodeWithSelector(IPolicyRegistry.isAttested.selector), abi.encode(true));

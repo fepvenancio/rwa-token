@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import {ERC1967Proxy} from '@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol';
 import {ERC1967Utils} from '@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol';
+import {Errors} from '@openzeppelin/contracts/utils/Errors.sol';
 import {ReentrancyGuardTransient} from '@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol';
 import {Test} from 'forge-std/Test.sol';
 
@@ -341,7 +342,7 @@ contract IntentTokenIntegration_Ether is IntentTokenIntegrationTest {
     _token.upgradeToAndCall{value: 1}(address(_impl), '');
 
     vm.prank(_admin);
-    vm.expectRevert(); // the delegated call is non-payable
+    vm.expectRevert(Errors.FailedCall.selector); // the delegated call is non-payable; OZ Address wraps the empty revert
     _token.upgradeToAndCall{value: 1}(address(_impl), abi.encodeCall(_token.decimals, ()));
     assertEq(address(_token).balance, 0);
   }
