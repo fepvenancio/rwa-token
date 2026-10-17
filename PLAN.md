@@ -1,6 +1,6 @@
 # PLAN
 
-Status: **Phase 5 complete and pushed (5a `9f8f5b0`, 5b `5791968`, recovery follow-up). Next: Phase 6 (viem integration) — plan.**
+Status: **Phase 5 complete and pushed (`d965ff5`). Phase 6 (viem integration): plan written, awaiting review. No Phase 6 code yet.**
 
 Brief v2 ("Gated Token Stack") replaced the original executor-only brief on 2026-10-16. On the same day the owner supplied a reference implementation in `Imported/` (now deleted; its contents live in `contracts/`) and approved, in chat, integrating it with the major findings fixed, a common-bug sweep, and the Wonderland Solidity standards.
 
@@ -488,5 +488,57 @@ Each gets red tests, then the implementation, then green, then a stop for review
   - **Tests** (red first): agent-only, nothing pending, zero recipient, the FORCED context with the event, works while paused, and fulfil/reject say "no request" afterwards. Integration runs the owner's sequence: de-verified controller → reject reverts → recovery to an unverified account reverts → recovery to a verified treasury → fulfil and reject revert with no request. **The invariant handler fuzzes recovery**, so escrow == Σ pending still holds across sequences. **Mutation check:** a recovery that doesn't clear pending is caught by 3 tests and the invariant.
 - **Verification:** `npm test` gives 347 passing (346 solidity, 1 nodejs); lint, typecheck and fmt are clean; Slither reports 0; Halmos 4/4.
 
+## Phase 6 — viem integration (PLAN, awaiting review)
+
+### Goal (brief §8)
+`test/nodejs/*.test.ts` (node:test + viem, `network.create()`) covering:
+- `signTypedData` → execute;
+- vault flows;
+- event decoding;
+- pre-flight parity from the TypeScript side.
+
+The temporary `smoke.test.ts` is deleted.
+
+### What TypeScript adds over the Solidity suite (recommended scope: only this, no re-port of unit coverage)
+1. **Real-wallet EIP-712.**
+   - `walletClient.signTypedData` (domain: token name, `"1"`, chainId, token address) produces a digest equal to the on-chain `intentHash` and to viem's `hashTypedData`.
+   - The signed intent settles via `IntentExecutor.execute`, and the `IntentExecuted` log is decoded.
+   - A signature for the wrong chainId or token is decoded client-side as `PolicyGated_TransferRejected(BAD_SIGNATURE)`.
+2. **Batch error decoding, as operator tooling would do it.** A failing `executeBatch` reverts with `IntentExecutor_BatchItemFailed(index, bytes)`. The test decodes the index **and** the nested `PolicyGated_TransferRejected(reason)` from those bytes, then drops the item and resubmits.
+3. **Pre-flight parity matrix.** For each case (identity, lockup, window, cap, frozen, pause) × (transfer, intent, deposit, redeem):
+   - `canTransfer` / `canExecute` / `max*` from a client;
+   - versus `simulateContract` and the actual write outcome;
+   - asserted equal, reason by reason.
+4. **Vault flows end to end.**
+   - **4626:** `maxDeposit` → `deposit` → `maxRedeem` → `redeem`.
+   - **7540:** `requestDeposit` → `fulfillDeposit` → claim; `requestRedeem` (escrow) → `fulfillRedeem` → claim; reject; recovery.
+   - The NAV history is rebuilt from decoded `Fulfilled` events and checked against `lastPrice`.
+5. **Time-dependent flows** via `networkHelpers.time`: lockup expiry, settlement-window open and close, and intent deadlines.
+
+### Setup
+- **Proxy artifact:** add `solidity.npmFilesToBuild: ['@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol']` to `hardhat.config.ts`. Hardhat 3 only emits artifacts for project sources; this lets viem deploy OZ's own proxy by name. The option was verified in the installed typings.
+- **Shared fixture** `test/nodejs/fixtures.ts`, using `networkHelpers.loadFixture`:
+  - it deploys the stack in the Phase 7 order (registry → rules → attest → hook with its constructor rules → implementations → proxies);
+  - "configure, then hand over" (the deployer configures caps, windows, exemptions and roles), with the vault registered as verified and exempt.
+- **Helpers:** typed error and event decoding (`decodeErrorResult`, `parseEventLogs`), plus the intent signer.
+- **Assertions:** `viem.assertions.revertWithCustomErrorWithArgs` / `emitWithArgs` where they fit, and explicit decoding where the point is to show client-side decoding.
+
+### Decisions needed (recommendation first)
+- **Q1. Scope:**
+  - **(a) Recommended:** TypeScript-only value as listed above.
+  - (b) Also port the Solidity unit cases.
+- **Q2. Deployment in tests:**
+  - **(a) Recommended:** a hand-rolled TypeScript fixture now that mirrors the deploy order; Phase 7's Ignition module replaces it, so tests and deployment end up sharing one source of truth.
+  - (b) Write the Ignition module now and use it in Phase 6 tests. That pulls Phase 7 forward.
+- **Q3. Timelock in Phase 6 fixtures:**
+  - **(a) Recommended:** a plain admin account, so the tests focus on flows; the real `TimelockController` (≥ 7 days, guardian as canceller) is exercised in the Phase 7 deploy tests.
+  - (b) A real timelock with time travel in every flow.
+
+### Environment note (not a code issue)
+- The repo sits under `~/Documents`, which is an **iCloud Drive** folder (verified). iCloud created "name 2" duplicates **inside the gitignored build output** twice: 264 files in `artifacts/`, plus `forge-out/` copies. The first batch broke `tsc`.
+- Sources and git were never affected (checked); the build dirs were wiped and rebuilt clean.
+- Recommendation: move the repo out of iCloud-synced folders (e.g. `~/dev/`), or exclude it from iCloud. That's the owner's environment choice; nothing was changed.
+
 ## Open questions for the owner
-1. Phase 6 plan (next).
+1. Q1–Q3 (or "defaults").
+2. The iCloud location (above).
