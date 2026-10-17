@@ -83,6 +83,14 @@ contract MaxHoldersRuleUnitTest is Helpers {
     });
   }
 
+  function _exempt(
+    address _account,
+    bool _isExempt
+  ) internal {
+    vm.prank(_admin);
+    _rule.setExemptHolder(_token, _account, _isExempt);
+  }
+
   /// @dev Maps a fuzzed seed onto TRANSFER or EXECUTED, the holder-driven kinds that are capped
   function _holderKind(
     uint8 _seedValue
@@ -131,6 +139,93 @@ contract MaxHoldersRuleUnit_Admin is MaxHoldersRuleUnitTest {
     emit IMaxHoldersRule.HolderCountSeeded(_token, _first, _second);
     _seed(_second);
     assertEq(_rule.holderCount(_token), _second);
+  }
+}
+
+contract MaxHoldersRuleUnit_Exemptions is MaxHoldersRuleUnitTest {
+  function test_WhenCallerIsNotTheTokensAdmin_SetExemptHolderReverts() external {
+    vm.expectRevert(abi.encodeWithSelector(IMaxHoldersRule.MaxHoldersRule_OnlyTokenAdmin.selector, _token, _stranger));
+    vm.prank(_stranger);
+    _rule.setExemptHolder(_token, _to, true);
+  }
+
+  function test_WhenTheAccountIsZero_SetExemptHolderReverts() external {
+    vm.expectRevert(IMaxHoldersRule.MaxHoldersRule_ZeroAddress.selector);
+    _exempt(address(0), true);
+  }
+
+  function test_WhenAnEmptyAccountIsExempted_ItStoresAndEmitsWithoutTouchingTheCount() external {
+    _seed(2);
+    _bal(_to, 0);
+    vm.expectEmit(address(_rule));
+    emit IMaxHoldersRule.HolderExemptionSet(_token, _to, true);
+    _exempt(_to, true);
+    assertTrue(_rule.isExemptHolder(_token, _to));
+    assertEq(_rule.holderCount(_token), 2);
+  }
+
+  /// @dev "Never counts" must hold even when the exemption changes while the account holds a balance
+  function test_WhenAHolderIsExemptedAndUnexempted_TheCountFollows() external {
+    _seed(2);
+    _bal(_to, 5);
+    vm.expectEmit(address(_rule));
+    emit IMaxHoldersRule.HolderCountUpdated(_token, 1);
+    _exempt(_to, true);
+    assertEq(_rule.holderCount(_token), 1);
+    _exempt(_to, false);
+    assertEq(_rule.holderCount(_token), 2);
+  }
+
+  function test_WhenTheExemptionIsUnchanged_NothingHappens() external {
+    _seed(2);
+    _bal(_to, 5);
+    _exempt(_to, true);
+    _exempt(_to, true);
+    assertEq(_rule.holderCount(_token), 1);
+  }
+
+  /// @dev R1: an empty escrow vault at a full cap must still accept a redemption request
+  function test_WhenTheReceiverIsExemptAtAFullCap_ItIsOk(
+    uint8 _kindSeed
+  ) external {
+    _cap(2);
+    _seed(2);
+    _bal(_to, 0);
+    _bal(_from, 10);
+    _exempt(_to, true);
+    assertEq(_rule.check(_ctx(_holderKind(_kindSeed), _from, _to, 3)), Reasons.TRANSFER_OK);
+  }
+
+  /// @dev An exempt sender was never counted, so its full exit frees no slot for a new holder
+  function test_WhenAnExemptSenderEmptiesIntoANewHolderAtAFullCap_ItIsRejected() external {
+    _cap(2);
+    _seed(3); // includes the sender, which then becomes exempt: the count drops to 2, a full cap
+    _bal(_from, 7);
+    _exempt(_from, true);
+    assertEq(_rule.holderCount(_token), 2);
+    _bal(_to, 0);
+    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.TRANSFER, _from, _to, 7)), Reasons.MAX_HOLDERS);
+  }
+
+  /// @dev A holder escrowing everything into the exempt vault leaves; the vault never joins
+  function test_WhenSharesMoveIntoAnExemptAccount_TheCountIgnoresIt() external {
+    _bal(_to, 0);
+    _exempt(_to, true); // empty, so no count adjustment
+    _seed(1);
+    _bal(_from, 0);
+    _bal(_to, 4);
+    _after(_ctx(IPolicyHook.TransferKind.TRANSFER, _from, _to, 4));
+    assertEq(_rule.holderCount(_token), 0);
+  }
+
+  /// @dev The escrow vault burning its last shares at fulfilment must not decrement the count
+  function test_WhenAnExemptAccountEmpties_TheCountIgnoresIt() external {
+    _seed(2);
+    _bal(_from, 3);
+    _exempt(_from, true); // holds a balance, so the count drops to 1
+    _bal(_from, 0);
+    _after(_ctx(IPolicyHook.TransferKind.BURN, _from, address(0), 3));
+    assertEq(_rule.holderCount(_token), 1);
   }
 }
 
@@ -377,6 +472,14 @@ contract MaxHoldersHandler is Test {
     _token.setFrozen(_account, bound(_amount, 0, _token.balanceOf(_account)));
   }
 
+  /// @dev Exemption changes move a current holder in or out of the count
+  function setExempt(
+    uint256 _seed,
+    bool _isExempt
+  ) external {
+    _rule.setExemptHolder(address(_token), _actor(_seed), _isExempt);
+  }
+
   /// @dev Cap changes, including lowering it below the current count, never change the holder count
   function setCap(
     uint256 _cap
@@ -446,11 +549,11 @@ contract MaxHoldersRuleInvariantTest is Test {
     targetContract(address(_handler));
   }
 
-  function invariant_TheCountEqualsTheNumberOfHolders() external view {
+  function invariant_TheCountEqualsTheNumberOfNonExemptHolders() external view {
     address[4] memory _all = _handler.actors();
     uint256 _holders;
     for (uint256 _i; _i < 4; ++_i) {
-      if (_token.balanceOf(_all[_i]) > 0) ++_holders;
+      if (_token.balanceOf(_all[_i]) > 0 && !_rule.isExemptHolder(address(_token), _all[_i])) ++_holders;
     }
     assertEq(_rule.holderCount(address(_token)), _holders);
   }

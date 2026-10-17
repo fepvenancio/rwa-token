@@ -8,6 +8,8 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
  * @notice Caps the number of holders per token. A holder is any account with balance > 0; zero amounts never add one.
  *         Only movements that add a new holder are checked, net of a sender who leaves, so a lowered cap never blocks
  *         existing holders. FORCED is exempt from the cap but still counted. `cap == 0` fails closed
+ *      Exempt accounts (e.g. a 7540 escrow vault, a treasury) never count and never trigger the cap; the seeded
+ *      count excludes them
  * @dev The count is maintained in `after_` from post-transfer balances. `seedHolderCount` is only legitimate while
  *      the rule is not in the token's active rule set; the correct value is recomputable from the token's `Transfer`
  *      events. With a wrong count, an exit that would take it below zero reverts (fails closed) until re-seeded.
@@ -35,6 +37,14 @@ interface IMaxHoldersRule is IComplianceRule {
   event HolderCountSeeded(address indexed _token, uint256 _oldCount, uint256 _newCount);
 
   /**
+   * @notice Emitted when an account's exemption changes
+   * @param _token The token
+   * @param _account The account
+   * @param _exempt Whether it is exempt
+   */
+  event HolderExemptionSet(address indexed _token, address indexed _account, bool _exempt);
+
+  /**
    * @notice Emitted when a movement changes a token's holder count
    * @param _token The token
    * @param _count The new count
@@ -52,6 +62,9 @@ interface IMaxHoldersRule is IComplianceRule {
    */
   error MaxHoldersRule_OnlyTokenAdmin(address _token, address _caller);
 
+  /// @notice Thrown when exempting the zero address
+  error MaxHoldersRule_ZeroAddress();
+
   /*///////////////////////////////////////////////////////////////
                             LOGIC
   //////////////////////////////////////////////////////////////*/
@@ -60,11 +73,25 @@ interface IMaxHoldersRule is IComplianceRule {
    * @notice Overwrites a token's holder count
    * @dev Only the token's DEFAULT_ADMIN_ROLE. Only legitimate while this rule is not in the token's active rule set
    * @param _token The token
-   * @param _count The number of accounts with balance > 0
+   * @param _count The number of non-exempt accounts with balance > 0
    */
   function seedHolderCount(
     address _token,
     uint256 _count
+  ) external;
+
+  /**
+   * @notice Exempts an account from a token's holder count and cap, or lifts the exemption
+   * @dev Only the token's DEFAULT_ADMIN_ROLE. If the account holds a balance, the count follows the change, so exempt
+   *      accounts never count
+   * @param _token The token
+   * @param _account The account
+   * @param _exempt Whether it is exempt
+   */
+  function setExemptHolder(
+    address _token,
+    address _account,
+    bool _exempt
   ) external;
 
   /**
@@ -86,6 +113,17 @@ interface IMaxHoldersRule is IComplianceRule {
   function capOf(
     address _token
   ) external view returns (uint256 _cap);
+
+  /**
+   * @notice Whether an account is exempt from a token's holder count and cap
+   * @param _token The token
+   * @param _account The account
+   * @return _exempt True if exempt
+   */
+  function isExemptHolder(
+    address _token,
+    address _account
+  ) external view returns (bool _exempt);
 
   /**
    * @notice A token's holder count

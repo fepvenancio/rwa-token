@@ -7,7 +7,12 @@ import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+import {IERC7540Deposit} from 'interfaces/IERC7540Deposit.sol';
+import {IERC7540Operator} from 'interfaces/IERC7540Operator.sol';
+import {IERC7540Redeem} from 'interfaces/IERC7540Redeem.sol';
+import {IERC7575} from 'interfaces/IERC7575.sol';
 import {IGated4626Vault} from 'interfaces/IGated4626Vault.sol';
+import {IGated7540Vault} from 'interfaces/IGated7540Vault.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IIdentityRule} from 'interfaces/IIdentityRule.sol';
 import {IIntentExecutor} from 'interfaces/IIntentExecutor.sol';
@@ -38,9 +43,16 @@ contract InterfaceFreezeTest is Test {
     // Added in Phase 4 (2026-10-16)
     assertEq(type(ILockupRule).interfaceId, bytes4(0xaafb038e), 'ILockupRule');
     assertEq(type(ISettlementWindowRule).interfaceId, bytes4(0xf2058aff), 'ISettlementWindowRule');
-    assertEq(type(IMaxHoldersRule).interfaceId, bytes4(0xa13cb93c), 'IMaxHoldersRule');
+    // Re-pinned in Phase 5b (2026-10-17) on owner instruction R1: setExemptHolder / isExemptHolder added (was 0xa13cb93c)
+    assertEq(type(IMaxHoldersRule).interfaceId, bytes4(0x0e091382), 'IMaxHoldersRule');
     // Added in Phase 5a (2026-10-17)
     assertEq(type(IGated4626Vault).interfaceId, bytes4(0xb008690c), 'IGated4626Vault');
+    // Added in Phase 5b (2026-10-17). The four ERC-7540 / ERC-7575 ids are the standard's own values.
+    assertEq(type(IERC7540Operator).interfaceId, bytes4(0xe3bc4e65), 'IERC7540Operator');
+    assertEq(type(IERC7540Deposit).interfaceId, bytes4(0xce3bbe50), 'IERC7540Deposit');
+    assertEq(type(IERC7540Redeem).interfaceId, bytes4(0x620ee8e4), 'IERC7540Redeem');
+    assertEq(type(IERC7575).interfaceId, bytes4(0x2f0a18c5), 'IERC7575');
+    assertEq(type(IGated7540Vault).interfaceId, bytes4(0x34aae296), 'IGated7540Vault');
     assertEq(type(IIdentityRule).interfaceId, bytes4(0x150c4aea), 'IIdentityRule');
     assertEq(type(IIdentityRegistry).interfaceId, bytes4(0xb9209e33), 'IIdentityRegistry');
   }
@@ -77,6 +89,26 @@ contract InterfaceFreezeTest is Test {
     assertEq(
       IMaxHoldersRule.HolderCountUpdated.selector, 0x3b44d433ae622a035b92513dcb4121b917fffdfa7ee90319d0e224a265504819
     );
+    assertEq(
+      IMaxHoldersRule.HolderExemptionSet.selector, 0x76f53701a110e481b9beccc51135df840459b6ca21581f88b3ee10235891f5e5
+    );
+    // Added in Phase 5b (2026-10-17)
+    assertEq(IGated7540Vault.Fulfilled.selector, 0xaf0e36efc5836309f8f21b646c6bfec100f3cd067e3a9e9c232c2bcb3d7045ce);
+    assertEq(
+      IGated7540Vault.DepositRequestRejected.selector,
+      0x62349aea2c873bb117c163dc27359603fe48b3c8e94fbb2acf192e0e6a300f38
+    );
+    assertEq(
+      IGated7540Vault.RedeemRequestRejected.selector, 0x5e8a98909a36717c694a64574320783e7d08b72c502bc66cf1bb82c69b6614b8
+    );
+    assertEq(
+      IGated7540Vault.CustodyChanged.selector, 0x76513a9766f12c52160aee58e04a50558448bf8d8cc1d1b2c60bcab3740c54bf
+    );
+    assertEq(
+      IERC7540Deposit.DepositRequest.selector, 0xbb58420bb8ce44e11b84e214cc0de10ce5e7c24d0355b2815c3d758b514cae72
+    );
+    assertEq(IERC7540Redeem.RedeemRequest.selector, 0x1fdc681a13d8c5da54e301c7ce6542dcde4581e4725043fdab2db12ddc574506);
+    assertEq(IERC7540Operator.OperatorSet.selector, 0xceb576d9f15e4e200fdb5096d64d5dfd667e16def20c1eefd14256d8e3faa267);
   }
 
   function test_WhenReasonsCompile_TheirValuesArePinned() external pure {

@@ -14,7 +14,7 @@ PolicyGatedERC20Upgradeable        base: accounting, roles, enforcement, guardia
         ▲                                 every movement → TransferContext → hook.beforeTransfer → balances → afterTransfer
         │
 IntentToken (+ IntentSettledUpgradeable)  holder-signed EIP-712 TransferIntent, settled by EXECUTOR_ROLE
-Gated4626Vault (ERC-4626, gated max*, decimals offset 6), (planned) Gated7540Vault
+Gated4626Vault (ERC-4626, gated max*, decimals offset 6), Gated7540Vault (ERC-7540 async, escrow, fulfiller)
 
 ComplianceHook (one per token, immutable) ──► ordered list of ≤16 attested IComplianceRule (first rejection wins)
 IdentityRule, LockupRule, SettlementWindowRule, MaxHoldersRule   hook-agnostic, shared across tokens; per-token
@@ -25,13 +25,13 @@ IntentExecutor (immutable)                       replaceable, role-gated submitt
 
 | Path | Contents |
 |---|---|
-| `contracts/interfaces/` | Frozen ABI: `IPolicyGated`, `IPolicyHook`, `IComplianceRule`, `IComplianceHook`, `IPolicyRegistry`, `ITransferIntent`, `IIntentExecutor`, `IIntentExecutorBatch`, `IIdentityRule`, `IIdentityRegistry`, `ILockupRule`, `ISettlementWindowRule`, `IMaxHoldersRule`, `IGated4626Vault`, `Errors.sol` (reason codes) |
+| `contracts/interfaces/` | Frozen ABI: `IPolicyGated`, `IPolicyHook`, `IComplianceRule`, `IComplianceHook`, `IPolicyRegistry`, `ITransferIntent`, `IIntentExecutor`, `IIntentExecutorBatch`, `IIdentityRule`, `IIdentityRegistry`, `ILockupRule`, `ISettlementWindowRule`, `IMaxHoldersRule`, `IGated4626Vault`, `IGated7540Vault`, `IERC7540Operator` / `IERC7540Deposit` / `IERC7540Redeem` / `IERC7575` (spec-exact ids), `Errors.sol` (reason codes) |
 | `contracts/base/` | `PolicyGatedERC20Upgradeable` |
 | `contracts/governance/` | `PolicyRegistry` |
 | `contracts/mixins/`, `contracts/tokens/` | `IntentSettledUpgradeable`, `IntentToken` |
 | `contracts/hooks/` | `ComplianceHook`, `BaseRule`, `rules/` `IdentityRule`, `LockupRule`, `SettlementWindowRule`, `MaxHoldersRule` (recommended order) |
 | `contracts/intents/` | `IntentExecutor` |
-| `contracts/vaults/` | `Gated4626Vault` |
+| `contracts/vaults/` | `Gated4626Vault`, `Gated7540Vault` |
 | `contracts/test/` | Test helpers and mocks, interface-freeze and contract-size guards, Halmos properties |
 
 Every contract has its `.t.sol` next to it. [`PLAN.md`](PLAN.md) tracks phases and decisions;
@@ -52,6 +52,7 @@ Every contract has its `.t.sol` next to it. [`PLAN.md`](PLAN.md) tracks phases a
 | `ATTESTER_ROLE` (registry) | security council | none | attest / revoke codehashes |
 | token `DEFAULT_ADMIN_ROLE` → rules | timelock | ≥ 7 days | set a token's holder cap, seed its holder count, set its settlement window |
 | token `AGENT_ROLE` → rules | issuer | none | set or clear per-holder lockups |
+| `FULFILLER_ROLE` (7540 vault) | bank | none | fulfil deposits/redemptions at off-chain NAV; reject pending requests |
 
 - **Attested code only.** Hooks, rules and implementations are installed only if their runtime codehash is attested.
   Attestation is checked at install time; revoking it later does not silently change a live token.

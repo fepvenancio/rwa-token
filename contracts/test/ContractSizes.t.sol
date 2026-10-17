@@ -16,6 +16,7 @@ import {SettlementWindowRule} from 'contracts/hooks/rules/SettlementWindowRule.s
 import {IntentExecutor} from 'contracts/intents/IntentExecutor.sol';
 import {IntentToken} from 'contracts/tokens/IntentToken.sol';
 import {Gated4626Vault} from 'contracts/vaults/Gated4626Vault.sol';
+import {Gated7540Vault} from 'contracts/vaults/Gated7540Vault.sol';
 
 /**
  * @notice EIP-170 guard. The default build profile matches the production one, so these are the deployed sizes.
@@ -28,6 +29,7 @@ contract ContractSizesTest is Test {
     address _registry = address(new PolicyRegistry(address(this), address(this)));
     _assertFits('IntentToken', address(new IntentToken()));
     _assertFits('Gated4626Vault', address(new Gated4626Vault()));
+    _assertFits('Gated7540Vault', address(new Gated7540Vault()));
     _assertFits('PolicyRegistry', _registry);
     _assertFits(
       'ComplianceHook',

@@ -26,6 +26,9 @@ contract MaxHoldersRule is BaseRule, IMaxHoldersRule {
   /// @notice The tracked holder count per token
   mapping(address _token => uint256 _count) internal _counts;
 
+  /// @notice Accounts that never count and never trigger the cap, per token
+  mapping(address _token => mapping(address _account => bool _exempt)) internal _exempts;
+
   /**
    * @notice Restricts a function to the token's DEFAULT_ADMIN_ROLE
    * @param _token The token
@@ -53,8 +56,12 @@ contract MaxHoldersRule is BaseRule, IMaxHoldersRule {
     // Exact equalities are the holder definition (post-move balance == amount <=> was 0). They are read inside the
     // token's guarded _update, where only the token moves balances.
     // slither-disable-start incorrect-equality
-    if (_ctx.to != address(0) && _token.balanceOf(_ctx.to) == _ctx.amount) _newCount += 1;
-    if (_ctx.from != address(0) && _token.balanceOf(_ctx.from) == 0) _newCount -= 1;
+    if (_ctx.to != address(0) && !_exempts[_ctx.token][_ctx.to] && _token.balanceOf(_ctx.to) == _ctx.amount) {
+      _newCount += 1;
+    }
+    if (_ctx.from != address(0) && !_exempts[_ctx.token][_ctx.from] && _token.balanceOf(_ctx.from) == 0) {
+      _newCount -= 1;
+    }
     // slither-disable-end incorrect-equality
     if (_newCount != _count) {
       _counts[_ctx.token] = _newCount;
@@ -70,6 +77,24 @@ contract MaxHoldersRule is BaseRule, IMaxHoldersRule {
     uint256 _oldCount = _counts[_token];
     _counts[_token] = _count;
     emit HolderCountSeeded(_token, _oldCount, _count);
+  }
+
+  /// @inheritdoc IMaxHoldersRule
+  function setExemptHolder(
+    address _token,
+    address _account,
+    bool _exempt
+  ) external onlyTokenAdmin(_token) {
+    if (_account == address(0)) revert MaxHoldersRule_ZeroAddress();
+    if (_exempts[_token][_account] == _exempt) return;
+    _exempts[_token][_account] = _exempt;
+    emit HolderExemptionSet(_token, _account, _exempt);
+    // A current holder enters or leaves the count with its exemption. Checked: a wrong count fails closed.
+    if (IERC20(_token).balanceOf(_account) > 0) {
+      uint256 _count = _exempt ? _counts[_token] - 1 : _counts[_token] + 1;
+      _counts[_token] = _count;
+      emit HolderCountUpdated(_token, _count);
+    }
   }
 
   /// @inheritdoc IMaxHoldersRule
@@ -90,14 +115,19 @@ contract MaxHoldersRule is BaseRule, IMaxHoldersRule {
     IPolicyHook.TransferContext calldata _ctx
   ) external view returns (bytes32 _reason) {
     if (_ctx.amount == 0 || _ctx.from == _ctx.to || _ctx.to == address(0)) return Reasons.TRANSFER_OK;
+    // An exempt receiver never adds a holder (e.g. an empty escrow vault at a full cap).
+    if (_exempts[_ctx.token][_ctx.to]) return Reasons.TRANSFER_OK;
     IERC20 _token = IERC20(_ctx.token);
     // An existing holder never adds to the count, so a lowered cap never blocks it.
     if (_token.balanceOf(_ctx.to) > 0) return Reasons.TRANSFER_OK;
     // FORCED is exempt from the cap (it is still counted in after_).
     if (_ctx.kind == IPolicyHook.TransferKind.FORCED) return Reasons.TRANSFER_OK;
-    // Exact equality is the definition of "sender leaves" (balance == amount); see after_.
-    // slither-disable-next-line incorrect-equality
-    bool _senderLeaves = _ctx.from != address(0) && _token.balanceOf(_ctx.from) == _ctx.amount;
+    // An exempt sender was never counted, so emptying it frees no slot. The exact equality is the definition of
+    // "sender leaves" (balance == amount); see after_.
+    // slither-disable-start incorrect-equality
+    bool _senderLeaves =
+      _ctx.from != address(0) && !_exempts[_ctx.token][_ctx.from] && _token.balanceOf(_ctx.from) == _ctx.amount;
+    // slither-disable-end incorrect-equality
     uint256 _cap = _caps[_ctx.token];
     if (_cap == 0 || _counts[_ctx.token] + (_senderLeaves ? 0 : 1) > _cap) return Reasons.MAX_HOLDERS;
     _reason = Reasons.TRANSFER_OK;
@@ -108,6 +138,14 @@ contract MaxHoldersRule is BaseRule, IMaxHoldersRule {
     address _token
   ) external view returns (uint256 _cap) {
     _cap = _caps[_token];
+  }
+
+  /// @inheritdoc IMaxHoldersRule
+  function isExemptHolder(
+    address _token,
+    address _account
+  ) external view returns (bool _exempt) {
+    _exempt = _exempts[_token][_account];
   }
 
   /// @inheritdoc IMaxHoldersRule

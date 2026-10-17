@@ -1,6 +1,6 @@
 # PLAN
 
-Status: **Phase 5a (`Gated4626Vault` + V1) implemented and green — awaiting review. 5b (`Gated7540Vault`) waits on R1–R3.**
+Status: **5a approved and pushed (`9f8f5b0`, CI green). 5b (`Gated7540Vault` + R1) implemented and green — awaiting review.**
 
 Brief v2 ("Gated Token Stack") replaced the original executor-only brief on 2026-10-16. On the same day the owner supplied a reference implementation in `Imported/` (now deleted; its contents live in `contracts/`) and approved, in chat, integrating it with the major findings fixed, a common-bug sweep, and the Wonderland Solidity standards.
 
@@ -360,7 +360,7 @@ Each gets red tests, then the implementation, then green, then a stop for review
   - `IGated7540Vault` (Wonderland: errors, plus fulfilment events `DepositFulfilled` and `RedeemFulfilled`, and `CustodySet`).
 - **Requests** (`requestId = 0`):
   - **`requestDeposit(assets, controller, owner)`:** `owner == msg.sender` or an operator. It pulls the assets into the vault and adds them to `pendingDeposit[controller]`. It emits `DepositRequest`.
-  - **`requestRedeem(shares, controller, owner)`:** `owner == msg.sender`, an operator, or an ERC-20 allowance (operators skip the allowance; non-infinite allowances are deducted). It **burns** the shares from `owner` (a BURN through the hook, so Identity, Lockup with V1, and MaxHolders all apply) and adds them to `pendingRedeem[controller]`. It emits `RedeemRequest`.
+  - **`requestRedeem(shares, controller, owner)`:** `owner == msg.sender`, an operator, or an ERC-20 allowance (operators skip the allowance; non-infinite allowances are deducted). It **escrows** the shares into the vault as a TRANSFER through the hook (lockup, frozen, identity and pause apply). The shares are BURNed at `fulfillRedeem`. It adds them to `pendingRedeem[controller]` and emits `RedeemRequest`.
 - **Fulfilment** (`FULFILLER_ROLE`, V3):
   - **`fulfillDeposit(controller, assets, shares)`:** moves pending to claimable and sends `assets` to `custody`.
   - **`fulfillRedeem(controller, shares, assets)`:** moves pending to claimable and pulls `assets` from the fulfiller into the vault.
@@ -427,6 +427,58 @@ Each gets red tests, then the implementation, then green, then a stop for review
   - The offset-0 mutant was first caught only by the `decimals()` check. **The inflation test was strengthened** with a victim-loss bound (≤ donation/1e6 + rounding) and now kills it too.
 - **Verification:** `npm test` gives 273 passing (272 solidity, 1 nodejs). Lint, typecheck and fmt are clean, Slither reports 0, Halmos 4/4.
 
+### Owner decisions on R1–R3 and the brief (2026-10-17)
+- **§7 test sentence** rewritten to the meaningful form.
+- **Slither suppressions:** each carries a one-line reason above the disable comment (all audited).
+- **R1 (a):** `setExemptHolder(token, account, bool)` on `MaxHoldersRule` (token admin, `HolderExemptionSet`). Exempt accounts never count and never trigger the cap, and the seed excludes them. This is the rule's own interface and nothing is deployed, so the change was made and re-pinned.
+- **R2 (a):** the reject moves shares internally via `_moveAs(vault, controller, shares, FORCED)`, not the external `forcedTransfer`, and emits `RedeemRequestRejected` (not `ForcedTransfer`). Identity still applies to the controller: if the controller was de-verified, the reject reverts and the shares stay escrowed.
+- **R3:** `Fulfilled(controller indexed, isDeposit indexed, price, assets, shares, fulfiller)`, where `price` = assets per `10**decimals()` shares (pinned in NatSpec), and `fulfiller` is not indexed.
+
+### 5b as built (2026-10-17)
+- **R1 `MaxHoldersRule`:**
+  - the review's four exemption points (receiver early-return; `_senderLeaves` and both `after_` sides ignore exempt accounts);
+  - plus **count-follows-exemption**: exempting or un-exempting an account that holds a balance moves it in or out of the count, so "never counts" holds and the count can't drift into the fail-closed underflow.
+  - The `IMaxHoldersRule` id was re-pinned `0xa13cb93c → 0x0e091382` (independently checked with `cast`); `HolderExemptionSet` is pinned.
+  - **Invariant** extended: the handler fuzzes `setExemptHolder`, and the property is now count == non-exempt holders.
+  - **Mutation check:** dropping the exemption on the `after_` decrement is caught by a unit test and the invariant.
+- **Spec interfaces:** `IERC7540Operator` `0xe3bc4e65`, `IERC7540Deposit` `0xce3bbe50`, `IERC7540Redeem` `0x620ee8e4` and `IERC7575` `0x2f0a18c5`. All four are the **standard's literal ids**, asserted in both the unit test and the freeze test.
+- **`IGated7540Vault`** `0x34aae296`; its 4 events and the 3 ERC-7540 events are pinned.
+- **`Gated7540Vault`** (20,389 B: OZ `ERC4626Upgradeable` + the base):
+  - requests, fulfilment, claims and rejects exactly as specified above;
+  - checks-effects-interactions throughout: state and events are written before token or hook calls;
+  - the claim rounding follows the review's table (full claims clear exactly; Floor for shares-out and assets-out; Ceil for assets-in and shares-burned), and a claim whose computed output is zero reverts instead of silently losing value;
+  - `maxDeposit` / `maxMint` = claimable, gated by the controller pre-flight;
+  - `maxRedeem` / `maxWithdraw` = claimable, and 0 while paused;
+  - `preview*` revert; `convertTo*` use the last price (1:1 before the first fulfilment); `totalAssets` is indicative;
+  - the issuer `mint` / `burn` revert (Q1).
+- **Tests** (red first: the vault was missing; green on the first implementation run):
+  - **Unit:** 50+ cases, including fuzzed rounding for all four claim paths and the "two-step claim never exceeds the fulfilment" property.
+  - **Integration** (real Identity + Lockup + MaxHolders, vault verified and exempt):
+    - a round trip with NAV +10%;
+    - an unverified controller refused at request;
+    - **owner case: cap full, vault empty, a partial redemption request succeeds**;
+    - a locked holder can't escrow (`LOCKED`) and frozen shares can't be escrowed;
+    - a reject at a full cap while paused still returns the shares (FORCED, counted);
+    - **owner case: a de-verified controller's reject reverts and the shares stay escrowed.**
+  - **Invariants:** the vault's assets equal Σ(pending deposits + claimable redemption assets); the vault's own shares equal Σ pending redemptions; supply = actors + escrow.
+  - **Mutation check:** withdraw shares rounded down, mint assets rounded down, and a reject that keeps pending. All 3 killed.
+- **Gates:** first run had 1 solhint and 3 Slither findings, all fixed or triaged with an inline reason:
+  - `IERC7575` ordering (id unchanged);
+  - `arbitrary-send-erc20`: the `requestDeposit` `owner` is authorised; operators are trusted by spec;
+  - `missing-inheritance`: `IERC7575` duplicates OZ's `IERC4626`; conformance is pinned by the id test;
+  - an `incorrect-equality` suppression lost when a line was wrapped.
+
+  264 stray duplicate files in the gitignored `artifacts/` (a concurrent-build race) broke `tsc`; they were cleaned by a rebuild.
+- **Verification:** `npm test` gives 338 passing (337 solidity, 1 nodejs); lint, typecheck and fmt are clean; Slither reports 0; Halmos 4/4.
+
+### Defaults I applied in 5b (flag if you disagree)
+- **Claims on the redemption side** (`redeem` / `withdraw`) are blocked while paused, consistent with "the guardian can stop things"; deposit claims are already blocked by the hook.
+- **Fulfilment while paused:** `fulfillDeposit` works; `fulfillRedeem` reverts, because the escrow BURN is a share movement.
+- **Price and zero inputs:** the price is 1:1 until the first fulfilment. Zero-amount requests revert, as in the spec's reference code; zero-output claims revert; a zero controller reverts.
+
 ## Open questions for the owner
-1. Review 5a. Once approved, I'll push it.
-2. R1–R3 for 5b (above).
+1. **Review 5b.** Once approved, I'll push it. Phase 6 (viem integration) comes next.
+2. **Escrow recovery for de-verified controllers (gap in R2).**
+   - If the agent recovers escrowed shares with `forcedTransfer` from the vault, `pendingRedeem[controller]` still counts them, so escrow and bookkeeping diverge and a later fulfil or reject for that controller fails.
+   - Proposal: a `FULFILLER_ROLE` (or agent) `recoverRedeemRequest(controller, to)` that clears the pending amount and moves the shares to a verified recovery account (e.g. the treasury) as FORCED, emitting its own event.
+   - It's not built; it needs your decision.
