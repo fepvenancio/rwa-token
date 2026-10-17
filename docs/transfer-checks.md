@@ -116,7 +116,7 @@ Rule id: `keccak256('IdentityRule.v1')`.
 
 Keeps an unlock time for each token and holder. It looks at `from`. The movement passes if `block.timestamp >= unlockTime`, which includes the stored 0 for "not locked".
 
-While locked, `TRANSFER` and `EXECUTED` return `LOCKED`. `BURN` returns `LOCKED` unless the operator holds `BURNER_ROLE` on the token, which makes a burn by the burner an enforcement action that ignores the lock. A holder who redeems vault shares is a holder burn and respects the lock. `FORCED` and `MINT` pass. A locked holder can still receive tokens, and the lock covers the whole balance, including tokens received later.
+While locked, `TRANSFER` and `EXECUTED` return `LOCKED`. `BURN` returns `LOCKED` unless the operator holds `BURNER_ROLE` on the token, which makes a burn by the burner an enforcement action that ignores the lock. On `Gated4626Vault`, a holder's `redeem` or `withdraw` is a holder burn and respects the lock. For a non-zero amount the caller sees `ERC4626ExceededMaxRedeem` or `ERC4626ExceededMaxWithdraw`, because the vault's `max*` is 0 for a locked owner. On `Gated7540Vault` the lock applies at `requestRedeem`, which moves the shares to the vault as a `TRANSFER`. The later claim calls no hook. `FORCED` and `MINT` pass. A locked holder can still receive tokens, and the lock covers the whole balance, including tokens received later.
 
 `setLockup(token, holder, unlockTime)` needs `AGENT_ROLE` on the token. A time at or before now clears the lock. The holder cannot be the zero address.
 
@@ -188,8 +188,9 @@ Each code is `keccak256` of its name, so `TRANSFER_OK` is not zero. A hook or ru
 | Any token entry point | revert `PolicyGated_TransferRejected(bytes32 reason)` |
 | `IntentExecutor.execute` | the token's revert, unchanged |
 | `IntentExecutor.executeBatch` | revert `IntentExecutor_BatchItemFailed(index, reason)`, where `reason` is the token's revert data. The whole batch is undone |
-| `Gated4626Vault.deposit`, `mint`, `withdraw`, `redeem` when the matching `max*` is lower than the request | OpenZeppelin's `ERC4626ExceededMaxDeposit`, `ERC4626ExceededMaxMint`, `ERC4626ExceededMaxWithdraw`, `ERC4626ExceededMaxRedeem`, before any hook call |
+| `Gated4626Vault.deposit`, `mint`, `withdraw`, `redeem` when the matching `max*` is lower than the request | OpenZeppelin's `ERC4626ExceededMaxDeposit`, `ERC4626ExceededMaxMint`, `ERC4626ExceededMaxWithdraw`, `ERC4626ExceededMaxRedeem`, before `_update` runs. The vault's `max*` functions ask the hook through a view call, so for a non-zero amount a policy rejection appears as a max of 0 and this error, not as `PolicyGated_TransferRejected`. A zero-amount call passes the max check. It reverts with `PolicyGated_TransferRejected` if the token is paused, or if the hook rejects a zero-amount movement: `IdentityRule` does for an unverified receiver (`deposit`, `mint`) or owner (`withdraw`, `redeem`), and `LockupRule` does for a locked owner. `MaxHoldersRule` does not |
 | `Gated7540Vault.requestDeposit` | `Gated7540Vault_ControllerNotEligible(reason)` |
+| `Gated7540Vault.redeem`, `withdraw` while paused | OpenZeppelin's `EnforcedPause`, with no hook call |
 
 `transfer` never returns `false`. A rejected transfer reverts.
 
@@ -200,7 +201,7 @@ The token has three read functions that run the same checks as the write path wi
 | Function | What it asks |
 |---|---|
 | `canTransfer(from, to, amount)` | Would a holder-driven movement pass? The kind is `MINT` if `from == 0`, `BURN` if `to == 0`, otherwise `TRANSFER`. The operator is `from`, or the caller for a mint. It runs the pause check, the frozen check and the hook |
-| `canExecute(intent)` | Would `executeTransfer` pass, apart from the signature? It checks the deadline and the nonce, then the same path with kind `EXECUTED` and the intent's `ref` and `deadline`. The operator is the caller, so call it from the executor's address. It cannot check the signature because the interface has no signature parameter |
+| `canExecute(intent)` | Would `executeTransfer` pass, apart from the signature and the caller's `EXECUTOR_ROLE`? It checks the deadline and the nonce, then the same path with kind `EXECUTED` and the intent's `ref` and `deadline`. The operator is the caller, so call it from the executor's address. It cannot check the signature because the interface has no signature parameter |
 | `isUserAllowed(user)` | Would the hook accept a mint of amount 0 to `user`? It ignores pause and frozen balance, and returns `false` if there is no hook. With the four standard rules only `IdentityRule` can reject a zero-amount mint, so this answers "is the user verified" |
 
 Differences from the real call:
@@ -209,12 +210,12 @@ Differences from the real call:
 - None of the three runs `afterTransfer`.
 - Apart from these, `canTransfer` and `canExecute` run the same `_check` as the write. `RuleSetIntegration.t.sol` and `test/nodejs/parity.test.ts` compare their answers with the state-changing calls.
 
-The vaults build `max*` from the same internal function that `canTransfer` uses. See [flows-vaults.md](flows-vaults.md).
+`Gated4626Vault` builds all four `max*` functions from the same internal function that `canTransfer` uses. `Gated7540Vault` does so only for `maxDeposit` and `maxMint`. Its `maxRedeem` and `maxWithdraw` check pause only. See [flows-vaults.md](flows-vaults.md).
 
 Code: `PolicyGatedERC20Upgradeable.canTransfer`, `isUserAllowed`, `_canTransfer`, `IntentSettledUpgradeable.canExecute`.
 
 ## Reentrancy
 
-`_update` is `nonReentrant` and uses transient storage (`ReentrancyGuardTransient`). A rule's `check` runs under `STATICCALL` and cannot write at all. `after_` can write, and runs while the guard is held, so a call from a rule back into `transfer`, `mint`, `burn` or any other function that reaches `_update` reverts with `ReentrancyGuardReentrantCall`. `MockReentrantRule` calls `transfer(ctx.to, 0)` from `after_`, and `IntentToken.t.sol` expects that revert.
+`_update` is `nonReentrant` and uses transient storage (`ReentrancyGuardTransient`). A rule's `check` runs under `STATICCALL` and cannot write at all. `after_` can write, and runs while the guard is held, so a call from a rule that reaches `_update` reverts with `ReentrancyGuardReentrantCall`. `transfer` does. A call that fails an earlier check reverts with that check's error instead: `AccessControlUnauthorizedAccount` from the role gate on `IntentToken.mint` and `burn` and on `forcedTransfer` of every token, or `ERC20InsufficientAllowance` from `transferFrom`. The vaults' `mint` and `burn` revert with `Gated4626Vault_Unsupported` or `Gated7540Vault_Unsupported` instead. `MockReentrantRule` calls `transfer(ctx.to, 0)` from `after_`, and `IntentToken.t.sol` expects that revert.
 
 Code: `PolicyGatedERC20Upgradeable._update`, `contracts/test/MockReentrantRule.sol`.

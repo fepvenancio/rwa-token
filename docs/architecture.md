@@ -40,16 +40,16 @@ flowchart LR
     Impl["Implementation"]
     Hook["ComplianceHook"]
     Proxy -->|"delegatecall"| Impl
-    Proxy -->|"policyHook()"| Hook
+    Proxy -->|"beforeTransfer, wantsAfter, afterTransfer"| Hook
   end
-  Hook -->|"rules()"| Rules["The four shared rules"]
-  Rules -->|"isVerified"| IdReg["Identity registry (external)"]
-  Proxy -->|"vaults only"| Asset["Vault asset (external)"]
+  Hook -->|"check, after_"| Rules["The four shared rules"]
+  Rules -->|"IdentityRule only: isVerified"| IdReg["Identity registry (external)"]
+  Proxy -->|"vaults only: asset transfers"| Asset["Vault asset (external)"]
   Proxy -.->|"isAttested, at install and upgrade"| Reg["PolicyRegistry"]
   Hook -.->|"isAttested for each rule, when the list is installed"| Reg
 ```
 
-Solid arrows are calls. Dotted arrows are registry checks that run when something is installed, not on every transfer. `IntentExecutor` appears only for `IntentToken`, which is the only token with `executeTransfer`.
+Solid arrows are calls, except `CREATE2`, which is a deployment, and `delegatecall`, which runs the implementation's code against the proxy's storage. Dotted arrows are registry checks that run when something is installed, not on every transfer. `IntentExecutor` appears only for `IntentToken`, which is the only token with `executeTransfer`.
 
 The timelock administers the tokens, the hook, the registry and the executor, and owns `ProxyDeployer`. [roles.md](roles.md) shows that.
 

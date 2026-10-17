@@ -24,12 +24,13 @@ sequenceDiagram
   participant X as Target contract
   Gov->>TL: schedule(target, 0, calldata, 0, salt, delay)
   Note over TL: operation is pending until the delay has passed
-  opt guardian objects
+  alt guardian cancels
     G->>TL: cancel(id)
-    Note over TL: the operation is gone
+    Note over TL: the operation is gone, and execute would revert
+  else nobody cancels
+    Gov->>TL: execute(target, 0, calldata, 0, salt)
+    TL->>X: calldata, with the timelock as msg.sender
   end
-  Gov->>TL: execute(target, 0, calldata, 0, salt)
-  TL->>X: calldata, with the timelock as msg.sender
 ```
 
 ## What the timelock does
@@ -60,7 +61,7 @@ Things that do not wait for the timelock: a guardian pause, a council attestatio
 | `ComplianceHook` constructor and `setRules` | `RULE` for each rule | when a rule list is installed |
 | `_authorizeUpgrade` | `IMPLEMENTATION` | when a token is upgraded |
 
-Attestation is checked at install time only. `revoke(codehash)` does not change a token that already runs the revoked code. The guardian can pause meanwhile, and the timelock can then remove the component.
+Attestation is checked at install time only. `revoke(codehash)` does not change a token that already runs the revoked code. The guardian can pause meanwhile, and the timelock can then remove the component. Removal is a scheduled timelock operation, and the guardian can cancel it ([roles.md](roles.md#what-the-guardian-can-do)).
 
 The codehash covers the runtime code, including immutable values. That has three consequences:
 
@@ -84,8 +85,11 @@ sequenceDiagram
   Note over TL: delay. The guardian may cancel
   Gov->>TL: execute(...)
   TL->>H: setRules(list)
-  H->>Reg: isAttested(rule, RULE) for each rule
-  H->>H: at most 16 rules, no repeated ruleId
+  H->>H: more than 16 rules? revert ComplianceHook_TooManyRules
+  loop each rule, in order
+    H->>Reg: isAttested(rule, RULE)
+    H->>H: ruleId not used by an earlier rule? note whether the rule wants after_
+  end
   H->>H: store the list and the after-mask, emit RuleSetChanged
 ```
 
@@ -113,7 +117,7 @@ State is kept in ERC-7201 namespaces so the new implementation keeps reading the
 
 A hook stores its token's address in an immutable (`TOKEN`). The council attests the hook by codehash, so the token address must be known before the hook is deployed. But a token is initialised with an attested hook. Each needs the other first.
 
-`ProxyDeployer` breaks the loop. It places each token proxy with CREATE2, with init code `TokenProxy(implementation, "")` and salt `keccak256(bytes(symbol))`. The address then depends on the deployer, the symbol and the implementation. It does not depend on the init data, which is where the hook address goes. `predict(symbol, implementation)` returns the address before anything is deployed.
+`ProxyDeployer` breaks the loop. It places each token proxy with CREATE2, with init code `TokenProxy(implementation, "")` and salt `keccak256(bytes(symbol))`. The address then depends on the `ProxyDeployer` contract's own address, the symbol and the implementation. It does not depend on the init data, which is where the hook address goes. `predict(symbol, implementation)` returns the address before anything is deployed.
 
 `deploy(symbol, implementation, initData, hook)` does these steps, and any revert undoes all of them, including the symbol being marked used:
 
@@ -133,7 +137,7 @@ flowchart TD
   H -->|yes| I["emit ProxyDeployed"]
 ```
 
-`deploy` is owner-only. The address does not cover the init data, so without the gate anyone could take it with the same symbol and implementation but their own admin. A symbol can be used once, with any implementation.
+`deploy` is owner-only. The address does not cover the init data, so without the gate anyone could take it with the same symbol and implementation but their own admin. A symbol can be used once, with any implementation. `deploy` does not check that `implementation` is attested. It checks the hook, through the token's `initialize`. On chain, an implementation's attestation is enforced only when a token is upgraded, so for a first deployment it is a council step in the runbook.
 
 `TokenProxy` is OpenZeppelin's `ERC1967Proxy` with one override, `_unsafeAllowUninitialized`, so it can be created without init data. `ProxyDeployer` initialises it in the same transaction.
 
@@ -172,8 +176,7 @@ sequenceDiagram
   loop the three tokens
     D->>Ch: ProxyDeployer.deploy(symbol, implementation, initData, hook)
   end
-  D->>Ch: configure: window, holder caps, 7540 vault exemption
-  D->>Ch: grant roles
+  D->>Ch: configure (window, holder caps, 7540 vault exemption) and grant roles, in either order
   D->>Ch: hand over admin to the timelock, deployer renounces
   IP->>Ch: verify the 7540 vault in the identity registry
 ```
@@ -198,17 +201,17 @@ sequenceDiagram
 
 Names and symbols above are the defaults in `roles.ts`. Parameters can override them, but `Tokens` and `Activate` must use the same symbol, because the symbol is the CREATE2 salt.
 
-`Activate`, in this order:
+`Activate` runs in these stages. Ignition orders calls by their dependencies: the futures they use, plus the `after` lists in this module:
 
 1. Deploy the three tokens through `ProxyDeployer`. The tokens are initialised with the deployer as admin and the guardian as guardian. Every later call waits for all three deploys, so a hook bound to the wrong address stops the whole stage before anything is configured or granted.
-2. Configure, while the deployer still holds `DEFAULT_ADMIN_ROLE` on the tokens: `SettlementWindowRule.setWindow` for `IntentToken` (`windowOpen`, `windowClose`, `windowDays`), `MaxHoldersRule.setCap` for all three tokens (`holderCap`), and `MaxHoldersRule.setExemptHolder(asyncFund, asyncFund, true)` so the 7540 vault's escrow never counts as a holder.
-3. Grant roles: `MINTER_ROLE` and `BURNER_ROLE` on `IntentToken`; `EXECUTOR_ROLE` on `IntentToken` to the executor; `FULFILLER_ROLE` on the 7540 vault; `AGENT_ROLE` on all three tokens; `UPGRADER_ROLE` on all three tokens to the timelock; `OPERATOR_ROLE` on the executor; `CANCELLER_ROLE` on the timelock to the guardian.
-4. Hand over: grant `DEFAULT_ADMIN_ROLE` on each token and on the executor to the timelock, then the deployer renounces it there. The deployer also renounces `DEFAULT_ADMIN_ROLE` on the timelock. `ProxyDeployer` ownership goes to the timelock, so any later token is placed through governance.
+2. Configure, after the deploys and while the deployer still holds `DEFAULT_ADMIN_ROLE` on the tokens: `SettlementWindowRule.setWindow` for `IntentToken` (`windowOpen`, `windowClose`, `windowDays`), `MaxHoldersRule.setCap` for all three tokens (`holderCap`), and `MaxHoldersRule.setExemptHolder(asyncFund, asyncFund, true)` so the 7540 vault's escrow never counts as a holder.
+3. Grant roles: `MINTER_ROLE` and `BURNER_ROLE` on `IntentToken`; `EXECUTOR_ROLE` on `IntentToken` to the executor; `FULFILLER_ROLE` on the 7540 vault; `AGENT_ROLE` on all three tokens; `UPGRADER_ROLE` on all three tokens to the timelock; `OPERATOR_ROLE` on the executor; `CANCELLER_ROLE` on the timelock to the guardian. This also waits only for the deploys, so steps 2 and 3 have no order between them.
+4. Hand over: once configuration and the role grants are done, grant `DEFAULT_ADMIN_ROLE` on each token and on the executor to the timelock, then the deployer renounces it there. The deployer also renounces `DEFAULT_ADMIN_ROLE` on the timelock once configuration and the grants are done. `ProxyDeployer` ownership goes to the timelock after the deploys, with no order against the other hand-over calls, so any later token is placed through governance.
 
 The identity provider has to verify the 7540 vault after `Activate`, because the vault holds shares in escrow and `IdentityRule` checks it on both legs. `Activate` does not do this.
 
 ### After `Activate`
 
-The roles are in [roles.md](roles.md#who-holds-what-after-activate). The post-deploy checks in the README runbook (the fixture's `assertHandedOver`) confirm that the deployer holds no role anywhere, the timelock is the only upgrader and admin, each token runs the hook the council recorded with the intended rules in order, the guardian can cancel but not propose or execute, and the delay is at least 7 days.
+The roles are in [roles.md](roles.md#who-holds-what-after-activate). The post-deploy checks in the README runbook (the fixture's `assertHandedOver`) confirm that the deployer holds no role on the timelock, registry, tokens or executor, the timelock holds `DEFAULT_ADMIN_ROLE` on each of them and is the only `UPGRADER_ROLE` holder among the known accounts, `ProxyDeployer` is owned by the timelock, each token runs the hook the council recorded with the intended rules in order, the guardian can cancel but not propose or execute, and the delay is at least 7 days.
 
 Code: `ignition/modules/Components.ts`, `Tokens.ts`, `Activate.ts`, `roles.ts`; `test/nodejs/fixtures.ts`.

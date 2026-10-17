@@ -55,7 +55,7 @@ assets = shares x (totalAssets + 1) / (totalSupply + 10^6)
 
 Share decimals are the asset's decimals plus 6. With a 6-decimal asset, shares have 12.
 
-Nothing in the vault changes the price over time. The price moves only if someone sends the asset to the vault directly, or if the asset itself changes balance. There is no strategy, fee or yield code.
+The vault does not change the price on a schedule. The price moves through the rounding dust of deposits and withdrawals, which stays in the vault, through direct transfers of the asset to the vault, and if the asset itself changes balance. There is no strategy, fee or yield code.
 
 Example, a 6-decimal asset and an empty vault. A deposit of 1,000 assets (`1000e6`) mints `1000e6 x 10^6 / 1 = 1e15` raw shares, which is 1,000 shares at 12 decimals. Redeeming all of them pays `1e15 x (1000e6 + 1) / (1e15 + 10^6) = 1000e6`, so the full 1,000 assets come back.
 
@@ -96,7 +96,7 @@ Solid arrows are the asset. Dotted arrows are shares.
 | `rejectDepositRequest` | the controller of the request |
 | `redeem`, `withdraw` | the `receiver` chosen by the controller or its operator |
 
-The asset comes in on `requestDeposit` (from the owner) and on `fulfillRedeem` (from the fulfiller's wallet). `custody` is a plain address fixed at initialisation. The timelock can change it with `setCustody`. The code makes no assumption about what it is.
+The asset comes in on `requestDeposit` (from the owner) and on `fulfillRedeem` (from the fulfiller's wallet). `custody` is a plain address, set at initialisation. The timelock can change it with `setCustody`. The code makes no assumption about what it is.
 
 ### The price
 
@@ -110,7 +110,7 @@ Share decimals equal the asset's decimals. There is no offset.
 
 ### Worked example
 
-A 6-decimal asset, so shares also have 6 decimals. Amounts below are whole units. Alice starts with 1,000 assets. The fulfiller starts with 500 assets and has approved the vault. Alice is verified, and so is the vault.
+A 6-decimal asset, so shares also have 6 decimals. Amounts below are whole units. Alice starts with 1,000 assets and has approved the vault on the asset. The fulfiller starts with 500 assets and has also approved the vault. Alice is verified, and so is the vault.
 
 | Step | Alice assets | Vault assets | Custody assets | Fulfiller assets | Alice shares | Vault shares | Share supply |
 |---|---|---|---|---|---|---|---|

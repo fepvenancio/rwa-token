@@ -1,6 +1,6 @@
 # Token flows
 
-Step-by-step flows for `IntentToken`. Transfer, forced transfer, freeze, lockup and pause work the same way on both vaults, because they come from the base. Mint, burn and signed intents exist only on `IntentToken`. Vault flows are in [flows-vaults.md](flows-vaults.md).
+Step-by-step flows for `IntentToken`. Transfer, forced transfer, freeze and pause apply to vault shares the same way, because they come from the base. Lockup applies the same way because the vaults' hooks include `LockupRule`. How a redemption meets them differs per vault. Role-gated `mint` and `burn`, and signed intents, work only on `IntentToken`. Both vaults reject `mint(address,uint256)` and `burn(address,uint256)`. Vault flows are in [flows-vaults.md](flows-vaults.md).
 
 In every diagram, "Hook" stands for `ComplianceHook` and the rules it calls. The checks that matter for each flow are listed under it. How the hook reaches a decision is in [transfer-checks.md](transfer-checks.md).
 
@@ -120,19 +120,19 @@ sequenceDiagram
   Ex-->>Op: intentHash
 ```
 
-Checks in `executeTransfer`, in this order:
+Checks in `executeTransfer`, in this order. Step 1 reverts with `AccessControlUnauthorizedAccount`. Steps 2 to 4, and the pause, frozen and hook checks inside step 6, revert with `PolicyGated_TransferRejected(reason)`. A zero `to` in step 6 reverts with `ERC20InvalidReceiver` before the hook runs. `canExecute` returns the reason instead of reverting for steps 2 and 3 and for the pause, frozen and hook checks of step 6. It does not check steps 1 and 4, and it does not reproduce the zero-`to` revert: for a zero `to` it returns whatever the hook says (with `IdentityRule`, normally `RECEIVER_NOT_VERIFIED`):
 
 1. The caller holds `EXECUTOR_ROLE`. After `Activate` that is the `IntentExecutor` contract.
-2. `block.timestamp > deadline` returns `INTENT_EXPIRED`.
-3. The nonce was already used by `from` returns `NONCE_USED`.
-4. The signature does not match `from` returns `BAD_SIGNATURE`.
+2. `block.timestamp > deadline`: reason `INTENT_EXPIRED`.
+3. The nonce was already used by `from`: reason `NONCE_USED`.
+4. The signature does not match `from`: reason `BAD_SIGNATURE`.
 5. The nonce is marked used.
 6. The movement goes through `_update` as `EXECUTED`: pause, frozen balance, then the hook. With the standard rules that means `IdentityRule` on both parties, `LockupRule` on the sender, `SettlementWindowRule` (the window must be open), and `MaxHoldersRule`.
 7. `IntentExecuted(intentHash, from, to, amount, executor, ref)` is emitted. `executor` is the account that called the token, so it is the `IntentExecutor` contract when the call came through it.
 
 A revert anywhere undoes the nonce write. An intent rejected for being outside the settlement window can be submitted again when the window opens, until its deadline.
 
-The executor passes the intent to the token unchanged. It holds no funds and no state. It has `OPERATOR_ROLE` for callers and a `GUARDIAN_ROLE` that can pause it, in which case `execute` reverts with OpenZeppelin's `EnforcedPause`.
+The executor passes the intent to the token unchanged. It holds no funds and keeps no intent or nonce state. It stores only its roles and its pause flag. It has `OPERATOR_ROLE` for callers and a `GUARDIAN_ROLE` that can pause it, in which case `execute` reverts with OpenZeppelin's `EnforcedPause`.
 
 Code: `IntentSettledUpgradeable.executeTransfer`, `canExecute`, `intentHash`, `_intentPreflight`; `IntentExecutor.execute`.
 
@@ -226,7 +226,7 @@ Code: `PolicyGatedERC20Upgradeable.setFrozen`, `getFrozen`.
 
 The agent blocks a holder from sending until a time.
 
-The agent calls the rule, not the token: `LockupRule.setLockup(token, holder, unlockTime)`. The rule asks the token whether the caller holds `AGENT_ROLE`. A time in the past or present clears the lockup. While locked, the holder's `transfer` and executed intents are rejected with `LOCKED`. On the vaults a redemption by the holder is rejected too, because it is a holder burn. See [transfer-checks.md](transfer-checks.md) for the full rule.
+The agent calls the rule, not the token: `LockupRule.setLockup(token, holder, unlockTime)`. The rule asks the token whether the caller holds `AGENT_ROLE`. A time in the past or present clears the lockup. While locked, the holder's `transfer` and executed intents are rejected with `LOCKED`. On `Gated4626Vault` a holder's `redeem` or `withdraw` is rejected too, because it is a holder burn. On `Gated7540Vault`, `requestRedeem` is rejected, because it moves the shares to the vault as a `TRANSFER`. See [transfer-checks.md](transfer-checks.md) for the full rule.
 
 Code: `LockupRule.setLockup`.
 

@@ -29,7 +29,7 @@ sequenceDiagram
   V->>V: _mint(receiver, shares), kind MINT, operator is the caller
   V->>H: beforeTransfer
   H-->>V: TRANSFER_OK
-  V->>H: afterTransfer
+  V->>H: afterTransfer, if a rule wants it
   V-->>U: shares, event Deposit
 ```
 
@@ -53,7 +53,7 @@ sequenceDiagram
   V->>V: _burn(owner, shares), kind BURN, operator is the caller
   V->>H: beforeTransfer
   H-->>V: TRANSFER_OK
-  V->>H: afterTransfer
+  V->>H: afterTransfer, if a rule wants it
   V->>A: transfer(receiver, assets)
   V-->>U: assets, event Withdraw
 ```
@@ -64,7 +64,7 @@ sequenceDiagram
 
 ### The `max*` functions
 
-These are how the vault reports what the hook will allow. Integrators are expected to call them before depositing or redeeming.
+These are how the vault reports what the hook will allow. Integrators are expected to call them before depositing or redeeming. `deposit`, `mint`, `withdraw` and `redeem` check the matching `max*` first, so for a non-zero amount a policy rejection appears as `ERC4626ExceededMaxDeposit`, `ERC4626ExceededMaxMint`, `ERC4626ExceededMaxWithdraw` or `ERC4626ExceededMaxRedeem` with a max of 0, not as `PolicyGated_TransferRejected`. A zero-amount call passes the max check. It reverts with `PolicyGated_TransferRejected` if the token is paused, or if the hook rejects a zero-amount movement: an unverified party (`IdentityRule`), or a locked owner on `redeem` or `withdraw` (`LockupRule`). `MaxHoldersRule` passes zero amounts, so a receiver blocked only by a full holder cap succeeds with a zero-amount `deposit` or `mint`. An allowed party also succeeds and moves nothing.
 
 | Function | Returns |
 |---|---|
@@ -102,7 +102,7 @@ sequenceDiagram
   participant K as Controller or its operator
 
   O->>V: requestDeposit(assets, controller, owner)
-  V->>V: caller is owner or operator of owner? assets and controller non-zero?
+  V->>V: assets non-zero? controller non-zero? caller is owner or operator of owner?
   V->>V: canTransfer(0, controller, 1) must be TRANSFER_OK
   V->>V: pendingAssets of controller up
   V->>A: transferFrom(owner, vault, assets)
@@ -117,11 +117,11 @@ sequenceDiagram
   K->>V: deposit(assets, receiver, controller)
   V->>V: shares from the claimable ratio, rounded down
   V->>V: _mint(receiver, shares), kind MINT
-  V->>H: beforeTransfer, afterTransfer
+  V->>H: beforeTransfer, then afterTransfer if a rule wants it
 ```
 
 - **Request.** The caller must be `owner` or an operator `owner` approved with `setOperator`. Checks run in this order: assets not zero, controller not zero, caller allowed, then the controller must be able to receive shares (`Gated7540Vault_ControllerNotEligible(reason)` otherwise). There is no cancel, so the vault refuses assets from a controller that could not hold the shares. That includes a full holder cap: if the controller holds no shares and the cap is reached, the request reverts with reason `MAX_HOLDERS`. Assets are pulled from `owner`. They sit in the vault until the fulfiller acts.
-- **Fulfil.** The fulfiller picks both numbers: how many pending assets it fulfils and how many shares they buy. Both must be non-zero and `assets` must not exceed `pendingAssets` (`Gated7540Vault_ExceedsPending`). It can fulfil a request in several parts. The assets go straight to `custody`. The vault emits `Fulfilled(controller, true, price, assets, shares, fulfiller)`. No hook call happens here and pause does not block it.
+- **Fulfil.** The fulfiller picks both numbers: how many pending assets it fulfils and how many shares they buy. The checks run in this order: both numbers non-zero (`Gated7540Vault_ZeroAmount`), something pending for the controller (`Gated7540Vault_NothingPending`), then `assets` not above `pendingAssets` (`Gated7540Vault_ExceedsPending`). It can fulfil a request in several parts. The assets go straight to `custody`. The vault emits `Fulfilled(controller, true, price, assets, shares, fulfiller)`. No hook call happens here and pause does not block it.
 - **Claim.** Only the controller or an operator of it can claim (`Gated7540Vault_Unauthorized` otherwise). The caller picks the `receiver` of the shares. The shares are minted through the hook as `MINT` with `receiver` as `to`.
 
 Claim arithmetic, with `full` meaning the request equals everything claimable on that side:
@@ -154,15 +154,15 @@ sequenceDiagram
   V->>V: not owner and not its operator? spend ERC-20 share allowance
   V->>V: pendingShares of controller up
   V->>V: _transfer(owner, vault, shares), kind TRANSFER
-  V->>H: beforeTransfer, afterTransfer
+  V->>H: beforeTransfer, then afterTransfer if a rule wants it
   Note over V,H: pause, frozen, identity of owner and vault, lockup of owner
 
   F->>V: fulfillRedeem(controller, shares, assets)
   V->>V: pendingShares down, claimableShares and claimableAssets up
   V->>V: lastPrice = assets x 10^decimals / shares, rounded down
   V->>V: _burn(vault, shares), kind BURN
-  V->>H: beforeTransfer, afterTransfer
-  F->>A: assets move from the fulfiller to the vault
+  V->>H: beforeTransfer, then afterTransfer if a rule wants it
+  V->>A: transferFrom(fulfiller, vault, assets)
   Note over F,A: the fulfiller must have approved the vault on the asset
 
   K->>V: redeem(shares, receiver, controller)
@@ -171,7 +171,7 @@ sequenceDiagram
 ```
 
 - **Request.** `shares` and `controller` must be non-zero. If the caller is neither `owner` nor an operator of `owner`, the vault spends the caller's ERC-20 share allowance from `owner`. The shares move from `owner` to the vault as an ordinary `TRANSFER`, so the same checks apply as for a transfer: pause, frozen balance, `IdentityRule` on the owner and on the vault, `LockupRule` on the owner. The vault must therefore be verified by the identity registry. `Activate` also exempts the vault from the holder cap, so escrow never fills a slot.
-- **Fulfil.** The fulfiller picks `shares` (at most `pendingShares`) and the `assets` they pay. The escrowed shares are burned as `BURN` from the vault. Then the vault pulls `assets` from the fulfiller's wallet with `transferFrom`. Both amounts must be non-zero. While the token is paused the burn is rejected, so fulfilment waits.
+- **Fulfil.** The fulfiller picks `shares` and the `assets` they pay. The checks are the same as for a deposit fulfilment: both non-zero, something pending, and `shares` not above `pendingShares`. The escrowed shares are burned as `BURN` from the vault. Then the vault pulls `assets` from the fulfiller's wallet with `transferFrom`. While the token is paused the burn is rejected, so fulfilment waits.
 - **Claim.** `redeem` and `withdraw` pay the assets to a `receiver` the caller picks. They do not call the hook and move no shares, because the burn already happened. They revert with `EnforcedPause` while paused.
 
 | Call | Reverts if | Result |

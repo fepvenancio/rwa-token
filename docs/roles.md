@@ -87,7 +87,8 @@ All three tokens share the base. Rows marked 7540 exist only on `Gated7540Vault`
 | `transfer`, `transferFrom`, `approve`, `permit` | anyone | Movements go through the hook |
 | `executeTransfer(intent, sig)` | `EXECUTOR_ROLE` | `IntentToken` only |
 | `cancelIntent(nonce)` | anyone, for its own nonces | `IntentToken` only |
-| `deposit`, `mint`, `withdraw`, `redeem` | anyone | `Gated4626Vault` only |
+| `deposit`, `mint` | anyone | `Gated4626Vault` only |
+| `withdraw`, `redeem` | the owner, or a spender with share allowance | `Gated4626Vault` only |
 | `requestDeposit(assets, controller, owner)` | `owner`, or an operator of `owner` | 7540 |
 | `requestRedeem(shares, controller, owner)` | `owner`, an operator of `owner`, or a spender with allowance | 7540 |
 | `deposit`, `mint`, `redeem`, `withdraw` with a controller | the controller or an operator of it | 7540 claims |
@@ -147,9 +148,9 @@ Actions with no delay: guardian pause, council attestation and revocation, and e
 
 Code: `ignition/modules/Components.ts`, `test/nodejs/fixtures.ts` (`assertHandedOver`).
 
-## What nobody can do
+## What the code does not allow
 
-- Change a token's registry. `registry()` is set in the initialiser and has no setter.
+- Change a token's registry. `registry()` is set in the initialiser and has no setter. Only an upgrade to an attested implementation, through the timelock, could change that.
 - Mint or burn vault shares through `mint` or `burn`.
 - Make `transfer` return `true` without moving a balance. A rejected movement reverts.
 - Let the executor change an intent. It passes the holder's signed fields to the token, which checks the signature.

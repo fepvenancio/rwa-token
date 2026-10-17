@@ -2,7 +2,7 @@
 
 These pages explain how the contracts in `contracts/` work and how they are deployed. They describe what the code does. Where the build brief ([CLAUDE.md](../CLAUDE.md)) or the [README](../README.md) says something different, the code is right, and the page follows the code.
 
-Checked against: CHECKED_AGAINST_PLACEHOLDER
+Checked against: the contracts and Ignition modules at commit `6fb8e05`. If a later commit changes them, these pages may be out of date.
 
 ## Which page answers what
 
@@ -45,7 +45,7 @@ Other documents in the repo: [README.md](../README.md) has the security model su
 
 ## Conventions
 
-- Each section ends with a `Code:` line naming the contracts and functions it was written from. They name functions, not line numbers, so they survive edits. To check a claim, open the named function.
+- Most sections that describe code end with a `Code:` line naming the contracts and functions they were written from. They name functions, not line numbers, so they survive edits. To check a claim, open the named function.
 - Reason codes, roles, events and errors appear in code font, spelled as in the source.
 - "Raw units" means the token's smallest unit. Amounts in whole units say so.
 - Diagrams are Mermaid, which GitHub renders.
