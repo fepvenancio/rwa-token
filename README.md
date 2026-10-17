@@ -230,6 +230,9 @@ The brief is in [`CLAUDE.md`](CLAUDE.md). Where the code intentionally differs, 
 - **Duplicate rules.** A duplicate `ruleId` reuses `ComplianceHook_DuplicateRule`, so the frozen ABI is unchanged.
 - **Mocks.** The brief's `MockAcceptHook` / `MockRejectHook` are replaced by `vm.mockCall`, per the Wonderland
   testing standard. `MockAsset` arrives with the vaults.
+- **7540 operators are full delegates** (review L-5, owner decision): the code follows ERC-7540, so an approved
+  operator can also create requests that pull the owner's assets or shares under any controller. Owners should approve
+  only custodians they would trust with the assets. The brief previously said "claims only" and was corrected.
 - **Deployment contracts.** `ProxyDeployer` and `TokenProxy` (in `contracts/deploy/`) are not in the brief. `TokenProxy`
   is OZ's `ERC1967Proxy` with only OZ's documented `_unsafeAllowUninitialized` override, so that it can be created
   without init data. That keeps its CREATE2 address independent of the hook; `ProxyDeployer` initialises it in the same

@@ -87,6 +87,14 @@ Further limits recorded during review:
   signature with `verifyTypedData` against the chain-reported ERC-5267 domain (`intents.test.ts`).
 - **Pre-flight answers for the latest block; a write lands in the next one.** At a time boundary (lockup end, window
   close, intent deadline) they can differ by one second (`time.test.ts`).
+- **7540 operators are full delegates** (review L-5). Per ERC-7540, an approved operator can create requests that pull
+  the owner's assets or shares under any controller, not only claim. Owners should approve only custodians they would
+  trust with the assets. Pinned by `test_WhenAnOperatorRequestsUnderItsOwnController_ItIsAFullDelegatePerErc7540`.
+- **Dust cap griefing is accepted** (review L-1). Anyone can deposit 1 wei into the 4626 vault for a verified, empty
+  receiver and take a holder slot, and 1 wei sent to an exiting holder breaks an exact-balance exit. Mitigation for
+  now: the agent cleans up dust (forced transfer or burn) and monitoring watches slot usage. Planned: `MinPositionRule`,
+  a per-token minimum, attested like the other rules. Requiring a verified caller on vault mints was rejected because
+  it would break custodians depositing for clients.
 - **The holder cap is a ratchet** (review L-4: prose corrected, behaviour unchanged). A full-balance move to a new
   holder passes only when `count <= cap`, and any other new holder only when `count < cap`. So above a lowered cap no
   new holder is admitted, net-zero swaps included, until the count comes back down. Existing holders can still

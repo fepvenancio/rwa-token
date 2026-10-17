@@ -272,6 +272,24 @@ contract Gated7540VaultUnit_RequestDeposit is Gated7540VaultUnitTest {
     assertEq(_vault.pendingDepositRequest(0, _alice), 5);
   }
 
+  /// @dev L-5 (owner decision): ERC-7540 operators are full delegates. An approved operator can open requests that pull
+  ///      the owner's assets or shares under ANY controller, its own included. Pinned so nobody narrows it to claims
+  function test_WhenAnOperatorRequestsUnderItsOwnController_ItIsAFullDelegatePerErc7540() external {
+    _holdShares(_alice, 100);
+    vm.prank(_alice);
+    _vault.setOperator(_bob, true);
+    uint256 _assetsBefore = _asset.balanceOf(_alice);
+    vm.startPrank(_bob);
+    _vault.requestDeposit(25, _bob, _alice); // alice pays, bob controls
+    _vault.requestRedeem(40, _bob, _alice); // alice's shares escrowed, bob controls
+    vm.stopPrank();
+    assertEq(_asset.balanceOf(_alice), _assetsBefore - 25);
+    assertEq(_vault.balanceOf(_alice), 60);
+    assertEq(_vault.pendingDepositRequest(0, _bob), 25);
+    assertEq(_vault.pendingRedeemRequest(0, _bob), 40);
+    assertEq(_vault.pendingDepositRequest(0, _alice) + _vault.pendingRedeemRequest(0, _alice), 0);
+  }
+
   /// @dev Backs the `arbitrary-send-erc20` suppression: a non-operator cannot pull a victim's approved assets
   function test_WhenANonOperatorRequestsWithAVictimAsOwner_ItRevertsAndMovesNothing(
     uint256 _assets

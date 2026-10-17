@@ -909,7 +909,7 @@ An Ignition deployment of the whole stack:
   - I adjusted the owner's wording at the boundary: at `count == cap` a full-balance move passes, as pinned by `test_WhenTheSenderLeavesForANewHolderAtTheCap_ItIsOkNet`.
   - Pins: `test_WhenTheCountIsAboveALoweredCap_ANetZeroMoveIsStillRejected` (above the cap) and the `count == cap` test above.
 
-## v0.2.0: design fixes from the 2026-10-17 review (owner decisions; in progress)
+## v0.2.0: design fixes from the 2026-10-17 review (owner decisions; implemented)
 
 Order: M-3, then M-2, then M-1, then the L-5 and L-1 docs. Each M is its own commit, tests first. Bytecode changes, so this is v0.2.0. The change-board findings page is published after the fixes land.
 
@@ -936,6 +936,12 @@ Order: M-3, then M-2, then M-1, then the L-5 and L-1 docs. Each M is its own com
   - Brief §4 updated. Runbook: a compromised governance multisig is out of scope for this control, by design.
 - **L-5:** standard ERC-7540 operators (full delegates); brief corrected; a test pins it.
 - **L-1:** accepted with agent clean-up; `MinPositionRule` (a per-token minimum, attested) later.
+- **As built:**
+  - M-3 `0822a4a`, M-2 `d99a82f`, M-1 `cfd95c3`, then the L-5/L-1 docs commit. Each has tests written first, and every M's mutants were run on a scratch copy and caught.
+  - Owner clarifications applied: the payout probe uses amount 0 (the amount-1 probe would block payouts to controllers holding no shares; that mutant breaks 11 tests); claimable deposit shares are delivered as an enforcement mint (`_mintAs`, FORCED from zero), so delivery works at a full cap and while paused; the recovery timelock covers the guardian's full surface (every token, vault and the executor, plus its main-timelock canceller).
+  - `GovernanceTimelock` replaces the plain main timelock (an OZ subclass). The recovery timelock is plain OZ.
+  - Interface changes: `IGated7540Vault` re-pinned to `0x75f5b0db` (M-3) and `IGovernanceTimelock` added (`0x31993a1c`); `IPolicyGated` and `IIntentExecutorBatch` changed NatSpec only, so their IDs are unchanged.
+  - Result: 495 passing; lint, Slither, Aderyn, Halmos, upgrades-core, isolated profile and reproducibility (13 contracts) all clean.
 
 ### Remaining brief items (deferred until the first external integrator is known)
 - **ERC-3643 `IToken` read adapter.**
