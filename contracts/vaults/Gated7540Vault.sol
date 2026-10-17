@@ -233,10 +233,10 @@ contract Gated7540Vault is
     if (_shares == 0) revert Gated7540Vault_NothingPending();
     _state.pendingShares = 0;
     emit RedeemRequestRejected(_controller, _shares);
-    // Internal FORCED move: not an agent action, and the vault needs no AGENT_ROLE on itself. Like forcedTransfer,
-    // it first releases any frozen escrow it takes, so `frozen <= balance` holds for the vault too.
-    _releaseFrozen(address(this), _shares);
-    _moveAs(address(this), _controller, _shares, IPolicyHook.TransferKind.FORCED, bytes32(0), 0);
+    // A plain TRANSFER back to the controller (owner decision M-2, reversing R2): cap, pause, lockup and freeze all
+    // apply, so a holder cannot route shares past the cap by naming a new controller. If the transfer is blocked,
+    // this reverts and the agent's recoverRedeemRequest (FORCED, to a verified account) is the enforcement path.
+    _transfer(address(this), _controller, _shares);
   }
 
   /// @inheritdoc IGated7540Vault

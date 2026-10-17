@@ -226,8 +226,9 @@ interface IGated7540Vault {
 
   /**
    * @notice Rejects a controller's whole pending redemption and returns the escrowed shares to the controller
-   * @dev Only FULFILLER_ROLE. Moved internally as FORCED: bypasses pause, lockup and the holder cap, but the controller
-   *      must still be verified. If it was de-verified this reverts and the shares stay escrowed for agent recovery
+   * @dev Only FULFILLER_ROLE. Returned as a plain TRANSFER, so the full policy applies to the controller (identity,
+   *      cap, pause, lockup, and freeze on the escrow). If it is blocked this reverts and the shares stay escrowed for
+   *      the agent's `recoverRedeemRequest`
    * @param _controller The controller
    */
   function rejectRedeemRequest(

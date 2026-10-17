@@ -684,7 +684,8 @@ contract Gated7540VaultUnit_FulfillAndClaimRedeem is Gated7540VaultUnitTest {
   }
 }
 
-/// @dev L-2: the vault's internal FORCED moves release frozen escrow exactly as `forcedTransfer` does
+/// @dev L-2: the vault's internal FORCED move (recovery) releases frozen escrow exactly as `forcedTransfer` does;
+///      a reject is a plain TRANSFER since M-2, so a frozen escrow blocks it
 contract Gated7540VaultUnit_FrozenEscrow is Gated7540VaultUnitTest {
   function _escrowTwoAndFreeze() internal {
     _holdShares(_alice, 50);
@@ -695,14 +696,16 @@ contract Gated7540VaultUnit_FrozenEscrow is Gated7540VaultUnitTest {
     _vault.setFrozen(address(_vault), 80);
   }
 
-  function test_WhenAFrozenEscrowIsRejected_FrozenFallsToTheRemainingEscrow() external {
+  /// @dev M-2: a reject is a plain TRANSFER, so a frozen escrow blocks it ("freeze means freeze"); recovery still works
+  function test_WhenTheEscrowIsFrozen_ARejectIsRefused() external {
     _escrowTwoAndFreeze();
-    vm.expectEmit(address(_vault));
-    emit IPolicyGated.Frozen(address(_vault), 30);
+    vm.expectRevert(
+      abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.INSUFFICIENT_UNFROZEN)
+    );
     vm.prank(_fulfiller);
     _vault.rejectRedeemRequest(_alice);
-    assertEq(_vault.getFrozen(address(_vault)), 30);
-    assertEq(_vault.balanceOf(address(_vault)), 30);
+    assertEq(_vault.getFrozen(address(_vault)), 80);
+    assertEq(_vault.pendingRedeemRequest(0, _alice), 50);
   }
 
   function test_WhenAFrozenEscrowIsRecovered_FrozenFallsToTheRemainingEscrow() external {
@@ -882,13 +885,14 @@ contract Gated7540VaultUnit_Rejects is Gated7540VaultUnitTest {
     assertEq(_vault.pendingDepositRequest(0, _bob), 0);
   }
 
-  function test_WhenARedemptionIsRejected_TheSharesReturnAsForcedAndItEmits() external {
+  /// @dev M-2 (reverses R2): the shares return as a plain TRANSFER, so the full policy applies to the controller
+  function test_WhenARedemptionIsRejected_TheSharesReturnAsAPlainTransferAndItEmits() external {
     _holdShares(_alice, 50);
     _requestRedeem(_alice, 30);
     vm.expectCall(
       _hook,
       abi.encodeCall(
-        IPolicyHook.beforeTransfer, (_ctx(IPolicyHook.TransferKind.FORCED, address(_vault), _alice, 30, _fulfiller))
+        IPolicyHook.beforeTransfer, (_ctx(IPolicyHook.TransferKind.TRANSFER, address(_vault), _alice, 30, _fulfiller))
       )
     );
     vm.expectEmit(address(_vault));
@@ -899,14 +903,17 @@ contract Gated7540VaultUnit_Rejects is Gated7540VaultUnitTest {
     assertEq(_vault.pendingRedeemRequest(0, _alice), 0);
   }
 
-  function test_WhenPaused_ARedemptionRejectStillWorks() external {
+  /// @dev M-2: a plain TRANSFER respects the pause; the shares stay escrowed (the agent can still recover them)
+  function test_WhenPaused_ARedemptionRejectIsRefusedAndTheSharesStayEscrowed() external {
     _holdShares(_alice, 50);
     _requestRedeem(_alice, 30);
     vm.prank(_guardian);
     _vault.pause();
+    vm.expectRevert(abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.PAUSED));
     vm.prank(_fulfiller);
     _vault.rejectRedeemRequest(_alice);
-    assertEq(_vault.balanceOf(_alice), 50);
+    assertEq(_vault.balanceOf(address(_vault)), 30);
+    assertEq(_vault.pendingRedeemRequest(0, _alice), 30);
   }
 
   function test_WhenNothingIsPending_RejectsRevert() external {
@@ -1225,23 +1232,57 @@ contract Gated7540VaultIntegration_Escrow is Gated7540VaultIntegrationTest {
     _vault.requestRedeem(1, _alice, _alice);
   }
 
-  /// @dev R2: returned as FORCED, so neither a full cap nor a pause blocks the unstick path
-  function test_WhenRejectedAtAFullCapWhilePaused_TheSharesStillReturn() external {
+  /// @dev M-2, cap full: a controller that left the count cannot be re-admitted by a reject; the agent recovers instead
+  function test_WhenRejectedAtAFullCapToANewHolder_TheRejectRevertsAndTheAgentRecovers() external {
+    address _treasury = makeAddr('treasury');
+    _identity.set(_treasury, true);
     _invest(_alice, 100);
     vm.prank(_alice);
     _vault.requestRedeem(100, _alice, _alice); // alice leaves the count
     _invest(_bob, 100);
     _invest(_carol, 100); // the cap is full again without alice
-    vm.prank(_guardian);
-    _vault.pause();
 
+    vm.expectRevert(abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.MAX_HOLDERS));
+    vm.prank(_fulfiller);
+    _vault.rejectRedeemRequest(_alice);
+    assertEq(_vault.pendingRedeemRequest(0, _alice), 100);
+
+    vm.prank(_agent);
+    _vault.recoverRedeemRequest(_alice, _bob); // FORCED, to an existing holder
+    assertEq(_vault.balanceOf(_bob), 200);
+    assertEq(_maxHoldersRule.holderCount(address(_vault)), 2);
+  }
+
+  /// @dev M-2, cap full: a controller that still holds is not a new holder, so the reject goes through
+  function test_WhenRejectedAtAFullCapToAnExistingHolder_TheSharesReturn() external {
+    _invest(_alice, 100);
+    _invest(_bob, 100); // cap full
+    vm.prank(_alice);
+    _vault.requestRedeem(40, _alice, _alice); // alice still holds 60
     vm.prank(_fulfiller);
     _vault.rejectRedeemRequest(_alice);
     assertEq(_vault.balanceOf(_alice), 100);
-    assertEq(_maxHoldersRule.holderCount(address(_vault)), 3); // FORCED is exempt from the cap but counted
+    assertEq(_maxHoldersRule.holderCount(address(_vault)), 2);
   }
 
-  /// @dev Owner-specified (R2): a de-verified controller's reject reverts and the shares stay escrowed
+  /// @dev M-2, the steering attack: naming a new holder as controller cannot route shares past a full cap
+  function test_WhenAHolderNamesANewControllerAtAFullCap_TheRejectCannotBypassTheCap() external {
+    _invest(_alice, 100);
+    _invest(_bob, 100); // cap full; carol is verified but holds nothing
+    vm.expectRevert(abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.MAX_HOLDERS));
+    vm.prank(_alice);
+    _vault.transfer(_carol, 10); // the direct route is refused...
+
+    vm.prank(_alice);
+    _vault.requestRedeem(10, _carol, _alice);
+    vm.expectRevert(abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.MAX_HOLDERS));
+    vm.prank(_fulfiller);
+    _vault.rejectRedeemRequest(_carol); // ...and so is the request-then-reject route
+    assertEq(_vault.balanceOf(_carol), 0);
+    assertEq(_maxHoldersRule.holderCount(address(_vault)), 2);
+  }
+
+  /// @dev A de-verified controller's reject reverts and the shares stay escrowed (unchanged by M-2)
   function test_WhenTheControllerWasDeverified_TheRejectRevertsAndTheSharesStayEscrowed() external {
     _invest(_alice, 100);
     vm.prank(_alice);
