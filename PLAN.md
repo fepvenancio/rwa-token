@@ -1,6 +1,6 @@
 # PLAN
 
-Status: **Phase 7 done (owner, 2026-10-17). Closing items: tag `v0.1.0` (exercises `release.yml`), `SECURITY.md` audit package.**
+Status: **v0.2.0 released (2026-10-18): review fixes M-1, M-2, M-3, L-2, L-3; L-4 and L-5 documented; L-1 accepted. Change-board page published.**
 
 Brief v2 ("Gated Token Stack") replaced the original executor-only brief on 2026-10-16. On the same day the owner supplied a reference implementation in `Imported/` (now deleted; its contents live in `contracts/`) and approved, in chat, integrating it with the major findings fixed, a common-bug sweep, and the Wonderland Solidity standards.
 
@@ -942,6 +942,16 @@ Order: M-3, then M-2, then M-1, then the L-5 and L-1 docs. Each M is its own com
   - `GovernanceTimelock` replaces the plain main timelock (an OZ subclass). The recovery timelock is plain OZ.
   - Interface changes: `IGated7540Vault` re-pinned to `0x75f5b0db` (M-3) and `IGovernanceTimelock` added (`0x31993a1c`); `IPolicyGated` and `IIntentExecutorBatch` changed NatSpec only, so their IDs are unchanged.
   - Result: 495 passing; lint, Slither, Aderyn, Halmos, upgrades-core, isolated profile and reproducibility (13 contracts) all clean.
+- **Docs:** the eight `docs/` guides were updated for v0.2.0 (`ca88619`), including a correction to the documented error for paused deposit claims (now `Gated7540Vault_ControllerNotEligible(PAUSED)`, from the claim-time check).
+- **Released:** tag `v0.2.0` on `ca88619`, after CI was green.
+  - The release workflow attached `release-build-v0.2.0.tar.gz` (2.9 MB, sha256 `63cab1240bded016295ac39ef033f180193f85401c78b821270005785239c95d`).
+  - Verified as the council would: the sha256 matches, the manifest is identical to a local clean build for all 13 contracts, and its 38 build-info roots are all in scope (no tests, mocks or OZ-rooted jobs).
+- **Attestation impact vs v0.1.0:**
+  - changed: the `IntentToken`, `Gated4626Vault` and `Gated7540Vault` implementations (re-attest), and `IntentExecutor`;
+  - new: `GovernanceTimelock`;
+  - unchanged: the four rules, `ComplianceHook`, `PolicyRegistry`, `ProxyDeployer`, `TokenProxy`.
+- **Mutation tally since v0.1.0:** 33 planted, 32 caught. The survivor ("ref slot not cleared") is an equivalent mutant. An earlier report of "24" was a miscount.
+- **Change-board page** (private until the owner shares it): https://claude.ai/artifact/HxFZz3atMCyaj4U9HbcjEo. It covers status by finding, decisions, test evidence, attestation impact, verification, and the reviewer's "by design" notes left unchanged.
 
 ### Remaining brief items (deferred until the first external integrator is known)
 - **ERC-3643 `IToken` read adapter.**
