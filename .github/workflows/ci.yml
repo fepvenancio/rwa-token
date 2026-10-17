@@ -34,6 +34,8 @@ jobs:
       - run: npm run typecheck
       # Default and production profiles share one compiler config, so ContractSizes.t.sol checks deployed sizes.
       - run: npm test
+      # Isolation mode shifts nonces: guards against fixtures that predict addresses from the deployer's nonce.
+      - run: npx hardhat test solidity --test-profile isolated
 
   analysis:
     name: Format, Slither + Aderyn gates, Halmos, upgrade safety, reproducibility (PRs into main)

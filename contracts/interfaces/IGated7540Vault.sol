@@ -38,7 +38,7 @@ interface IGated7540Vault {
    * @notice Emitted on every fulfilment, putting the NAV history on-chain
    * @param _controller The controller of the fulfilled request
    * @param _isDeposit True for a deposit fulfilment, false for a redemption
-   * @param _price The fulfilment price: assets per `10**decimals()` shares, rounded down
+   * @param _price The fulfilment price: assets per `10**decimals()` shares, rounded down, and never below 1
    * @param _assets The assets of the fulfilment
    * @param _shares The shares of the fulfilment
    * @param _fulfiller The FULFILLER_ROLE account that fulfilled
@@ -223,7 +223,7 @@ interface IGated7540Vault {
 
   /**
    * @notice The last fulfilment price, used by `convertTo*` and the indicative `totalAssets`
-   * @return _price Assets per `10**decimals()` shares; `10**decimals()` (1:1) before the first fulfilment
+   * @return _price Assets per `10**decimals()` shares, never below 1; `10**decimals()` (1:1) before the first fulfilment
    */
   function lastPrice() external view returns (uint256 _price);
 }

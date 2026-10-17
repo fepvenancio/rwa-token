@@ -279,6 +279,27 @@ abstract contract PolicyGatedERC20Upgradeable is
   }
 
   /**
+   * @notice Lowers an account's frozen amount so an enforcement action can take `_amount` from it
+   * @dev Keeps `frozen <= balance` after the action. Emits `Frozen` before the token `Transfer`, as ERC-7943 requires.
+   *      Internal so templates' own enforcement moves (e.g. the 7540 escrow returns) keep the same invariant
+   * @param _account The account losing tokens
+   * @param _amount The amount it loses
+   */
+  function _releaseFrozen(
+    address _account,
+    uint256 _amount
+  ) internal {
+    uint256 _balance = balanceOf(_account);
+    if (_amount > _balance) revert ERC20InsufficientBalance(_account, _balance, _amount);
+    PolicyGatedStorage storage $ = _getPolicyGatedStorage();
+    uint256 _remaining = _balance - _amount;
+    if ($.frozen[_account] > _remaining) {
+      $.frozen[_account] = _remaining;
+      emit Frozen(_account, _remaining);
+    }
+  }
+
+  /**
    * @notice Authorizes a UUPS upgrade
    * @dev Only UPGRADER_ROLE, and the new implementation must be attested as IMPLEMENTATION
    * @param _newImplementation The new implementation
@@ -385,26 +406,6 @@ abstract contract PolicyGatedERC20Upgradeable is
     if (_from == address(0)) return IPolicyHook.TransferKind.MINT;
     if (_to == address(0)) return IPolicyHook.TransferKind.BURN;
     _kind = IPolicyHook.TransferKind.TRANSFER;
-  }
-
-  /**
-   * @notice Lowers an account's frozen amount so an enforcement action can take `_amount` from it
-   * @dev Keeps `frozen <= balance` after the action. Emits `Frozen` before the token `Transfer`, as ERC-7943 requires
-   * @param _account The account losing tokens
-   * @param _amount The amount it loses
-   */
-  function _releaseFrozen(
-    address _account,
-    uint256 _amount
-  ) private {
-    uint256 _balance = balanceOf(_account);
-    if (_amount > _balance) revert ERC20InsufficientBalance(_account, _balance, _amount);
-    PolicyGatedStorage storage $ = _getPolicyGatedStorage();
-    uint256 _remaining = _balance - _amount;
-    if ($.frozen[_account] > _remaining) {
-      $.frozen[_account] = _remaining;
-      emit Frozen(_account, _remaining);
-    }
   }
 
   /**

@@ -360,6 +360,7 @@ contract Gated7540VaultUnit_FulfillDeposit is Gated7540VaultUnitTest {
     _shares = bound(_shares, 1, _FUNDS);
     _requestDeposit(_alice, _assets);
     uint256 _price = Math.mulDiv(_fulfilled, _ONE, _shares);
+    if (_price == 0) _price = 1; // the stored price never falls below 1 (L-3)
 
     vm.expectEmit(address(_vault));
     emit IGated7540Vault.Fulfilled(_alice, true, _price, _fulfilled, _shares, _fulfiller);
@@ -680,6 +681,64 @@ contract Gated7540VaultUnit_FulfillAndClaimRedeem is Gated7540VaultUnitTest {
     vm.expectRevert(Pausable.EnforcedPause.selector);
     vm.prank(_alice);
     _vault.withdraw(50, _alice, _alice);
+  }
+}
+
+/// @dev L-2: the vault's internal FORCED moves release frozen escrow exactly as `forcedTransfer` does
+contract Gated7540VaultUnit_FrozenEscrow is Gated7540VaultUnitTest {
+  function _escrowTwoAndFreeze() internal {
+    _holdShares(_alice, 50);
+    _holdShares(_bob, 30);
+    _requestRedeem(_alice, 50);
+    _requestRedeem(_bob, 30);
+    vm.prank(_agent);
+    _vault.setFrozen(address(_vault), 80);
+  }
+
+  function test_WhenAFrozenEscrowIsRejected_FrozenFallsToTheRemainingEscrow() external {
+    _escrowTwoAndFreeze();
+    vm.expectEmit(address(_vault));
+    emit IPolicyGated.Frozen(address(_vault), 30);
+    vm.prank(_fulfiller);
+    _vault.rejectRedeemRequest(_alice);
+    assertEq(_vault.getFrozen(address(_vault)), 30);
+    assertEq(_vault.balanceOf(address(_vault)), 30);
+  }
+
+  function test_WhenAFrozenEscrowIsRecovered_FrozenFallsToTheRemainingEscrow() external {
+    _escrowTwoAndFreeze();
+    vm.prank(_agent);
+    _vault.recoverRedeemRequest(_alice, _carolRecovery);
+    assertEq(_vault.getFrozen(address(_vault)), 30);
+    assertEq(_vault.balanceOf(address(_vault)), 30);
+  }
+
+  address internal _carolRecovery = makeAddr('carolRecovery');
+}
+
+/// @dev L-3: a fulfilment price that floors to zero is stored as 1, so `convertTo*` never divide by zero
+contract Gated7540VaultUnit_ZeroPrice is Gated7540VaultUnitTest {
+  function test_WhenTheFulfilmentPriceFloorsToZero_TheLastPriceIsOneAndConversionsWork() external {
+    _requestDeposit(_alice, 1);
+    vm.expectEmit(address(_vault));
+    emit IGated7540Vault.Fulfilled(_alice, true, 1, 1, 2 * _ONE, _fulfiller);
+    _fulfillDeposit(_alice, 1, 2 * _ONE); // 0.5 asset units per whole share: floors to 0
+    assertEq(_vault.lastPrice(), 1);
+    assertEq(_vault.convertToShares(1), _ONE);
+    assertEq(_vault.convertToAssets(_ONE), 1);
+  }
+
+  function testFuzz_ThePriceIsNeverZero(
+    uint256 _assets,
+    uint256 _shares
+  ) external {
+    _assets = bound(_assets, 1, _FUNDS);
+    _shares = bound(_shares, 1, type(uint128).max);
+    _requestDeposit(_alice, _assets);
+    _fulfillDeposit(_alice, _assets, _shares);
+    uint256 _floor = Math.mulDiv(_assets, _ONE, _shares);
+    assertEq(_vault.lastPrice(), _floor == 0 ? 1 : _floor);
+    _vault.convertToShares(_assets); // never reverts
   }
 }
 

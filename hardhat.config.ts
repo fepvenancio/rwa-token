@@ -32,8 +32,11 @@ export default defineConfig({
   },
   test: {
     solidity: {
-      fuzz: {
-        runs: 256,
+      profiles: {
+        default: { fuzz: { runs: 256 } },
+        // Each test runs in isolation (a fresh EVM per call), which changes nonces and gas. CI runs it so fixtures can
+        // never again depend on the deployer's nonce (they deploy through ProxyDeployer, CREATE2). "isolate" is reserved.
+        isolated: { fuzz: { runs: 256 }, isolate: true },
       },
     },
   },

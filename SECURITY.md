@@ -87,6 +87,11 @@ Further limits recorded during review:
   signature with `verifyTypedData` against the chain-reported ERC-5267 domain (`intents.test.ts`).
 - **Pre-flight answers for the latest block; a write lands in the next one.** At a time boundary (lockup end, window
   close, intent deadline) they can differ by one second (`time.test.ts`).
+- **The holder cap is a ratchet** (review L-4: prose corrected, behaviour unchanged). A full-balance move to a new
+  holder passes only when `count <= cap`, and any other new holder only when `count < cap`. So above a lowered cap no
+  new holder is admitted, net-zero swaps included, until the count comes back down. Existing holders can still
+  transfer among themselves and exit. Pinned by
+  `MaxHoldersRule.t.sol::test_WhenTheCountIsAboveALoweredCap_ANetZeroMoveIsStillRejected`.
 - **Revoking an attestation does not affect live tokens.** Attestation is checked at install and upgrade time only.
   The guardian pauses while the timelock removes the component.
 - **`totalAssets` of the 7540 vault is indicative** (the last fulfilment price); `preview*` revert, as ERC-7540
@@ -177,6 +182,8 @@ Each row is a bug deliberately planted, the run that caught it, then restored fr
 | `Gated7540Vault` access | controller/operator check removed from `redeem`, `withdraw`, `_claimMint`, `_claimDeposit`; `FULFILLER_ROLE` removed from `fulfillRedeem`, `rejectRedeemRequest`, `fulfillDeposit`, `rejectDepositRequest`; `whenNotPaused` removed from `withdraw` | 1 to 2 tests each (`Gated7540VaultUnit_ClaimAccess` and others). Before the 2026-10-17 review, 6 of these 9 survived |
 | `Gated7540Vault.requestDeposit` | eligibility checked on the owner instead of the controller | `test_WhenAVerifiedOwnerRequestsForAnUnverifiedController_ItIsRefused`, the only test where owner differs from controller |
 | Base transient context | kind slot not cleared after a movement | 3 tests (forced-then-plain, executed-then-plain, and others) |
+| `Gated7540Vault` escrow (L-2) | `rejectRedeemRequest` or `recoverRedeemRequest` stops releasing frozen escrow | 1 test each (`Gated7540VaultUnit_FrozenEscrow`) |
+| `Gated7540Vault` price (L-3) | the minimum price of 1 removed | 3 tests (`Gated7540VaultUnit_ZeroPrice` and the fulfilment fuzz) |
 | Base enforcement | `forcedTransfer` keeps frozen tokens | `invariant_FrozenNeverExceedsBalance` and 2 unit tests. With the old no-op handler, the invariant missed it |
 | Base transient context | ref slot not cleared | Not killable: an equivalent mutant. The ref is read only when the kind slot is set, and every movement that sets the kind rewrites the ref first |
 | Reproducibility | metadata hash re-enabled | `verify:reproducible`: every contract differs across jobs |

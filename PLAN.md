@@ -897,9 +897,68 @@ An Ignition deployment of the whole stack:
 - **Mutation hygiene (teammate session's note, adopted):** the runs above edited the real `contracts/` files in place and restored them afterwards, but an interrupted run would have left a missing access check one `git commit -a` away (one mutant was live during the teammate's snapshot). From now on mutants run only in a scratch copy (`git ls-files` → rsync, `node_modules` symlinked); the eligibility-subject mutant was checked that way.
 - **Owner decision pending (teammate's suggestion):** an `isolated` Hardhat test profile (`isolate: true`) plus a CI step `npx hardhat test solidity --test-profile isolated` (about 25 s). It reproduced the 11 nonce-dependent fixture failures before the CREATE2 fix, so it would stop that class returning.
 
+### Owner: push, isolated profile, three fixes (2026-10-17)
+- **Pushed** `2caf004` and `dc26f25`.
+- **Isolated test profile:** `test.solidity.profiles.isolated` (`isolate: true`, same fuzz runs; Hardhat requires a `default` profile) and a CI step `npx hardhat test solidity --test-profile isolated`. Checked on a scratch copy: with the pre-CREATE2 nonce fixture restored, this profile reproduces the `ComplianceHook_OnlyToken` failures (4 in the 4626 file). The current suite passes it (395).
+- **L-2 fixed:** `rejectRedeemRequest` and `recoverRedeemRequest` call `_releaseFrozen(address(this), shares)` before their internal FORCED move, as `forcedTransfer` does. `_releaseFrozen` became `internal` and moved next to `_moveAs` (solhint ordering). Tests (red first): `Gated7540VaultUnit_FrozenEscrow`.
+- **L-3 fixed:** `_recordPrice` stores at least 1, so `convertTo*` never divide by zero. `IGated7540Vault` NatSpec for `Fulfilled._price` and `lastPrice()` now says "never below 1"; this is text only, so the ABI, ERC-165 ID and topics are unchanged. Tests (red first): `Gated7540VaultUnit_ZeroPrice`, including a fuzz test that the price is never 0.
+- **Mutants on a scratch copy:** each fix removed in turn is caught (1, 1 and 3 failing).
+- **Bytecode:** only `Gated7540Vault` differs from v0.1.0, so the next tag needs a new implementation attestation for it.
+- **L-4: prose corrected, behaviour unchanged (owner, 2026-10-17).** The formula `count + (senderLeaves ? 0 : 1) > cap` is the intended behaviour: a lowered cap is a ratchet. Swaps would let the register churn without ever shrinking, while existing holders can still transfer among themselves and exit, so nobody is trapped.
+  - Brief §6 now says: a full-balance move to a new holder is net-zero and passes when `count <= cap`; any other new holder needs `count < cap`; above a lowered cap no new holder is admitted, net-zero or not, until the count is back down to the cap (full-balance moves) or below it (any other).
+  - I adjusted the owner's wording at the boundary: at `count == cap` a full-balance move passes, as pinned by `test_WhenTheSenderLeavesForANewHolderAtTheCap_ItIsOkNet`.
+  - Pins: `test_WhenTheCountIsAboveALoweredCap_ANetZeroMoveIsStillRejected` (above the cap) and the `count == cap` test above.
+
 ### Remaining brief items (deferred until the first external integrator is known)
 - **ERC-3643 `IToken` read adapter.**
 - **Exact ERC-7943 conformance,** once the ERC is Final. Today there is no 7943 interface ID, because the function names and return types differ (README deviations).
+
+## Docs: `docs/` (plan, 2026-10-17, awaiting review)
+
+There is no `docs/` folder. The README has the security model and the deployment runbook. Nothing explains how the contracts connect, or follows a holder, an operator or the bank through a flow. The request: an architecture page, plus diagrams of the user flows, the roles, the money and how the protocol works, exact against the code.
+
+### Source of truth
+- The Solidity in `contracts/` and the modules in `ignition/modules/`, read in full on 2026-10-17. Non-test source is identical at `2caf004` and `dc26f25`. The OpenZeppelin 5.6.1 behaviour the pages rely on (timelock constructor roles, ERC-4626 order of transfer and mint, EIP-712 version string) was read in `node_modules`.
+- Where `CLAUDE.md`, the README and the code disagree, the pages follow the code. The differences go in the summary of this task. The brief, README and SECURITY.md are not edited.
+- No contract, interface, test or config file changes. Another session is committing to this checkout, so `contracts/` and `ignition/` are re-checked for changes before the pages are called done.
+
+### Pages
+| File | What it explains | Diagrams |
+|---|---|---|
+| `docs/README.md` | Index, reading order, a one-table glossary (hook, rule, kind, context, attested, timelock, guardian, controller), and the commit the pages were checked against | none |
+| `docs/architecture.md` | Each contract and what it does; how they call each other; which are proxies and which are immutable; the ERC-7201 storage namespaces; how each template inherits the base | component map, inheritance, install-time vs run-time calls |
+| `docs/roles.md` | Every role on every contract, who holds it after `Activate`, the exact functions it opens, its delay, what it cannot do. The guardian's two separate powers: `pause` on the token, `cancel` on the timelock | authority map; function × role table |
+| `docs/transfer-checks.md` | What `_update` does for every balance movement: the five kinds, the context, pause and frozen checks, hook, rule order, `afterTransfer`, the transient slots. Rule × kind table; the 13 reason codes and who returns each; where `canTransfer` and `canExecute` differ from the real call | `_update` flow; one transfer through the hook and rules |
+| `docs/flows-token.md` | `IntentToken` flows step by step, with who signs or sends what: mint, burn, transfer, signed intent (sign, pre-flight, execute, batch, cancel), forced transfer, freeze, lockup, pause and unpause. The EIP-712 domain and type | one sequence per flow (about 8) |
+| `docs/flows-vaults.md` | `Gated4626Vault` deposit, mint, withdraw, redeem and the gated `max*`. `Gated7540Vault` request, fulfil and claim for deposits and redemptions, reject, recover, operators. What pause blocks in each call | sequences; request state diagrams |
+| `docs/money.md` | Where tokens and assets sit at each step of each template; who pays, who receives, who holds custody; the price and rounding rules with worked numbers; what the code does not have (no fees, no yield logic, no payment leg on `IntentToken`) | one money-flow diagram per template; balance tables |
+| `docs/governance-and-deployment.md` | Timelock operations (schedule, wait, execute, cancel); council attestation and where it is checked; hook swap, rule-set change, upgrade; the deploy order and `ProxyDeployer`'s CREATE2 binding; the state after `Activate`. Points to the README runbook for commands instead of repeating them | deploy sequence; governed change; upgrade; end state |
+
+### How accuracy is checked
+1. Each behaviour is written from the function that does it. Every section ends with a `Code:` line naming the contract and function (names, not line numbers, so edits do not break them).
+2. A throwaway script in the session scratchpad (not committed) pulls every code identifier, role, reason code, event, error and path out of the pages. It fails if one is missing from `contracts/`, `ignition/` or `test/`. It also scans for the banned wording below.
+3. The rule × kind table, the pause table and the worked numbers are run against the real contracts in a scratch copy of the repo (as the mutation runs are), never in the working tree.
+4. Each Mermaid block is parsed with Mermaid (a pinned release, loaded outside the repo). A block that does not parse is fixed.
+5. A fresh agent (`gsd-doc-verifier`) gets the pages and the repo, not my conclusions, and returns every claim that does not hold. I fix them and re-run it until it returns none.
+6. At the end: `npx hardhat test` (both runners) with the summary line pasted; `git diff --stat` shows only `docs/` and `PLAN.md`; `contracts/interfaces/` is unchanged.
+
+### Writing rules
+- Plain sentences: who calls what, what changes, what reverts and with which error. Exact names in code font.
+- No filler or sales words (the scan in check 2 lists them: robust, seamless, leverage, comprehensive, ensure, crucial, streamline, powerful, delve, landscape, "not just X but Y"). No closing summary paragraph on a page. No em-dash chains.
+- Every number (delay, cap, rule count, decimals) comes from the code or from a deployment parameter, and the page says which.
+- The pages describe what the code does today.
+
+### Defaults I chose (say if you want another)
+1. **Mermaid** in the `.md` files: GitHub renders it, and the flows need sequence diagrams. The README uses ASCII boxes.
+2. **Behaviours the 2026-10-17 review left for you to decide are stated as plain facts**, each with one line saying PLAN.md tracks it. The guardian's `CANCELLER_ROLE` also covers a scheduled unpause (`roles.md`). A 7540 reject is a FORCED move to the controller, so it skips pause and the holder cap, and a redemption claim pays out without the hook (`flows-vaults.md`). The holder cap counts any balance above zero, so a 1-wei holder takes a slot (`transfer-checks.md`). If you change the code, those lines change with it. Alternative: leave them out.
+3. **README, SECURITY.md and `CLAUDE.md` are not edited**, and the README gets no link to `docs/` until you say so (one line).
+4. **Eight files.** One page per question a reader asks (what is it, who can do what, how is a transfer decided, what happens when I use it, where does the money go, who can change it) is easier to keep correct than one long file.
+
+### Out of scope
+Code, interface, test or CI changes. Fixing the open review items. An API reference that repeats the NatSpec. Tooling docs (README and SECURITY.md cover them). The ERC-3643 read adapter and exact ERC-7943 conformance (not built).
+
+### Done when
+All eight pages exist, checks 1 to 6 pass with their output shown, and the summary lists every place the brief, README or SECURITY.md disagrees with the code.
 
 ## Open questions for the owner
 1. None.

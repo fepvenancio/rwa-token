@@ -233,7 +233,9 @@ contract Gated7540Vault is
     if (_shares == 0) revert Gated7540Vault_NothingPending();
     _state.pendingShares = 0;
     emit RedeemRequestRejected(_controller, _shares);
-    // Internal FORCED move: not an agent action, and the vault needs no AGENT_ROLE on itself.
+    // Internal FORCED move: not an agent action, and the vault needs no AGENT_ROLE on itself. Like forcedTransfer,
+    // it first releases any frozen escrow it takes, so `frozen <= balance` holds for the vault too.
+    _releaseFrozen(address(this), _shares);
     _moveAs(address(this), _controller, _shares, IPolicyHook.TransferKind.FORCED, bytes32(0), 0);
   }
 
@@ -248,7 +250,9 @@ contract Gated7540Vault is
     if (_shares == 0) revert Gated7540Vault_NothingPending();
     _state.pendingShares = 0;
     emit RedeemRequestRecovered(_controller, _to, _shares, _msgSender());
-    // Internal FORCED move: an enforcement action; identity still applies to the recovery account.
+    // Internal FORCED move: an enforcement action; identity still applies to the recovery account. Releases any frozen
+    // escrow it takes first, as forcedTransfer does.
+    _releaseFrozen(address(this), _shares);
     _moveAs(address(this), _to, _shares, IPolicyHook.TransferKind.FORCED, bytes32(0), 0);
   }
 
@@ -684,6 +688,9 @@ contract Gated7540Vault is
     // 10 ** decimals() is one whole share, read at runtime.
     // aderyn-ignore-next-line(literal-instead-of-constant)
     _price = Math.mulDiv(_assets, 10 ** decimals(), _shares);
+    // A price below one unit per whole share floors to 0; store the smallest unit instead, so the indicative
+    // convertTo* (which divide by lastPrice) never revert. Claims use the exact claimable ratio, not this price.
+    if (_price == 0) _price = 1;
     _getGated7540Storage().lastPrice = _price;
   }
 
