@@ -261,7 +261,28 @@ contract Gated7540VaultUnit_RequestDeposit is Gated7540VaultUnitTest {
     assertEq(_vault.pendingDepositRequest(0, _alice), 5);
   }
 
-  function test_WhenAStrangerRequestsForTheOwner_ItReverts() external {
+  /// @dev Backs the `arbitrary-send-erc20` suppression: a non-operator cannot pull a victim's approved assets
+  function test_WhenANonOperatorRequestsWithAVictimAsOwner_ItRevertsAndMovesNothing(
+    uint256 _assets
+  ) external {
+    _assets = bound(_assets, 1, _FUNDS);
+    assertEq(_asset.allowance(_alice, address(_vault)), type(uint256).max); // the victim has approved the vault
+
+    vm.expectRevert(_unauthorized(_stranger));
+    vm.prank(_stranger);
+    _vault.requestDeposit(_assets, _stranger, _alice);
+
+    assertEq(_asset.balanceOf(_alice), _FUNDS);
+    assertEq(_asset.balanceOf(address(_vault)), 0);
+    assertEq(_vault.pendingDepositRequest(0, _stranger), 0);
+    assertEq(_vault.pendingDepositRequest(0, _alice), 0);
+  }
+
+  function test_WhenARevokedOperatorRequestsForTheOwner_ItReverts() external {
+    vm.startPrank(_alice);
+    _vault.setOperator(_stranger, true);
+    _vault.setOperator(_stranger, false);
+    vm.stopPrank();
     vm.expectRevert(_unauthorized(_stranger));
     vm.prank(_stranger);
     _vault.requestDeposit(5, _stranger, _alice);
