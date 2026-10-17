@@ -17,6 +17,8 @@ const compiler = {
 export default defineConfig({
   plugins: [hardhatToolboxViemPlugin, hardhatKeystore],
   solidity: {
+    // Hardhat emits artifacts only for project sources; TS tests (and Phase 7) deploy OZ's own proxy by name.
+    npmFilesToBuild: ["@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol"],
     profiles: {
       default: compiler,
       production: compiler,

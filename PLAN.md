@@ -1,6 +1,6 @@
 # PLAN
 
-Status: **Phase 5 complete and pushed (`d965ff5`). Phase 6 (viem integration): plan written, awaiting review. No Phase 6 code yet.**
+Status: **Phase 6 (viem integration) built and green (2026-10-17); awaiting review. Not pushed.**
 
 Brief v2 ("Gated Token Stack") replaced the original executor-only brief on 2026-10-16. On the same day the owner supplied a reference implementation in `Imported/` (now deleted; its contents live in `contracts/`) and approved, in chat, integrating it with the major findings fixed, a common-bug sweep, and the Wonderland Solidity standards.
 
@@ -488,7 +488,7 @@ Each gets red tests, then the implementation, then green, then a stop for review
   - **Tests** (red first): agent-only, nothing pending, zero recipient, the FORCED context with the event, works while paused, and fulfil/reject say "no request" afterwards. Integration runs the owner's sequence: de-verified controller → reject reverts → recovery to an unverified account reverts → recovery to a verified treasury → fulfil and reject revert with no request. **The invariant handler fuzzes recovery**, so escrow == Σ pending still holds across sequences. **Mutation check:** a recovery that doesn't clear pending is caught by 3 tests and the invariant.
 - **Verification:** `npm test` gives 347 passing (346 solidity, 1 nodejs); lint, typecheck and fmt are clean; Slither reports 0; Halmos 4/4.
 
-## Phase 6 — viem integration (PLAN, awaiting review)
+## Phase 6 — viem integration (built 2026-10-17, awaiting review)
 
 ### Goal (brief §8)
 `test/nodejs/*.test.ts` (node:test + viem, `network.create()`) covering:
@@ -539,6 +539,67 @@ The temporary `smoke.test.ts` is deleted.
 - Sources and git were never affected (checked); the build dirs were wiped and rebuilt clean.
 - Recommendation: move the repo out of iCloud-synced folders (e.g. `~/dev/`), or exclude it from iCloud. That's the owner's environment choice; nothing was changed.
 
+### Owner decisions on Phase 6 (2026-10-17)
+- **Q1 (a):** TypeScript covers only what Solidity can't. The parity matrix and the NAV-history rebuild from `Fulfilled` are the most valuable parts, because they are what the ops tooling will do.
+- **Q2 (a), plus:** the fixture is **the only place deployment order lives**. Phase 7's Ignition module imports or mirrors it rather than re-deriving it. The fixture ends with an assertion that **the deployer holds no role on the token, hook, rules or vaults**, so the hand-over check exists before Phase 7.
+- **Q3 (a):** a plain admin in Phase 6; the real timelock in Phase 7.
+- **Repo moved out of iCloud** to `~/dev/gated-token-stack`, before Phase 6.
+  - `git fsck`: 228 reachable objects, 0 missing; the only note is git's virtual empty tree, referenced by the earlier `rebase --root`.
+  - No file-provider attributes on `~/dev` or `.git`.
+  - Fresh `npm ci`, then the full gate: 347 passing, lint, typecheck and fmt clean, Slither 0, Halmos 4/4, 0 duplicates.
+
+### Phase 6 as built (2026-10-17)
+- **`hardhat.config.ts`:** `solidity.npmFilesToBuild` adds OZ `ERC1967Proxy`, so TS (and Phase 7) deploys OZ's own proxy by name.
+- **`test/nodejs/fixtures.ts`:** the single source of deployment order.
+  - Order:
+    1. Registry, identity and the four shared rules, then the attester attests the rules.
+    2. Per template: implementation, then a hook bound to the predicted proxy address (initial rules in its constructor; the prediction is asserted).
+    3. Attest the hook and the implementation, then deploy the proxy.
+  - Configure-then-hand-over: the deployer is initialised as admin of the token, vaults and executor. As admin it:
+    - sets the window (09:00–17:00, Mon–Fri), the caps (3) and the 7540 vault's holder exemption;
+    - grants the operational roles;
+    - grants DEFAULT_ADMIN_ROLE to the admin, then renounces.
+  - The hook's `ADMIN` is the admin from the start (it is immutable).
+  - Ends in `assertHandedOver`:
+    - the deployer holds none of the roles returned by any `*_ROLE()` getter, nor DEFAULT_ADMIN_ROLE, on the registry, token, vaults or executor;
+    - the admin holds DEFAULT_ADMIN_ROLE on each of them, so the check is not vacuous;
+    - every hook's `ADMIN` is the admin;
+    - rules have no access control of their own.
+  - The clock is pinned to a Monday 10:00 UTC (2031) so window-dependent flows are deterministic.
+  - Helpers: `REASONS` / `reasonName`; `signIntent`, which takes the domain from the chain via ERC-5267 `eip712Domain()` and uses a random nonce and ref; `revertOf`, which decodes revert data against combined ABIs because the executor bubbles the token's errors.
+- **Tests (46):**
+  - `deployment.test.ts`: the stack is live with its policy from deploy.
+  - `intents.test.ts`:
+    - wallet `signTypedData` = on-chain `intentHash` = viem `hashTypedData`;
+    - settle through `IntentExecutor`, and decode `IntentExecuted` both by assertion and from the receipt;
+    - a wrong-chain signature reverts BAD_SIGNATURE;
+    - replay and cancel both give NONCE_USED;
+    - batch failure decodes to the index plus the nested `PolicyGated_TransferRejected(reason)`; the batch is atomic, and dropping the failed item lets the rest settle.
+  - `parity.test.ts`: 8 conditions × 4 operations, each checked three ways: pre-flight (`canTransfer` / `canExecute` / `max*`), `simulateContract`, and the write.
+    - Conditions: none, receiver de-verified, sender de-verified, lockup, Saturday, cap, full freeze, pause.
+    - Operations: transfer, intent, 4626 deposit, 4626 redeem.
+    - Vault cells check `maxDeposit` / `maxRedeem` against `canTransfer` with the zero address, then the exact `redeem(maxRedeem + 1)` revert from the same state.
+  - `vaults.test.ts`:
+    - 4626 deposit, then `withdraw(maxWithdraw)` returns the assets exactly;
+    - 7540 request → fulfil → claim for both legs (custody receives the assets; escrow is burned at fulfilment);
+    - reject deposit and reject redeem;
+    - recovery after de-verification (reject fails, recovery succeeds);
+    - NAV history rebuilt from `Fulfilled` logs: price recomputed off-chain, including a rounding case, and the last price equals `lastPrice()`.
+  - `time.test.ts`: lockup holds until its unlock second; the window is `[open, close)` and closed at weekends, with the same intent settling at Monday's open; the deadline is inclusive.
+- **Findings worth knowing (none are contract bugs):**
+  1. `canExecute` takes no signature (frozen interface), so it says OK for a bad signature. The integrator's signature pre-flight is `verifyTypedData` against the chain-reported domain, as `intents.test.ts` shows.
+  2. Pre-flight evaluates the latest block, but a write lands in the next one. At a time boundary they can differ by one second. Example: at the deadline second, `canExecute` is OK, but a write mined one second later expires. Ops tooling should leave margin near boundaries.
+  3. hardhat-viem's `balancesHaveChanged` tracks native ETH only, not ERC-20 balances, so token balances are asserted directly.
+- **Mutation check:** four planted bugs, each killed, then restored from git.
+  1. The executor hand-over skipped: 46 failing, through the fixture assertion.
+  2. `canExecute` skips the hook: 8 failing.
+  3. NAV price rounds up: 1 failing.
+  4. An exclusive deadline: 1 failing.
+- **`smoke.test.ts` deleted.**
+
+### Verification (Phase 6)
+- `npx hardhat test`: **392 passing (346 solidity, 46 nodejs)**.
+- solhint clean, `tsc` clean, `forge fmt --check` clean, Slither 0 results, Halmos 4 passed / 0 failed, 0 iCloud duplicates.
+
 ## Open questions for the owner
-1. Q1–Q3 (or "defaults").
-2. The iCloud location (above).
+1. Phase 7 starts after review: an Ignition module mirroring `fixtures.ts`, with the TimelockController in place of the plain admin.
