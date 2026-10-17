@@ -293,6 +293,18 @@ contract PolicyGatedUnit_ForcedTransfer is PolicyGatedUnitTest {
     _token.forcedTransfer(_alice, _bob, _INITIAL + 1);
   }
 
+  /// @dev A plain transfer later in the same transaction must not inherit the FORCED kind from transient storage
+  function test_WhenAPlainTransferFollowsAForcedTransferInTheSameTransaction_ItIsAPlainTransfer() external {
+    vm.prank(_agent);
+    _token.forcedTransfer(_alice, _bob, 10);
+    vm.expectCall(
+      _hook,
+      abi.encodeCall(IPolicyHook.beforeTransfer, (_ctx(_bob, _alice, 1, _bob, IPolicyHook.TransferKind.TRANSFER)))
+    );
+    vm.prank(_bob);
+    _token.transfer(_alice, 1);
+  }
+
   function test_WhenValid_ItMovesWithAForcedContextAndEmits(
     uint256 _amount
   ) external {
@@ -667,12 +679,19 @@ contract PolicyGatedHandler is Test {
     _all = _actors;
   }
 
+  /// @notice Ghost counters: how many times each action actually executed in the current run
+  mapping(bytes32 _action => uint256 _count) public executed;
+
+  // Every amount is computed before `vm.prank`: an external call in the arguments would consume the prank and turn
+  // the action into an unauthorised no-op. `afterInvariant` in the test asserts each action really executes.
+
   function mint(
     uint256 _to,
     uint256 _amount
   ) external {
     vm.prank(_minter);
-    _token.mint(_actor(_to), bound(_amount, 0, 1e30));
+    _token.mint(_actor(_to), bound(_amount, 1, 1e30));
+    ++executed['mint'];
   }
 
   function burn(
@@ -680,8 +699,12 @@ contract PolicyGatedHandler is Test {
     uint256 _amount
   ) external {
     address _account = _actor(_from);
+    uint256 _balance = _token.balanceOf(_account);
+    if (_balance == 0) return;
+    _amount = bound(_amount, 1, _balance);
     vm.prank(_burner);
-    _token.burn(_account, bound(_amount, 0, _token.balanceOf(_account)));
+    _token.burn(_account, _amount);
+    ++executed['burn'];
   }
 
   function transfer(
@@ -691,8 +714,11 @@ contract PolicyGatedHandler is Test {
   ) external {
     address _account = _actor(_from);
     uint256 _unfrozen = _token.balanceOf(_account) - _token.getFrozen(_account);
+    if (_unfrozen == 0) return;
+    _amount = bound(_amount, 1, _unfrozen);
     vm.prank(_account);
-    _token.transfer(_actor(_to), bound(_amount, 0, _unfrozen));
+    _token.transfer(_actor(_to), _amount);
+    ++executed['transfer'];
   }
 
   function forcedTransfer(
@@ -701,8 +727,12 @@ contract PolicyGatedHandler is Test {
     uint256 _amount
   ) external {
     address _account = _actor(_from);
+    uint256 _balance = _token.balanceOf(_account);
+    if (_balance == 0) return;
+    _amount = bound(_amount, 1, _balance);
     vm.prank(_agent);
-    _token.forcedTransfer(_account, _actor(_to), bound(_amount, 0, _token.balanceOf(_account)));
+    _token.forcedTransfer(_account, _actor(_to), _amount);
+    ++executed['forcedTransfer'];
   }
 
   function setFrozen(
@@ -710,8 +740,10 @@ contract PolicyGatedHandler is Test {
     uint256 _amount
   ) external {
     address _account = _actor(_user);
+    _amount = bound(_amount, 0, _token.balanceOf(_account));
     vm.prank(_agent);
-    _token.setFrozen(_account, bound(_amount, 0, _token.balanceOf(_account)));
+    _token.setFrozen(_account, _amount);
+    ++executed['setFrozen'];
   }
 
   function _actor(
@@ -746,6 +778,15 @@ contract PolicyGatedInvariantTest is PolicyGatedUnitTest {
     address[3] memory _all = _handler.actors();
     for (uint256 _i; _i < 3; ++_i) {
       assertLe(_token.getFrozen(_all[_i]), _token.balanceOf(_all[_i]));
+    }
+  }
+
+  /// @dev Non-vacuity: every action must execute in every run (a consumed prank once made burn, forcedTransfer and
+  ///      setFrozen silent no-ops, so the frozen invariant never saw an enforcement action)
+  function afterInvariant() external view {
+    string[5] memory _actions = ['mint', 'burn', 'transfer', 'forcedTransfer', 'setFrozen'];
+    for (uint256 _i; _i < _actions.length; ++_i) {
+      assertGt(_handler.executed(bytes32(bytes(_actions[_i]))), 0, _actions[_i]);
     }
   }
 }

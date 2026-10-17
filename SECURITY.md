@@ -174,6 +174,10 @@ Each row is a bug deliberately planted, the run that caught it, then restored fr
 | upgrades-core | upgrade-unsafe state initialiser | `validate` FAILED |
 | Aderyn gate | one inline suppression removed | `npm run aderyn` fails (1 high) |
 | 7540 invariant handler | an action silently turned into a no-op | `afterInvariant` fails (every action must execute in every run) |
+| `Gated7540Vault` access | controller/operator check removed from `redeem`, `withdraw`, `_claimMint`, `_claimDeposit`; `FULFILLER_ROLE` removed from `fulfillRedeem`, `rejectRedeemRequest`, `fulfillDeposit`, `rejectDepositRequest`; `whenNotPaused` removed from `withdraw` | 1 to 2 tests each (`Gated7540VaultUnit_ClaimAccess` and others). Before the 2026-10-17 review, 6 of these 9 survived |
+| Base transient context | kind slot not cleared after a movement | 3 tests (forced-then-plain, executed-then-plain, and others) |
+| Base enforcement | `forcedTransfer` keeps frozen tokens | `invariant_FrozenNeverExceedsBalance` and 2 unit tests. With the old no-op handler, the invariant missed it |
+| Base transient context | ref slot not cleared | Not killable: an equivalent mutant. The ref is read only when the kind slot is set, and every movement that sets the kind rewrites the ref first |
 | Reproducibility | metadata hash re-enabled | `verify:reproducible`: every contract differs across jobs |
 
 ## 6. Toolchain supply chain

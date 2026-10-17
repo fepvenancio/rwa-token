@@ -197,10 +197,9 @@ contract ProxyDeployerUnit_Deploy is ProxyDeployerUnitTest {
     vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, _owner));
     _deploy('INT', _init('INT', _hook), _hook);
 
+    address _predicted = _deployer.predict('INT', address(_impl)); // read first, never inside the pranked call
     vm.prank(_timelock);
-    assertEq(
-      _deployer.deploy('INT', address(_impl), _init('INT', _hook), _hook), _deployer.predict('INT', address(_impl))
-    );
+    assertEq(_deployer.deploy('INT', address(_impl), _init('INT', _hook), _hook), _predicted);
   }
 
   function test_ItReportsTheSymbolItWasKeyedOn() external {

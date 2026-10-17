@@ -2,7 +2,6 @@
 pragma solidity ^0.8.28;
 
 import {IAccessControl} from '@openzeppelin/contracts/access/IAccessControl.sol';
-import {ERC1967Proxy} from '@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol';
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {IERC165} from '@openzeppelin/contracts/utils/introspection/IERC165.sol';
 import {stdError} from 'forge-std/StdError.sol';
@@ -17,6 +16,7 @@ import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 
+import {ProxyDeployer} from 'contracts/deploy/ProxyDeployer.sol';
 import {PolicyRegistry} from 'contracts/governance/PolicyRegistry.sol';
 import {ComplianceHook} from 'contracts/hooks/ComplianceHook.sol';
 import {MaxHoldersRule} from 'contracts/hooks/rules/MaxHoldersRule.sol';
@@ -447,11 +447,20 @@ contract MaxHoldersHandler is Test {
     _all = _actors;
   }
 
+  /// @notice Ghost counters: successful non-zero movements of each kind in the current run
+  mapping(bytes32 _action => uint256 _count) public executed;
+
+  // Amounts are computed before any `vm.prank` (an external call in the arguments would consume it). Moves can be
+  // rejected by the cap by design, so they run in `try` and only successful non-zero moves are counted.
+
   function mint(
     uint256 _to,
     uint256 _amount
   ) external {
-    _token.mint(_actor(_to), bound(_amount, 0, 1e24));
+    _amount = bound(_amount, 0, 1e24);
+    try _token.mint(_actor(_to), _amount) {
+      if (_amount > 0) ++executed['mint'];
+    } catch {}
   }
 
   function transfer(
@@ -460,8 +469,11 @@ contract MaxHoldersHandler is Test {
     uint256 _amount
   ) external {
     address _sender = _actor(_from);
+    _amount = bound(_amount, 0, _token.balanceOf(_sender) - _token.getFrozen(_sender));
     vm.prank(_sender);
-    _token.transfer(_actor(_to), bound(_amount, 0, _token.balanceOf(_sender)));
+    try _token.transfer(_actor(_to), _amount) {
+      if (_amount > 0) ++executed['transfer'];
+    } catch {}
   }
 
   /// @dev Freezes change which moves succeed, never the holder count
@@ -494,7 +506,10 @@ contract MaxHoldersHandler is Test {
     uint256 _amount
   ) external {
     address _sender = _actor(_from);
-    _token.forcedTransfer(_sender, _actor(_to), bound(_amount, 0, _token.balanceOf(_sender)));
+    _amount = bound(_amount, 0, _token.balanceOf(_sender));
+    try _token.forcedTransfer(_sender, _actor(_to), _amount) {
+      if (_amount > 0) ++executed['forcedTransfer'];
+    } catch {}
   }
 
   function burn(
@@ -502,7 +517,10 @@ contract MaxHoldersHandler is Test {
     uint256 _amount
   ) external {
     address _sender = _actor(_from);
-    _token.burn(_sender, bound(_amount, 0, _token.balanceOf(_sender)));
+    _amount = bound(_amount, 0, _token.balanceOf(_sender));
+    try _token.burn(_sender, _amount) {
+      if (_amount > 0) ++executed['burn'];
+    } catch {}
   }
 
   function _actor(
@@ -526,17 +544,21 @@ contract MaxHoldersRuleInvariantTest is Test {
     IntentToken _impl = new IntentToken();
     IComplianceRule[] memory _rules = new IComplianceRule[](1);
     _rules[0] = _rule;
-    address _predictedProxy = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+    // CREATE2 through ProxyDeployer, as in production: the address does not depend on this contract's nonce.
+    ProxyDeployer _proxyDeployer = new ProxyDeployer(address(this));
+    address _predictedProxy = _proxyDeployer.predict('CAP', address(_impl));
     ComplianceHook _hook = new ComplianceHook(address(this), _registry, _predictedProxy, _rules);
     _registry.attest(address(_hook).codehash, IPolicyRegistry.AttestKind.HOOK, '');
     _registry.attest(address(_impl).codehash, IPolicyRegistry.AttestKind.IMPLEMENTATION, '');
     _token = IntentToken(
       address(
-        new ERC1967Proxy(
+        _proxyDeployer.deploy(
+          'CAP',
           address(_impl),
           abi.encodeCall(
             IntentToken.initialize, ('Capped', 'CAP', address(this), address(this), address(_registry), address(_hook))
-          )
+          ),
+          address(_hook)
         )
       )
     );
@@ -557,6 +579,14 @@ contract MaxHoldersRuleInvariantTest is Test {
       if (_token.balanceOf(_all[_i]) > 0 && !_rule.isExemptHolder(address(_token), _all[_i])) ++_holders;
     }
     assertEq(_rule.holderCount(address(_token)), _holders);
+  }
+
+  /// @dev Non-vacuity: every kind of balance movement must succeed at least once in every run
+  function afterInvariant() external view {
+    string[4] memory _actions = ['mint', 'transfer', 'forcedTransfer', 'burn'];
+    for (uint256 _i; _i < _actions.length; ++_i) {
+      assertGt(_handler.executed(bytes32(bytes(_actions[_i]))), 0, _actions[_i]);
+    }
   }
 }
 

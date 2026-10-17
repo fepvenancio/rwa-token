@@ -19,6 +19,7 @@ import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 
+import {ProxyDeployer} from 'contracts/deploy/ProxyDeployer.sol';
 import {PolicyRegistry} from 'contracts/governance/PolicyRegistry.sol';
 import {ComplianceHook} from 'contracts/hooks/ComplianceHook.sol';
 import {IdentityRule} from 'contracts/hooks/rules/IdentityRule.sol';
@@ -376,13 +377,16 @@ contract Gated4626VaultIntegrationTest is Test {
     _rules[0] = _identityRule;
     _rules[1] = _lockupRule;
     _rules[2] = _maxHoldersRule;
-    address _predictedProxy = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+    // CREATE2 through ProxyDeployer, as in production: the address does not depend on this contract's nonce.
+    ProxyDeployer _proxyDeployer = new ProxyDeployer(address(this));
+    address _predictedProxy = _proxyDeployer.predict('gFUND', address(_impl));
     ComplianceHook _hook = new ComplianceHook(address(this), _registry, _predictedProxy, _rules);
     _registry.attest(address(_hook).codehash, IPolicyRegistry.AttestKind.HOOK, '');
     _registry.attest(address(_impl).codehash, IPolicyRegistry.AttestKind.IMPLEMENTATION, '');
     _vault = Gated4626Vault(
       address(
-        new ERC1967Proxy(
+        _proxyDeployer.deploy(
+          'gFUND',
           address(_impl),
           abi.encodeCall(
             Gated4626Vault.initialize,
@@ -395,7 +399,8 @@ contract Gated4626VaultIntegrationTest is Test {
               address(_registry),
               address(_hook)
             )
-          )
+          ),
+          address(_hook)
         )
       )
     );

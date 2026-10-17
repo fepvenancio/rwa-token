@@ -179,6 +179,29 @@ contract IntentSettledUnit_ExecuteTransfer is IntentSettledUnitTest {
     assertTrue(_token.nonceUsed(_alice, _nonce));
   }
 
+  /// @dev The kind, ref and deadline live in transient storage for the whole transaction; they must be cleared after
+  ///      each movement, or a later plain transfer in the same transaction would reach the hook as EXECUTED
+  function test_WhenAPlainTransferFollowsAnExecutionInTheSameTransaction_ItIsAPlainTransfer() external {
+    ITransferIntent.TransferIntent memory _i = _intent(10, keccak256('n'), block.timestamp + 1 days);
+    _execute(_i, _signed(_i));
+
+    IPolicyHook.TransferContext memory _plain = IPolicyHook.TransferContext({
+      token: address(_token),
+      from: _bob,
+      to: _alice,
+      id: 0,
+      amount: 1,
+      operator: _bob,
+      kind: IPolicyHook.TransferKind.TRANSFER,
+      ref: bytes32(0),
+      deadline: 0,
+      extra: ''
+    });
+    vm.expectCall(_hook, abi.encodeCall(IPolicyHook.beforeTransfer, (_plain)));
+    vm.prank(_bob);
+    _token.transfer(_alice, 1);
+  }
+
   function test_WhenDeadlineIsNow_ItExecutes() external {
     ITransferIntent.TransferIntent memory _i = _intent(1, keccak256('n'), block.timestamp);
     _execute(_i, _signed(_i));

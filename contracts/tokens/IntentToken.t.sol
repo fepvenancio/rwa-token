@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import {ERC1967Proxy} from '@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol';
 import {ERC1967Utils} from '@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol';
 import {Errors} from '@openzeppelin/contracts/utils/Errors.sol';
 import {ReentrancyGuardTransient} from '@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol';
@@ -15,6 +14,7 @@ import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
 
+import {ProxyDeployer} from 'contracts/deploy/ProxyDeployer.sol';
 import {PolicyRegistry} from 'contracts/governance/PolicyRegistry.sol';
 import {ComplianceHook} from 'contracts/hooks/ComplianceHook.sol';
 import {IdentityRule} from 'contracts/hooks/rules/IdentityRule.sol';
@@ -73,7 +73,9 @@ contract IntentTokenIntegrationTest is Test {
     vm.prank(_attester);
     _registry.attest(address(_identityRule).codehash, IPolicyRegistry.AttestKind.RULE, 'ipfs://rule-review');
 
-    address _predictedProxy = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+    // CREATE2 through ProxyDeployer, as in production: the address does not depend on this contract's nonce.
+    ProxyDeployer _proxyDeployer = new ProxyDeployer(address(this));
+    address _predictedProxy = _proxyDeployer.predict('GNOTE', address(_impl));
     _hook = new ComplianceHook(_admin, _registry, _predictedProxy, _withRules ? _one(_identityRule) : _none());
 
     vm.startPrank(_attester);
@@ -83,11 +85,13 @@ contract IntentTokenIntegrationTest is Test {
 
     _token = IntentToken(
       address(
-        new ERC1967Proxy(
+        _proxyDeployer.deploy(
+          'GNOTE',
           address(_impl),
           abi.encodeCall(
             IntentToken.initialize, ('Gated Note', 'GNOTE', _admin, _guardian, address(_registry), address(_hook))
-          )
+          ),
+          address(_hook)
         )
       )
     );

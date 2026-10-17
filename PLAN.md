@@ -865,6 +865,36 @@ An Ignition deployment of the whole stack:
      - the non-payable upgrade pins `Errors.FailedCall` (OZ `Address` wraps the empty revert).
 - **Result:** 435 passing (378 solidity, 57 nodejs).
 
+### Independent review (2026-10-17): validation and test fixes
+- **Validation:** every security and logic finding was real (M-1, M-2, M-3, L-1 to L-5). Of the test findings, only "the `requestDeposit` eligibility check survives" was outdated (4 tests kill it on the current code), and "no `count <= cap` invariant" is by design: a lowered cap and FORCED moves can push the count over the cap.
+- **Code findings, awaiting owner decisions:**
+  - M-1: guardian permanent freeze (a brief §4 change);
+  - M-2: a reject steered past the cap (reverses R2);
+  - M-3: no recovery or refund of claimable balances (an interface change);
+  - L-5: operator scope (brief or code);
+  - L-1: dust cap griefing.
+  - Small code fixes proposed, not yet applied: L-2 (release frozen tokens in internal FORCED moves), L-3 (zero price), L-4 (cap only net additions).
+- **Test fixes (test files only; bytecode unchanged):**
+  1. **Access checks pinned:** `Gated7540VaultUnit_ClaimAccess`.
+     - A fuzzed non-controller can't redeem, withdraw, mint or deposit another controller's claim; an approved operator can (the control).
+     - A fuzzed account without the role can't fulfil or reject a redemption.
+     - `withdraw` reverts while paused.
+  2. **Two no-op invariant handlers fixed** (in `PolicyGatedERC20Upgradeable.t.sol` and `MaxHoldersRule.t.sol`). `balanceOf` inside the call arguments consumed `vm.prank`. Amounts are now computed first; ghost counters plus `afterInvariant` require every action to execute.
+     - A sweep of every `.t.sol` found no other instance (one fragile case in `ProxyDeployer.t.sol` was reordered).
+     - Proof: with the old handler, `invariant_FrozenNeverExceedsBalance` passes against a `forcedTransfer` that keeps frozen tokens; with the fixed handler it fails.
+  3. **Fixtures no longer predict addresses from the nonce:** `IntentToken`, `Gated4626Vault`, `Gated7540Vault` and `MaxHoldersRule` deploy through `ProxyDeployer` (CREATE2), as in production. `--gas-stats` now passes on all four (164 tests).
+  4. **Coverage:** `ContractSizes.t.sol` skips (`vm.skip`) only when the bytecode contains EDR's coverage address `0xc0bE…C0BE`, i.e. under `--coverage`. Normal builds still assert EIP-170, and `--coverage` runs with no failures.
+  5. **Gaps filled:**
+     - exactly `MAX_RULES` (16) rules install;
+     - 7540 `totalAssets` equals the supply at the last price;
+     - the two-argument `mint` claims for the caller;
+     - the transient kind, ref and deadline are cleared between movements in one transaction (forced then plain; executed then plain);
+     - the 7540 handler adds `requestDepositFor` / `requestRedeemFor` (controller differs from owner), checked in `afterInvariant`.
+- **Mutation re-run (12 mutants, full suite):**
+  - all 9 vault access mutants are now killed (6 survived before);
+  - "kind slot not cleared" and "`forcedTransfer` keeps frozen" are killed;
+  - "ref slot not cleared" survives as an equivalent mutant: the ref is read only when the kind slot is set, and every movement that sets the kind rewrites it first.
+
 ### Remaining brief items (deferred until the first external integrator is known)
 - **ERC-3643 `IToken` read adapter.**
 - **Exact ERC-7943 conformance,** once the ERC is Final. Today there is no 7943 interface ID, because the function names and return types differ (README deviations).

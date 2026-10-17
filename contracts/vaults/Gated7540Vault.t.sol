@@ -24,6 +24,7 @@ import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 
+import {ProxyDeployer} from 'contracts/deploy/ProxyDeployer.sol';
 import {PolicyRegistry} from 'contracts/governance/PolicyRegistry.sol';
 import {ComplianceHook} from 'contracts/hooks/ComplianceHook.sol';
 import {IdentityRule} from 'contracts/hooks/rules/IdentityRule.sol';
@@ -676,6 +677,137 @@ contract Gated7540VaultUnit_FulfillAndClaimRedeem is Gated7540VaultUnitTest {
     vm.expectRevert(Pausable.EnforcedPause.selector);
     vm.prank(_alice);
     _vault.redeem(50, _alice, _alice);
+    vm.expectRevert(Pausable.EnforcedPause.selector);
+    vm.prank(_alice);
+    _vault.withdraw(50, _alice, _alice);
+  }
+}
+
+contract Gated7540VaultUnit_TotalAssetsAndShortMint is Gated7540VaultUnitTest {
+  /// @dev Indicative: the share supply valued at the last fulfilment price, rounded down
+  function test_TotalAssetsIsTheSupplyAtTheLastPrice() external {
+    assertEq(_vault.totalAssets(), 0);
+    _requestDeposit(_alice, 300);
+    _fulfillDeposit(_alice, 300, 200); // 1.5 assets per share
+    vm.prank(_alice);
+    _vault.deposit(300, _alice, _alice);
+    assertEq(_vault.totalAssets(), Math.mulDiv(200, _vault.lastPrice(), _ONE));
+    assertEq(_vault.totalAssets(), 300);
+  }
+
+  /// @dev The ERC-4626 two-argument `mint` claims for the caller as controller
+  function test_WhenTheControllerMintsWithTwoArguments_ItClaimsItsOwnRequest() external {
+    _requestDeposit(_alice, 100);
+    _fulfillDeposit(_alice, 100, 40);
+    vm.prank(_alice);
+    assertEq(_vault.mint(40, _bob), 100);
+    assertEq(_vault.balanceOf(_bob), 40);
+    assertEq(_vault.maxMint(_alice), 0);
+    vm.expectRevert(abi.encodeWithSelector(IGated7540Vault.Gated7540Vault_ExceedsClaimable.selector, 1, 0));
+    vm.prank(_bob);
+    _vault.mint(1, _bob);
+  }
+}
+
+/// @dev Every claim and every fulfiller action is gated; each check is pinned (mutation: removing any one fails here)
+contract Gated7540VaultUnit_ClaimAccess is Gated7540VaultUnitTest {
+  address internal _operator = makeAddr('operator');
+
+  function _notAlice(
+    address _caller
+  ) internal view returns (address _someoneElse) {
+    _someoneElse = _caller == _alice || _caller == _operator ? _stranger : _caller;
+  }
+
+  function _claimableRedemption() internal {
+    _holdShares(_alice, 50);
+    _requestRedeem(_alice, 50);
+    _fulfillRedeem(_alice, 50, 50);
+  }
+
+  function _claimableDeposit() internal {
+    _requestDeposit(_alice, 100);
+    _fulfillDeposit(_alice, 100, 100);
+  }
+
+  function testFuzz_WhenSomeoneElseRedeemsTheControllersClaim_ItReverts(
+    address _caller
+  ) external {
+    _caller = _notAlice(_caller);
+    _claimableRedemption();
+    vm.expectRevert(abi.encodeWithSelector(IGated7540Vault.Gated7540Vault_Unauthorized.selector, _caller));
+    vm.prank(_caller);
+    _vault.redeem(50, _caller, _alice);
+  }
+
+  function testFuzz_WhenSomeoneElseWithdrawsTheControllersClaim_ItReverts(
+    address _caller
+  ) external {
+    _caller = _notAlice(_caller);
+    _claimableRedemption();
+    vm.expectRevert(abi.encodeWithSelector(IGated7540Vault.Gated7540Vault_Unauthorized.selector, _caller));
+    vm.prank(_caller);
+    _vault.withdraw(50, _caller, _alice);
+  }
+
+  function testFuzz_WhenSomeoneElseMintsTheControllersClaim_ItReverts(
+    address _caller
+  ) external {
+    _caller = _notAlice(_caller);
+    _claimableDeposit();
+    vm.expectRevert(abi.encodeWithSelector(IGated7540Vault.Gated7540Vault_Unauthorized.selector, _caller));
+    vm.prank(_caller);
+    _vault.mint(100, _caller, _alice);
+  }
+
+  function testFuzz_WhenSomeoneElseDepositsTheControllersClaim_ItReverts(
+    address _caller
+  ) external {
+    _caller = _notAlice(_caller);
+    _claimableDeposit();
+    vm.expectRevert(abi.encodeWithSelector(IGated7540Vault.Gated7540Vault_Unauthorized.selector, _caller));
+    vm.prank(_caller);
+    _vault.deposit(100, _caller, _alice);
+  }
+
+  /// @dev Control: an operator the controller approved can claim every way, to any receiver
+  function test_WhenAnApprovedOperatorClaims_ItSucceeds() external {
+    vm.prank(_alice);
+    _vault.setOperator(_operator, true);
+    _claimableDeposit();
+    _claimableRedemption();
+    vm.startPrank(_operator);
+    _vault.mint(40, _bob, _alice);
+    _vault.deposit(_vault.maxDeposit(_alice), _bob, _alice);
+    _vault.redeem(20, _bob, _alice);
+    _vault.withdraw(_vault.maxWithdraw(_alice), _bob, _alice);
+    vm.stopPrank();
+    assertEq(_vault.maxMint(_alice) + _vault.maxRedeem(_alice) + _vault.maxWithdraw(_alice), 0);
+  }
+
+  function testFuzz_WhenSomeoneWithoutTheRoleFulfilsARedemption_ItReverts(
+    address _caller
+  ) external {
+    bytes32 _role = _vault.FULFILLER_ROLE();
+    if (_vault.hasRole(_role, _caller)) _caller = _stranger;
+    _holdShares(_alice, 50);
+    _requestRedeem(_alice, 50);
+    vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, _caller, _role));
+    vm.prank(_caller);
+    _vault.fulfillRedeem(_alice, 50, 50);
+  }
+
+  function testFuzz_WhenSomeoneWithoutTheRoleRejectsARedemption_ItReverts(
+    address _caller
+  ) external {
+    bytes32 _role = _vault.FULFILLER_ROLE();
+    if (_vault.hasRole(_role, _caller)) _caller = _stranger;
+    _holdShares(_alice, 50);
+    _requestRedeem(_alice, 50);
+    vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, _caller, _role));
+    vm.prank(_caller);
+    _vault.rejectRedeemRequest(_alice);
+    assertEq(_vault.pendingRedeemRequest(0, _alice), 50);
   }
 }
 
@@ -899,13 +1031,16 @@ contract Gated7540VaultIntegrationTest is Test {
     _rules[0] = _identityRule;
     _rules[1] = _lockupRule;
     _rules[2] = _maxHoldersRule;
-    address _predictedProxy = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+    // CREATE2 through ProxyDeployer, as in production: the address does not depend on this contract's nonce.
+    ProxyDeployer _proxyDeployer = new ProxyDeployer(address(this));
+    address _predictedProxy = _proxyDeployer.predict('gASYNC', address(_impl));
     ComplianceHook _hook = new ComplianceHook(address(this), _registry, _predictedProxy, _rules);
     _registry.attest(address(_hook).codehash, IPolicyRegistry.AttestKind.HOOK, '');
     _registry.attest(address(_impl).codehash, IPolicyRegistry.AttestKind.IMPLEMENTATION, '');
     _vault = Gated7540Vault(
       address(
-        new ERC1967Proxy(
+        _proxyDeployer.deploy(
+          'gASYNC',
           address(_impl),
           abi.encodeCall(
             Gated7540Vault.initialize,
@@ -919,7 +1054,8 @@ contract Gated7540VaultIntegrationTest is Test {
               address(_hook),
               _custody
             )
-          )
+          ),
+          address(_hook)
         )
       )
     );
@@ -1140,6 +1276,33 @@ contract Gated7540Handler is Test {
     ++executed['requestDeposit'];
   }
 
+  /// @dev Controller differs from the owner: the owner pays, the next actor controls the claim
+  function requestDepositFor(
+    uint256 _seed,
+    uint256 _assets
+  ) external {
+    address _owner = _actors[_seed % 3];
+    address _controller = _actors[(_seed + 1) % 3];
+    _assets = bound(_assets, 1, 1e15);
+    _asset.mint(_owner, _assets);
+    vm.prank(_owner);
+    _vault.requestDeposit(_assets, _controller, _owner);
+    ++executed['requestDepositFor'];
+  }
+
+  /// @dev Controller differs from the owner: the owner's shares are escrowed under the next actor's request
+  function requestRedeemFor(
+    uint256 _seed,
+    uint256 _shares
+  ) external {
+    (address _owner, uint256 _max) = _firstWith(_seed, Need.Shares);
+    if (_max == 0) return;
+    address _controller = _owner == _actors[0] ? _actors[1] : _actors[0];
+    vm.prank(_owner);
+    _vault.requestRedeem(bound(_shares, 1, _max), _controller, _owner);
+    ++executed['requestRedeemFor'];
+  }
+
   function fulfillDeposit(
     uint256 _seed,
     uint256 _assets,
@@ -1341,9 +1504,12 @@ contract Gated7540VaultInvariantTest is Gated7540VaultUnitTest {
   /// @dev Non-vacuity: every run must have executed every action at least once, so the invariants above are checked
   ///      against vaults that went through deposits, mint and withdraw claims, rejections and recoveries. Runs reach
   ///      400+ executed actions, so a missing action means the handler regressed into no-ops, not bad luck.
+  ///      Includes requests whose controller differs from the owner.
   function afterInvariant() external view {
-    string[11] memory _actions = [
+    string[13] memory _actions = [
       'requestDeposit',
+      'requestDepositFor',
+      'requestRedeemFor',
       'fulfillDeposit',
       'claimDeposit',
       'claimMint',

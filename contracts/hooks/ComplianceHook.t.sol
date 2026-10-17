@@ -155,6 +155,16 @@ contract ComplianceHookUnit_Constructor is ComplianceHookUnitTest {
     new ComplianceHook(_admin, IPolicyRegistry(_registry), _token, _two(_rule, _rule));
   }
 
+  function test_WhenExactlyTheCapOfRulesIsInstalled_ItAccepts() external {
+    uint256 _length = _hook.MAX_RULES();
+    IComplianceRule[] memory _ruleSet = new IComplianceRule[](_length);
+    for (uint256 _i; _i < _length; ++_i) {
+      _ruleSet[_i] = _newRule(string.concat('rule', vm.toString(_i)), false);
+    }
+    ComplianceHook _full = new ComplianceHook(_admin, IPolicyRegistry(_registry), _token, _ruleSet);
+    assertEq(_full.rules().length, 16);
+  }
+
   function test_WhenInitialRulesExceedTheCap_ItReverts() external {
     uint256 _length = _hook.MAX_RULES() + 1;
     vm.expectRevert(abi.encodeWithSelector(IComplianceHook.ComplianceHook_TooManyRules.selector, _length));
