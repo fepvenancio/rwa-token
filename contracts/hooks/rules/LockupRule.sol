@@ -31,6 +31,8 @@ contract LockupRule is BaseRule, ILockupRule {
     address _holder,
     uint256 _unlockTime
   ) external {
+    // View interface: compiled to STATICCALL, so the token cannot change any state (test: *_TokenCallsAreStatic).
+    // aderyn-ignore-next-line(reentrancy-state-change)
     if (!IAccessControl(_token).hasRole(AGENT_ROLE, msg.sender)) revert LockupRule_OnlyTokenAgent(_token, msg.sender);
     if (_holder == address(0)) revert LockupRule_ZeroAddress();
     uint256 _stored = _unlockTime > block.timestamp ? _unlockTime : 0;

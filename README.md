@@ -172,6 +172,10 @@ slither .             # static-analysis gate; accepted findings in slither.confi
 ```
 
 ```bash
+npm run aderyn        # second static-analysis gate (Cyfrin Aderyn); exclusions in aderyn.toml, the rest inline
+```
+
+```bash
 npm run test:halmos   # symbolic properties: nonce/signature and frozen-balance paths
 ```
 

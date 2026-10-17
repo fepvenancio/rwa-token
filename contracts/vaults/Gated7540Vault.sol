@@ -29,7 +29,10 @@ import {PolicyGatedERC20Upgradeable} from 'contracts/base/PolicyGatedERC20Upgrad
  */
 // IERC7575 re-declares every ERC-4626 function already inherited via OZ IERC4626; inheriting both would need dual
 // override specifiers on each. Conformance is pinned by the 0x2f0a18c5 ERC-165 test and full function coverage.
-// slither-disable-next-line missing-inheritance
+// No receive or payable function, and upgradeToAndCall rejects value: no ETH can enter (tests: *_Ether).
+// Slither missing-inheritance spans the whole contract, so its suppression block closes after the last line.
+// slither-disable-start missing-inheritance
+// aderyn-ignore-next-line(contract-locks-ether)
 contract Gated7540Vault is
   ERC4626Upgradeable,
   PolicyGatedERC20Upgradeable,
@@ -85,6 +88,8 @@ contract Gated7540Vault is
   bytes32 public constant FULFILLER_ROLE = keccak256('FULFILLER_ROLE');
 
   /// @notice keccak256(abi.encode(uint256(keccak256('gated.storage.Gated7540Vault')) - 1)) & ~bytes32(uint256(0xff))
+  // Read in assembly by the ERC-7201 accessor (test: Gated7540VaultUnit_Storage).
+  // aderyn-ignore-next-line(unused-state-variable)
   bytes32 private constant _GATED_7540_STORAGE_LOCATION =
     0x2cc225a2bfbd5a47b58fbfec984f4f856b2fa5e8b68081e6d3300ec76f5f3900;
 
@@ -117,6 +122,8 @@ contract Gated7540Vault is
     __PolicyGatedERC20_init_unchained(_admin, _guardian, _registry, _hook);
     Gated7540Storage storage $ = _getGated7540Storage();
     $.custody = _custody;
+    // 10 ** decimals() is one whole share; decimals() is read at runtime, so there is no literal to hoist.
+    // aderyn-ignore-next-line(literal-instead-of-constant)
     $.lastPrice = 10 ** decimals();
     emit CustodyChanged(address(0), _custody);
   }
@@ -139,8 +146,9 @@ contract Gated7540Vault is
     $.deposits[_controller].pendingAssets += _assets;
     emit DepositRequest(_controller, _owner, 0, _sender, _assets);
     // `_owner` is authorised above: the caller itself, or an operator the owner approved (ERC-7540 operators are trusted).
+    // Aderyn's form of the Slither finding below; same guard, same tests.
     // slither-disable-next-line arbitrary-send-erc20
-    IERC20(asset()).safeTransferFrom(_owner, address(this), _assets);
+    IERC20(asset()).safeTransferFrom(_owner, address(this), _assets); // aderyn-ignore(arbitrary-transfer-from)
     _requestId = 0;
   }
 
@@ -601,6 +609,8 @@ contract Gated7540Vault is
     uint256 _assets,
     Math.Rounding _rounding
   ) internal view override returns (uint256 _shares) {
+    // 10 ** decimals() is one whole share, read at runtime.
+    // aderyn-ignore-next-line(literal-instead-of-constant)
     _shares = Math.mulDiv(_assets, 10 ** decimals(), _getGated7540Storage().lastPrice, _rounding);
   }
 
@@ -614,6 +624,8 @@ contract Gated7540Vault is
     uint256 _shares,
     Math.Rounding _rounding
   ) internal view override returns (uint256 _assets) {
+    // 10 ** decimals() is one whole share, read at runtime.
+    // aderyn-ignore-next-line(literal-instead-of-constant)
     _assets = Math.mulDiv(_shares, _getGated7540Storage().lastPrice, 10 ** decimals(), _rounding);
   }
 
@@ -669,6 +681,8 @@ contract Gated7540Vault is
     uint256 _assets,
     uint256 _shares
   ) private returns (uint256 _price) {
+    // 10 ** decimals() is one whole share, read at runtime.
+    // aderyn-ignore-next-line(literal-instead-of-constant)
     _price = Math.mulDiv(_assets, 10 ** decimals(), _shares);
     _getGated7540Storage().lastPrice = _price;
   }
@@ -696,3 +710,4 @@ contract Gated7540Vault is
     }
   }
 }
+// slither-disable-end missing-inheritance

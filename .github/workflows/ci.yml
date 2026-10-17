@@ -32,7 +32,7 @@ jobs:
       - run: npm test
 
   analysis:
-    name: Format, Slither gate, Halmos, upgrade safety, reproducibility (PRs into main)
+    name: Format, Slither + Aderyn gates, Halmos, upgrade safety, reproducibility (PRs into main)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -51,6 +51,9 @@ jobs:
       - run: pip install slither-analyzer==0.11.5 halmos==0.3.3
       - run: npm run fmt:check
       - run: slither .
+      # Second static analyser (Cyfrin Aderyn, pinned devDependency): fails on any finding not excluded in aderyn.toml
+      # or suppressed inline with a reason.
+      - run: npm run aderyn
       - run: npm run test:halmos
       - run: npm run validate:upgrades
       # Same bytecode from 2 clean production builds, the default profile and forge; TokenProxy matches ProxyDeployer.

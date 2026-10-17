@@ -29,6 +29,8 @@ abstract contract BaseRule is ERC165, IComplianceRule {
   }
 
   /// @inheritdoc IComplianceRule
+  // Default for rules without wantsAfter(); the hook only calls after_ on rules that opt in.
+  // aderyn-ignore-next-line(empty-block)
   function after_(
     IPolicyHook.TransferContext calldata _ctx
   ) external virtual onlyHook(_ctx) {}

@@ -1185,3 +1185,25 @@ contract Gated7540VaultInvariantTest is Gated7540VaultUnitTest {
     assertEq(_sum, _vault.totalSupply());
   }
 }
+
+/// @dev Aderyn `contract-locks-ether` is a false positive for this implementation: no path accepts ETH
+contract Gated7540VaultUnit_Ether is Gated7540VaultUnitTest {
+  function test_WhenEtherIsSentPlainly_ItReverts() external {
+    vm.deal(_alice, 1 ether);
+    vm.prank(_alice);
+    (bool _ok,) = address(_vault).call{value: 1}('');
+    assertFalse(_ok);
+    assertEq(address(_vault).balance, 0);
+  }
+}
+
+/// @dev Aderyn `unused-state-variable` on the storage location is a false positive: it is read in assembly
+contract Gated7540VaultUnit_Storage is Gated7540VaultUnitTest {
+  function test_TheErc7201LocationHoldsTheVaultState() external view {
+    bytes32 _location =
+      keccak256(abi.encode(uint256(keccak256('gated.storage.Gated7540Vault')) - 1)) & ~bytes32(uint256(0xff));
+    assertEq(_location, 0x2cc225a2bfbd5a47b58fbfec984f4f856b2fa5e8b68081e6d3300ec76f5f3900);
+    assertEq(address(uint160(uint256(vm.load(address(_vault), _location)))), _custody, 'slot 0: custody');
+    assertEq(uint256(vm.load(address(_vault), bytes32(uint256(_location) + 1))), _ONE, 'slot 1: lastPrice');
+  }
+}

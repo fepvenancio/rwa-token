@@ -21,6 +21,7 @@ import {PolicyRegistry} from 'contracts/governance/PolicyRegistry.sol';
 import {ComplianceHook} from 'contracts/hooks/ComplianceHook.sol';
 import {MaxHoldersRule} from 'contracts/hooks/rules/MaxHoldersRule.sol';
 import {Helpers} from 'contracts/test/Helpers.sol';
+import {MockStatefulToken} from 'contracts/test/MockStatefulToken.sol';
 import {IntentToken} from 'contracts/tokens/IntentToken.sol';
 
 contract MaxHoldersRuleUnitTest is Helpers {
@@ -556,5 +557,29 @@ contract MaxHoldersRuleInvariantTest is Test {
       if (_token.balanceOf(_all[_i]) > 0 && !_rule.isExemptHolder(address(_token), _all[_i])) ++_holders;
     }
     assertEq(_rule.holderCount(address(_token)), _holders);
+  }
+}
+
+/// @dev Aderyn `reentrancy-state-change` is a false positive: the token is read through STATICCALL
+contract MaxHoldersRuleUnit_TokenCallsAreStatic is MaxHoldersRuleUnitTest {
+  function test_WhenTheTokenTriesToWriteDuringTheRoleCheck_AdminWritesRevert() external {
+    MockStatefulToken _stateful = new MockStatefulToken();
+    vm.startPrank(_admin);
+    vm.expectRevert();
+    _rule.setCap(address(_stateful), 3);
+    vm.expectRevert();
+    _rule.seedHolderCount(address(_stateful), 1);
+    vm.expectRevert();
+    _rule.setExemptHolder(address(_stateful), _to, true);
+    vm.stopPrank();
+  }
+
+  function test_WhenTheTokenTriesToWriteDuringTheHookOrBalanceRead_AfterReverts() external {
+    MockStatefulToken _stateful = new MockStatefulToken();
+    IPolicyHook.TransferContext memory _ctxStateful = _ctx(IPolicyHook.TransferKind.MINT, address(0), _to, 1);
+    _ctxStateful.token = address(_stateful);
+    vm.expectRevert();
+    _rule.after_(_ctxStateful);
+    assertEq(_rule.holderCount(address(_stateful)), 0);
   }
 }

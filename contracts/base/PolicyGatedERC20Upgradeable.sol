@@ -220,7 +220,11 @@ abstract contract PolicyGatedERC20Upgradeable is
   ) internal onlyInitializing {
     if (_admin == address(0) || _guardian == address(0) || _registry == address(0)) revert PolicyGated_ZeroAddress();
     _getPolicyGatedStorage().registry = IPolicyRegistry(_registry);
+    // _grantRole returns false only if the role is already held; either way the account ends up holding it.
+    // aderyn-ignore-next-line(unchecked-return)
     _grantRole(DEFAULT_ADMIN_ROLE, _admin);
+    // As above.
+    // aderyn-ignore-next-line(unchecked-return)
     _grantRole(GUARDIAN_ROLE, _guardian);
     _setHook(_hook);
   }

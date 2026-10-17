@@ -33,6 +33,8 @@ contract SettlementWindowRule is BaseRule, ISettlementWindowRule {
     uint32 _close,
     uint8 _dayMask
   ) external {
+    // View interface: compiled to STATICCALL, so the token cannot change any state (test: *_TokenCallsAreStatic).
+    // aderyn-ignore-next-line(reentrancy-state-change)
     if (!IAccessControl(_token).hasRole(_DEFAULT_ADMIN_ROLE, msg.sender)) {
       revert SettlementWindowRule_OnlyTokenAdmin(_token, msg.sender);
     }
@@ -48,6 +50,8 @@ contract SettlementWindowRule is BaseRule, ISettlementWindowRule {
     IPolicyHook.TransferContext calldata _ctx
   ) external view returns (bytes32 _reason) {
     if (_ctx.kind != IPolicyHook.TransferKind.EXECUTED) return Reasons.TRANSFER_OK;
+    // A read-only copy of the window into memory; nothing is edited.
+    // aderyn-ignore-next-line(storage-array-memory-edit)
     if (!_isOpen(_windows[_ctx.token], block.timestamp)) return Reasons.OUTSIDE_SETTLEMENT_WINDOW;
     _reason = Reasons.TRANSFER_OK;
   }
@@ -57,6 +61,8 @@ contract SettlementWindowRule is BaseRule, ISettlementWindowRule {
     address _token,
     uint256 _timestamp
   ) external view returns (bool _open) {
+    // A read-only copy of the window into memory; nothing is edited.
+    // aderyn-ignore-next-line(storage-array-memory-edit)
     _open = _isOpen(_windows[_token], _timestamp);
   }
 
@@ -95,7 +101,11 @@ contract SettlementWindowRule is BaseRule, ISettlementWindowRule {
     uint256 _day = _timestamp / 1 days;
     // Calendar arithmetic on the timestamp, not randomness.
     // slither-disable-start weak-prng
+    // Calendar constants: 7 days a week, and 1970-01-01 was a Thursday, so +3 makes Monday 0.
+    // aderyn-ignore-next-line(literal-instead-of-constant)
     uint256 _today = (_day + 3) % 7;
+    // Calendar constants, as above: +6 mod 7 is the previous weekday.
+    // aderyn-ignore-next-line(literal-instead-of-constant)
     uint256 _yesterday = (_today + 6) % 7;
     uint256 _second = _timestamp % 1 days;
     // slither-disable-end weak-prng

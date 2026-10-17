@@ -812,6 +812,21 @@ An Ignition deployment of the whole stack:
   - The OZ sources a contract imports remain inside its job's solc input, since they are needed to reproduce it.
 - **The `v0.1.0` archive was published before this change and is the larger one.** The next tag gets the trimmed archive.
 
+### Aderyn as a second static-analysis gate (owner, 2026-10-17)
+- **Setup:** `@cyfrin/aderyn` 0.6.8, pinned. `aderyn.toml` sets the scope (`contracts/`, minus tests and mocks) and the project-wide exclusions; `scripts/aderyn-gate.ts` (`npm run aderyn`) fails on any remaining finding. It's in the CI analysis job after Slither.
+- **First run:** 5 high and 13 low detector types; no exploitable issue.
+- **One real fix:** `ProxyDeployer`'s constructor parameter `_owner` shadowed `Ownable._owner`; renamed `_initialOwner`.
+- **The rest triaged** (full table in `SECURITY.md` §4):
+  - project-wide: `centralization-risk`, `push-zero-opcode`, `unspecific-solidity-pragma`, `uninitialized-local-variable`, `unused-import`;
+  - inline, with the reason on the line above.
+- **Owner: "add tests to validate the issues if not false positives".** Each acknowledgement whose verdict rests on behaviour is now pinned by a test:
+  - **`contract-locks-ether`:** turned out to be a false positive, not an accepted risk. Plain ETH sent to the token or either vault reverts; ETH attached to a token function reverts; even the upgrader's `upgradeToAndCall{value}` reverts (`ERC1967NonPayable` with empty data; non-payable delegated call with data). Tests: `IntentTokenIntegration_Ether`, `Gated4626VaultUnit_Ether`, `Gated7540VaultUnit_Ether`.
+  - **`reentrancy-state-change`:** `MockStatefulToken`, whose `hasRole` / `balanceOf` / `policyHook` write state. Every rule entry point that reads the token reverts against it, proving those reads are STATICCALLs; a direct call to the same mock succeeds as a control. Tests: `{Lockup,SettlementWindow,MaxHolders}RuleUnit_TokenCallsAreStatic`.
+  - **`unused-state-variable`:** `Gated7540VaultUnit_Storage` checks the ERC-7201 formula equals the constant and that the slot holds custody and `lastPrice`.
+- **Interplay with Slither:** where a Slither next-line suppression already occupies the line above, Aderyn uses its same-line form. The 7540 contract declaration uses Slither's block form instead, because `forge fmt` wraps the inheritance list. Slither attributes `missing-inheritance` to the whole contract, so that block closes after the last line.
+- **Mutation check:** removing one inline suppression fails the gate (1 high).
+- **Supply-chain note:** the package downloads its binary in `postinstall` from Cyfrin's GitHub release, without a checksum. Recorded in `SECURITY.md`.
+
 ### Remaining brief items (deferred until the first external integrator is known)
 - **ERC-3643 `IToken` read adapter.**
 - **Exact ERC-7943 conformance,** once the ERC is Final. Today there is no 7943 interface ID, because the function names and return types differ (README deviations).

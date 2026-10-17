@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {ERC1967Proxy} from '@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol';
+import {ERC1967Utils} from '@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol';
 import {ReentrancyGuardTransient} from '@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol';
 import {Test} from 'forge-std/Test.sol';
 
@@ -312,5 +313,36 @@ contract IntentTokenIntegration_Safety is IntentTokenIntegrationTest {
     _token.upgradeToAndCall(address(_next), '');
     assertEq(_token.balanceOf(_alice), 1000 ether);
     assertEq(_token.policyHook(), address(_hook));
+  }
+}
+
+/// @dev Aderyn `contract-locks-ether` is a false positive for this implementation: no path accepts ETH
+contract IntentTokenIntegration_Ether is IntentTokenIntegrationTest {
+  function test_WhenEtherIsSentPlainly_ItReverts() external {
+    vm.deal(_alice, 1 ether);
+    vm.prank(_alice);
+    (bool _ok,) = address(_token).call{value: 1}('');
+    assertFalse(_ok, 'the proxy delegates to an implementation with no receive or payable fallback');
+    assertEq(address(_token).balance, 0);
+  }
+
+  function test_WhenEtherIsAttachedToATokenFunction_ItReverts() external {
+    vm.deal(_alice, 1 ether);
+    vm.prank(_alice);
+    (bool _ok,) = address(_token).call{value: 1}(abi.encodeCall(_token.transfer, (_bob, 0)));
+    assertFalse(_ok, 'every implementation function is non-payable');
+  }
+
+  /// @dev The only payable entry point is UUPS `upgradeToAndCall`; even the upgrader cannot leave ETH behind
+  function test_WhenTheUpgraderAttachesEther_TheUpgradeReverts() external {
+    vm.deal(_admin, 1 ether);
+    vm.prank(_admin);
+    vm.expectRevert(ERC1967Utils.ERC1967NonPayable.selector);
+    _token.upgradeToAndCall{value: 1}(address(_impl), '');
+
+    vm.prank(_admin);
+    vm.expectRevert(); // the delegated call is non-payable
+    _token.upgradeToAndCall{value: 1}(address(_impl), abi.encodeCall(_token.decimals, ()));
+    assertEq(address(_token).balance, 0);
   }
 }

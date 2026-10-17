@@ -7,6 +7,8 @@ import {IntentSettledUpgradeable} from 'contracts/mixins/IntentSettledUpgradeabl
  * @title IntentToken
  * @notice Gated ERC-20 with executor-settled transfers. Deployed behind a UUPS proxy
  */
+// No receive or payable function, and upgradeToAndCall rejects value: no ETH can enter (tests: *_Ether).
+// aderyn-ignore-next-line(contract-locks-ether)
 contract IntentToken is IntentSettledUpgradeable {
   /**
    * @notice Locks the implementation; only proxies can be initialized

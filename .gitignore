@@ -45,6 +45,7 @@
 /forge-upgrades-cache
 /forge-repro
 /forge-repro-cache
+/aderyn-report.json
 
 # Release reference build (manifest + build-info), produced by `npm run verify:reproducible`
 /release-build

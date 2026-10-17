@@ -12,6 +12,7 @@ import {ISettlementWindowRule} from 'interfaces/ISettlementWindowRule.sol';
 
 import {SettlementWindowRule} from 'contracts/hooks/rules/SettlementWindowRule.sol';
 import {Helpers} from 'contracts/test/Helpers.sol';
+import {MockStatefulToken} from 'contracts/test/MockStatefulToken.sol';
 
 contract SettlementWindowRuleUnitTest is Helpers {
   bytes32 internal constant _ADMIN_ROLE = 0x00;
@@ -253,5 +254,16 @@ contract SettlementWindowRuleUnit_Metadata is SettlementWindowRuleUnitTest {
     assertTrue(_rule.supportsInterface(type(IComplianceRule).interfaceId));
     assertTrue(_rule.supportsInterface(type(ISettlementWindowRule).interfaceId));
     assertTrue(_rule.supportsInterface(type(IERC165).interfaceId));
+  }
+}
+
+/// @dev Aderyn `reentrancy-state-change` is a false positive: the token is read through STATICCALL
+contract SettlementWindowRuleUnit_TokenCallsAreStatic is SettlementWindowRuleUnitTest {
+  function test_WhenTheTokenTriesToWriteDuringTheRoleCheck_SetWindowReverts() external {
+    MockStatefulToken _stateful = new MockStatefulToken();
+    uint8 _days = _rule.MON_TO_FRI(); // read first: an external call would consume expectRevert and the prank
+    vm.expectRevert();
+    vm.prank(_admin);
+    _rule.setWindow(address(_stateful), 9 hours, 17 hours, _days);
   }
 }

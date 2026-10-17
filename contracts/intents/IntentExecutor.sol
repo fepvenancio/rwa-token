@@ -33,7 +33,11 @@ contract IntentExecutor is AccessControl, Pausable, IIntentExecutor, IIntentExec
     address _guardian
   ) {
     if (_admin == address(0) || _guardian == address(0)) revert IntentExecutor_ZeroAddress();
+    // _grantRole returns false only if the role is already held; either way the account ends up holding it.
+    // aderyn-ignore-next-line(unchecked-return)
     _grantRole(DEFAULT_ADMIN_ROLE, _admin);
+    // As above.
+    // aderyn-ignore-next-line(unchecked-return)
     _grantRole(GUARDIAN_ROLE, _guardian);
   }
 
@@ -59,6 +63,8 @@ contract IntentExecutor is AccessControl, Pausable, IIntentExecutor, IIntentExec
     if (_length != _sigs.length) revert IntentExecutor_LengthMismatch(_length, _sigs.length);
 
     _intentHashes = new bytes32[](_length);
+    // Batches are atomic by design: the first failing intent reverts the batch with its index.
+    // aderyn-ignore-next-line(require-revert-in-loop)
     for (uint256 _i; _i < _length; ++_i) {
       // Any failure reverts the whole batch, naming the failing index and carrying the token's reason.
       try ITransferIntent(_token).executeTransfer(_intents[_i], _sigs[_i]) returns (bytes32 _intentHash) {

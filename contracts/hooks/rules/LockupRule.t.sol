@@ -12,6 +12,7 @@ import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 
 import {LockupRule} from 'contracts/hooks/rules/LockupRule.sol';
 import {Helpers} from 'contracts/test/Helpers.sol';
+import {MockStatefulToken} from 'contracts/test/MockStatefulToken.sol';
 
 contract LockupRuleUnitTest is Helpers {
   bytes32 internal constant _AGENT_ROLE = keccak256('AGENT_ROLE');
@@ -196,5 +197,19 @@ contract LockupRuleUnit_Metadata is LockupRuleUnitTest {
     assertTrue(_rule.supportsInterface(type(IComplianceRule).interfaceId));
     assertTrue(_rule.supportsInterface(type(ILockupRule).interfaceId));
     assertTrue(_rule.supportsInterface(type(IERC165).interfaceId));
+  }
+}
+
+/// @dev Aderyn `reentrancy-state-change` is a false positive: the token is read through STATICCALL
+contract LockupRuleUnit_TokenCallsAreStatic is LockupRuleUnitTest {
+  function test_WhenTheTokenTriesToWriteDuringTheRoleCheck_SetLockupReverts() external {
+    MockStatefulToken _stateful = new MockStatefulToken();
+    _stateful.hasRole(_AGENT_ROLE, _agent); // control: the same read writes when called with CALL
+    assertEq(_stateful.writes(), 1);
+
+    vm.expectRevert();
+    vm.prank(_agent);
+    _rule.setLockup(address(_stateful), _holder, _NOW + 1 days);
+    assertEq(_rule.unlockTime(address(_stateful), _holder), 0);
   }
 }

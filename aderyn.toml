@@ -1,0 +1,23 @@
+# Aderyn static analysis (CI gate: `npm run aderyn` fails on any finding). Hardhat builds this project; Aderyn reads
+# the sources via foundry.toml + remappings.txt.
+version = 1
+root = "."
+src = "contracts"
+exclude = ["contracts/test/", ".t.sol"]
+
+[detectors]
+# Project-wide exclusions, each false for this codebase as a whole. Every other accepted finding is suppressed inline
+# with its reason on the line above (`aderyn-ignore-next-line(...)`, or `aderyn-ignore(...)` on the same line where a
+# Slither/solhint next-line suppression already occupies the line above).
+exclude = [
+  # Privileged roles are the product: every one is held by the timelock, guardian, council or issuer (README security model).
+  "centralization-risk",
+  # evmVersion is pinned to cancun (PUSH0, TSTORE, MCOPY); the target chain must support it regardless.
+  "push-zero-opcode",
+  # Brief rule 9 mandates `pragma ^0.8.28`; the exact compiler (0.8.30) is pinned in hardhat.config.ts and foundry.toml.
+  "unspecific-solidity-pragma",
+  # Wonderland idiom `for (uint256 _i; ...)`: zero-initialised loop counters and bitmasks, by design.
+  "uninitialized-local-variable",
+  # solhint already flags unused imports; Aderyn misses imports used only by NatSpec `@inheritdoc`.
+  "unused-import",
+]

@@ -120,6 +120,39 @@ Inline suppressions (each carries its reason on the line above, in the source):
 | `ProxyDeployer` `deploy` | `unused-return` | `initialize` returns nothing; success is checked by the post-init assertions |
 | `TokenProxy` `_unsafeAllowUninitialized` | `dead-code` | Called from `ERC1967Proxy`'s constructor; Slither does not trace it through the override |
 
+Aderyn 0.6.8 (Cyfrin) runs as a second CI gate (`npm run aderyn`, 0 findings). First run: 5 high and 13 low
+detector types. One real fix: `ProxyDeployer`'s constructor parameter shadowed `Ownable._owner` and was renamed. Every
+other finding is acknowledged below. Where a finding is a real property rather than a false positive, a test pins it.
+
+Project-wide exclusions (`aderyn.toml`):
+
+| Detector | Reason |
+|---|---|
+| `centralization-risk` | Privileged roles are the product; each is held by the timelock, guardian, council or issuer |
+| `push-zero-opcode` | `evmVersion` is pinned to cancun; the target chain must support it (PUSH0, TSTORE, MCOPY) |
+| `unspecific-solidity-pragma` | Brief rule 9 mandates `^0.8.28`; the exact compiler is pinned in config |
+| `uninitialized-local-variable` | `for (uint256 _i; ...)` loop counters and zero-start bitmasks |
+| `unused-import` | solhint already flags unused imports; Aderyn misses imports used only by `@inheritdoc` |
+
+Inline acknowledgements (reason on the line above each `aderyn-ignore`):
+
+| Detector | Where | Verdict | Evidence |
+|---|---|---|---|
+| `contract-locks-ether` (high) | `IntentToken`, `Gated4626Vault`, `Gated7540Vault`, `TokenProxy` | False positive: no path accepts ETH. There is no `receive` or payable function, `upgradeToAndCall` with empty data rejects value (`ERC1967NonPayable`), and with data the value is delegated into a non-payable function | `IntentTokenIntegration_Ether`, `Gated4626VaultUnit_Ether`, `Gated7540VaultUnit_Ether` |
+| `reentrancy-state-change` (high) | `LockupRule`, `SettlementWindowRule`, `MaxHoldersRule` | False positive: the token is called through view interfaces, which compile to STATICCALL, so nothing the token does can change any state | `*Unit_TokenCallsAreStatic`: a token whose reads write makes every rule entry point revert, while a direct call to it succeeds (control) |
+| `arbitrary-transfer-from` (high) | `Gated7540Vault.requestDeposit` | Same as Slither's `arbitrary-send-erc20` (§4 above) | Fuzzed victim-owner test; removing the guard fails 2 tests |
+| `abi-encode-packed-hash-collision` (high) | `ProxyDeployer._initCodeHash` | False positive: only the second operand varies; the first is fixed creation code | Fuzzed `predict` formula test; off-chain CREATE2 test |
+| `storage-array-memory-edit` (high) | `SettlementWindowRule.check`, `isOpen` | False positive: a read-only copy of a storage struct into memory | Window tests |
+| `unused-state-variable` | `Gated7540Vault` ERC-7201 location | False positive: read in assembly | `Gated7540VaultUnit_Storage`: the formula equals the constant and the slot holds custody and `lastPrice` |
+| `unchecked-return` | `_grantRole` in constructors and initialisers; `Address.functionCall` in `ProxyDeployer` | `_grantRole` returns false only if the role is already held; `initialize` returns nothing | Role and deploy tests |
+| `costly-loop`, `require-revert-in-loop` | `ComplianceHook._setRules`, `IntentExecutor.executeBatch` | By design: at most 16 rules, and invalid rules must fail closed; batches are atomic | Hook and batch tests |
+| `literal-instead-of-constant` | calendar arithmetic; `10 ** decimals()` | Calendar constants; `decimals()` is read at runtime | Window and vault tests |
+| `empty-block`, `modifier-used-only-once` | `BaseRule.after_`, `__IntentSettled_init`, `onlyAdmin` | By design | n/a |
+
+Supply-chain note: the `@cyfrin/aderyn` npm package downloads its binary in `postinstall` from Cyfrin's GitHub
+release `aderyn-v0.6.8`, without checksum verification. It runs only in development and CI and never affects deployed
+bytecode.
+
 solhint (Wonderland config, `--max-warnings 0`):
 - `style-guide-casing` is disabled on getters of `UPPER_SNAKE` constants and immutables and on OZ-style `__X_init`
   functions;
@@ -142,6 +175,7 @@ Each row is a bug deliberately planted, the run that caught it, then restored fr
 | `ProxyDeployer` | no hook-binding check; no salt check | unit test + Ignition tamper test; unit test |
 | Ignition `Activate` | UPGRADER to an ops account; deployer keeps timelock admin; deployer keeps `ProxyDeployer` ownership; hooks built with rules reversed | 54 / 54 / 55 / 55 failing |
 | upgrades-core | upgrade-unsafe state initialiser | `validate` FAILED |
+| Aderyn gate | one inline suppression removed | `npm run aderyn` fails (1 high) |
 | Reproducibility | metadata hash re-enabled | `verify:reproducible`: every contract differs across jobs |
 
 ## 6. Verification commands
@@ -163,6 +197,10 @@ slither .
 ```
 
 ```bash
+npm run aderyn
+```
+
+```bash
 npm run test:halmos
 ```
 
@@ -174,7 +212,7 @@ npm run validate:upgrades
 npm run verify:reproducible
 ```
 
-Tool versions: Node 24, Hardhat 3.20.0, Foundry v1.8.1, slither 0.11.5, halmos 0.3.3, `@openzeppelin/upgrades-core`
-1.46.0. CI (`.github/workflows/ci.yml`) runs all of them on every push, except `verify:reproducible`, which runs on
+Tool versions: Node 24, Hardhat 3.20.0, Foundry v1.8.1, slither 0.11.5, Aderyn 0.6.8, halmos 0.3.3,
+`@openzeppelin/upgrades-core` 1.46.0. CI (`.github/workflows/ci.yml`) runs all of them on every push, except `verify:reproducible`, which runs on
 pull requests into `main` and, through `release.yml`, on every `v*` tag. Mythril is not used: it has no Cancun support
 (TSTORE/TLOAD/MCOPY).

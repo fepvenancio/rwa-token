@@ -11,6 +11,8 @@ import {ERC1967Proxy} from '@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
  *      `ProxyDeployer` initialises the proxy in the same transaction that creates it; a `TokenProxy` deployed any other
  *      way is not one of this system's tokens
  */
+// Delegates to implementations with no payable entry point, so no ETH can be sent in (tests: *_Ether).
+// aderyn-ignore-next-line(contract-locks-ether)
 contract TokenProxy is ERC1967Proxy {
   /**
    * @notice Deploys the proxy

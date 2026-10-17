@@ -56,9 +56,13 @@ contract MaxHoldersRule is BaseRule, IMaxHoldersRule {
     // Exact equalities are the holder definition (post-move balance == amount <=> was 0). They are read inside the
     // token's guarded _update, where only the token moves balances.
     // slither-disable-start incorrect-equality
+    // View interface: compiled to STATICCALL, so the token cannot change any state (test: *_TokenCallsAreStatic).
+    // aderyn-ignore-next-line(reentrancy-state-change)
     if (_ctx.to != address(0) && !_exempts[_ctx.token][_ctx.to] && _token.balanceOf(_ctx.to) == _ctx.amount) {
       _newCount += 1;
     }
+    // View interface: compiled to STATICCALL, as above.
+    // aderyn-ignore-next-line(reentrancy-state-change)
     if (_ctx.from != address(0) && !_exempts[_ctx.token][_ctx.from] && _token.balanceOf(_ctx.from) == 0) {
       _newCount -= 1;
     }
@@ -90,6 +94,8 @@ contract MaxHoldersRule is BaseRule, IMaxHoldersRule {
     _exempts[_token][_account] = _exempt;
     emit HolderExemptionSet(_token, _account, _exempt);
     // A current holder enters or leaves the count with its exemption. Checked: a wrong count fails closed.
+    // View interface: compiled to STATICCALL, so the token cannot change any state (test: *_TokenCallsAreStatic).
+    // aderyn-ignore-next-line(reentrancy-state-change)
     if (IERC20(_token).balanceOf(_account) > 0) {
       uint256 _count = _exempt ? _counts[_token] - 1 : _counts[_token] + 1;
       _counts[_token] = _count;

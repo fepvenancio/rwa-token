@@ -12,9 +12,11 @@
     "test:halmos": "halmos --forge-build-out forge-out --match-contract 'Halmos$' --solver-timeout-assertion 0",
     "typecheck": "tsc --noEmit",
     "validate:upgrades": "rm -rf forge-upgrades forge-upgrades-cache && forge build --build-info --extra-output storageLayout --out forge-upgrades --cache-path forge-upgrades-cache --skip './contracts/**/*.t.sol' && openzeppelin-upgrades-core validate forge-upgrades/build-info --exclude 'contracts/test/**'",
-    "verify:reproducible": "node scripts/verify-reproducible.ts"
+    "verify:reproducible": "node scripts/verify-reproducible.ts",
+    "aderyn": "node scripts/aderyn-gate.ts"
   },
   "devDependencies": {
+    "@cyfrin/aderyn": "0.6.8",
     "@nomicfoundation/hardhat-ignition": "3.1.9",
     "@nomicfoundation/hardhat-keystore": "3.1.2",
     "@nomicfoundation/hardhat-toolbox-viem": "5.0.7",

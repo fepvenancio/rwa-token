@@ -26,11 +26,12 @@ contract ProxyDeployer is Ownable, IProxyDeployer {
 
   /**
    * @notice Deploys the helper
-   * @param _owner The deployer account, the only one allowed to deploy proxies until ownership moves to the timelock
+   * @param _initialOwner The deployer account, the only one allowed to deploy proxies until ownership moves to the
+   *        timelock
    */
   constructor(
-    address _owner
-  ) Ownable(_owner) {}
+    address _initialOwner
+  ) Ownable(_initialOwner) {}
 
   /// @inheritdoc IProxyDeployer
   function deploy(
@@ -52,8 +53,9 @@ contract ProxyDeployer is Ownable, IProxyDeployer {
     // Empty init data keeps the address independent of the hook; initialising here leaves no window to front-run.
     _proxy = address(new TokenProxy{salt: _salt}(_implementation, ''));
     // `initialize` returns nothing; its success is all that matters, and it is checked below.
+    // Aderyn's form of the Slither finding below; initialize returns nothing.
     // slither-disable-next-line unused-return
-    Address.functionCall(_proxy, _initData);
+    Address.functionCall(_proxy, _initData); // aderyn-ignore(unchecked-return)
 
     address _installed = IPolicyGated(_proxy).policyHook();
     if (_installed != _hook) revert ProxyDeployer_HookNotInstalled(_hook, _installed);
@@ -79,6 +81,8 @@ contract ProxyDeployer is Ownable, IProxyDeployer {
   function _initCodeHash(
     address _implementation
   ) private pure returns (bytes32 _hash) {
+    // Only the second operand varies; the first is fixed creation code, so the packed encoding is unambiguous.
+    // aderyn-ignore-next-line(abi-encode-packed-hash-collision)
     _hash = keccak256(abi.encodePacked(type(TokenProxy).creationCode, abi.encode(_implementation, bytes(''))));
   }
 }

@@ -22,6 +22,8 @@ import {PolicyGatedERC20Upgradeable} from 'contracts/base/PolicyGatedERC20Upgrad
  * @dev Deployed behind a UUPS proxy. Virtual shares with a decimals offset of 6 make first-depositor donation attacks
  *      unprofitable
  */
+// No receive or payable function, and upgradeToAndCall rejects value: no ETH can enter (tests: *_Ether).
+// aderyn-ignore-next-line(contract-locks-ether)
 contract Gated4626Vault is ERC4626Upgradeable, PolicyGatedERC20Upgradeable, IGated4626Vault {
   /**
    * @notice Locks the implementation; only proxies can be initialized

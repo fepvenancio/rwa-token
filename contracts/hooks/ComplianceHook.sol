@@ -38,6 +38,8 @@ contract ComplianceHook is ERC165, IComplianceHook {
   /**
    * @notice Restricts a function to `ADMIN`
    */
+  // Kept as a modifier so the ADMIN gate is visible in the setRules signature.
+  // aderyn-ignore-next-line(modifier-used-only-once)
   modifier onlyAdmin() {
     if (msg.sender != ADMIN) revert ComplianceHook_OnlyAdmin(msg.sender);
     _;
@@ -141,6 +143,8 @@ contract ComplianceHook is ERC165, IComplianceHook {
     uint256 _mask;
     bytes32[] memory _ruleIds = new bytes32[](_length);
 
+    // At most MAX_RULES (16) iterations; an invalid rule must revert the whole set (fail closed).
+    // aderyn-ignore-next-line(costly-loop, require-revert-in-loop)
     for (uint256 _i; _i < _length; ++_i) {
       IComplianceRule _rule = _newRules[_i];
       if (!REGISTRY.isAttested(address(_rule), IPolicyRegistry.AttestKind.RULE)) {
@@ -148,6 +152,8 @@ contract ComplianceHook is ERC165, IComplianceHook {
       }
       // `ruleId` is the rule type: one instance of each type per hook. The same contract twice shares an id too.
       bytes32 _ruleId = _rule.ruleId();
+      // Duplicate check over at most 16 rules; a duplicate must revert the whole set.
+      // aderyn-ignore-next-line(require-revert-in-loop)
       for (uint256 _j; _j < _i; ++_j) {
         if (_ruleIds[_j] == _ruleId) revert ComplianceHook_DuplicateRule(address(_rule));
       }

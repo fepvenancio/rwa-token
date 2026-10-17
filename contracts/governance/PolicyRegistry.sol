@@ -30,7 +30,11 @@ contract PolicyRegistry is AccessControl, IPolicyRegistry {
     address _attester
   ) {
     if (_admin == address(0) || _attester == address(0)) revert PolicyRegistry_ZeroAddress();
+    // _grantRole returns false only if the role is already held; either way the account ends up holding it.
+    // aderyn-ignore-next-line(unchecked-return)
     _grantRole(DEFAULT_ADMIN_ROLE, _admin);
+    // As above.
+    // aderyn-ignore-next-line(unchecked-return)
     _grantRole(ATTESTER_ROLE, _attester);
   }
 

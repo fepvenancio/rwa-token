@@ -616,3 +616,14 @@ contract Gated4626VaultInvariantTest is Gated4626VaultUnitTest {
     assertLe(_vault.convertToAssets(_vault.totalSupply()), _asset.balanceOf(address(_vault)));
   }
 }
+
+/// @dev Aderyn `contract-locks-ether` is a false positive for this implementation: no path accepts ETH
+contract Gated4626VaultUnit_Ether is Gated4626VaultUnitTest {
+  function test_WhenEtherIsSentPlainly_ItReverts() external {
+    vm.deal(_alice, 1 ether);
+    vm.prank(_alice);
+    (bool _ok,) = address(_vault).call{value: 1}('');
+    assertFalse(_ok);
+    assertEq(address(_vault).balance, 0);
+  }
+}

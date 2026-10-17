@@ -125,8 +125,9 @@ abstract contract IntentSettledUpgradeable is PolicyGatedERC20Upgradeable, ITran
   }
 
   /// @notice Initializes the mixin; it has no state to set
+  // The mixin has no state; the init keeps the OZ init-chain convention.
   // solhint-disable-next-line style-guide-casing
-  function __IntentSettled_init() internal onlyInitializing {}
+  function __IntentSettled_init() internal onlyInitializing {} // aderyn-ignore(empty-block)
 
   /**
    * @notice Checks that do not depend on the signature: deadline (inclusive) and nonce
