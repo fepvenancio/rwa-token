@@ -38,6 +38,8 @@
 .letta/
 .DS_Store
 
-# forge (fmt / Slither builds)
+# forge (fmt / Slither builds; storage-layout build for upgrades-core)
 /forge-out
 /forge-cache
+/forge-upgrades
+/forge-upgrades-cache

@@ -1,6 +1,6 @@
 # PLAN
 
-Status: **Phase 6 approved and pushed (`a2082b8`). Phase 7 (deploy + security): plan written, awaiting review. No Phase 7 code yet.**
+Status: **Phase 7 (deploy + security) built and green (2026-10-17); awaiting review. Not pushed.**
 
 Brief v2 ("Gated Token Stack") replaced the original executor-only brief on 2026-10-16. On the same day the owner supplied a reference implementation in `Imported/` (now deleted; its contents live in `contracts/`) and approved, in chat, integrating it with the major findings fixed, a common-bug sweep, and the Wonderland Solidity standards.
 
@@ -601,7 +601,7 @@ The temporary `smoke.test.ts` is deleted.
 - `npx hardhat test`: **392 passing (346 solidity, 46 nodejs)**.
 - solhint clean, `tsc` clean, `forge fmt --check` clean, Slither 0 results, Halmos 4 passed / 0 failed, 0 iCloud duplicates.
 
-## Phase 7 — deploy + security (PLAN, awaiting review)
+## Phase 7 — deploy + security (built 2026-10-17, awaiting review)
 
 ### Goal (brief §8)
 An Ignition deployment of the whole stack:
@@ -676,5 +676,73 @@ An Ignition deployment of the whole stack:
 - No changes to interfaces or existing contracts, unless Q1 (d) is chosen, which touches the base.
 - No Mythril (brief §8).
 
+### Owner decisions on Phase 7 (2026-10-17)
+- **Q1 (a), `ProxyDeployer`, on three conditions:**
+  1. **CREATE2, keyed on a salt derived from the token symbol**, so the council can compute the token address off-chain before any hook or proxy exists and verify it afterwards.
+  2. **Single-use per salt:** a reused salt reverts.
+  3. **A loud binding check:** `hook.TOKEN() == token` is asserted before any role is granted.
+  - The attested hook codehash already includes the token address: `TOKEN` is an immutable set from a constructor argument. So the council attests *this hook for this token*, which means one attestation per token, not per hook type. This goes in the runbook.
+- **Q2 (a):** the timelock's proposer and executor is the governance multisig only. Open execution would remove the window to abort.
+- **Q3:** no Sepolia in Phase 7.
+- **Q4:** UPGRADER_ROLE goes to the timelock only; `Activate` ends with the deployer holding nothing.
+
+### How the Q1 conditions are met (implementation consequences, verified against the code)
+- **CREATE2 of the full proxy creation code would be circular.** That code embeds `initialize(…, hook)`, and the hook needs the address. So `deploy` CREATE2s the proxy with **empty init data** and calls `initialize` **in the same transaction**. The address is then `f(ProxyDeployer, keccak256(symbol), implementation)`, and atomic initialisation leaves no window to initialise first.
+- **`deploy` is owner-only** (immutable `OWNER` = the deployer). Because the address does not cover the init data, anyone else could otherwise take the address with the same salt and implementation but their own admin.
+- **The binding check is on-chain, inside `deploy`.** Ignition has no assertion step, so `deploy` reverts *before creating the proxy* if `hook.TOKEN() != predicted`. After `initialize`, it also reverts unless `policyHook() == hook` and `symbol() == symbol`. Every role grant in `Activate` depends on that transaction, so a mismatch stops the deployment before any role is granted.
+- **"Before anything is deployed", made precise:** the address depends on the `ProxyDeployer` and implementation addresses, both fixed once `Components` has run. The council can compute every token address at its first step, before any hook or proxy exists. Computing it before `Components` would need CREATE3 or deterministic deployment of the helper and implementations; not done.
+- **What a hook's codehash does not cover: its rule list.** The rules live in storage. The council attests the code and immutables `(ADMIN, REGISTRY, TOKEN)`; each rule is attested on its own and checked by the hook constructor, but the *selection and order* of rules is not covered by the hook attestation. The runbook has the council read `hook.rules()` before attesting. A twin hook with the same immutables but different rules shares the codehash, and only the timelock can install it (existing test `test_WhenAnIdenticalHookIsInstalled_ItIsAccepted`).
+- **Ignition on the in-process network is ephemeral per `deploy` call,** so modules cannot reuse each other through `useModule` in tests. Each stage takes the previous stage's addresses as parameters, which is how a live deployment with council steps in between works anyway.
+
+### Phase 7 as built (2026-10-17)
+- **`contracts/deploy/ProxyDeployer.sol`** (+ `IProxyDeployer`, `.t.sol`, 12 tests, written red first):
+  - CREATE2, salt `keccak256(bytes(symbol))`, over `TokenProxy(implementation, "")`;
+  - `initialize` runs in the same transaction;
+  - owner only; a symbol is single-use across implementations (`saltUsed`);
+  - reverts `HookTokenMismatch` before creating the proxy, and `HookNotInstalled` / `SymbolMismatch` after initialising;
+  - emits `ProxyDeployed`, whose topic is pinned in `InterfaceFreeze`; it is also in `ContractSizes`.
+- **`contracts/deploy/TokenProxy.sol`** (+ `.t.sol`): OZ 5.6's `ERC1967Proxy` reverts `ERC1967ProxyUninitialized` on empty init data. `TokenProxy` is that proxy with only OZ's documented `_unsafeAllowUninitialized` override. Safe because `ProxyDeployer` initialises atomically. Considered and rejected: a hook-independent no-op init call to keep OZ's exact bytecode (obscure); a bootstrap implementation (more code).
+- **Ignition modules** (`ignition/modules/`):
+  - `Components`: timelock, registry, rules, implementations, `ProxyDeployer`, executor.
+  - `Tokens`: hooks, bound to `ProxyDeployer.predict` via `staticCall`.
+  - `Activate`: deploys through `ProxyDeployer`, configures, grants roles, hands over to the timelock.
+  - `roles.ts` holds the role ids and the default token names and symbols.
+  - Every config and grant call in `Activate` waits for **all** token deploys. Without this, Ignition ran token-independent grants (the timelock CANCELLER, the executor OPERATOR) in the first batch, before a failed deploy. The tampered-hook test caught it.
+- **`npmFilesToBuild`:** `TimelockController` replaces `ERC1967Proxy`, which nothing deploys by name any more.
+- **`fixtures.ts` now runs the modules:** `deployUntilActivate` (stages 1–2 and both council steps) plus `activate`. It plays the council and the identity provider, then runs `assertHandedOver`, which now checks:
+  - the deployer holds no role on the timelock, registry, tokens or executor; the timelock is admin everywhere and the only UPGRADER;
+  - hook ↔ token binding both ways; hook admin = timelock;
+  - the guardian can cancel but not propose or execute; minimum delay ≥ 7 days.
+  - All 46 Phase 6 tests pass unchanged on the Ignition deployment.
+- **New tests:**
+  - `deployment.test.ts`:
+    - the council's off-chain CREATE2 formula matches every token;
+    - a tampered `Activate` (two hooks swapped) reverts `ProxyDeployer_HookTokenMismatch`, creates no proxy, consumes no salt and grants no role anywhere.
+  - `governance.test.ts`, everything through the real timelock:
+    - an upgrade waits out the delay (it fails right after scheduling and again one second before the delay elapses) and then lands;
+    - an unattested redeploy of the same source is refused at execution with `PolicyGated_NotAttested`;
+    - governance can't upgrade, swap the hook or set rules directly;
+    - the guardian cancels but can't schedule or execute; it pauses, and only the timelock unpauses;
+    - a hook swap and `setRules` take effect only on execution;
+    - guardian membership changes only through the timelock.
+- **upgrades-core 1.46.0**, pinned. It can't read Hardhat 3's build-info, which lacks `storageLayout`, so `npm run validate:upgrades` makes a clean Foundry build with `--extra-output storageLayout` into `forge-upgrades/` (gitignored, wiped each run so stale build-info can't mask a regression) and excludes `contracts/test/**`. Added to the CI analysis job.
+- **README:** the deployment runbook (three modules, two council steps, the CREATE2 formula, the hook-attestation scope, post-deploy checks), plus a deviation entry for `ProxyDeployer` / `TokenProxy`. The stale smoke-test line is removed.
+- **Mutation check:** five planted bugs, each killed, then restored.
+  1. No hook-binding check: 2 failing (unit test and Ignition tamper test).
+  2. No salt check: 1 failing.
+  3. UPGRADER_ROLE granted to an ops account: 54 failing.
+  4. Deployer keeps timelock admin: 54 failing.
+  5. Upgrade-unsafe state initialiser: `validate` FAILED.
+
+### Verification (Phase 7)
+- `npx hardhat test`: **415 passing (360 solidity, 55 nodejs)**.
+- solhint, `tsc` and `forge fmt` clean; Slither 0 results; Halmos 4/4; upgrades-core: 3 upgradeable contracts, 3 passed.
+
+### Open finding (decision needed)
+- **upgrades-core warns that both vaults call initializers out of order.** `__ERC4626_init` comes before the base's `__PolicyGatedERC20_init`, which contains `__ERC20_init` and `__ERC20Permit_init`.
+  - It is a warning, not an error, and as far as I can tell behaviour-neutral: `__ERC4626_init` only records the asset and its decimals.
+  - The clean fix expands the base initializer inside both vaults: `__ERC20_init`, then `__ERC4626_init`, then `__ERC20Permit_init`, then `__AccessControl_init`, then `__Pausable_init`, then `__PolicyGatedERC20_init_unchained`. That touches Phase 5 code and changes the implementations' bytecode, which is fine before the first deployment.
+  - **Recommended: apply it** so the gate is silent.
+
 ## Open questions for the owner
-1. Q1–Q4 above.
+1. The vault initializer-order warning above: apply the fix, or accept the warning?

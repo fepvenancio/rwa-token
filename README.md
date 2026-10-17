@@ -64,7 +64,56 @@ Every contract has its `.t.sol` next to it. [`PLAN.md`](PLAN.md) tracks phases a
 - **Pre-flight parity.** `canTransfer` and `canExecute` run the same checks as the state-changing path.
 - **Reentrancy.** `_update` is `nonReentrant` (transient storage); rules cannot call back into the token.
 - **Deployment.** One implementation per template, deployed and attested once, with one proxy per token. Each
-  implementation deployment has its own codehash, because UUPS stores `address(this)` in an immutable.
+  implementation deployment has its own codehash, because UUPS stores `address(this)` in an immutable. Each proxy sits
+  at a CREATE2 address fixed before its hook exists, and `ProxyDeployer` refuses to deploy unless the hook is bound to
+  that address (see the runbook below).
+
+## Deployment runbook
+
+Three Ignition modules in `ignition/modules/`, with two security-council steps between them. Each stage takes the
+previous stages' addresses as parameters. `test/nodejs/fixtures.ts` runs this exact sequence on the local network,
+playing the council and the identity provider, and ends with the post-deploy checks below.
+
+1. **`Components`** (deployer):
+   - the TimelockController: minimum delay ≥ 7 days; proposer **and** executor are the governance multisig only;
+     the deployer is its admin until `Activate`;
+   - the `PolicyRegistry`: admin = timelock, attester = council;
+   - the four rules, one implementation per template, `ProxyDeployer` (owner = deployer), and `IntentExecutor`.
+
+   Parameters: `governance`, `council`, `guardian`, `identityRegistry`, `minDelay`.
+2. **Council step 1.** For each rule and implementation, recompute the runtime codehash from the reviewed source and
+   compare it with `extcodehash` of the deployed address, then `attest(codehash, RULE | IMPLEMENTATION, auditUri)`.
+   Also compute where each token will live, before any hook or proxy exists:
+   `CREATE2(ProxyDeployer, salt = keccak256(utf8(symbol)), initCode = TokenProxy.creationCode ++ abi.encode(implementation, ""))`.
+   `ProxyDeployer.predict(symbol, implementation)` returns the same address.
+3. **`Tokens`** (deployer): one `ComplianceHook` per token, with `ADMIN` = timelock, `TOKEN` = the predicted address,
+   and the token's initial rules in the constructor (which re-checks each rule's attestation).
+4. **Council step 2.** For each hook:
+   - check that `TOKEN()` equals the address computed in step 2, `ADMIN()` is the timelock and `REGISTRY()` is the
+     registry;
+   - read `rules()`: the attestation covers the code and the immutables, not the rule list, which lives in storage;
+   - then `attest(codehash, HOOK, auditUri)`.
+
+   `TOKEN` is an immutable, so the codehash covers the token: the council attests *this hook for this token*, which
+   means one attestation per token, not per hook type. A later hook with the same admin, registry and token shares that
+   codehash whatever its rules, and only the timelock can install it, after the delay.
+5. **`Activate`** (deployer):
+   - `ProxyDeployer.deploy(symbol, implementation, initData, hook)` for each token. It reverts **before creating the
+     proxy** if `hook.TOKEN()` is not the predicted address, initialises in the same transaction, then checks the
+     installed hook and the symbol. A symbol can be used once. Every later call waits for all three deploys, so one
+     mis-bound hook grants nothing anywhere;
+   - configure: settlement window, holder caps, the 7540 vault's holder-cap exemption;
+   - grant roles: MINTER, BURNER and AGENT to the issuer's accounts, EXECUTOR to `IntentExecutor`, FULFILLER to the
+     bank, OPERATOR to the relayer, **UPGRADER to the timelock only**, CANCELLER on the timelock to the guardian;
+   - hand over: DEFAULT_ADMIN_ROLE to the timelock on every token and on the executor; the deployer renounces it there
+     and on the timelock.
+6. **Identity provider:** verify the 7540 vault, which escrows pending redemptions.
+7. **Post-deploy checks** (the fixture's `assertHandedOver`):
+   - the deployer holds no role on the timelock, registry, tokens or executor;
+   - the timelock holds DEFAULT_ADMIN_ROLE everywhere and is the only UPGRADER;
+   - every hook's `TOKEN` is its token and every token's `policyHook` is its hook;
+   - the guardian can cancel timelock operations but cannot propose or execute them;
+   - `getMinDelay() ≥ 7 days`.
 
 ## Commands
 
@@ -99,6 +148,10 @@ slither .             # static-analysis gate; accepted findings in slither.confi
 npm run test:halmos   # symbolic properties: nonce/signature and frozen-balance paths
 ```
 
+```bash
+npm run validate:upgrades   # OZ upgrades-core over a Foundry build with storage layouts
+```
+
 CI (`.github/workflows/ci.yml`) runs all of the above on every push and pull request.
 
 ## Deviations from the brief
@@ -121,4 +174,7 @@ The brief is in [`CLAUDE.md`](CLAUDE.md). Where the code intentionally differs, 
 - **Duplicate rules.** A duplicate `ruleId` reuses `ComplianceHook_DuplicateRule`, so the frozen ABI is unchanged.
 - **Mocks.** The brief's `MockAcceptHook` / `MockRejectHook` are replaced by `vm.mockCall`, per the Wonderland
   testing standard. `MockAsset` arrives with the vaults.
-- **Smoke test.** `test/nodejs/smoke.test.ts` stays until the Phase 6 viem tests replace it.
+- **Deployment contracts.** `ProxyDeployer` and `TokenProxy` (in `contracts/deploy/`) are not in the brief. `TokenProxy`
+  is OZ's `ERC1967Proxy` with only OZ's documented `_unsafeAllowUninitialized` override, so that it can be created
+  without init data. That keeps its CREATE2 address independent of the hook; `ProxyDeployer` initialises it in the same
+  transaction.

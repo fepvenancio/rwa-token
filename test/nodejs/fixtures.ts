@@ -5,27 +5,28 @@ import {
   BaseError,
   ContractFunctionRevertedError,
   decodeErrorResult,
-  encodeFunctionData,
-  getContractAddress,
   isAddressEqual,
   keccak256,
-  parseAbi,
   toHex,
   type Abi,
   type Address,
   type Hex,
 } from "viem";
 
+import Activate from "../../ignition/modules/Activate.js";
+import Components from "../../ignition/modules/Components.js";
+import { ROLES } from "../../ignition/modules/roles.js";
+import Tokens from "../../ignition/modules/Tokens.js";
+
 /**
- * The single source of deployment order (Phase 6 Q2). Phase 7's Ignition module mirrors this file; it does not
- * re-derive the order:
+ * Runs the production deployment: the three Ignition modules, which are where deployment order lives (Phase 6 Q2),
+ * with this file playing the parties Ignition cannot sign for:
  *
- *   registry → identity → rules → attest rules → per template: implementation → hook bound to the predicted proxy,
- *   initial rules in its constructor → attest hook and implementation → proxy → configure → hand over.
+ *   Components → council attests rules + implementations → Tokens → council attests hooks → Activate
+ *   → identity provider verifies holders and the 7540 escrow vault → hand-over check.
  *
- * Configure-then-hand-over: the deployer is each contract's admin only while it sets rule parameters and grants
- * operational roles, then grants DEFAULT_ADMIN_ROLE to the admin and renounces. The fixture ends by proving the
- * deployer holds no role anywhere. Phase 6 uses a plain admin account; Phase 7 substitutes the timelock (Q3).
+ * Each stage gets the previous stages' addresses as parameters, as a live deployment does between council steps
+ * (Ignition is also ephemeral per `deploy` call on the in-process network, so stages cannot share a journal here).
  */
 
 const REASON_NAMES = [
@@ -59,19 +60,22 @@ export const WINDOW_CLOSE = 17 * 3_600;
 export const HOLDER_CAP = 3n;
 
 const ATTEST = { HOOK: 1, RULE: 2, IMPLEMENTATION: 3 } as const;
-const DEFAULT_ADMIN_ROLE = `0x${"00".repeat(32)}` as Hex;
-// The loops below span contracts whose typed instances do not unify, so they share the OZ AccessControl surface.
-const ACCESS_CONTROL = parseAbi([
-  "function grantRole(bytes32 role, address account)",
-  "function renounceRole(bytes32 role, address callerConfirmation)",
-]);
 
 export async function deployStack(connection: NetworkConnection) {
-  const { viem, networkHelpers } = connection;
+  const { activate, parameters } = await deployUntilActivate(connection);
+  return activate(parameters);
+}
+
+/**
+ * Stages 1–2 and both council steps. Returns `Activate`'s parameters and a function that runs stage 3 with them and
+ * finishes the deployment, so a test can run stage 3 on tampered parameters and inspect what was left behind.
+ */
+export async function deployUntilActivate(connection: NetworkConnection) {
+  const { viem, networkHelpers, ignition } = connection;
   const publicClient = await viem.getPublicClient();
   const [
     deployer,
-    admin,
+    governance,
     attester,
     guardian,
     minter,
@@ -87,168 +91,165 @@ export async function deployStack(connection: NetworkConnection) {
     dave,
     eve,
   ] = await viem.getWalletClients();
-  const D = deployer.account.address;
+  const address = (w: typeof deployer) => w.account.address;
 
   // Deterministic calendar: everything below happens inside the settlement window (Mon 10:00 UTC onwards).
   await networkHelpers.time.increaseTo(MONDAY_10AM);
 
-  // 1. Registry, identity, rules. Rules are hook-agnostic and shared by every token.
-  const registry = await viem.deployContract("PolicyRegistry", [admin.account.address, attester.account.address]);
+  // External to the stack: the identity provider's registry and the vaults' asset.
   const identity = await viem.deployContract("MockIdentityRegistry");
-  const identityRule = await viem.deployContract("IdentityRule", [identity.address]);
-  const lockupRule = await viem.deployContract("LockupRule");
-  const windowRule = await viem.deployContract("SettlementWindowRule");
-  const maxHoldersRule = await viem.deployContract("MaxHoldersRule");
+  const asset = await viem.deployContract("MockAsset", [6]);
 
+  const components = await ignition.deploy(Components, {
+    parameters: {
+      Components: {
+        governance: address(governance),
+        council: address(attester),
+        guardian: address(guardian),
+        identityRegistry: identity.address,
+      },
+    },
+  });
+  const { timelock, registry, identityRule, lockupRule, windowRule, maxHoldersRule, proxyDeployer, executor } =
+    components;
   const attest = async (target: Address, kind: number, uri: string) => {
     const code = await publicClient.getCode({ address: target });
     await registry.write.attest([keccak256(code!), kind, uri], { account: attester.account });
   };
+
+  // Council step 1.
   for (const rule of [identityRule, lockupRule, windowRule, maxHoldersRule]) {
     await attest(rule.address, ATTEST.RULE, `ipfs://rule-review/${rule.address}`);
   }
-
-  // 2. Per template: implementation, hook bound to the predicted proxy, attestations, proxy.
-  const deployProxied = async (
-    name: "IntentToken" | "Gated4626Vault" | "Gated7540Vault",
-    rules: Address[],
-    initArgs: (hook: Address) => readonly unknown[],
-  ) => {
-    const impl = await viem.deployContract(name);
-    // The hook takes the next nonce and the proxy the one after it; attestations come from the attester.
-    const nonce = await publicClient.getTransactionCount({ address: D });
-    const predicted = getContractAddress({ from: D, nonce: BigInt(nonce + 1) });
-    const hook = await viem.deployContract("ComplianceHook", [admin.account.address, registry.address, predicted, rules]);
-    await attest(hook.address, ATTEST.HOOK, `ipfs://hook-review/${name}`);
-    await attest(impl.address, ATTEST.IMPLEMENTATION, `ipfs://impl-review/${name}`);
-    const data = encodeFunctionData({ abi: impl.abi as Abi, functionName: "initialize", args: initArgs(hook.address) });
-    const proxy = await viem.deployContract("ERC1967Proxy", [impl.address, data]);
-    assert.ok(isAddressEqual(proxy.address, predicted), `${name}: proxy address prediction`);
-    return { impl, hook, address: proxy.address };
-  };
-  const base = (name: string, symbol: string, hook: Address) =>
-    [name, symbol, D, guardian.account.address, registry.address, hook] as const;
-
-  const asset = await viem.deployContract("MockAsset", [6]);
-  const tokenDeployment = await deployProxied(
-    "IntentToken",
-    [identityRule.address, lockupRule.address, windowRule.address, maxHoldersRule.address],
-    (hook) => base("Intent Token", "INT", hook),
-  );
-  const vaultRules = [identityRule.address, lockupRule.address, maxHoldersRule.address];
-  const vault4626Deployment = await deployProxied("Gated4626Vault", vaultRules, (hook) => [
-    asset.address,
-    ...base("Gated Fund", "gFUND", hook),
-  ]);
-  const vault7540Deployment = await deployProxied("Gated7540Vault", vaultRules, (hook) => [
-    asset.address,
-    ...base("Gated Async Fund", "gASYNC", hook),
-    custody.account.address,
-  ]);
-  const token = await viem.getContractAt("IntentToken", tokenDeployment.address);
-  const vault4626 = await viem.getContractAt("Gated4626Vault", vault4626Deployment.address);
-  const vault7540 = await viem.getContractAt("Gated7540Vault", vault7540Deployment.address);
-
-  // 3. Executor: the deployer administers it only while granting OPERATOR_ROLE.
-  const executor = await viem.deployContract("IntentExecutor", [D, guardian.account.address]);
-
-  // 4. Configure, while the deployer is still every token's admin.
-  await windowRule.write.setWindow([token.address, WINDOW_OPEN, WINDOW_CLOSE, await windowRule.read.MON_TO_FRI()]);
-  for (const t of [token, vault4626, vault7540]) await maxHoldersRule.write.setCap([t.address, HOLDER_CAP]);
-  // The 7540 vault escrows pending redemptions: a verified holder that never counts against the cap.
-  await maxHoldersRule.write.setExemptHolder([vault7540.address, vault7540.address, true]);
-  for (const w of [alice, bob, carol, dave, recovery]) await identity.write.set([w.account.address, true]);
-  await identity.write.set([vault7540.address, true]);
-
-  await token.write.grantRole([await token.read.MINTER_ROLE(), minter.account.address]);
-  await token.write.grantRole([await token.read.BURNER_ROLE(), burner.account.address]);
-  await token.write.grantRole([await token.read.EXECUTOR_ROLE(), executor.address]);
-  await vault7540.write.grantRole([await vault7540.read.FULFILLER_ROLE(), fulfiller.account.address]);
-  const grant = (address: Address, role: Hex, account: Address) =>
-    deployer.writeContract({ address, abi: ACCESS_CONTROL, functionName: "grantRole", args: [role, account] });
-  for (const t of [token, vault4626, vault7540]) {
-    await grant(t.address, await token.read.AGENT_ROLE(), agent.account.address);
-    await grant(t.address, await token.read.UPGRADER_ROLE(), admin.account.address);
-  }
-  await executor.write.grantRole([await executor.read.OPERATOR_ROLE(), operator.account.address]);
-
-  // 5. Hand over: admin in, deployer out.
-  for (const c of [token, vault4626, vault7540, executor]) {
-    await grant(c.address, DEFAULT_ADMIN_ROLE, admin.account.address);
-    await deployer.writeContract({ address: c.address, abi: ACCESS_CONTROL, functionName: "renounceRole", args: [DEFAULT_ADMIN_ROLE, D] });
+  for (const impl of [components.intentImpl, components.fundImpl, components.asyncFundImpl]) {
+    await attest(impl.address, ATTEST.IMPLEMENTATION, `ipfs://impl-review/${impl.address}`);
   }
 
-  const stack = {
-    publicClient,
-    wallets: { deployer, admin, attester, guardian, minter, burner, agent, operator, fulfiller, custody, recovery },
-    holders: { alice, bob, carol, dave, eve },
-    registry,
-    identity,
-    rules: { identityRule, lockupRule, windowRule, maxHoldersRule },
-    asset,
-    token,
-    vault4626,
-    vault7540,
-    executor,
-    hooks: { token: tokenDeployment.hook, vault4626: vault4626Deployment.hook, vault7540: vault7540Deployment.hook },
-    implementations: {
-      token: tokenDeployment.impl,
-      vault4626: vault4626Deployment.impl,
-      vault7540: vault7540Deployment.impl,
-    },
+  const addresses = {
+    timelock: timelock.address,
+    registry: registry.address,
+    proxyDeployer: proxyDeployer.address,
+    identityRule: identityRule.address,
+    lockupRule: lockupRule.address,
+    windowRule: windowRule.address,
+    maxHoldersRule: maxHoldersRule.address,
+    intentImpl: components.intentImpl.address,
+    fundImpl: components.fundImpl.address,
+    asyncFundImpl: components.asyncFundImpl.address,
   };
-  await assertHandedOver(stack);
-  return stack;
+  const hooks = await ignition.deploy(Tokens, { parameters: { Tokens: addresses } });
+
+  // Council step 2.
+  for (const hook of Object.values(hooks)) {
+    await attest(hook.address, ATTEST.HOOK, `ipfs://hook-review/${hook.address}`);
+  }
+
+  const parameters = {
+    ...addresses,
+    executor: executor.address,
+    guardian: address(guardian),
+    asset: asset.address,
+    custody: address(custody),
+    intentHook: hooks.intentHook.address,
+    fundHook: hooks.fundHook.address,
+    asyncFundHook: hooks.asyncFundHook.address,
+    minter: address(minter),
+    burner: address(burner),
+    agent: address(agent),
+    operator: address(operator),
+    fulfiller: address(fulfiller),
+    holderCap: HOLDER_CAP,
+    windowOpen: WINDOW_OPEN,
+    windowClose: WINDOW_CLOSE,
+    windowDays: await windowRule.read.MON_TO_FRI(),
+  };
+
+  const activate = async (activateParameters: typeof parameters) => {
+    const tokens = await ignition.deploy(Activate, { parameters: { Activate: activateParameters } });
+    const token = tokens.intent;
+    const vault4626 = tokens.fund;
+    const vault7540 = tokens.asyncFund;
+
+    // Identity provider: the holders used by the tests, the recovery account and the 7540 escrow vault.
+    for (const w of [alice, bob, carol, dave, recovery]) await identity.write.set([address(w), true]);
+    await identity.write.set([vault7540.address, true]);
+
+    const stack = {
+      publicClient,
+      wallets: { deployer, governance, attester, guardian, minter, burner, agent, operator, fulfiller, custody, recovery },
+      holders: { alice, bob, carol, dave, eve },
+      timelock,
+      registry,
+      identity,
+      rules: { identityRule, lockupRule, windowRule, maxHoldersRule },
+      proxyDeployer,
+      asset,
+      token,
+      vault4626,
+      vault7540,
+      executor,
+      hooks: { token: hooks.intentHook, vault4626: hooks.fundHook, vault7540: hooks.asyncFundHook },
+      implementations: {
+        token: components.intentImpl,
+        vault4626: components.fundImpl,
+        vault7540: components.asyncFundImpl,
+      },
+    };
+    await assertHandedOver(stack);
+    return stack;
+  };
+  return { activate, parameters, components, hooks, wallets: { deployer, agent, operator, governance, guardian } };
 }
 
 export type Stack = Awaited<ReturnType<typeof deployStack>>;
 
 /**
- * Hand-over check: the deployer holds no role on the registry, token, vaults or executor; it is not any hook's admin;
- * and rules have no access control of their own (they defer to the token's roles). The admin holds DEFAULT_ADMIN_ROLE
- * everywhere, so the negative check cannot pass on a contract that has no admin at all.
+ * Hand-over check, the same one the runbook prescribes after a live deployment:
+ * - the deployer holds no role (every `*_ROLE()` getter, so later roles are covered) on the timelock, registry,
+ *   tokens or executor, while the timelock holds DEFAULT_ADMIN_ROLE on each, so the check is not vacuous;
+ * - UPGRADER_ROLE is held by the timelock and nobody else that the stack knows about;
+ * - every hook is bound to its token and administered by the timelock; rules have no access control of their own;
+ * - the guardian can cancel timelock operations but cannot propose or execute them.
  */
-async function assertHandedOver(s: {
-  publicClient: Stack["publicClient"];
-  wallets: Stack["wallets"];
-  registry: Stack["registry"];
-  token: Stack["token"];
-  vault4626: Stack["vault4626"];
-  vault7540: Stack["vault7540"];
-  executor: Stack["executor"];
-  hooks: Stack["hooks"];
-  rules: Stack["rules"];
-}) {
+async function assertHandedOver(s: Omit<Stack, "holders" | "identity" | "asset" | "implementations" | "proxyDeployer">) {
   const deployer = s.wallets.deployer.account.address;
-  const admin = s.wallets.admin.account.address;
-  for (const c of [s.registry, s.token, s.vault4626, s.vault7540, s.executor]) {
-    // Every `*_ROLE()` getter in the ABI, so a role added later is covered without editing this list.
-    const getters = (c.abi as Abi).filter(
-      (item) => item.type === "function" && item.name.endsWith("_ROLE") && item.inputs.length === 0,
-    );
-    const roles: Hex[] = [DEFAULT_ADMIN_ROLE];
-    for (const getter of getters) {
-      if (getter.type !== "function") continue;
-      roles.push((await s.publicClient.readContract({ address: c.address, abi: c.abi as Abi, functionName: getter.name })) as Hex);
+  const timelock = s.timelock.address;
+  const known = Object.values(s.wallets).map((w) => w.account.address);
+  for (const c of [s.timelock, s.registry, s.token, s.vault4626, s.vault7540, s.executor]) {
+    const abi = c.abi as Abi;
+    const roles: Hex[] = [];
+    for (const item of abi) {
+      if (item.type !== "function" || !item.name.endsWith("_ROLE") || item.inputs.length !== 0) continue;
+      roles.push((await s.publicClient.readContract({ address: c.address, abi, functionName: item.name })) as Hex);
     }
-    for (const role of roles) {
-      const held = await s.publicClient.readContract({
-        address: c.address,
-        abi: c.abi as Abi,
-        functionName: "hasRole",
-        args: [role, deployer],
-      });
-      assert.equal(held, false, `deployer still holds ${role} on ${c.address}`);
-    }
-    assert.equal(await c.read.hasRole([DEFAULT_ADMIN_ROLE, admin]), true, `admin lacks DEFAULT_ADMIN_ROLE on ${c.address}`);
+    const hasRole = (role: Hex, account: Address) =>
+      s.publicClient.readContract({ address: c.address, abi, functionName: "hasRole", args: [role, account] });
+    for (const role of roles) assert.equal(await hasRole(role, deployer), false, `deployer holds ${role} on ${c.address}`);
+    assert.equal(await hasRole(ROLES.DEFAULT_ADMIN, timelock), true, `timelock lacks DEFAULT_ADMIN_ROLE on ${c.address}`);
   }
-  for (const hook of Object.values(s.hooks)) {
-    assert.ok(isAddressEqual(await hook.read.ADMIN(), admin), `hook ${hook.address} admin`);
+  for (const t of [s.token, s.vault4626, s.vault7540]) {
+    assert.equal(await t.read.hasRole([ROLES.UPGRADER, timelock]), true, `timelock lacks UPGRADER_ROLE on ${t.address}`);
+    for (const account of known) assert.equal(await t.read.hasRole([ROLES.UPGRADER, account]), false, `${account} can upgrade`);
+  }
+  const bound = [
+    [s.hooks.token, s.token],
+    [s.hooks.vault4626, s.vault4626],
+    [s.hooks.vault7540, s.vault7540],
+  ] as const;
+  for (const [hook, t] of bound) {
+    assert.ok(isAddressEqual(await hook.read.TOKEN(), t.address), `hook ${hook.address} bound elsewhere`);
+    assert.ok(isAddressEqual(await t.read.policyHook(), hook.address), `token ${t.address} runs another hook`);
+    assert.ok(isAddressEqual(await hook.read.ADMIN(), timelock), `hook ${hook.address} admin`);
   }
   for (const rule of Object.values(s.rules)) {
     const names = (rule.abi as Abi).flatMap((item) => (item.type === "function" ? [item.name] : []));
     assert.ok(!names.includes("hasRole") && !names.includes("owner"), `rule ${rule.address} has its own access control`);
   }
+  const guardian = s.wallets.guardian.account.address;
+  assert.equal(await s.timelock.read.hasRole([await s.timelock.read.CANCELLER_ROLE(), guardian]), true);
+  assert.equal(await s.timelock.read.hasRole([await s.timelock.read.PROPOSER_ROLE(), guardian]), false);
+  assert.equal(await s.timelock.read.hasRole([await s.timelock.read.EXECUTOR_ROLE(), guardian]), false);
+  assert.ok((await s.timelock.read.getMinDelay()) >= 7n * 86_400n, "timelock delay below 7 days");
 }
 
 export const INTENT_TYPES = {

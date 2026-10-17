@@ -22,6 +22,7 @@ import {IMaxHoldersRule} from 'interfaces/IMaxHoldersRule.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
+import {IProxyDeployer} from 'interfaces/IProxyDeployer.sol';
 import {ISettlementWindowRule} from 'interfaces/ISettlementWindowRule.sol';
 import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
 
@@ -114,6 +115,8 @@ contract InterfaceFreezeTest is Test {
     );
     assertEq(IERC7540Redeem.RedeemRequest.selector, 0x1fdc681a13d8c5da54e301c7ce6542dcde4581e4725043fdab2db12ddc574506);
     assertEq(IERC7540Operator.OperatorSet.selector, 0xceb576d9f15e4e200fdb5096d64d5dfd667e16def20c1eefd14256d8e3faa267);
+    // Added in Phase 7 (2026-10-17): deployment tooling and the runbook decode it
+    assertEq(IProxyDeployer.ProxyDeployed.selector, 0x389a3c9c5265cf3f40a0cf66a7bb66a57b95d2ba6a945110dd880a283b8c0704);
   }
 
   function test_WhenReasonsCompile_TheirValuesArePinned() external pure {
