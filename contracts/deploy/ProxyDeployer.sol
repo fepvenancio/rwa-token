@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import {Ownable} from '@openzeppelin/contracts/access/Ownable.sol';
 import {IERC20Metadata} from '@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol';
 import {Address} from '@openzeppelin/contracts/utils/Address.sol';
 import {Create2} from '@openzeppelin/contracts/utils/Create2.sol';
@@ -15,26 +16,21 @@ import {TokenProxy} from 'contracts/deploy/TokenProxy.sol';
  * @title ProxyDeployer
  * @notice Places each token proxy at an address the council can compute before the token's hook is deployed, and
  *         refuses to deploy unless the hook is bound to exactly that address
- * @dev Immutable, deployment-only, owner-gated. The owner gate matters: the address does not cover the init data, so
- *      anyone else could otherwise occupy it with the same symbol and implementation but their own admin
+ * @dev Immutable code, owner-gated. The owner gate matters: the address does not cover the init data, so anyone else
+ *      could otherwise occupy it with the same symbol and implementation but their own admin. The deployer owns it only
+ *      during deployment; `Activate` transfers ownership to the timelock, so any later token goes through governance
  */
-contract ProxyDeployer is IProxyDeployer {
-  /// @inheritdoc IProxyDeployer
-  address public immutable OWNER;
-
+contract ProxyDeployer is Ownable, IProxyDeployer {
   /// @inheritdoc IProxyDeployer
   mapping(bytes32 _salt => bool _used) public saltUsed;
 
   /**
    * @notice Deploys the helper
-   * @param _owner The deployer account, the only one allowed to deploy proxies
+   * @param _owner The deployer account, the only one allowed to deploy proxies until ownership moves to the timelock
    */
   constructor(
     address _owner
-  ) {
-    if (_owner == address(0)) revert ProxyDeployer_ZeroAddress();
-    OWNER = _owner;
-  }
+  ) Ownable(_owner) {}
 
   /// @inheritdoc IProxyDeployer
   function deploy(
@@ -42,8 +38,8 @@ contract ProxyDeployer is IProxyDeployer {
     address _implementation,
     bytes calldata _initData,
     address _hook
-  ) external returns (address _proxy) {
-    if (msg.sender != OWNER) revert ProxyDeployer_OnlyOwner(msg.sender);
+  ) external onlyOwner returns (address _proxy) {
+    // Every revert below undoes the whole call, `saltUsed` included: a failed deploy never strands the symbol.
     bytes32 _salt = keccak256(bytes(_symbol));
     if (saltUsed[_salt]) revert ProxyDeployer_SaltUsed(_salt);
     saltUsed[_salt] = true;

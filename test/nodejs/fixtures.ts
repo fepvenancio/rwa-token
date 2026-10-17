@@ -209,9 +209,10 @@ export type Stack = Awaited<ReturnType<typeof deployStack>>;
  *   tokens or executor, while the timelock holds DEFAULT_ADMIN_ROLE on each, so the check is not vacuous;
  * - UPGRADER_ROLE is held by the timelock and nobody else that the stack knows about;
  * - every hook is bound to its token and administered by the timelock; rules have no access control of their own;
- * - the guardian can cancel timelock operations but cannot propose or execute them.
+ * - the guardian can cancel timelock operations but cannot propose or execute them;
+ * - `ProxyDeployer` is owned by the timelock, so no token can be placed outside governance.
  */
-async function assertHandedOver(s: Omit<Stack, "holders" | "identity" | "asset" | "implementations" | "proxyDeployer">) {
+async function assertHandedOver(s: Omit<Stack, "holders" | "identity" | "asset" | "implementations">) {
   const deployer = s.wallets.deployer.account.address;
   const timelock = s.timelock.address;
   const known = Object.values(s.wallets).map((w) => w.account.address);
@@ -245,6 +246,7 @@ async function assertHandedOver(s: Omit<Stack, "holders" | "identity" | "asset" 
     const names = (rule.abi as Abi).flatMap((item) => (item.type === "function" ? [item.name] : []));
     assert.ok(!names.includes("hasRole") && !names.includes("owner"), `rule ${rule.address} has its own access control`);
   }
+  assert.ok(isAddressEqual(await s.proxyDeployer.read.owner(), timelock), "ProxyDeployer is not owned by the timelock");
   const guardian = s.wallets.guardian.account.address;
   assert.equal(await s.timelock.read.hasRole([await s.timelock.read.CANCELLER_ROLE(), guardian]), true);
   assert.equal(await s.timelock.read.hasRole([await s.timelock.read.PROPOSER_ROLE(), guardian]), false);

@@ -8,7 +8,8 @@ import { ROLES, TOKENS } from "./roles.js";
  *
  * 1. Configure while the deployer is the tokens' admin: settlement window, holder caps, the 7540 escrow exemption.
  * 2. Grant the operational roles; UPGRADER_ROLE goes to the timelock only; the guardian becomes a timelock canceller.
- * 3. Hand over: DEFAULT_ADMIN_ROLE to the timelock on the tokens and the executor; the deployer renounces everywhere.
+ * 3. Hand over: DEFAULT_ADMIN_ROLE to the timelock on the tokens and the executor; the deployer renounces everywhere,
+ *    and `ProxyDeployer` ownership moves to the timelock.
  *
  * Outside this module: the identity provider must verify the 7540 vault (it escrows pending redemptions).
  */
@@ -101,6 +102,8 @@ export default buildModule("Activate", (m) => {
     m.call(contract, "renounceRole", [ROLES.DEFAULT_ADMIN, deployer], { id: `${key}_admin_renounce`, after: [handed] });
   }
   m.call(timelock, "renounceRole", [ROLES.DEFAULT_ADMIN, deployer], { id: "timelock_admin_renounce", after });
+  // Any later token goes through governance: the deployer EOA can no longer place one.
+  m.call(proxyDeployer, "transferOwnership", [timelock], { id: "proxyDeployer_owner", after: deploys });
 
   return { intent, fund, asyncFund };
 });

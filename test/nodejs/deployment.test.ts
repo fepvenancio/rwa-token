@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 
 import hre, { network } from "hardhat";
@@ -26,7 +27,12 @@ describe("deployment (Ignition: Components → council → Tokens → council �
 
   it("puts each token where the council computes it off-chain: CREATE2(ProxyDeployer, keccak256(symbol), TokenProxy(impl, ''))", async function () {
     const s = await networkHelpers.loadFixture(stack);
-    const { bytecode } = await hre.artifacts.readArtifact("TokenProxy");
+    // The creation code ProxyDeployer embeds, taken from ProxyDeployer's own build. A TokenProxy compiled in another
+    // job can differ in its trailing metadata hash (solc metadata includes the job's remappings).
+    const buildInfoId = await hre.artifacts.getBuildInfoId("ProxyDeployer");
+    const outputPath = await hre.artifacts.getBuildInfoOutputPath(buildInfoId!);
+    const { output } = JSON.parse(await readFile(outputPath!, "utf8"));
+    const bytecode = `0x${output.contracts["project/contracts/deploy/TokenProxy.sol"].TokenProxy.evm.bytecode.object}` as const;
     const expected = (symbol: string, implementation: `0x${string}`) =>
       getContractAddress({
         opcode: "CREATE2",
@@ -78,5 +84,6 @@ describe("deployment with a tampered Activate", async function () {
     }
     assert.equal(await components.executor.read.hasRole([ROLES.OPERATOR, wallets.operator.account.address]), false);
     assert.equal(await components.timelock.read.hasRole([ROLES.CANCELLER, wallets.guardian.account.address]), false);
+    assert.ok(isAddressEqual(await pd.read.owner(), wallets.deployer.account.address), "ownership not yet handed over");
   });
 });

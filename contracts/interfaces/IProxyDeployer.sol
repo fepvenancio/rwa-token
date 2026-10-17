@@ -8,7 +8,8 @@ pragma solidity ^0.8.28;
  *         for exactly that token
  * @dev CREATE2 with salt `keccak256(bytes(symbol))` over `TokenProxy(implementation, "")`: the address depends on
  *      this contract, the symbol and the implementation, never on the init data, which carries the hook. The proxy is
- *      initialised in the same transaction, so no one can initialise it first. Holds no roles and no funds
+ *      initialised in the same transaction, so no one can initialise it first. Holds no roles and no funds. Ownership
+ *      (OZ `Ownable`) gates `deploy`; after deployment it belongs to the timelock
  */
 interface IProxyDeployer {
   /*///////////////////////////////////////////////////////////////
@@ -44,12 +45,6 @@ interface IProxyDeployer {
   error ProxyDeployer_HookNotInstalled(address _expected, address _installed);
 
   /**
-   * @notice Thrown when a caller other than the owner deploys
-   * @param _caller The caller
-   */
-  error ProxyDeployer_OnlyOwner(address _caller);
-
-  /**
    * @notice Thrown when the symbol's salt was already used, with any implementation
    * @param _salt The salt
    */
@@ -62,16 +57,13 @@ interface IProxyDeployer {
    */
   error ProxyDeployer_SymbolMismatch(string _expected, string _actual);
 
-  /// @notice Thrown when a constructor argument is the zero address
-  error ProxyDeployer_ZeroAddress();
-
   /*///////////////////////////////////////////////////////////////
                             LOGIC
   //////////////////////////////////////////////////////////////*/
 
   /**
    * @notice Deploys and initialises a token proxy at `predict(_symbol, _implementation)`
-   * @dev Only `OWNER`, once per symbol. Reverts before creating anything unless `_hook` is bound to the predicted
+   * @dev Only the owner, once per symbol; a reverted deploy leaves the symbol unused. Reverts before creating anything unless `_hook` is bound to the predicted
    *      address, and after initialising unless the token installed `_hook` and reports `_symbol`
    * @param _symbol The token symbol; its hash is the salt
    * @param _implementation The attested implementation
@@ -85,14 +77,6 @@ interface IProxyDeployer {
     bytes calldata _initData,
     address _hook
   ) external returns (address _proxy);
-
-  /**
-   * @notice The account allowed to deploy
-   * @return _owner The owner
-   */
-  // getter of an UPPER_SNAKE constant/immutable
-  // solhint-disable-next-line style-guide-casing
-  function OWNER() external view returns (address _owner);
 
   /**
    * @notice The address a token proxy for `_symbol` over `_implementation` will occupy

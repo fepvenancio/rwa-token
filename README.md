@@ -56,6 +56,9 @@ Every contract has its `.t.sol` next to it. [`PLAN.md`](PLAN.md) tracks phases a
 
 - **Attested code only.** Hooks, rules and implementations are installed only if their runtime codehash is attested.
   Attestation is checked at install time; revoking it later does not silently change a live token.
+- **Attestation covers hook code and binding, not rule set; the rule set is governed by the timelock.** A hook's
+  admin, registry and token are immutables inside its attested codehash; its ordered rule list lives in storage. Each
+  rule is attested on its own, and only the timelock can change the list (`setRules`) or install another hook.
 - **Immutable policy components.** Hooks and rules are never proxies. Changing one means deploying a new one and
   swapping it in through the timelock. The hook's admin, registry and token are `immutable`, so they are part of the
   attested codehash.
@@ -85,7 +88,9 @@ playing the council and the identity provider, and ends with the post-deploy che
    compare it with `extcodehash` of the deployed address, then `attest(codehash, RULE | IMPLEMENTATION, auditUri)`.
    Also compute where each token will live, before any hook or proxy exists:
    `CREATE2(ProxyDeployer, salt = keccak256(utf8(symbol)), initCode = TokenProxy.creationCode ++ abi.encode(implementation, ""))`.
-   `ProxyDeployer.predict(symbol, implementation)` returns the same address.
+   `ProxyDeployer.predict(symbol, implementation)` returns the same address. Take `TokenProxy.creationCode` from the
+   `ProxyDeployer` build (its `evm.bytecode` in that build's output). A `TokenProxy` compiled in a different job can
+   differ in its trailing metadata hash, because solc metadata includes the job's remappings.
 3. **`Tokens`** (deployer): one `ComplianceHook` per token, with `ADMIN` = timelock, `TOKEN` = the predicted address,
    and the token's initial rules in the constructor (which re-checks each rule's attestation).
 4. **Council step 2.** For each hook:
@@ -100,19 +105,22 @@ playing the council and the identity provider, and ends with the post-deploy che
 5. **`Activate`** (deployer):
    - `ProxyDeployer.deploy(symbol, implementation, initData, hook)` for each token. It reverts **before creating the
      proxy** if `hook.TOKEN()` is not the predicted address, initialises in the same transaction, then checks the
-     installed hook and the symbol. A symbol can be used once. Every later call waits for all three deploys, so one
+     installed hook and the symbol. A symbol can be used once; a reverted deploy (mis-bound hook, failed `initialize`)
+     leaves no proxy and does not use up the symbol. Every later call waits for all three deploys, so one
      mis-bound hook grants nothing anywhere;
    - configure: settlement window, holder caps, the 7540 vault's holder-cap exemption;
    - grant roles: MINTER, BURNER and AGENT to the issuer's accounts, EXECUTOR to `IntentExecutor`, FULFILLER to the
      bank, OPERATOR to the relayer, **UPGRADER to the timelock only**, CANCELLER on the timelock to the guardian;
    - hand over: DEFAULT_ADMIN_ROLE to the timelock on every token and on the executor; the deployer renounces it there
-     and on the timelock.
+     and on the timelock; `ProxyDeployer` ownership moves to the timelock, so any later token is placed through
+     governance (schedule `deploy`, wait out the delay, execute).
 6. **Identity provider:** verify the 7540 vault, which escrows pending redemptions.
 7. **Post-deploy checks** (the fixture's `assertHandedOver`):
    - the deployer holds no role on the timelock, registry, tokens or executor;
    - the timelock holds DEFAULT_ADMIN_ROLE everywhere and is the only UPGRADER;
    - every hook's `TOKEN` is its token and every token's `policyHook` is its hook;
    - the guardian can cancel timelock operations but cannot propose or execute them;
+   - `ProxyDeployer.owner()` is the timelock;
    - `getMinDelay() ≥ 7 days`.
 
 ## Commands

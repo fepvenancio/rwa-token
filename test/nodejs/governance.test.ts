@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { network } from "hardhat";
-import { encodeFunctionData, getAddress, keccak256, toHex, zeroHash, type Abi, type Address, type Hex } from "viem";
+import { encodeFunctionData, getAddress, isAddressEqual, keccak256, toHex, zeroHash, type Abi, type Address, type Hex } from "viem";
 
 import { ROLES } from "../../ignition/modules/roles.js";
 import { deployStack, revertOf, type Stack } from "./fixtures.js";
@@ -161,6 +161,42 @@ describe("governance through the timelock", async function () {
     ]);
     await rules.execute();
     assert.deepEqual(await s.hooks.vault4626.read.rules(), [getAddress(identityRule.address)]);
+  });
+
+  it("after hand-over a new token can be placed only through the timelock, still bound to its attested hook", async function () {
+    const s = await networkHelpers.loadFixture(stack);
+    const implementation = s.implementations.token.address;
+    const predicted = await s.proxyDeployer.read.predict(["NEW", implementation]);
+    const hook = await viem.deployContract("ComplianceHook", [
+      s.timelock.address,
+      s.registry.address,
+      predicted,
+      [s.rules.identityRule.address],
+    ]);
+    await attest(s, hook.address, ATTEST.HOOK);
+    const initData = encodeFunctionData({
+      abi: s.token.abi,
+      functionName: "initialize",
+      args: ["New Token", "NEW", s.timelock.address, s.wallets.guardian.account.address, s.registry.address, hook.address],
+    });
+    const deploy = encodeFunctionData({
+      abi: s.proxyDeployer.abi,
+      functionName: "deploy",
+      args: ["NEW", implementation, initData, hook.address],
+    });
+
+    await viem.assertions.revertWithCustomErrorWithArgs(
+      s.proxyDeployer.write.deploy(["NEW", implementation, initData, hook.address], { account: s.wallets.deployer.account }),
+      s.proxyDeployer,
+      "OwnableUnauthorizedAccount",
+      [getAddress(s.wallets.deployer.account.address)],
+    );
+    const op = await schedule(s, s.proxyDeployer.address, deploy);
+    await networkHelpers.time.increase(op.delay);
+    await op.execute();
+    const token = await viem.getContractAt("IntentToken", predicted);
+    assert.ok(isAddressEqual(await token.read.policyHook(), hook.address));
+    assert.equal(await token.read.hasRole([ROLES.DEFAULT_ADMIN, s.timelock.address]), true);
   });
 
   it("the timelock is self-administered: governance changes the guardian only through it", async function () {

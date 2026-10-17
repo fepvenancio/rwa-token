@@ -1,6 +1,6 @@
 # PLAN
 
-Status: **Phase 7 (deploy + security) built and green (2026-10-17); awaiting review. Not pushed.**
+Status: **Phase 7 built and pushed through `a974915` (CI green); follow-ups (initializer order, ProxyDeployer ownership and pins) committed locally; one decision open.**
 
 Brief v2 ("Gated Token Stack") replaced the original executor-only brief on 2026-10-16. On the same day the owner supplied a reference implementation in `Imported/` (now deleted; its contents live in `contracts/`) and approved, in chat, integrating it with the major findings fixed, a common-bug sweep, and the Wonderland Solidity standards.
 
@@ -752,5 +752,25 @@ An Ignition deployment of the whole stack:
   - vault suites: 93 passing; full suite: 415 passing.
 - **Still printed:** 8 solc "unreachable code" warnings from inside OZ's `ERC4626Upgradeable` (code after the 7540 vault's always-reverting `preview*` overrides). They are not ours, and the count was the same before the change.
 
+### Owner follow-ups on `ProxyDeployer` (2026-10-17): pinned in tests
+1. **A failed `initialize` leaves no proxy and does not use up the symbol.** A revert undoes the CREATE2 and the `saltUsed` write together. Test: the deploy fails, then after the fix the same symbol deploys at the predicted address.
+2. **A mis-bound hook leaves the salt free.** Test: `HookTokenMismatch` revert, then `saltUsed == false`, then the correct hook deploys at the predicted address.
+3. **Ownership after `Activate`:**
+   - `ProxyDeployer` moved from an immutable `OWNER` to OZ `Ownable`. The `OWNER()` getter and the `ProxyDeployer_OnlyOwner` / `ProxyDeployer_ZeroAddress` errors were replaced by OZ's `owner()`, `OwnableUnauthorizedAccount` and `OwnableInvalidOwner`; `IProxyDeployer` was not yet frozen.
+   - `Activate` calls `transferOwnership(timelock)` after all deploys. The timelock was chosen over renouncing so later tokens keep the same CREATE2 scheme under governance.
+   - `assertHandedOver` checks `owner() == timelock`; the tamper test checks the deployer still owns it when `Activate` fails.
+   - Unit test: the former owner can't deploy after the transfer.
+   - Governance test: a new token (`NEW`) can be placed only by a scheduled timelock operation, still bound to its attested hook; a direct deploy from the deployer EOA reverts `OwnableUnauthorizedAccount`.
+   - Mutation check: keeping ownership with the deployer gives 55 failing.
+- **README security model:** "Attestation covers hook code and binding, not rule set; the rule set is governed by the timelock."
+
+### Finding: bytecode depends on the compile job (decision needed)
+- **What happens:** Hardhat 3 gives each compile job its own remappings list (forge-std entries depend on which test files share the job), and solc metadata includes the remappings. The trailing CBOR metadata hash, and therefore the bytecode, depends on job grouping, not only on the source.
+- **Where it showed up:** after `ProxyDeployer` imported `Ownable`, the separately compiled `TokenProxy` artifact no longer matched the copy embedded in `ProxyDeployer`. The difference starts at byte 892 of 935, inside the metadata. The off-chain CREATE2 test now takes the creation code from `ProxyDeployer`'s own build output, and the runbook says to.
+- **Wider impact:** every attested runtime codehash includes that metadata hash. The council can't recompute a codehash from source alone; it must reproduce the exact build or use the published build-info.
+- **Options:**
+  - **(a) Recommended:** set `metadata.bytecodeHash = "none"` in the shared compiler config (and `bytecode_hash = "none"` in `foundry.toml` so Slither and Halmos match). Bytecode then depends only on source, compiler version and settings, so codehashes and the CREATE2 address can be reproduced from source. Cost: Sourcify gives a partial rather than a full match; Etherscan verification is unaffected.
+  - (b) Keep the metadata hash and publish the production build-info with each release as the council's reference.
+
 ## Open questions for the owner
-1. None.
+1. The bytecode-reproducibility finding above: (a) `bytecodeHash: "none"` or (b) published build-info?

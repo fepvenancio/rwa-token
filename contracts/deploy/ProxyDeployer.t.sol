@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {IAccessControl} from '@openzeppelin/contracts/access/IAccessControl.sol';
+import {Ownable} from '@openzeppelin/contracts/access/Ownable.sol';
 import {ERC1967Utils} from '@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol';
 import {Initializable} from '@openzeppelin/contracts/proxy/utils/Initializable.sol';
 import {IERC20Metadata} from '@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol';
@@ -62,12 +63,12 @@ contract ProxyDeployerUnitTest is Helpers {
 
 contract ProxyDeployerUnit_Constructor is ProxyDeployerUnitTest {
   function test_WhenTheOwnerIsZero_ItReverts() external {
-    vm.expectRevert(IProxyDeployer.ProxyDeployer_ZeroAddress.selector);
+    vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableInvalidOwner.selector, address(0)));
     new ProxyDeployer(address(0));
   }
 
   function test_ItRecordsTheOwner() external view {
-    assertEq(_deployer.OWNER(), _owner);
+    assertEq(_deployer.owner(), _owner);
   }
 }
 
@@ -111,7 +112,7 @@ contract ProxyDeployerUnit_Deploy is ProxyDeployerUnitTest {
     address _caller
   ) external {
     if (_caller == _owner) _caller = address(uint160(_owner) ^ 1); // remap rather than vm.assume
-    vm.expectRevert(abi.encodeWithSelector(IProxyDeployer.ProxyDeployer_OnlyOwner.selector, _caller));
+    vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, _caller));
     vm.prank(_caller);
     _deployer.deploy('INT', address(_impl), _init('INT', _hook), _hook);
   }
@@ -125,6 +126,18 @@ contract ProxyDeployerUnit_Deploy is ProxyDeployerUnitTest {
     );
     _deploy('INT', _init('INT', _hook), _hook);
     assertEq(_predicted.code.length, 0);
+  }
+
+  /// @dev A mis-bound hook must not strand the symbol: the salt stays free and the corrected deploy lands
+  function test_WhenTheHookWasBoundElsewhere_TheSaltStaysFreeForTheCorrectHook() external {
+    address _predicted = _deployer.predict('INT', address(_impl));
+    _bindHook(_otherHook, makeAddr('elsewhere'));
+    vm.expectRevert();
+    _deploy('INT', _init('INT', _otherHook), _otherHook);
+    assertFalse(_deployer.saltUsed(keccak256('INT')));
+
+    assertEq(_deploy('INT', _init('INT', _hook), _hook), _predicted);
+    assertTrue(_deployer.saltUsed(keccak256('INT')));
   }
 
   function test_WhenTheSymbolWasUsed_ItRevertsEvenWithAnotherImplementation() external {
@@ -155,6 +168,33 @@ contract ProxyDeployerUnit_Deploy is ProxyDeployerUnitTest {
     _deploy('INT', _init('INT', _hook), _hook);
     assertEq(_predicted.code.length, 0);
     assertFalse(_deployer.saltUsed(keccak256('INT')));
+  }
+
+  /// @dev Same-transaction initialisation is the safety argument for `TokenProxy`: a failed init leaves nothing at the
+  ///      address and does not burn the salt, so a bad configuration does not strand the symbol
+  function test_WhenInitialisationReverts_TheSameSymbolDeploysAfterTheFix() external {
+    address _predicted = _deployer.predict('INT', address(_impl));
+    vm.mockCall(_registry, abi.encodeWithSelector(IPolicyRegistry.isAttested.selector), abi.encode(false));
+    vm.expectRevert();
+    _deploy('INT', _init('INT', _hook), _hook);
+
+    vm.mockCall(_registry, abi.encodeWithSelector(IPolicyRegistry.isAttested.selector), abi.encode(true));
+    assertEq(_deploy('INT', _init('INT', _hook), _hook), _predicted);
+    assertEq(IPolicyGated(_predicted).policyHook(), _hook);
+  }
+
+  /// @dev After the hand-over the deployer EOA cannot place a token outside governance
+  function test_WhenOwnershipMovedToTheTimelock_TheFormerOwnerCannotDeploy() external {
+    address _timelock = makeAddr('timelock');
+    vm.prank(_owner);
+    _deployer.transferOwnership(_timelock);
+    vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, _owner));
+    _deploy('INT', _init('INT', _hook), _hook);
+
+    vm.prank(_timelock);
+    assertEq(
+      _deployer.deploy('INT', address(_impl), _init('INT', _hook), _hook), _deployer.predict('INT', address(_impl))
+    );
   }
 
   function test_ItReportsTheSymbolItWasKeyedOn() external {
