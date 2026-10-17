@@ -1,6 +1,6 @@
 # PLAN
 
-Status: **Phase 7 built and pushed through `a974915` (CI green); follow-ups (initializer order, ProxyDeployer ownership and pins) committed locally; one decision open.**
+Status: **Phase 7 done (owner, 2026-10-17). Closing items: tag `v0.1.0` (exercises `release.yml`), `SECURITY.md` audit package.**
 
 Brief v2 ("Gated Token Stack") replaced the original executor-only brief on 2026-10-16. On the same day the owner supplied a reference implementation in `Imported/` (now deleted; its contents live in `contracts/`) and approved, in chat, integrating it with the major findings fixed, a common-bug sweep, and the Wonderland Solidity standards.
 
@@ -794,6 +794,20 @@ An Ignition deployment of the whole stack:
   - new `deployment.test.ts` case: a twin hook (same immutables, only `MaxHoldersRule`) is attested, Activate completes, and the post-deploy check rejects it ("runs another hook");
   - mutant: hooks built with the rule list reversed give 55 failing ("rule 0").
 - **`type(IProxyDeployer).interfaceId` pinned** at `0x886d8cd8`: `cast` selectors XORed, checked against solc's value by the test. All 20 interfaces are now pinned.
+
+### Phase 7 closing items (2026-10-17)
+1. **`v0.1.0` tag** on the commit whose CI analysis job (including `verify:reproducible`) is green. It exercises `release.yml` for real and gives the council a first reference build to practise the step-2 procedure against.
+2. **`SECURITY.md`**, the audit package index:
+   - the brief, the security model, the runbook and the deviation list (by link);
+   - scope and build settings;
+   - the three Phase 7 findings (CREATE2 circularity, the `_unsafeAllowUninitialized` argument, the hook attestation scope) plus the recorded limits;
+   - every Slither and solhint suppression with its reason;
+   - the mutation results across all phases;
+   - verification commands and tool versions.
+
+### Remaining brief items (deferred until the first external integrator is known)
+- **ERC-3643 `IToken` read adapter.**
+- **Exact ERC-7943 conformance,** once the ERC is Final. Today there is no 7943 interface ID, because the function names and return types differ (README deviations).
 
 ## Open questions for the owner
 1. None.

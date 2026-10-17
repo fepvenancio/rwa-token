@@ -39,6 +39,9 @@ Every contract has its `.t.sol` next to it. [`PLAN.md`](PLAN.md) tracks phases a
 
 ## Security model
 
+The audit package (scope, suppressions, mutation results, findings an auditor should know first) is indexed in
+[`SECURITY.md`](SECURITY.md).
+
 | Power | Holder | Delay | Can |
 |---|---|---|---|
 | `DEFAULT_ADMIN_ROLE` | TimelockController | ≥ 7 days | grant/revoke every role, `unpause`, `setPolicyHook`, change hook rules, manage attesters |
