@@ -5,7 +5,7 @@ Two kinds of value move in this repo:
 - **Token balances.** Every template is a gated ERC-20, and its balances move through the hook ([transfer-checks.md](transfer-checks.md)).
 - **The vault asset.** `Gated4626Vault` and `Gated7540Vault` hold and pay out an ordinary ERC-20 chosen at deployment. The hook never sees these transfers.
 
-What the code does not have: fees of any kind, interest or yield logic, a price oracle, or ETH handling. No contract written for this repo defines a `receive` or payable function, and none charges or pays a fee. `IntentToken` has no asset leg at all. (OpenZeppelin's `upgradeToAndCall` is payable but rejects value, as [SECURITY.md](../SECURITY.md) explains, and OpenZeppelin's `TimelockController` can receive ETH.)
+What the code does not have: fees of any kind, interest or yield logic, a price oracle, or ETH handling. No contract written for this repo defines a `receive` or payable function, and none charges or pays a fee. `IntentToken` has no asset leg at all. (OpenZeppelin's `upgradeToAndCall` is payable but rejects value, as [SECURITY.md](../SECURITY.md) explains. The token proxy's `fallback` is payable, but the implementation behind it has no `receive`, no payable fallback, and no payable function other than `upgradeToAndCall`, so value sent through the proxy is rejected too. OpenZeppelin's `TimelockController`, and `GovernanceTimelock`, which extends it, can receive ETH.)
 
 ## `IntentToken`: the token is the instrument
 
@@ -84,23 +84,24 @@ flowchart LR
   Fulfiller["Fulfiller"] -->|"step 2: fulfillRedeem: assets"| Vault
   Vault -.->|"step 2: escrowed shares burned"| Burned["Supply reduced"]
   Vault -->|"step 3: claim: assets"| Receiver["Receiver"]
-  Vault -.->|"reject: shares back"| Controller["Controller"]
-  Vault -.->|"recoverRedeemRequest: shares"| Recovery["Recovery account"]
-  Vault -->|"recoverClaimable: claimable assets"| Recovery
+  Vault -.->|"rejectRedeemRequest or recoverRedeemRequest: escrowed shares back"| Back["Controller or recovery account"]
+  Vault -->|"recoverClaimable: claimable assets"| Recovery["Recovery account"]
 ```
 
 Solid arrows are the asset. Dotted arrows are shares.
 
-### The only places the asset can leave the vault
+### Where the vault's code sends the asset
 
 | Function | Asset goes to |
 |---|---|
 | `fulfillDeposit` | the `custody` address |
 | `rejectDepositRequest` | the controller of the request |
-| `redeem`, `withdraw` | the `receiver` chosen by the controller or its operator, once the controller passes its claim-time check |
-| `recoverClaimable` | the verified recovery account chosen by the agent |
+| `redeem`, `withdraw` | the `receiver` chosen by the controller or its operator |
+| `recoverClaimable` | `to`, the recovery account the agent names, which must pass the vault's policy as the receiver of a `FORCED` move (with the deployed rules, only `IdentityRule` can refuse it) |
 
-The asset comes in on `requestDeposit` (from the owner) and on `fulfillRedeem` (from the fulfiller's wallet). `custody` is a plain address, set at initialisation. The timelock can change it with `setCustody`. The code makes no assumption about what it is.
+These are the vault's own functions. Two other things can also move the asset: an upgrade to another attested implementation, and powers held by the asset's own issuer.
+
+The asset comes in on `requestDeposit` (from the owner) and on `fulfillRedeem` (from the fulfiller's wallet). `custody` is a plain address, set at initialisation. The main timelock can change it with `setCustody`. The code makes no assumption about what it is.
 
 ### The price
 
@@ -108,13 +109,13 @@ The fulfiller names both numbers in each fulfilment. The vault stores `lastPrice
 
 `convertToShares(a) = floor(a x 10^decimals / lastPrice)` and `convertToAssets(s) = floor(s x lastPrice / 10^decimals)` use the stored price, and `totalAssets()` is `convertToAssets(totalSupply)`. These are only indicative. The amounts actually paid or minted come from each controller's own claimable pair, set by that controller's fulfilments.
 
-When a controller has been fulfilled in several parts, its claimable amounts are the sums of those parts, so a claim uses the blended ratio.
+Each fulfilment adds its assets and shares to the controller's claimable pair, and each claim subtracts what it used. A claim therefore uses the ratio of everything still claimable, blended across fulfilments.
 
 Share decimals equal the asset's decimals. There is no offset.
 
 ### Worked example
 
-A 6-decimal asset, so shares also have 6 decimals. Amounts below are whole units. Alice starts with 1,000 assets and has approved the vault on the asset. The fulfiller starts with 500 assets and has also approved the vault. Alice is verified, and so is the vault.
+A 6-decimal asset, so shares also have 6 decimals. Amounts below are whole units. Alice starts with 1,000 assets and has approved the vault on the asset. The fulfiller starts with 500 assets and has also approved the vault. Alice is verified. The identity provider has verified the vault, and `Activate` has exempted the vault from `MaxHoldersRule` and set a holder cap with room for Alice.
 
 | Step | Alice assets | Vault assets | Custody assets | Fulfiller assets | Alice shares | Vault shares | Share supply |
 |---|---|---|---|---|---|---|---|
@@ -130,11 +131,15 @@ In step 2 the stored price is `1000 x 10^6 / 800 = 1,250,000`, which is 1.25 ass
 
 ### Rounding in partial claims
 
-Rounding always favours the vault, and a claim of everything is exact. In raw units (the smallest unit of each token):
+Each partial claim rounds against the caller. The difference stays in the controller's claimable pair, and a claim of everything is exact, so the controller ends up with exactly the fulfilled totals and the vault keeps nothing. In raw units (the smallest unit of each token):
 
 - A deposit has `claimableAssets = 1000` and `claimableShares = 800`. `deposit(333)` mints `floor(333 x 800 / 1000) = 266` shares. The claimable amounts become 667 assets and 534 shares. `mint(267)` then uses `ceil(267 x 667 / 534) = 334` assets.
 - A redemption has `claimableShares = 7` and `claimableAssets = 10`. From that pair, `redeem(3)` pays `floor(3 x 10 / 7) = 4` assets. From the same pair, `withdraw(4)` uses `ceil(4 x 7 / 10) = 3` shares.
 
-A claim that would compute zero shares or zero assets reverts with `Gated7540Vault_ZeroAmount`.
+A zero input reverts with `Gated7540Vault_ZeroAmount` on all four claims. Of the computed amounts, only two are checked:
+- `deposit` reverts with `Gated7540Vault_ZeroAmount` if it would mint 0 shares;
+- `redeem` reverts with `Gated7540Vault_ZeroAmount` if it would pay 0 assets.
+
+`mint` and `withdraw` round up, so they compute 0 only after the other side of the pair is used up. For example, a rounded-up partial `mint` can consume all the claimable assets and leave shares. A later `mint` then delivers those shares for 0 assets, and a later `withdraw` in the mirror case pays the remaining assets for 0 shares. Neither reverts, and the totals stay exact.
 
 Code: `Gated7540Vault._recordPrice`, `_convertToShares`, `_convertToAssets`, `_claimDeposit`, `_claimMint`, `redeem`, `withdraw`, `fulfillDeposit`, `fulfillRedeem`, `rejectDepositRequest`, `recoverClaimable`, `setCustody`.

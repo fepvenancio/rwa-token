@@ -14,19 +14,19 @@ The base does only mechanical work: roles, pause, frozen balances, forced transf
 | `Gated4626Vault` | `contracts/vaults/` | UUPS proxy | ERC-4626 vault. The shares are a gated token |
 | `Gated7540Vault` | `contracts/vaults/` | UUPS proxy | ERC-7540 asynchronous vault. The shares are a gated token |
 | `ComplianceHook` | `contracts/hooks/` | immutable, one per token | Holds an ordered list of up to 16 rules. First rejection wins |
-| `BaseRule` and four rules | `contracts/hooks/`, `contracts/hooks/rules/` | immutable, shared by all tokens | `IdentityRule`, `LockupRule`, `SettlementWindowRule`, `MaxHoldersRule` |
+| `BaseRule` and four rules | `contracts/hooks/`, `contracts/hooks/rules/` | `BaseRule` abstract; each rule immutable, one instance shared by every token whose hook lists it | `IdentityRule`, `LockupRule`, `SettlementWindowRule`, `MaxHoldersRule`. As deployed, `SettlementWindowRule` is on `IntentToken`'s hook only |
 | `PolicyRegistry` | `contracts/governance/` | immutable, one per deployment | List of attested codehashes, each marked `HOOK`, `RULE` or `IMPLEMENTATION` |
 | `IntentExecutor` | `contracts/intents/` | immutable | Role-gated caller that submits signed intents to a token, one at a time or as an atomic batch |
 | `ProxyDeployer` | `contracts/deploy/` | immutable | Creates each token proxy at an address that can be computed before the hook exists |
 | `TokenProxy` | `contracts/deploy/` | the proxy | OpenZeppelin's `ERC1967Proxy`, constructible without init data |
-| `GovernanceTimelock` | `contracts/governance/` | immutable | The main timelock: OpenZeppelin's `TimelockController` plus a `RECOVERY_ROLE` that can only revoke `CANCELLER_ROLE`. Holds the admin powers once deployment is finished |
-| Recovery `TimelockController` | OpenZeppelin, not in this repo | immutable | Same delay, no cancellers. Can only unpause and remove the guardian (see [governance-and-deployment.md](governance-and-deployment.md#the-recovery-timelock)) |
+| `GovernanceTimelock` | `contracts/governance/` | immutable | The main timelock: OpenZeppelin's `TimelockController` plus one power for the recovery timelock, revoking `CANCELLER_ROLE`. Holds the admin powers once deployment is finished |
+| `TimelockController` | OpenZeppelin, not in this repo | immutable | Deployed unmodified as the recovery timelock, which can only unpause the tokens and the executor, revoke `GUARDIAN_ROLE` on them, and revoke `CANCELLER_ROLE` on the main timelock from any holder. Like every OpenZeppelin timelock it is also its own admin |
 
-Two things sit outside the repo. The identity registry is any contract with `isVerified(address)`, and `IdentityRule` reads it. The vault asset is any ERC-20.
+Two external contracts are neither in this repo nor deployed by it. The identity registry is any contract with `isVerified(address)`, and `IdentityRule` reads it. The vault asset is any standard ERC-20. The vaults credit the amount named in the call, not the amount that arrives, so fee-on-transfer assets are not supported. `Gated7540Vault` also books fixed asset amounts for pending deposits and claimable redemptions, so an asset whose balances change on their own (rebasing) can break its claims.
 
 A token's implementation contract calls `_disableInitializers()` in its constructor, so only a proxy can be initialised. Hooks and rules are not proxies. To change one you deploy a new one and install it.
 
-Code: `PolicyGatedERC20Upgradeable`, `IntentSettledUpgradeable`, `ComplianceHook`, `BaseRule`, `PolicyRegistry`, `IntentExecutor`, `ProxyDeployer`, `TokenProxy`.
+Code: `PolicyGatedERC20Upgradeable`, `IntentSettledUpgradeable`, `ComplianceHook`, `BaseRule`, `PolicyRegistry`, `IntentExecutor`, `ProxyDeployer`, `TokenProxy`, `GovernanceTimelock`.
 
 ## Structure
 
@@ -38,12 +38,11 @@ flowchart LR
   Exec["IntentExecutor"] -->|"executeTransfer"| Proxy
   subgraph PerToken["One set per token"]
     Proxy["Token proxy"]
-    Impl["Implementation"]
     Hook["ComplianceHook"]
-    Proxy -->|"delegatecall"| Impl
     Proxy -->|"beforeTransfer, wantsAfter, afterTransfer"| Hook
   end
-  Hook -->|"check, after_"| Rules["The four shared rules"]
+  Proxy -->|"delegatecall"| Impl["Implementation: one per template, shared by its tokens"]
+  Hook -->|"check, after_"| Rules["Shared rules: four on IntentToken's hook, three on each vault's"]
   Rules -->|"IdentityRule only: isVerified"| IdReg["Identity registry (external)"]
   Proxy -->|"vaults only: asset transfers"| Asset["Vault asset (external)"]
   Proxy -.->|"isAttested, at install and upgrade"| Reg["PolicyRegistry"]
@@ -52,7 +51,7 @@ flowchart LR
 
 Solid arrows are calls, except `CREATE2`, which is a deployment, and `delegatecall`, which runs the implementation's code against the proxy's storage. Dotted arrows are registry checks that run when something is installed, not on every transfer. `IntentExecutor` appears only for `IntentToken`, which is the only token with `executeTransfer`.
 
-The timelock administers the tokens, the hook, the registry and the executor, and owns `ProxyDeployer`. [roles.md](roles.md) shows that.
+The main timelock administers the tokens, the hook, the registry and the executor, and owns `ProxyDeployer`. The recovery timelock can unpause the tokens and the executor and remove the guardian. [roles.md](roles.md) shows both.
 
 Code: `ProxyDeployer.deploy`, `PolicyGatedERC20Upgradeable._setHook`, `ComplianceHook._setRules`.
 
@@ -106,7 +105,8 @@ flowchart BT
   PG --> P3["PausableUpgradeable (OZ)"]
   PG --> P4["UUPSUpgradeable (OZ)"]
   PG --> P5["ReentrancyGuardTransient (OZ)"]
-  CH["ComplianceHook"] --> IPH["IPolicyHook"]
+  CH["ComplianceHook"] --> ICH["IComplianceHook"]
+  ICH --> IPH["IPolicyHook"]
   IdR["IdentityRule"] --> BR["BaseRule"]
   LR["LockupRule"] --> BR
   SW["SettlementWindowRule"] --> BR
@@ -126,9 +126,9 @@ Code: `Gated4626Vault._update`, `Gated7540Vault._update`, `supportsInterface` in
 |---|---|---|
 | `IntentToken` | `executeTransfer`, `cancelIntent`, `canExecute`, `intentHash`, `nonceUsed` | used-nonce map per signer |
 | `Gated4626Vault` | OZ ERC-4626 with a decimals offset of 6, and `maxDeposit`, `maxMint`, `maxRedeem`, `maxWithdraw` that reflect the hook | none |
-| `Gated7540Vault` | request, fulfil and claim for deposits and redemptions, claim-time controller checks, reject, recover pending and claimable amounts, operators, custody address, last fulfilment price | per-controller deposit and redemption state, operator approvals, custody, `lastPrice` |
+| `Gated7540Vault` | request, fulfil and claim for deposits and redemptions; reject; agent recovery of pending redemptions and of claimable amounts; operators; custody address; last fulfilment price | per-controller deposit and redemption state, operator approvals, custody, `lastPrice` |
 
-On both vaults the base's `mint(address,uint256)` and `burn(address,uint256)` always revert with `Gated4626Vault_Unsupported` or `Gated7540Vault_Unsupported`. Shares are created only by deposits (or deposit claims) and destroyed only by redemptions (or redemption fulfilments).
+On both vaults the base's `mint(address,uint256)` and `burn(address,uint256)` always revert with `Gated4626Vault_Unsupported` or `Gated7540Vault_Unsupported`. On `Gated4626Vault`, shares are created by ERC-4626 `deposit` and `mint(shares, receiver)` and destroyed by `withdraw` and `redeem`. On `Gated7540Vault`, shares are created by deposit claims and by the agent's `recoverClaimable`, and destroyed by redemption fulfilments.
 
 Code: `IntentSettledUpgradeable`, `Gated4626Vault`, `Gated7540Vault`.
 
@@ -142,7 +142,7 @@ The base and each template keep their state in ERC-7201 namespaced slots, so a l
 | `gated.storage.IntentSettled` | `nonces[signer][nonce]` |
 | `gated.storage.Gated7540Vault` | `custody`, `lastPrice`, `deposits[controller]`, `redeems[controller]`, `operators[controller][operator]` |
 
-The base also uses three transient-storage slots, `gated.transient.kind`, `gated.transient.ref` and `gated.transient.deadline`. A function that moves tokens as `FORCED` or `EXECUTED` writes them just before calling `_transfer` (`_moveAs`), and an enforcement mint writes `FORCED` just before calling `_mint` (`_mintAs`). `_update` reads them and clears them. The token cannot infer these two kinds from the addresses, so this is how the hook learns them. The transient slots live for one transaction.
+The base also uses three transient-storage slots of its own, `gated.transient.kind`, `gated.transient.ref` and `gated.transient.deadline`. A fourth transient slot belongs to OpenZeppelin's `ReentrancyGuardTransient`. A function that transfers tokens between two accounts as `FORCED` or `EXECUTED` writes the three slots just before calling `_transfer`, through `_moveAs`. The enforcement mint in `Gated7540Vault.recoverClaimable` writes them before calling `_mint`, through `_mintAs`. `_update` reads them and clears them. The token cannot infer these two kinds from the addresses, so this is how the hook learns them. The transient slots live for one transaction.
 
 Code: `PolicyGatedERC20Upgradeable._moveAs`, `_mintAs`, `_consumePending`, `_getPolicyGatedStorage`.
 
@@ -150,11 +150,11 @@ Code: `PolicyGatedERC20Upgradeable._moveAs`, `_mintAs`, `_consumePending`, `_get
 
 | Component | How it is replaced | Who | What is checked |
 |---|---|---|---|
-| Hook | `setPolicyHook(newHook)` on the token | `DEFAULT_ADMIN_ROLE`, which is the timelock | the new hook's codehash is attested as `HOOK` |
-| Rule list | `setRules(rules)` on the hook | the hook's `ADMIN`, which is the timelock | each rule's codehash is attested as `RULE`, at most 16, no two with the same `ruleId` |
-| Token implementation | UUPS `upgradeToAndCall` | `UPGRADER_ROLE`, which is the timelock | the new implementation's codehash is attested as `IMPLEMENTATION` |
+| Hook | `setPolicyHook(newHook)` on the token | `DEFAULT_ADMIN_ROLE`, which is the main timelock | the new hook's codehash is attested as `HOOK` |
+| Rule list | `setRules(rules)` on the hook | the hook's `ADMIN`, which is the main timelock | each rule's codehash is attested as `RULE`, at most 16, no two with the same `ruleId` |
+| Token implementation | UUPS `upgradeToAndCall` | `UPGRADER_ROLE`, which is the main timelock | the new implementation's codehash is attested as `IMPLEMENTATION` |
 | Rule logic | deploy a new rule and put it in the list | as for the rule list | as for the rule list |
-| Registry | not replaceable. `registry()` has no setter | n/a | n/a |
+| Registry | the token's pointer has no setter; only an upgrade to an attested implementation could change it. Rules are vetted against the hook's own immutable `REGISTRY`, which comes with the hook | as for the hook or the implementation | as for the hook or the implementation |
 | Executor | grant `EXECUTOR_ROLE` to a new executor, revoke the old one | `DEFAULT_ADMIN_ROLE` | none |
 | 7540 custody address | `setCustody` | `DEFAULT_ADMIN_ROLE` | non-zero address |
 

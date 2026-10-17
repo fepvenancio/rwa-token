@@ -1,8 +1,10 @@
 # Roles
 
-Who can call what, and who holds each role once `Activate` has run. The role holders below are the ones the Ignition modules set up. Contracts do not forbid other holders: the timelock can grant any role to anyone, after its delay.
+Who can call what, and who holds each role once `Activate` has run. The role holders below are the ones the Ignition modules set up. Contracts do not forbid other holders: the main timelock can grant any `AccessControl` role on the tokens, the executor, the registry and itself to anyone, after its delay. A hook's `ADMIN` is immutable and cannot be granted.
 
-In OpenZeppelin `AccessControl`, `DEFAULT_ADMIN_ROLE` administers every other role unless a contract changes that. None of these contracts does. So whoever holds `DEFAULT_ADMIN_ROLE` on a contract can grant and revoke every role on it. The one addition is `RECOVERY_ROLE` (v0.2.0): it is not an admin of anything, but the tokens, the executor and the main timelock let its holder through for one or two specific revocations and `unpause` (see [what the guardian can do](#what-the-guardian-can-do)).
+There are two timelocks. The **main timelock** is `GovernanceTimelock`, OpenZeppelin's `TimelockController` with one added power for the recovery timelock, and it holds the admin powers. The **recovery timelock** is a plain `TimelockController`. As deployed, nobody can cancel its operations. Like every timelock it administers itself; outside itself it holds one narrow role, `RECOVERY_ROLE`, which can only unpause, revoke `GUARDIAN_ROLE`, and revoke `CANCELLER_ROLE` on the main timelock (see [What the guardian can do](#what-the-guardian-can-do)).
+
+In OpenZeppelin `AccessControl`, `DEFAULT_ADMIN_ROLE` administers every other role unless a contract changes that. None of these contracts does. So whoever holds `DEFAULT_ADMIN_ROLE` on a contract can grant and revoke every role on it.
 
 The word "operator" means three different things in this repo:
 
@@ -10,24 +12,26 @@ The word "operator" means three different things in this repo:
 |---|---|
 | `OPERATOR_ROLE` on `IntentExecutor` | the bank's or relayer's key that submits signed intents |
 | `ctx.operator` in `TransferContext` | whoever called into the token for this movement: the holder, a spender, the agent, the minter, the executor |
-| `setOperator` on `Gated7540Vault` | an account a controller has approved to act for it: a full delegate per ERC-7540, which can also open requests with the owner's assets or shares |
+| `setOperator` on `Gated7540Vault` | an account a controller has approved to act for it: a full delegate, which can also open requests with that account's assets or shares (owner decision L-5) |
 
 ## Who holds what after `Activate`
 
 | Holder | Where | Role | Set by |
 |---|---|---|---|
-| Timelock | each token | `DEFAULT_ADMIN_ROLE`, `UPGRADER_ROLE` | `Activate` grants admin, then the deployer renounces. `UPGRADER_ROLE` goes to the timelock only |
-| Timelock | `PolicyRegistry` | `DEFAULT_ADMIN_ROLE` | constructor |
-| Timelock | `IntentExecutor` | `DEFAULT_ADMIN_ROLE` | `Activate` |
-| Timelock | each `ComplianceHook` | `ADMIN` (immutable) | constructor |
-| Timelock | `ProxyDeployer` | owner | `Activate` calls `transferOwnership` |
-| Governance multisig | main timelock | `PROPOSER_ROLE`, `EXECUTOR_ROLE`, `CANCELLER_ROLE` | `Components` passes it as proposer and executor. OpenZeppelin gives proposers `CANCELLER_ROLE` too |
-| Governance multisig | recovery timelock | `PROPOSER_ROLE`, `EXECUTOR_ROLE` | `Components`; `Activate` revokes the `CANCELLER_ROLE` OpenZeppelin added, so nobody can cancel there |
+| Main timelock | each token | `DEFAULT_ADMIN_ROLE`, `UPGRADER_ROLE` | `Activate` grants admin, then the deployer renounces. `UPGRADER_ROLE` goes to the main timelock only |
+| Main timelock | `PolicyRegistry` | `DEFAULT_ADMIN_ROLE` | constructor |
+| Main timelock | `IntentExecutor` | `DEFAULT_ADMIN_ROLE` | `Activate` |
+| Main timelock | itself | `DEFAULT_ADMIN_ROLE` | OpenZeppelin's constructor makes every timelock its own admin |
+| Main timelock | each `ComplianceHook` | `ADMIN` (immutable) | constructor |
+| Main timelock | `ProxyDeployer` | owner | `Activate` calls `transferOwnership` |
 | Recovery timelock | each token, `IntentExecutor` | `RECOVERY_ROLE` | `Activate` |
 | Recovery timelock | main timelock | `RECOVERY_ROLE` | `GovernanceTimelock` constructor |
+| Recovery timelock | itself | `DEFAULT_ADMIN_ROLE` | OpenZeppelin's constructor |
+| Governance multisig | main timelock | `PROPOSER_ROLE`, `EXECUTOR_ROLE`, `CANCELLER_ROLE` | `Components` passes it as proposer and executor. OpenZeppelin's constructor gives the initial proposers `CANCELLER_ROLE` too |
+| Governance multisig | recovery timelock | `PROPOSER_ROLE`, `EXECUTOR_ROLE` | `Components` passes it as proposer and executor. `Activate` revokes the `CANCELLER_ROLE` OpenZeppelin gave it, so nobody can cancel there |
 | Guardian multisig | each token | `GUARDIAN_ROLE` | token initialiser |
 | Guardian multisig | `IntentExecutor` | `GUARDIAN_ROLE` | constructor |
-| Guardian multisig | timelock | `CANCELLER_ROLE` | `Activate` |
+| Guardian multisig | main timelock | `CANCELLER_ROLE` | `Activate`. The guardian holds nothing on the recovery timelock |
 | Security council | `PolicyRegistry` | `ATTESTER_ROLE` | constructor |
 | Agent (issuer's compliance ops) | each token | `AGENT_ROLE` | `Activate` |
 | Minter, burner (issuer) | `IntentToken` | `MINTER_ROLE`, `BURNER_ROLE` | `Activate` |
@@ -35,28 +39,34 @@ The word "operator" means three different things in this repo:
 | Relayer / bank key | `IntentExecutor` | `OPERATOR_ROLE` | `Activate` |
 | Bank (fulfiller) | `Gated7540Vault` | `FULFILLER_ROLE` | `Activate` |
 
-Until `Activate` finishes, the deployer account holds `DEFAULT_ADMIN_ROLE` on each token and on the executor, is the admin of both timelocks, and is the `ProxyDeployer` owner. `Activate` hands all of these to the main timelock (or, on the recovery timelock, simply renounces) and the deployer ends with no role anywhere.
+Until `Activate` finishes, the deployer account holds `DEFAULT_ADMIN_ROLE` on each token, on the executor and on both timelocks, and owns `ProxyDeployer`. To hand over, `Activate` does four things:
+1. grants the main timelock `DEFAULT_ADMIN_ROLE` on the tokens and the executor;
+2. moves `ProxyDeployer` ownership to the main timelock;
+3. revokes governance's `CANCELLER_ROLE` on the recovery timelock;
+4. has the deployer renounce `DEFAULT_ADMIN_ROLE` on the tokens, the executor and both timelocks.
+
+Each timelock already administers itself.
 
 Code: `ignition/modules/Activate.ts`, `ignition/modules/Components.ts`, `ignition/modules/roles.ts`.
 
 ## Authority map
 
-Through the timelock. Every edge that leaves the timelock waits for the timelock delay:
+Through a timelock. Every edge that leaves a timelock waits for that timelock's delay:
 
 ```mermaid
 flowchart LR
-  Gov["Governance multisig"] -->|"schedule, execute"| TL["Main timelock (GovernanceTimelock)"]
+  Gov["Governance multisig"] -->|"schedule, execute, cancel"| TL["Main timelock (GovernanceTimelock)"]
   Guard["Guardian multisig"] -->|"cancel only"| TL
-  Gov -->|"schedule, execute; nobody can cancel"| RT["Recovery timelock"]
-  RT -->|"unpause, revoke GUARDIAN_ROLE"| Tokens
-  RT -->|"unpause, revoke GUARDIAN_ROLE"| Exec
-  RT -->|"revoke CANCELLER_ROLE"| TL
   TL -->|"admin, upgrade"| Tokens["Tokens"]
   TL -->|"setRules"| Hook["ComplianceHook"]
   TL -->|"admin"| Reg["PolicyRegistry"]
   TL -->|"admin"| Exec["IntentExecutor"]
   TL -->|"deploy"| PD["ProxyDeployer"]
-  TL -->|"window, cap, count, exemptions"| Rules["Rules"]
+  TL -->|"window, cap, count seed, exemptions"| Rules["Rules"]
+  Gov -->|"schedule, execute; nobody can cancel"| RTL["Recovery timelock"]
+  RTL -->|"unpause, revoke GUARDIAN_ROLE"| Tokens
+  RTL -->|"unpause, revoke GUARDIAN_ROLE"| Exec
+  RTL -->|"revoke CANCELLER_ROLE"| TL
 ```
 
 Takes effect at once, with no delay:
@@ -65,7 +75,7 @@ Takes effect at once, with no delay:
 flowchart LR
   Guard["Guardian multisig"] -->|"pause"| Tokens["Tokens"]
   Guard -->|"pause"| Exec["IntentExecutor"]
-  Agent["Agent"] -->|"force, freeze, recover pending and claimable"| Tokens
+  Agent["Agent"] -->|"force, freeze, recover"| Tokens
   Agent -->|"setLockup"| Rules["Rules"]
   Council["Security council"] -->|"attest, revoke"| Reg["PolicyRegistry"]
   Issuer["Minter and burner"] -->|"mint, burn"| IT["IntentToken"]
@@ -87,10 +97,10 @@ All three tokens share the base. Rows marked 7540 exist only on `Gated7540Vault`
 | `forcedTransfer(from, to, amount)` | `AGENT_ROLE` | Works while paused and on frozen tokens. The hook still runs, with kind `FORCED` |
 | `setFrozen(user, amount)` | `AGENT_ROLE` | Absolute amount, at most the balance |
 | `pause()` | `GUARDIAN_ROLE` | No delay |
-| `unpause()` | `DEFAULT_ADMIN_ROLE` or `RECOVERY_ROLE` | The main timelock, or the recovery timelock |
+| `unpause()` | `DEFAULT_ADMIN_ROLE` or `RECOVERY_ROLE` | The main or the recovery timelock. Anyone else gets `AccessControlUnauthorizedAccount(caller, DEFAULT_ADMIN_ROLE)` |
 | `setPolicyHook(newHook)` | `DEFAULT_ADMIN_ROLE` | New hook must be attested as `HOOK` |
 | `upgradeToAndCall(impl, data)` | `UPGRADER_ROLE` | New implementation must be attested as `IMPLEMENTATION` |
-| `grantRole`, `revokeRole` | the role's admin, `DEFAULT_ADMIN_ROLE` | Exception: `RECOVERY_ROLE` may revoke `GUARDIAN_ROLE`. Any account may call `renounceRole` for itself |
+| `grantRole`, `revokeRole` | the role's admin, `DEFAULT_ADMIN_ROLE` | `RECOVERY_ROLE` may also revoke `GUARDIAN_ROLE`, and no other role. Any account may call `renounceRole` for itself |
 | `transfer`, `transferFrom`, `approve`, `permit` | anyone | Movements go through the hook |
 | `executeTransfer(intent, sig)` | `EXECUTOR_ROLE` | `IntentToken` only |
 | `cancelIntent(nonce)` | anyone, for its own nonces | `IntentToken` only |
@@ -98,11 +108,11 @@ All three tokens share the base. Rows marked 7540 exist only on `Gated7540Vault`
 | `withdraw`, `redeem` | the owner, or a spender with share allowance | `Gated4626Vault` only |
 | `requestDeposit(assets, controller, owner)` | `owner`, or an operator of `owner` | 7540 |
 | `requestRedeem(shares, controller, owner)` | `owner`, an operator of `owner`, or a spender with allowance | 7540 |
-| `deposit`, `mint`, `redeem`, `withdraw` with a controller | the controller or an operator of it | 7540 claims |
+| `deposit`, `mint`, `redeem`, `withdraw` with a controller | the controller or an operator of it | 7540 claims. The two-argument `deposit(assets, receiver)` and `mint(shares, receiver)` claim with the caller as the controller |
 | `setOperator(operator, approved)` | anyone, for itself | 7540 |
 | `fulfillDeposit`, `fulfillRedeem`, `rejectDepositRequest`, `rejectRedeemRequest` | `FULFILLER_ROLE` | 7540 |
-| `recoverRedeemRequest(controller, to)` | `AGENT_ROLE` | 7540, pending redemptions |
-| `recoverClaimable(controller, to)` | `AGENT_ROLE` | 7540, claimable assets and shares; works while paused and at a full cap |
+| `recoverRedeemRequest(controller, to)` | `AGENT_ROLE` | 7540. Pending redemptions |
+| `recoverClaimable(controller, to)` | `AGENT_ROLE` | 7540. Claimable amounts, delivered to a verified `to`. Works while paused |
 | `setCustody(newCustody)` | `DEFAULT_ADMIN_ROLE` | 7540 |
 
 Code: `PolicyGatedERC20Upgradeable`, `IntentSettledUpgradeable`, `Gated4626Vault`, `Gated7540Vault`.
@@ -118,9 +128,16 @@ Code: `PolicyGatedERC20Upgradeable`, `IntentSettledUpgradeable`, `Gated4626Vault
 | `IntentExecutor` | `execute`, `executeBatch` | `OPERATOR_ROLE`, and only while not paused |
 | `IntentExecutor` | `pause()` | `GUARDIAN_ROLE` |
 | `IntentExecutor` | `unpause()` | `DEFAULT_ADMIN_ROLE` or `RECOVERY_ROLE` |
-| `IntentExecutor` | `grantRole`, `revokeRole` | `DEFAULT_ADMIN_ROLE`; `RECOVERY_ROLE` may revoke `GUARDIAN_ROLE` |
-| `GovernanceTimelock` | `revokeRole(CANCELLER_ROLE, …)` | `DEFAULT_ADMIN_ROLE` (itself) or `RECOVERY_ROLE` |
+| `IntentExecutor` | `grantRole`, `revokeRole` | `DEFAULT_ADMIN_ROLE`. `RECOVERY_ROLE` may also revoke `GUARDIAN_ROLE` |
+| Main timelock | `schedule`, `scheduleBatch` | `PROPOSER_ROLE` |
+| Main timelock | `execute`, `executeBatch` | `EXECUTOR_ROLE` |
+| Main timelock | `cancel(id)` | `CANCELLER_ROLE` |
+| Main timelock | `updateDelay`, `grantRole`, `revokeRole` | the timelock itself, through its own operations. `RECOVERY_ROLE` may also revoke `CANCELLER_ROLE`, and nothing else |
+| Recovery timelock | `schedule`, `execute` and their batch forms | `PROPOSER_ROLE`, `EXECUTOR_ROLE`: governance |
+| Recovery timelock | `cancel(id)` | `CANCELLER_ROLE`, which nobody holds after `Activate` |
+| Recovery timelock | `updateDelay`, `grantRole`, `revokeRole` | the recovery timelock itself |
 | `ProxyDeployer` | `deploy(...)` | owner |
+| `ProxyDeployer` | `transferOwnership`, `renounceOwnership` | owner (OpenZeppelin `Ownable`). Renouncing would disable `deploy` for good |
 
 Rules have no roles of their own. Each rule asks the token, at call time, who may configure it for that token:
 
@@ -130,40 +147,45 @@ Rules have no roles of their own. Each rule asks the token, at call time, who ma
 | `MaxHoldersRule.setCap`, `seedHolderCount`, `setExemptHolder` | `DEFAULT_ADMIN_ROLE` |
 | `LockupRule.setLockup` | `AGENT_ROLE` |
 
-After `Activate`, `DEFAULT_ADMIN_ROLE` on a token is the timelock, so the window, the cap, the count and the exemptions change only after the timelock delay. Lockups are set by the agent with no delay.
+After `Activate`, `DEFAULT_ADMIN_ROLE` on a token is the main timelock. So `setWindow`, `setCap`, `seedHolderCount` and `setExemptHolder` take effect only after the timelock delay. The holder count itself still moves with every movement that adds or removes a holder. Lockups are set by the agent with no delay.
 
-`afterTransfer` on the hook is open only to `TOKEN`. `after_` on a rule is open only to the hook currently installed on `ctx.token`, which the rule checks by calling `ctx.token.policyHook()`.
+`afterTransfer` on the hook is open only to `TOKEN`. `after_` on a rule is open only to the hook currently installed on `ctx.token`, which the rule checks by calling `ctx.token.policyHook()`. Neither `ctx.token` nor the `token` argument of the setters is authenticated. Any contract can call these for a token address it controls, but that changes only that address's entries, never a real token's.
 
 Code: `ComplianceHook`, `PolicyRegistry`, `IntentExecutor`, `ProxyDeployer`, `BaseRule.onlyHook`, `SettlementWindowRule.setWindow`, `MaxHoldersRule.onlyTokenAdmin`, `LockupRule.setLockup`.
 
 ## What the guardian can do
 
-The guardian multisig holds three separate powers, on three contracts:
+The guardian multisig holds three separate powers, on three kinds of contract: each token, the `IntentExecutor` and the main timelock.
 
-1. `pause()` on each token. It stops every movement except `FORCED` ones. No delay.
+1. `pause()` on each token. It stops every token or share movement except `FORCED` ones. No delay. On `Gated7540Vault`, `fulfillDeposit` and `rejectDepositRequest` still move the asset while paused, because they move no shares.
 2. `pause()` on `IntentExecutor`. It stops `execute` and `executeBatch`. No delay.
-3. `cancel(id)` on the timelock, through `CANCELLER_ROLE`. It cancels any scheduled operation that has not run yet.
+3. `cancel(id)` on the main timelock, through `CANCELLER_ROLE`. It cancels any operation there that has not been executed yet, including one whose delay has passed.
 
-It cannot schedule or execute timelock operations, unpause, change the hook, grant roles, or upgrade.
+It cannot schedule or execute timelock operations, unpause, change the hook, grant roles, or upgrade. It holds nothing on the recovery timelock.
 
-The main timelock's `cancel` does not look at what an operation does, so the guardian can cancel a scheduled `unpause`, or a scheduled revocation of its own roles. Since v0.2.0 that veto has a limit (owner decision M-1): the recovery timelock, on which nobody can cancel and the guardian holds nothing, can after its delay unpause every token and the executor, revoke `GUARDIAN_ROLE` on each of them, and revoke the guardian's `CANCELLER_ROLE` on the main timelock. It can do nothing else. [governance-and-deployment.md](governance-and-deployment.md#the-recovery-timelock) shows the sequence.
+The main timelock's `cancel` does not look at what an operation does. The guardian can therefore cancel a scheduled `unpause` there, or a scheduled revocation of its own roles. The recovery timelock is the way around that. Governance schedules any of these on the recovery timelock:
+- `unpause()` on a token or on the executor;
+- `revokeRole(GUARDIAN_ROLE, guardian)` on each token and on the executor;
+- `revokeRole(CANCELLER_ROLE, guardian)` on the main timelock.
 
-Code: `PolicyGatedERC20Upgradeable.pause`, `unpause`, `revokeRole`; `IntentExecutor.pause`, `unpause`, `revokeRole`; `GovernanceTimelock.revokeRole`; `ignition/modules/Activate.ts` (`timelock_canceller`, `*_recovery`).
+After `Activate` nobody holds `CANCELLER_ROLE` on the recovery timelock, so these run after its delay whatever the guardian does. A guardian that vetoes or keeps re-pausing can be removed everywhere this way.
+
+`RECOVERY_ROLE` allows nothing else. It cannot grant any role, revoke any other role, propose, execute, cancel, upgrade or change the hook.
+
+Code: `PolicyGatedERC20Upgradeable.pause`, `unpause`, `revokeRole`; `IntentExecutor.pause`, `unpause`, `revokeRole`; `GovernanceTimelock.revokeRole`; `ignition/modules/Activate.ts` (the `timelock_canceller` grant and the `recovery_no_cancellers` call).
 
 ## The delay
 
-Everything the timelock does waits for `getMinDelay()` after it is scheduled. `Components.ts` takes the delay as the parameter `minDelay`, default 7 days. The module does not refuse a smaller value. The test fixture's post-deploy check does: it asserts `getMinDelay() >= 7 days`. Changing the delay later is itself a timelock operation (`updateDelay` can only be called by the timelock).
+A timelock operation waits at least that timelock's `getMinDelay()`, counted from when it is scheduled. The proposer can choose a longer delay, and a later `updateDelay` does not change operations already scheduled. `Components.ts` gives both timelocks the same `minDelay` parameter, default 7 days. The module does not refuse a smaller value. The test fixture's post-deploy check does: it asserts `getMinDelay() >= 7 days` on both. Changing a delay later is itself an operation of that timelock (`updateDelay` can only be called by the timelock itself).
 
-The recovery timelock has the same minimum delay, also checked by the post-deploy check.
-
-Actions with no delay: guardian pause, council attestation and revocation, and everything the agent, minter, burner, executor operator and fulfiller do.
+Actions with no delay: a guardian pause, a `cancel` on the main timelock (by the guardian or governance), council attestation and revocation, and everything the agent, minter, burner, executor operator and fulfiller do.
 
 Code: `ignition/modules/Components.ts`, `test/nodejs/fixtures.ts` (`assertHandedOver`).
 
 ## What the code does not allow
 
-- Change a token's registry. `registry()` is set in the initialiser and has no setter. Only an upgrade to an attested implementation, through the timelock, could change that.
-- Mint or burn vault shares through `mint` or `burn`.
-- Make `transfer` return `true` without moving a balance. A rejected movement reverts.
+- Change a token's registry. `registry()` is set in the initialiser and has no setter. Only an upgrade to an attested implementation, through the main timelock, could change that.
+- Mint or burn vault shares through `mint(to, amount)` or `burn(from, amount)`. They are role-gated on `IntentToken`; on the vaults they have no role check and revert for every caller. Shares are minted by ERC-4626 `deposit` and `mint(shares, receiver)`, by 7540 deposit claims and by `recoverClaimable`. They are burned by 4626 redemptions and 7540 redemption fulfilments.
+- Make `transfer` return `false`. A movement that the base's pause and frozen checks or the hook reject reverts with `PolicyGated_TransferRejected(reason)`. OpenZeppelin's own checks (zero address, allowance, the reentrancy guard) revert with their own errors. A zero-amount transfer, or one to yourself, that the rules allow returns `true` and moves nothing.
 - Let the executor change an intent. It passes the holder's signed fields to the token, which checks the signature.
 - Let a rule configure itself for a token. Each rule reads the permission from the token.

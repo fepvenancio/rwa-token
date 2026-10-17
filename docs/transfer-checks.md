@@ -19,25 +19,23 @@ The token builds a `TransferContext` for every movement. Callers cannot supply o
 | `deadline` | the intent's `deadline` for `EXECUTED`, otherwise 0 |
 | `extra` | always empty |
 
-The operator is whoever called the token, so it changes with the entry point. For `transferFrom` it is the spender. For `executeTransfer` it is the executor. For a vault `redeem` made by a spender with allowance it is the spender.
+The operator is whoever called the token, so it changes with the entry point. For `transferFrom` it is the spender. For `executeTransfer` it is the executor. For a `Gated4626Vault` `redeem` or `withdraw`, or a `Gated7540Vault` `requestRedeem`, made by a spender with allowance, it is the spender.
 
 ## Where the kind comes from
 
-`_update` takes the kind from the transient slots if a function announced one. Otherwise it infers the kind from the addresses: `from == 0` is `MINT`, `to == 0` is `BURN`, anything else is `TRANSFER`.
+`_update` takes the kind from the transient slots if a function announced one. Otherwise it infers the kind from the addresses: `from == 0` is `MINT`, `to == 0` is `BURN`, anything else is `TRANSFER`. An announced kind wins over the addresses, so the enforcement mint in `recoverClaimable` (`from == 0`) reaches the hook as `FORCED`, not `MINT`.
 
 | Entry point | Kind | Announced or inferred |
 |---|---|---|
 | `transfer`, `transferFrom` | `TRANSFER` | inferred |
 | `Gated7540Vault.requestRedeem` (owner to vault) | `TRANSFER` | inferred |
+| `Gated7540Vault.rejectRedeemRequest` (vault to controller) | `TRANSFER` | inferred |
 | `executeTransfer` | `EXECUTED` | announced by `_moveAs` |
-| `forcedTransfer` | `FORCED` | announced |
-| `Gated7540Vault.rejectRedeemRequest` (vault to controller) | `TRANSFER` | inferred. A plain transfer since v0.2.0, so the full policy applies |
-| `Gated7540Vault.recoverRedeemRequest` (vault to recovery account) | `FORCED` | announced |
-| `Gated7540Vault.recoverClaimable` (claimable deposit shares to a recovery account) | `FORCED`, with `from` = 0 | announced by `_mintAs` |
+| `forcedTransfer` | `FORCED` | announced by `_moveAs` |
+| `Gated7540Vault.recoverRedeemRequest` (vault to recovery account) | `FORCED` | announced by `_moveAs` |
+| `Gated7540Vault.recoverClaimable` (claimable deposit shares minted to the recovery account) | `FORCED`, with `from == 0` | announced by `_mintAs` |
 | `IntentToken.mint`, `Gated4626Vault.deposit`/`mint`, `Gated7540Vault` deposit claims | `MINT` | inferred |
 | `IntentToken.burn`, `Gated4626Vault.withdraw`/`redeem`, `Gated7540Vault.fulfillRedeem` | `BURN` | inferred |
-
-`FORCED` with `from` = 0 is an enforcement mint. Rules treat it as `FORCED`: exempt from the cap, the pause and lockups, and `IdentityRule` still needs `to` verified. `MaxHoldersRule` still counts the new holder. `FORCED` with `to` = 0 is reserved and currently unused. Every standard rule is tested against `FORCED` with `from` = 0.
 
 Code: `PolicyGatedERC20Upgradeable._consumePending`, `_moveAs`, `_mintAs`, `_inferKind`.
 
@@ -72,7 +70,7 @@ Notes on the steps:
 
 - **Pause.** While paused, every kind except `FORCED` is rejected, mints and burns included.
 - **Frozen.** The check runs for every kind except `FORCED`, and only when `from` is not the zero address. It rejects if `balanceOf(from) - getFrozen(from) < amount`. It runs before the hook, so a transfer larger than the balance is rejected as `INSUFFICIENT_UNFROZEN`, not with OpenZeppelin's `ERC20InsufficientBalance`.
-- **`burn` by the burner.** `burn` lowers the frozen amount first (`_releaseFrozen`, which emits `Frozen`), so the frozen check passes. A holder or vault burn, such as `redeem`, does not, so frozen tokens cannot be redeemed.
+- **`burn` by the burner.** `burn` first calls `_releaseFrozen`, which caps the frozen amount at `balance - amount` and emits `Frozen` only if that changes it. So the frozen check passes. If `amount` is above the balance, `_releaseFrozen` reverts with `ERC20InsufficientBalance`. A holder or vault burn, such as `redeem`, does not, so frozen tokens cannot be redeemed.
 - **`forcedTransfer`.** It calls `_releaseFrozen` first, then moves the tokens as `FORCED`. If `amount` is above the balance it reverts with `ERC20InsufficientBalance`.
 - **The hook is read once.** `afterTransfer` goes to the hook that approved the movement.
 - **`afterTransfer` is optional.** `ComplianceHook.wantsAfter()` is true only if at least one installed rule wants `after_`.
@@ -83,7 +81,7 @@ Code: `PolicyGatedERC20Upgradeable._update`, `_check`, `_releaseFrozen`.
 
 `ComplianceHook.beforeTransfer` copies its rule list into memory, returns `NO_RULES` if the list is empty, and otherwise calls `check` on each rule in order. The first reason that is not `TRANSFER_OK` is returned. `afterTransfer` accepts only the token it is bound to and calls `after_` on the rules that asked for it when the list was installed.
 
-The rule order is set when the hook is deployed. The Ignition module (`RULE_ORDER` in `ignition/modules/roles.ts`) uses:
+The initial order is passed to the hook's constructor. The main timelock can later replace the whole ordered list with `setRules`. The Ignition module (`RULE_ORDER` in `ignition/modules/roles.ts`) uses:
 
 | Token | Order |
 |---|---|
@@ -106,13 +104,15 @@ Code: `ComplianceHook.beforeTransfer`, `afterTransfer`, `_setRules`.
 | `MaxHoldersRule.check` | caps a new holder | caps a new holder | passes | caps a new holder | passes |
 | `MaxHoldersRule.after_` | updates the count | updates the count | updates the count | updates the count | updates the count |
 
+The `FORCED` column also covers the enforcement mint in `recoverClaimable`, where `from` is 0. Each standard rule has a unit test for that case. No code path produces `FORCED` with `to == 0`; the project brief reserves it.
+
 ### IdentityRule
 
 Calls `isVerified(address)` on the identity registry that was passed to its constructor. The registry address is an immutable, so it is part of the attested codehash.
 
-The sender is checked unless the kind is `MINT` or `FORCED`. The receiver is checked unless the kind is `BURN`. The sender check comes first. The caller, the spender and the executor are never checked. Only `from` and `to` are.
+The sender is checked unless the kind is `MINT` or `FORCED`. The receiver is checked unless the kind is `BURN`. The sender check comes first. `IdentityRule` never checks the caller, the spender or the executor. It checks only `from` and `to`.
 
-A holder who loses verification can no longer send or receive. The agent can still take their tokens with `forcedTransfer`, but only to a verified account.
+A holder who loses verification can no longer send or receive. The burner cannot burn their tokens either, because a `BURN` checks `from`. The agent can still take their tokens with `forcedTransfer`, but only to a verified account.
 
 Rule id: `keccak256('IdentityRule.v1')`.
 
@@ -120,7 +120,13 @@ Rule id: `keccak256('IdentityRule.v1')`.
 
 Keeps an unlock time for each token and holder. It looks at `from`. The movement passes if `block.timestamp >= unlockTime`, which includes the stored 0 for "not locked".
 
-While locked, `TRANSFER` and `EXECUTED` return `LOCKED`. `BURN` returns `LOCKED` unless the operator holds `BURNER_ROLE` on the token, which makes a burn by the burner an enforcement action that ignores the lock. On `Gated4626Vault`, a holder's `redeem` or `withdraw` is a holder burn and respects the lock. For a non-zero amount the caller sees `ERC4626ExceededMaxRedeem` or `ERC4626ExceededMaxWithdraw`, because the vault's `max*` is 0 for a locked owner. On `Gated7540Vault` the lock applies at `requestRedeem`, which moves the shares to the vault as a `TRANSFER`. The later claim calls no hook. `FORCED` and `MINT` pass. A locked holder can still receive tokens, and the lock covers the whole balance, including tokens received later.
+While locked, `TRANSFER` and `EXECUTED` return `LOCKED`. `BURN` returns `LOCKED` unless the operator holds `BURNER_ROLE` on the token, which makes a burn by the burner an enforcement action that ignores the lock. On `Gated4626Vault`, a holder's `redeem` or `withdraw` is a holder burn and respects the lock. For a non-zero amount the caller sees `ERC4626ExceededMaxRedeem` or `ERC4626ExceededMaxWithdraw`, because the vault's `max*` is 0 for a locked owner. The `max*` probe treats the owner as the operator. This matches the real burn unless an account holds the vault's `BURNER_ROLE`, which `Activate` never grants.
+
+On `Gated7540Vault` the lock applies twice:
+- at `requestRedeem`, which moves the owner's shares to the vault as a `TRANSFER`;
+- at the claim, where `redeem` and `withdraw` run a zero-amount burn pre-flight on the controller, so a locked controller cannot collect until the unlock. The pre-flight treats the controller as the operator, so a controller holding the vault's `BURNER_ROLE` would pass; `Activate` never grants that role on a vault.
+
+`FORCED` and `MINT` pass. A locked holder can still receive tokens, and the lock covers the whole balance, including tokens received later.
 
 `setLockup(token, holder, unlockTime)` needs `AGENT_ROLE` on the token. A time at or before now clears the lock. The holder cannot be the zero address.
 
@@ -182,7 +188,7 @@ Each code is `keccak256` of its name, so `TRANSFER_OK` is not zero. A hook or ru
 | `INTENT_EXPIRED` | `executeTransfer` and `canExecute`, when `block.timestamp > deadline` |
 | `NONCE_USED` | `executeTransfer`, `canExecute`, and `cancelIntent` |
 | `BAD_SIGNATURE` | `executeTransfer` |
-| `NO_HOOK` | the base, when the token has no hook |
+| `NO_HOOK` | the base, when the token has no hook. An initialised proxy always has one (initialisation and `setPolicyHook` refuse the zero address), so in practice only a bare implementation returns it |
 | `NO_RULES` | `ComplianceHook`, when its rule list is empty |
 
 ## How a rejection reaches the caller
@@ -192,16 +198,16 @@ Each code is `keccak256` of its name, so `TRANSFER_OK` is not zero. A hook or ru
 | Any token entry point | revert `PolicyGated_TransferRejected(bytes32 reason)` |
 | `IntentExecutor.execute` | the token's revert, unchanged |
 | `IntentExecutor.executeBatch` | revert `IntentExecutor_BatchItemFailed(index, reason)`, where `reason` is the token's revert data. The whole batch is undone |
-| `Gated4626Vault.deposit`, `mint`, `withdraw`, `redeem` when the matching `max*` is lower than the request | OpenZeppelin's `ERC4626ExceededMaxDeposit`, `ERC4626ExceededMaxMint`, `ERC4626ExceededMaxWithdraw`, `ERC4626ExceededMaxRedeem`, before `_update` runs. The vault's `max*` functions ask the hook through a view call, so for a non-zero amount a policy rejection appears as a max of 0 and this error, not as `PolicyGated_TransferRejected`. A zero-amount call passes the max check. It reverts with `PolicyGated_TransferRejected` if the token is paused, or if the hook rejects a zero-amount movement: `IdentityRule` does for an unverified receiver (`deposit`, `mint`) or owner (`withdraw`, `redeem`), and `LockupRule` does for a locked owner. `MaxHoldersRule` does not |
-| `Gated7540Vault.requestDeposit`, and the claims `deposit`, `mint`, `redeem`, `withdraw` | `Gated7540Vault_ControllerNotEligible(reason)` when the controller fails its pre-flight (claims re-check it since v0.2.0) |
-| `Gated7540Vault.redeem`, `withdraw` while paused | OpenZeppelin's `EnforcedPause`, before the controller check |
-| `Gated7540Vault.recoverClaimable` | `Gated7540Vault_RecipientNotEligible(reason)` when the recovery account fails the identity check |
+| `Gated4626Vault.deposit`, `mint`, `withdraw`, `redeem` when the matching `max*` is lower than the request | OpenZeppelin's `ERC4626ExceededMaxDeposit`, `ERC4626ExceededMaxMint`, `ERC4626ExceededMaxWithdraw`, `ERC4626ExceededMaxRedeem`, before `_update` runs. The vault's `max*` functions ask the hook through a view call, so for a non-zero amount a policy rejection appears as a max of 0 and this error, not as `PolicyGated_TransferRejected`. A zero-amount call passes the max check. It reverts with `PolicyGated_TransferRejected` if the token is paused, or if the hook rejects a zero-amount movement: `IdentityRule` does for an unverified receiver (`deposit`, `mint`) or owner (`withdraw`, `redeem`), and `LockupRule` does for a locked owner. `MaxHoldersRule` does not. The `max*` probe treats the owner as the operator, which matches the real burn with the roles `Activate` grants |
+| `Gated7540Vault.requestDeposit`, the deposit claims `deposit` and `mint`, and the redemption claims `redeem` and `withdraw` | `Gated7540Vault_ControllerNotEligible(reason)`, from the controller check that runs before anything moves |
+| `Gated7540Vault.recoverClaimable` | `Gated7540Vault_RecipientNotEligible(reason)` if `to` fails the pre-flight, a zero-amount `FORCED` mint to `to` through the hook. With the standard rules only `IdentityRule` can reject it |
+| `Gated7540Vault.redeem`, `withdraw` while paused | OpenZeppelin's `EnforcedPause`, before any other check |
 
 `transfer` never returns `false`. A rejected transfer reverts.
 
 ## Pre-flight calls
 
-The token has three read functions that run the same checks as the write path without writing. They run at the current block's timestamp. A transaction mined in a later block can see a different time, which matters at a lockup end, a window edge or an intent deadline.
+Every token has `canTransfer` and `isUserAllowed`. `IntentToken` also has `canExecute`. `canTransfer` and `canExecute` run the same checks as the write path without writing. `isUserAllowed` asks only the hook. All three run at the current block's timestamp. A transaction mined in a later block can see a different time, which matters at a lockup end, a window edge or an intent deadline.
 
 | Function | What it asks |
 |---|---|
@@ -215,12 +221,12 @@ Differences from the real call:
 - None of the three runs `afterTransfer`.
 - Apart from these, `canTransfer` and `canExecute` run the same `_check` as the write. `RuleSetIntegration.t.sol` and `test/nodejs/parity.test.ts` compare their answers with the state-changing calls.
 
-`Gated4626Vault` builds all four `max*` functions from the same internal function that `canTransfer` uses. `Gated7540Vault` does so only for `maxDeposit` and `maxMint`. Its `maxRedeem` and `maxWithdraw` check pause only. See [flows-vaults.md](flows-vaults.md).
+Both vaults build all four `max*` functions from the same internal function that `canTransfer` uses. `Gated4626Vault` asks `canTransfer(0, receiver, 1)` and `canTransfer(owner, 0, 1)`. `Gated7540Vault` asks `canTransfer(0, controller, 1)` for `maxDeposit` and `maxMint`, and the zero-amount burn probe `canTransfer(controller, 0, 0)` for `maxRedeem` and `maxWithdraw`. See [flows-vaults.md](flows-vaults.md).
 
 Code: `PolicyGatedERC20Upgradeable.canTransfer`, `isUserAllowed`, `_canTransfer`, `IntentSettledUpgradeable.canExecute`.
 
 ## Reentrancy
 
-`_update` is `nonReentrant` and uses transient storage (`ReentrancyGuardTransient`). A rule's `check` runs under `STATICCALL` and cannot write at all. `after_` can write, and runs while the guard is held, so a call from a rule that reaches `_update` reverts with `ReentrancyGuardReentrantCall`. `transfer` does. A call that fails an earlier check reverts with that check's error instead: `AccessControlUnauthorizedAccount` from the role gate on `IntentToken.mint` and `burn` and on `forcedTransfer` of every token, or `ERC20InsufficientAllowance` from `transferFrom`. The vaults' `mint` and `burn` revert with `Gated4626Vault_Unsupported` or `Gated7540Vault_Unsupported` instead. `MockReentrantRule` calls `transfer(ctx.to, 0)` from `after_`, and `IntentToken.t.sol` expects that revert.
+`_update` is `nonReentrant` and uses transient storage (`ReentrancyGuardTransient`). A rule's `check` runs under `STATICCALL` and cannot write at all. `after_` can write, and runs while the guard is held, so a call from a rule that reaches `_update` reverts with `ReentrancyGuardReentrantCall`. `transfer` does. A call that fails an earlier check reverts with that check's error instead. Examples are `AccessControlUnauthorizedAccount` from a role gate, and `ERC20InsufficientAllowance` from `transferFrom`. The role-gated functions include `IntentToken.mint` and `burn`, `forcedTransfer`, `executeTransfer`, and the 7540 fulfil, reject and recover functions. On the vaults, `mint(address,uint256)` and `burn(address,uint256)` have no role check: they revert with `Gated4626Vault_Unsupported` or `Gated7540Vault_Unsupported` for every caller. Their share `mint` functions reach `_update` like `transfer`. `MockReentrantRule` calls `transfer(ctx.to, 0)` from `after_`, and `IntentToken.t.sol` expects that revert.
 
 Code: `PolicyGatedERC20Upgradeable._update`, `contracts/test/MockReentrantRule.sol`.

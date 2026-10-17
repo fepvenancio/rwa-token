@@ -2,7 +2,7 @@
 
 These pages explain how the contracts in `contracts/` work and how they are deployed. They describe what the code does. Where the build brief ([CLAUDE.md](../CLAUDE.md)) or the [README](../README.md) says something different, the code is right, and the page follows the code.
 
-Checked against: the contracts and Ignition modules at commit `6fb8e05`. If a later commit changes them, these pages may be out of date.
+Checked against: the contracts and Ignition modules of release `v0.2.0` (commit `ca88619`). If a later commit changes them, these pages may be out of date.
 
 ## Which page answers what
 
@@ -32,15 +32,15 @@ Other documents in the repo: [README.md](../README.md) has the security model su
 | Context | The `TransferContext` struct the token builds for each movement and passes to the hook and rules |
 | Reason code | A `bytes32` returned instead of `TRANSFER_OK` to reject a movement. Listed in `contracts/interfaces/Errors.sol` |
 | Attested | A runtime codehash recorded in `PolicyRegistry` as `HOOK`, `RULE` or `IMPLEMENTATION` |
-| Timelock | The main timelock, `GovernanceTimelock` (OpenZeppelin's `TimelockController` plus one revoke-only recovery power). It holds the admin powers after deployment |
-| Recovery timelock | A second timelock nobody can cancel. It can only unpause and remove the guardian |
-| Guardian | A multisig that can pause tokens and the executor, and cancel main-timelock operations. It can do nothing else, and cannot block its own removal by the recovery timelock |
-| Council | The security council multisig, holder of `ATTESTER_ROLE` on the registry |
-| Agent | The holder of `AGENT_ROLE`: forced transfers, freezes, lockups, recovery of pending redemptions and of claimable balances |
+| Main timelock | `GovernanceTimelock`, OpenZeppelin's `TimelockController` with one added recovery power. It holds the admin powers after deployment |
+| Recovery timelock | A second, plain `TimelockController`. As deployed, nobody can cancel its operations. Through `RECOVERY_ROLE` it can only unpause the tokens and the executor, revoke `GUARDIAN_ROLE` on them, and revoke `CANCELLER_ROLE` on the main timelock |
+| Guardian | The account, a multisig in a real deployment, that can pause tokens and the executor and cancel operations on the main timelock. It can do nothing else, and the recovery timelock can remove it |
+| Council | The security council, a multisig in a real deployment, holder of `ATTESTER_ROLE` on the registry |
+| Agent | The holder of `AGENT_ROLE`: forced transfers, freezes, lockups, and in `Gated7540Vault` recovery of pending redemptions and of claimable amounts |
 | Operator | Three different things. See [roles.md](roles.md) |
 | Intent | A transfer the holder signs (EIP-712) and an executor submits |
-| Frozen | An amount of a holder's balance that the holder cannot move, set by the agent |
-| Controller | In `Gated7540Vault`, the account that owns a request's bookkeeping and makes the claim |
+| Frozen | An amount of a holder's balance that the holder cannot move. The agent sets it. Enforcement actions (`burn`, forced transfers, the 7540 vault's recovery of pending redemptions) lower it as far as they need |
+| Controller | In `Gated7540Vault`, the account that owns a request's bookkeeping. The claim is made by the controller or by an operator it approved |
 | Fulfiller | The holder of `FULFILLER_ROLE` on `Gated7540Vault`. It decides price and timing of fulfilments |
 | Custody | In `Gated7540Vault`, the address that receives the assets of fulfilled deposits |
 
