@@ -744,11 +744,13 @@ An Ignition deployment of the whole stack:
   - Local runs had hidden it because the artifacts already existed.
 - **Fix:** CI now runs `npx hardhat build` before `npm run typecheck`.
 
-### Open finding (decision needed)
-- **upgrades-core warns that both vaults call initializers out of order.** `__ERC4626_init` comes before the base's `__PolicyGatedERC20_init`, which contains `__ERC20_init` and `__ERC20Permit_init`.
-  - It is a warning, not an error, and as far as I can tell behaviour-neutral: `__ERC4626_init` only records the asset and its decimals.
-  - The clean fix expands the base initializer inside both vaults: `__ERC20_init`, then `__ERC4626_init`, then `__ERC20Permit_init`, then `__AccessControl_init`, then `__Pausable_init`, then `__PolicyGatedERC20_init_unchained`. That touches Phase 5 code and changes the implementations' bytecode, which is fine before the first deployment.
-  - **Recommended: apply it** so the gate is silent.
+### Vault initializer order (owner: fix it, 2026-10-17)
+- **The warning:** upgrades-core flagged both vaults for calling `__ERC4626_init` before the base's composite `__PolicyGatedERC20_init`.
+- **The fix:** both now expand that initializer in linearized order: `__ERC20_init`, then `__ERC4626_init`, then `__ERC20Permit_init` (which includes EIP712), then `__AccessControl_init`, then `__Pausable_init`, then `__PolicyGatedERC20_init_unchained`.
+- **Result:**
+  - `validate:upgrades`: 3 passed, no upgrades-core warnings;
+  - vault suites: 93 passing; full suite: 415 passing.
+- **Still printed:** 8 solc "unreachable code" warnings from inside OZ's `ERC4626Upgradeable` (code after the 7540 vault's always-reverting `preview*` overrides). They are not ours, and the count was the same before the change.
 
 ## Open questions for the owner
-1. The vault initializer-order warning above: apply the fix, or accept the warning?
+1. None.

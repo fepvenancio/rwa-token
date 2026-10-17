@@ -108,8 +108,13 @@ contract Gated7540Vault is
     address _custody
   ) external initializer {
     if (_custody == address(0)) revert Gated7540Vault_ZeroAddress();
+    // Parent initializers in linearized order (OZ upgrades-core): the base's composite init is expanded around ERC4626.
+    __ERC20_init(_name, _symbol);
     __ERC4626_init(_asset);
-    __PolicyGatedERC20_init(_name, _symbol, _admin, _guardian, _registry, _hook);
+    __ERC20Permit_init(_name);
+    __AccessControl_init();
+    __Pausable_init();
+    __PolicyGatedERC20_init_unchained(_admin, _guardian, _registry, _hook);
     Gated7540Storage storage $ = _getGated7540Storage();
     $.custody = _custody;
     $.lastPrice = 10 ** decimals();
