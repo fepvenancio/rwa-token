@@ -1,6 +1,6 @@
 # PLAN
 
-Status: **Phase 6 (viem integration) built and green (2026-10-17); awaiting review. Not pushed.**
+Status: **Phase 6 approved and pushed (`a2082b8`). Phase 7 (deploy + security): plan written, awaiting review. No Phase 7 code yet.**
 
 Brief v2 ("Gated Token Stack") replaced the original executor-only brief on 2026-10-16. On the same day the owner supplied a reference implementation in `Imported/` (now deleted; its contents live in `contracts/`) and approved, in chat, integrating it with the major findings fixed, a common-bug sweep, and the Wonderland Solidity standards.
 
@@ -488,7 +488,7 @@ Each gets red tests, then the implementation, then green, then a stop for review
   - **Tests** (red first): agent-only, nothing pending, zero recipient, the FORCED context with the event, works while paused, and fulfil/reject say "no request" afterwards. Integration runs the owner's sequence: de-verified controller → reject reverts → recovery to an unverified account reverts → recovery to a verified treasury → fulfil and reject revert with no request. **The invariant handler fuzzes recovery**, so escrow == Σ pending still holds across sequences. **Mutation check:** a recovery that doesn't clear pending is caught by 3 tests and the invariant.
 - **Verification:** `npm test` gives 347 passing (346 solidity, 1 nodejs); lint, typecheck and fmt are clean; Slither reports 0; Halmos 4/4.
 
-## Phase 6 — viem integration (built 2026-10-17, awaiting review)
+## Phase 6 — viem integration (approved and pushed 2026-10-17)
 
 ### Goal (brief §8)
 `test/nodejs/*.test.ts` (node:test + viem, `network.create()`) covering:
@@ -601,5 +601,80 @@ The temporary `smoke.test.ts` is deleted.
 - `npx hardhat test`: **392 passing (346 solidity, 46 nodejs)**.
 - solhint clean, `tsc` clean, `forge fmt --check` clean, Slither 0 results, Halmos 4 passed / 0 failed, 0 iCloud duplicates.
 
+## Phase 7 — deploy + security (PLAN, awaiting review)
+
+### Goal (brief §8)
+An Ignition deployment of the whole stack:
+1. registry → attest implementations, hook and rules → timelock (≥ 7 days, guardian as canceller) → proxies → roles → guardian multisig;
+2. one implementation per template, one proxy per token;
+3. `npx @openzeppelin/upgrades-core validate`;
+4. Slither clean and Halmos green. Both are already gates in CI and stay that way.
+
+### Facts that shape the plan (verified 2026-10-17)
+- **A proxy can't start without a hook.** `_setHook` rejects `address(0)` and requires a HOOK attestation, so `initialize` needs an attested hook.
+- **A hook is bound to one token.** `ComplianceHook.TOKEN` is an immutable and part of the hook's codehash, so the hook must exist and be attested before the proxy, and it needs the proxy's address in advance.
+- **Ignition can't predict that address safely.** The Phase 6 fixture predicts it from the deployer's nonce. Ignition batches transactions from one account, can interleave independent futures, and can resume a failed run, so a nonce-predicted address is not reliable there. A wrong prediction doesn't fail the proxy deploy; it yields a token whose hook rejects every `afterTransfer`.
+- **The council's attestations are outside Ignition.** On a real network the attester is the security council multisig, and Ignition can't sign for it. Rules must be attested before a hook is constructed (the hook constructor checks them), and the hook before its proxy. So a live deployment has two council steps.
+- **OZ's TimelockController** constructor grants PROPOSER and CANCELLER to the proposers. Giving the guardian CANCELLER needs an admin, so the deployer is the timelock's admin only long enough to grant it, then renounces (the same configure-then-hand-over as everything else).
+- **UUPS `__self` immutable:** redeploying an implementation produces a new codehash. An upgrade test can therefore show that an unattested build of identical source is rejected.
+- **Tooling:**
+  - `@nomicfoundation/hardhat-ignition` 3.1.9 and `-viem` are installed. The builder offers `getParameter`, `getAccount`, `staticCall`, `encodeFunctionCall` and `after`.
+  - `@openzeppelin/upgrades-core` is not installed. Hardhat 3 splits each build-info into `<id>.json` plus `<id>.output.json`, which upgrades-core may not read. The documented alternative is Foundry build-info with `storageLayout` extra output, which already goes to `forge-out/`. To verify at implementation time.
+
+### Proposed design
+1. **`contracts/deploy/ProxyDeployer.sol`: a one-shot CREATE helper, the only new contract.**
+   - Its constructor records its own first CREATE address as `PROXY`, a pure function of the helper's address and nonce 1, unaffected by anything the deployer EOA does.
+   - `deploy(impl, initData)`: owner only, once only. It creates the `ERC1967Proxy` and asserts the result equals `PROXY`.
+   - It holds no roles and is neither a hook nor a rule, so it needs no attestation.
+   - It ships with an interface, a `.t.sol` and NatSpec, per rule 16.
+   - About 30 lines. The alternatives are below (Q1).
+2. **Ignition modules (`ignition/modules/`), split at the council steps:**
+   - `Components`:
+     - deploys the timelock (admin = deployer; minDelay = 7 days; proposers and executors = governance multisig);
+     - deploys the registry (admin = timelock, attester = council);
+     - deploys the rules, the three implementations, and one `ProxyDeployer` per token;
+     - deploys the executor (admin = deployer);
+     - takes the identity registry address as a parameter.
+   - *Council step 1:* attest the rules and the implementations.
+   - `Tokens`: deploys one hook per token (admin = timelock, token = `ProxyDeployer.PROXY`, initial rules), reading `PROXY` with `staticCall`.
+   - *Council step 2:* attest the hooks.
+   - `Activate`:
+     - `ProxyDeployer.deploy` for each proxy, initialised with admin = deployer;
+     - configure the rules: window, caps, 7540 exemption, verification of the escrow vault;
+     - grant roles: MINTER, BURNER and AGENT to the ops accounts; EXECUTOR to IntentExecutor; FULFILLER; UPGRADER to the timelock; OPERATOR;
+     - grant CANCELLER on the timelock to the guardian;
+     - hand over: DEFAULT_ADMIN_ROLE to the timelock everywhere; the deployer renounces it on the tokens, executor and timelock.
+   - **Parameters:** governance multisig, council, guardian, ops accounts, identity registry, minDelay (default 7 days), caps and window.
+3. **The fixture becomes the runner for the modules.**
+   - `fixtures.ts` deploys `Components`, plays the council (local attester wallet), deploys `Tokens`, plays the council again, then deploys `Activate`, and ends in `assertHandedOver`, extended to the timelock and to "the guardian holds CANCELLER and nothing that proposes or executes".
+   - The order then lives in the modules, and the fixture adds only the council steps. This fulfils Q2 ("import or mirror"). Phase 6's 46 tests rerun unchanged on the Ignition deployment, because none of them needs the admin after deploy.
+4. **`test/nodejs/governance.test.ts` (new), everything through the real timelock:**
+   - Upgrades:
+     - an upgrade to an attested implementation can't execute before 7 days and executes after;
+     - an upgrade to an unattested redeploy reverts `PolicyGated_NotAttested` at execution;
+   - Guardian:
+     - cancels a pending operation;
+     - cannot schedule or execute;
+     - pauses the token and the executor, but only the timelock unpauses.
+   - Policy changes: a hook swap (`setPolicyHook`) and `setRules` go through the timelock and take effect only after the delay.
+5. **upgrades-core:** pin `@openzeppelin/upgrades-core` as a devDependency (named in the brief; OZ only, rule 1). Add `npm run validate:upgrades` over the Foundry build-info with `storageLayout`, and a CI step for it. The `@custom:oz-upgrades-unsafe-allow constructor` annotations are already on every implementation.
+6. **README:** a deployment runbook covering the three modules, the two council steps with how to recompute a codehash before attesting, and the post-deploy checks (the same assertions as the fixture).
+
+### Decisions needed (recommendation first)
+- **Q1. How the hook learns its proxy's address:**
+  - **(a) Recommended:** `ProxyDeployer` (above). Deterministic, safe to resume, and immune to stray transactions; costs about 30 lines of audited surface.
+  - (b) Predict from the deployer's nonce as the Phase 6 fixture does, plus a post-deploy check. No new contract, but fragile under Ignition batching and resume, and a mismatch is found only after the proxy exists.
+  - (c) CREATE3 via CreateX, an external factory at a fixed address. No circularity, but a new external dependency, which must be etched onto the local network.
+  - (d) Let the base initialise with no hook (fail closed with NO_HOOK) and set it during configuration. The cleanest order, but it changes the base and the documented init semantics.
+- **Q2. Timelock executors:**
+  - **(a) Recommended:** the governance multisig only.
+  - (b) Open execution (`address(0)`): anyone may execute once the delay passes.
+- **Q3. Real networks in this phase:** add a `sepolia` network entry with `configVariable` and the keystore, plus a dry-run doc? **Recommended: no.** Phase 7 proves the modules on the in-process network; a real network is a separate step with your RPC and keys.
+- **Q4. Who holds UPGRADER_ROLE after hand-over:** **recommended: the timelock only** (brief rule 13). Phase 6 gave it to the plain admin.
+
+### Out of scope
+- No changes to interfaces or existing contracts, unless Q1 (d) is chosen, which touches the base.
+- No Mythril (brief §8).
+
 ## Open questions for the owner
-1. Phase 7 starts after review: an Ignition module mirroring `fixtures.ts`, with the TimelockController in place of the plain admin.
+1. Q1–Q4 above.
