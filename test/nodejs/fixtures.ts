@@ -15,7 +15,7 @@ import {
 
 import Activate from "../../ignition/modules/Activate.js";
 import Components from "../../ignition/modules/Components.js";
-import { ROLES } from "../../ignition/modules/roles.js";
+import { ROLES, RULE_ORDER } from "../../ignition/modules/roles.js";
 import Tokens from "../../ignition/modules/Tokens.js";
 
 /**
@@ -208,7 +208,8 @@ export type Stack = Awaited<ReturnType<typeof deployStack>>;
  * - the deployer holds no role (every `*_ROLE()` getter, so later roles are covered) on the timelock, registry,
  *   tokens or executor, while the timelock holds DEFAULT_ADMIN_ROLE on each, so the check is not vacuous;
  * - UPGRADER_ROLE is held by the timelock and nobody else that the stack knows about;
- * - every hook is bound to its token and administered by the timelock; rules have no access control of their own;
+ * - every token runs the hook the council reviewed, bound to it, administered by the timelock, with the intended
+ *   ordered rule list (`RULE_ORDER`); rules have no access control of their own;
  * - the guardian can cancel timelock operations but cannot propose or execute them;
  * - `ProxyDeployer` is owned by the timelock, so no token can be placed outside governance.
  */
@@ -232,15 +233,21 @@ async function assertHandedOver(s: Omit<Stack, "holders" | "identity" | "asset" 
     assert.equal(await t.read.hasRole([ROLES.UPGRADER, timelock]), true, `timelock lacks UPGRADER_ROLE on ${t.address}`);
     for (const account of known) assert.equal(await t.read.hasRole([ROLES.UPGRADER, account]), false, `${account} can upgrade`);
   }
+  // `s.hooks` are the hooks the council reviewed (stage 2). A twin with the same immutables shares their attested
+  // codehash whatever its rules, so check the token runs that exact hook and that its rule list is the intended one.
   const bound = [
-    [s.hooks.token, s.token],
-    [s.hooks.vault4626, s.vault4626],
-    [s.hooks.vault7540, s.vault7540],
+    [s.hooks.token, s.token, RULE_ORDER.intent],
+    [s.hooks.vault4626, s.vault4626, RULE_ORDER.fund],
+    [s.hooks.vault7540, s.vault7540, RULE_ORDER.asyncFund],
   ] as const;
-  for (const [hook, t] of bound) {
+  for (const [hook, t, order] of bound) {
     assert.ok(isAddressEqual(await hook.read.TOKEN(), t.address), `hook ${hook.address} bound elsewhere`);
     assert.ok(isAddressEqual(await t.read.policyHook(), hook.address), `token ${t.address} runs another hook`);
     assert.ok(isAddressEqual(await hook.read.ADMIN(), timelock), `hook ${hook.address} admin`);
+    const expected = order.map((name) => s.rules[name].address);
+    const actual = await hook.read.rules();
+    assert.equal(actual.length, expected.length, `hook ${hook.address} rule count`);
+    actual.forEach((rule, i) => assert.ok(isAddressEqual(rule, expected[i]), `hook ${hook.address} rule ${i}`));
   }
   for (const rule of Object.values(s.rules)) {
     const names = (rule.abi as Abi).flatMap((item) => (item.type === "function" ? [item.name] : []));

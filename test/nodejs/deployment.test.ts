@@ -53,6 +53,26 @@ describe("deployment (Ignition: Components → council → Tokens → council �
 
 });
 
+describe("deployment with a twin hook passed to Activate", async function () {
+  const connection = await network.create();
+  const stages = () => deployUntilActivate(connection);
+
+  it("a twin of the reviewed hook (same immutables, weaker rules) installs, and the post-deploy check rejects it", async function () {
+    const { activate, parameters, components } = await connection.networkHelpers.loadFixture(stages);
+    const token = await components.proxyDeployer.read.predict([TOKENS.intent.symbol, components.intentImpl.address]);
+    // Same admin, registry and token as the reviewed hook, so the same codehash, already attested: only max-holders.
+    const twin = await connection.viem.deployContract("ComplianceHook", [
+      components.timelock.address,
+      components.registry.address,
+      token,
+      [components.maxHoldersRule.address],
+    ]);
+    assert.equal(await components.registry.read.isAttested([twin.address, 1]), true, "the attestation covers the twin");
+    // ProxyDeployer checks the binding only, so Activate completes; the hand-over check is what refuses it.
+    await assert.rejects(activate({ ...parameters, intentHook: twin.address }), /runs another hook/);
+  });
+});
+
 describe("deployment with a tampered Activate", async function () {
   // A fresh chain: the fixture pins the clock, which only moves forward on a shared connection.
   const connection = await network.create();

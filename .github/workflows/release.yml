@@ -1,0 +1,40 @@
+name: Release build
+
+# On a version tag: prove the build is reproducible, then attach the reference build (manifest + build-info) to the
+# GitHub release for that tag. The council compares its own clean build at the tag against this artefact before
+# attesting anything.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  reference-build:
+    name: Reproducible reference build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+      - run: npm ci
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.8.1
+      - run: npm run verify:reproducible
+      - name: Package
+        run: |
+          tar -czf "release-build-${GITHUB_REF_NAME}.tar.gz" release-build
+          sha256sum "release-build-${GITHUB_REF_NAME}.tar.gz" > "release-build-${GITHUB_REF_NAME}.tar.gz.sha256"
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          files=("release-build-${GITHUB_REF_NAME}.tar.gz" "release-build-${GITHUB_REF_NAME}.tar.gz.sha256")
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            && gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber \
+            || gh release create "$GITHUB_REF_NAME" "${files[@]}" --verify-tag --notes "Reference build for ${GITHUB_REF_NAME}: manifest.json and build-info."

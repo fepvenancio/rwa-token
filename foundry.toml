@@ -9,6 +9,8 @@ solc_version = '0.8.30'
 evm_version = 'cancun'
 optimizer = true
 optimizer_runs = 200
+# Same as hardhat.config.ts: no metadata hash, so bytecode does not depend on remappings or paths.
+bytecode_hash = 'none'
 # Hardhat resolves npm packages itself; forge needs forge-std's src/ mapped explicitly.
 remappings = ['forge-std/=node_modules/forge-std/src/']
 

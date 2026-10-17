@@ -57,6 +57,8 @@ contract InterfaceFreezeTest is Test {
     assertEq(type(IGated7540Vault).interfaceId, bytes4(0x316209a5), 'IGated7540Vault');
     assertEq(type(IIdentityRule).interfaceId, bytes4(0x150c4aea), 'IIdentityRule');
     assertEq(type(IIdentityRegistry).interfaceId, bytes4(0xb9209e33), 'IIdentityRegistry');
+    // Added in Phase 7 (2026-10-17), after ProxyDeployer moved to OZ Ownable
+    assertEq(type(IProxyDeployer).interfaceId, bytes4(0x886d8cd8), 'IProxyDeployer');
   }
 
   function test_WhenInterfacesCompile_TheirEventTopicsArePinned() external pure {

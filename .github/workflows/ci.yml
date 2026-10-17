@@ -32,7 +32,7 @@ jobs:
       - run: npm test
 
   analysis:
-    name: Format, Slither gate, Halmos, upgrade safety
+    name: Format, Slither gate, Halmos, upgrade safety, reproducibility
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -53,3 +53,5 @@ jobs:
       - run: slither .
       - run: npm run test:halmos
       - run: npm run validate:upgrades
+      # Same bytecode from 2 clean production builds, the default profile and forge; TokenProxy matches ProxyDeployer.
+      - run: npm run verify:reproducible

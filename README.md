@@ -66,6 +66,8 @@ Every contract has its `.t.sol` next to it. [`PLAN.md`](PLAN.md) tracks phases a
   rejection reverts with `PolicyGated_TransferRejected(bytes32 reason)`; `transfer` never returns `false`.
 - **Pre-flight parity.** `canTransfer` and `canExecute` run the same checks as the state-changing path.
 - **Reentrancy.** `_update` is `nonReentrant` (transient storage); rules cannot call back into the token.
+- **Reproducible builds.** solc 0.8.30, cancun, optimizer 200 runs, and no metadata hash, in both Hardhat and forge.
+  Every codehash and CREATE2 address can be recomputed from the source at a tag; CI fails if two clean builds disagree.
 - **Deployment.** One implementation per template, deployed and attested once, with one proxy per token. Each
   implementation deployment has its own codehash, because UUPS stores `address(this)` in an immutable. Each proxy sits
   at a CREATE2 address fixed before its hook exists, and `ProxyDeployer` refuses to deploy unless the hook is bound to
@@ -84,20 +86,32 @@ playing the council and the identity provider, and ends with the post-deploy che
    - the four rules, one implementation per template, `ProxyDeployer` (owner = deployer), and `IntentExecutor`.
 
    Parameters: `governance`, `council`, `guardian`, `identityRegistry`, `minDelay`.
-2. **Council step 1.** For each rule and implementation, recompute the runtime codehash from the reviewed source and
-   compare it with `extcodehash` of the deployed address, then `attest(codehash, RULE | IMPLEMENTATION, auditUri)`.
+2. **Council step 1.** Attest only when two independent sources agree:
+   - **Reproduce:** check out the release tag and run `npm ci && npm run verify:reproducible`. This builds from clean
+     several ways, fails unless they all agree, and writes `release-build/manifest.json`.
+   - **Compare with the published reference:** the release's `release-build-<tag>.tar.gz`, attached by the release
+     workflow, after checking its `.sha256`. Its `manifest.json` must equal yours, contract by contract.
+   - **Compare with the chain:** for each rule and implementation, take the manifest's `runtime` code, fill its
+     `immutableSlots` with the bytes at the same positions in the deployed code, and confirm those bytes are the
+     expected constructor arguments (e.g. `IdentityRule`'s identity registry; an implementation's own address). Then
+     confirm the keccak256 of the result equals `extcodehash`.
+   - Then `attest(codehash, RULE | IMPLEMENTATION, auditUri)`. The record for the change board reads: computed from the
+     source at tag X, matched the release build, matched the chain.
+
    Also compute where each token will live, before any hook or proxy exists:
-   `CREATE2(ProxyDeployer, salt = keccak256(utf8(symbol)), initCode = TokenProxy.creationCode ++ abi.encode(implementation, ""))`.
-   `ProxyDeployer.predict(symbol, implementation)` returns the same address. Take `TokenProxy.creationCode` from the
-   `ProxyDeployer` build (its `evm.bytecode` in that build's output). A `TokenProxy` compiled in a different job can
-   differ in its trailing metadata hash, because solc metadata includes the job's remappings.
+   `CREATE2(ProxyDeployer, salt = keccak256(utf8(symbol)), initCode = TokenProxy.creationCode ++ abi.encode(implementation, ""))`,
+   with `TokenProxy.creationCode` from the manifest's `TokenProxy.creation`. `ProxyDeployer.predict(symbol,
+   implementation)` returns the same address. Builds carry no metadata hash, so this code is the same in every clean
+   build at the tag, and `verify:reproducible` checks that `ProxyDeployer` embeds exactly it.
 3. **`Tokens`** (deployer): one `ComplianceHook` per token, with `ADMIN` = timelock, `TOKEN` = the predicted address,
    and the token's initial rules in the constructor (which re-checks each rule's attestation).
 4. **Council step 2.** For each hook:
    - check that `TOKEN()` equals the address computed in step 2, `ADMIN()` is the timelock and `REGISTRY()` is the
      registry;
-   - read `rules()`: the attestation covers the code and the immutables, not the rule list, which lives in storage;
-   - then `attest(codehash, HOOK, auditUri)`.
+   - read `rules()` and compare it with the intended ordered list (`RULE_ORDER` in `ignition/modules/roles.ts`): the
+     attestation covers the code and the immutables, not the rule list, which lives in storage;
+   - then `attest(codehash, HOOK, auditUri)`, and **record the hook addresses reviewed**. These are the addresses
+     passed to `Activate` as `<token>Hook`.
 
    `TOKEN` is an immutable, so the codehash covers the token: the council attests *this hook for this token*, which
    means one attestation per token, not per hook type. A later hook with the same admin, registry and token shares that
@@ -118,7 +132,9 @@ playing the council and the identity provider, and ends with the post-deploy che
 7. **Post-deploy checks** (the fixture's `assertHandedOver`):
    - the deployer holds no role on the timelock, registry, tokens or executor;
    - the timelock holds DEFAULT_ADMIN_ROLE everywhere and is the only UPGRADER;
-   - every hook's `TOKEN` is its token and every token's `policyHook` is its hook;
+   - every token's `policyHook()` is the hook address the council recorded in step 4, that hook's `TOKEN` is the
+     token, and its `rules()` equals `RULE_ORDER`. A twin hook with the same immutables but other rules carries the same
+     attested codehash and passes `ProxyDeployer`; this check is what refuses it;
    - the guardian can cancel timelock operations but cannot propose or execute them;
    - `ProxyDeployer.owner()` is the timelock;
    - `getMinDelay() ≥ 7 days`.
@@ -159,6 +175,13 @@ npm run test:halmos   # symbolic properties: nonce/signature and frozen-balance 
 ```bash
 npm run validate:upgrades   # OZ upgrades-core over a Foundry build with storage layouts
 ```
+
+```bash
+npm run verify:reproducible # identical bytecode across clean Hardhat (production, default) and forge builds; writes release-build/
+```
+
+On a `v*` tag, `.github/workflows/release.yml` reruns the reproducibility check and attaches `release-build-<tag>.tar.gz`
+(manifest + build-info, with its sha256) to the release as the council's reference.
 
 CI (`.github/workflows/ci.yml`) runs all of the above on every push and pull request.
 

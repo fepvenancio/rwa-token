@@ -1,6 +1,6 @@
 import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
 
-import { TOKENS } from "./roles.js";
+import { RULE_ORDER, TOKENS } from "./roles.js";
 
 /**
  * Stage 2 of 3. One `ComplianceHook` per token, bound to the address `ProxyDeployer` will put that token at:
@@ -15,26 +15,25 @@ export default buildModule("Tokens", (m) => {
   const timelock = m.getParameter<string>("timelock");
   const registry = m.getParameter<string>("registry");
   const proxyDeployer = m.contractAt("ProxyDeployer", m.getParameter<string>("proxyDeployer"));
-  const identityRule = m.getParameter<string>("identityRule");
-  const lockupRule = m.getParameter<string>("lockupRule");
-  const windowRule = m.getParameter<string>("windowRule");
-  const maxHoldersRule = m.getParameter<string>("maxHoldersRule");
+  const rules = {
+    identityRule: m.getParameter<string>("identityRule"),
+    lockupRule: m.getParameter<string>("lockupRule"),
+    windowRule: m.getParameter<string>("windowRule"),
+    maxHoldersRule: m.getParameter<string>("maxHoldersRule"),
+  };
 
-  // Identity → Lockup → SettlementWindow → MaxHolders (brief §6); vaults have no EXECUTED transfers to window.
-  const tokenRules = [identityRule, lockupRule, windowRule, maxHoldersRule];
-  const vaultRules = [identityRule, lockupRule, maxHoldersRule];
-
-  const hookFor = (key: keyof typeof TOKENS, implementation: string, rules: typeof tokenRules) => {
+  const hookFor = (key: keyof typeof TOKENS, implementation: string) => {
     const symbol = m.getParameter<string>(`${key}Symbol`, TOKENS[key].symbol);
     const token = m.staticCall(proxyDeployer, "predict", [symbol, m.getParameter<string>(implementation)], 0, {
       id: `${key}_predict`,
     });
-    return m.contract("ComplianceHook", [timelock, registry, token, rules], { id: `${key}_hook` });
+    const ruleList = RULE_ORDER[key].map((name) => rules[name]);
+    return m.contract("ComplianceHook", [timelock, registry, token, ruleList], { id: `${key}_hook` });
   };
 
   return {
-    intentHook: hookFor("intent", "intentImpl", tokenRules),
-    fundHook: hookFor("fund", "fundImpl", vaultRules),
-    asyncFundHook: hookFor("asyncFund", "asyncFundImpl", vaultRules),
+    intentHook: hookFor("intent", "intentImpl"),
+    fundHook: hookFor("fund", "fundImpl"),
+    asyncFundHook: hookFor("asyncFund", "asyncFundImpl"),
   };
 });

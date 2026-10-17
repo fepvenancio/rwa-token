@@ -11,7 +11,8 @@
     "test": "hardhat test",
     "test:halmos": "halmos --forge-build-out forge-out --match-contract 'Halmos$' --solver-timeout-assertion 0",
     "typecheck": "tsc --noEmit",
-    "validate:upgrades": "rm -rf forge-upgrades forge-upgrades-cache && forge build --build-info --extra-output storageLayout --out forge-upgrades --cache-path forge-upgrades-cache --skip './contracts/**/*.t.sol' && openzeppelin-upgrades-core validate forge-upgrades/build-info --exclude 'contracts/test/**'"
+    "validate:upgrades": "rm -rf forge-upgrades forge-upgrades-cache && forge build --build-info --extra-output storageLayout --out forge-upgrades --cache-path forge-upgrades-cache --skip './contracts/**/*.t.sol' && openzeppelin-upgrades-core validate forge-upgrades/build-info --exclude 'contracts/test/**'",
+    "verify:reproducible": "node scripts/verify-reproducible.ts"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-ignition": "3.1.9",

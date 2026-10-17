@@ -764,13 +764,36 @@ An Ignition deployment of the whole stack:
    - Mutation check: keeping ownership with the deployer gives 55 failing.
 - **README security model:** "Attestation covers hook code and binding, not rule set; the rule set is governed by the timelock."
 
-### Finding: bytecode depends on the compile job (decision needed)
-- **What happens:** Hardhat 3 gives each compile job its own remappings list (forge-std entries depend on which test files share the job), and solc metadata includes the remappings. The trailing CBOR metadata hash, and therefore the bytecode, depends on job grouping, not only on the source.
-- **Where it showed up:** after `ProxyDeployer` imported `Ownable`, the separately compiled `TokenProxy` artifact no longer matched the copy embedded in `ProxyDeployer`. The difference starts at byte 892 of 935, inside the metadata. The off-chain CREATE2 test now takes the creation code from `ProxyDeployer`'s own build output, and the runbook says to.
-- **Wider impact:** every attested runtime codehash includes that metadata hash. The council can't recompute a codehash from source alone; it must reproduce the exact build or use the published build-info.
-- **Options:**
-  - **(a) Recommended:** set `metadata.bytecodeHash = "none"` in the shared compiler config (and `bytecode_hash = "none"` in `foundry.toml` so Slither and Halmos match). Bytecode then depends only on source, compiler version and settings, so codehashes and the CREATE2 address can be reproduced from source. Cost: Sourcify gives a partial rather than a full match; Etherscan verification is unaffected.
-  - (b) Keep the metadata hash and publish the production build-info with each release as the council's reference.
+### Finding: bytecode depends on the compile job (resolved 2026-10-17)
+- **Cause:** Hardhat 3 gives each compile job its own remappings list (forge-std entries depend on which test files share the job), and solc metadata includes the remappings. The trailing metadata hash, and so the bytecode, depended on job grouping. It surfaced when the separately compiled `TokenProxy` stopped matching the copy embedded in `ProxyDeployer` (first difference at byte 892 of 935).
+- **Owner decision: both (a) and (b), as two layers of one control:**
+  - **(a) Source-reproducible builds.** `metadata.bytecodeHash = "none"` in the shared Hardhat compiler config, `bytecode_hash = 'none'` in `foundry.toml`; solc 0.8.30, cancun, optimizer 200 runs, pinned in both.
+  - **(b) A published reference.** `.github/workflows/release.yml`: on a `v*` tag it reruns the reproducibility check and attaches `release-build-<tag>.tar.gz` (`manifest.json` + production build-info, with a `.sha256`) to the release.
+  - The council attests only when its clean build at the tag matches the published reference and the chain (README runbook, step 2).
+- **Verified before pushing:**
+  1. **Pinned-ID and codehash tests:** all 419 tests pass with the metadata hash off. Interface IDs and event topics come from the ABI, and registry tests compute codehashes at runtime.
+  2. **upgrades-core does not use the metadata:**
+     - `validate` still passes all 3 contracts;
+     - a deliberately incompatible storage reference (`--contract Gated4626Vault --reference IntentToken`) still fails ("Deleted namespace erc7201:gated.storage.IntentSettled");
+     - the unsafe-state-initialiser mutant still fails.
+     - So no production-only fallback was needed.
+  3. **Reproducibility gate:** `scripts/verify-reproducible.ts` (`npm run verify:reproducible`, in the CI analysis job).
+     - Compares runtime code, creation code and immutable slot positions for 12 contracts (8 attested plus registry, executor, `ProxyDeployer`, `TokenProxy`) across: two clean production builds (each file compiled alone), the default profile (files grouped with the tests), and forge.
+     - Also checks that `ProxyDeployer` embeds the `TokenProxy` artifact's creation code.
+     - Result: REPRODUCIBLE.
+     - **Two clean builds alone would not have caught today's break.** With the metadata hash re-enabled, the two production rebuilds stayed identical, while the default-profile and forge builds differed for every contract. The cross-job comparisons are what catch it, and the mutant confirms the gate fails.
+- **This changes no deployed contract, because none exists yet.** Every address and codehash changed with this setting, which is fine now. After a first deployment the same change would be a migration: new implementations, attestations and hooks, and new CREATE2 addresses.
+
+### Twin-hook check and `IProxyDeployer` pin (owner: yes, 2026-10-17)
+- **The gap (from validating the external review):** a hook with the same admin, registry and token shares the attested codehash whatever its rules, and `ProxyDeployer` checks only `TOKEN()`. So a weaker twin could be passed to `Activate`.
+- **Fix:**
+  - `RULE_ORDER` in `ignition/modules/roles.ts` is the single definition of each token's ordered rule list; `Tokens` builds hooks from it.
+  - `assertHandedOver` checks each token runs the stage-2 (council-reviewed) hook and that `hook.rules()` equals `RULE_ORDER`.
+  - The runbook has the council record the reviewed hook addresses and check `policyHook()` and `rules()` after deployment.
+- **Tests:**
+  - new `deployment.test.ts` case: a twin hook (same immutables, only `MaxHoldersRule`) is attested, Activate completes, and the post-deploy check rejects it ("runs another hook");
+  - mutant: hooks built with the rule list reversed give 55 failing ("rule 0").
+- **`type(IProxyDeployer).interfaceId` pinned** at `0x886d8cd8`: `cast` selectors XORed, checked against solc's value by the test. All 20 interfaces are now pinned.
 
 ## Open questions for the owner
-1. The bytecode-reproducibility finding above: (a) `bytecodeHash: "none"` or (b) published build-info?
+1. None.
