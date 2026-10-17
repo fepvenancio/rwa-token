@@ -267,3 +267,12 @@ contract SettlementWindowRuleUnit_TokenCallsAreStatic is SettlementWindowRuleUni
     _rule.setWindow(address(_stateful), 9 hours, 17 hours, _days);
   }
 }
+
+/// @dev Brief §5: FORCED with `from == address(0)` is an enforcement mint; the window gates EXECUTED only
+contract SettlementWindowRuleUnit_ForcedMint is SettlementWindowRuleUnitTest {
+  function test_WhenAnEnforcementMintHappensOutsideTheWindow_ItIsOk() external {
+    IPolicyHook.TransferContext memory _context = _ctx(IPolicyHook.TransferKind.FORCED);
+    _context.from = address(0);
+    assertEq(_rule.check(_context), Reasons.TRANSFER_OK); // unconfigured window: EXECUTED would fail closed
+  }
+}

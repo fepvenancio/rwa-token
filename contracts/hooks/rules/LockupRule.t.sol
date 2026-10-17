@@ -213,3 +213,14 @@ contract LockupRuleUnit_TokenCallsAreStatic is LockupRuleUnitTest {
     assertEq(_rule.unlockTime(address(_stateful), _holder), 0);
   }
 }
+
+/// @dev Brief §5: FORCED with `from == address(0)` is an enforcement mint, exempt like any FORCED move
+contract LockupRuleUnit_ForcedMint is LockupRuleUnitTest {
+  function test_WhenAnEnforcementMintReachesALockedReceiver_ItIsOk() external {
+    vm.prank(_agent);
+    _rule.setLockup(_token, _to, _NOW + 365 days);
+    IPolicyHook.TransferContext memory _context = _ctx(IPolicyHook.TransferKind.FORCED);
+    _context.from = address(0);
+    assertEq(_rule.check(_context), Reasons.TRANSFER_OK);
+  }
+}

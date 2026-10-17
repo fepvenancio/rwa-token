@@ -1628,3 +1628,177 @@ contract Gated7540VaultUnit_Storage is Gated7540VaultUnitTest {
     assertEq(uint256(vm.load(address(_vault), bytes32(uint256(_location) + 1))), _ONE, 'slot 1: lastPrice');
   }
 }
+
+/// @dev M-3: compliance holds after fulfilment. Claims re-run the controller's policy pre-flight, and the agent can
+///      recover claimable balances to a verified account, even while paused or at a full cap
+contract Gated7540VaultIntegration_Claimable is Gated7540VaultIntegrationTest {
+  address internal _treasury = makeAddr('treasury');
+
+  function _fulfilledDeposit(
+    address _account,
+    uint256 _amount
+  ) internal {
+    vm.prank(_account);
+    _vault.requestDeposit(_amount, _account, _account);
+    vm.prank(_fulfiller);
+    _vault.fulfillDeposit(_account, _amount, _amount);
+  }
+
+  function _fulfilledRedemption(
+    address _account,
+    uint256 _amount
+  ) internal {
+    _invest(_account, _amount);
+    vm.prank(_account);
+    _vault.requestRedeem(_amount, _account, _account);
+    vm.prank(_fulfiller);
+    _vault.fulfillRedeem(_account, _amount, _amount);
+  }
+
+  function test_WhenTheControllerIsDeVerifiedAfterADepositIsFulfilled_TheClaimIsRefused() external {
+    _fulfilledDeposit(_alice, 100);
+    _identity.set(_alice, false);
+    assertEq(_vault.maxDeposit(_alice) + _vault.maxMint(_alice), 0);
+    bytes memory _refused = abi.encodeWithSelector(
+      IGated7540Vault.Gated7540Vault_ControllerNotEligible.selector, Reasons.RECEIVER_NOT_VERIFIED
+    );
+    vm.startPrank(_alice);
+    vm.expectRevert(_refused);
+    _vault.deposit(100, _bob, _alice); // even to a verified receiver
+    vm.expectRevert(_refused);
+    _vault.mint(100, _bob, _alice);
+    vm.stopPrank();
+  }
+
+  function test_WhenTheControllerIsDeVerifiedAfterARedemptionIsFulfilled_ThePayoutIsRefused() external {
+    _fulfilledRedemption(_alice, 100);
+    _identity.set(_alice, false);
+    assertEq(_vault.maxRedeem(_alice) + _vault.maxWithdraw(_alice), 0);
+    bytes memory _refused = abi.encodeWithSelector(
+      IGated7540Vault.Gated7540Vault_ControllerNotEligible.selector, Reasons.SENDER_NOT_VERIFIED
+    );
+    vm.startPrank(_alice);
+    vm.expectRevert(_refused);
+    _vault.redeem(100, _eve, _alice);
+    vm.expectRevert(_refused);
+    _vault.withdraw(100, _eve, _alice);
+    vm.stopPrank();
+  }
+
+  /// @dev The payout probe is a zero-amount burn: a controller whose shares were all escrowed and burned still collects
+  function test_WhenTheControllerHoldsNoShares_ThePayoutIsStillAllowed() external {
+    _fulfilledRedemption(_alice, 100);
+    assertEq(_vault.balanceOf(_alice), 0);
+    assertEq(_vault.maxRedeem(_alice), 100);
+    uint256 _before = _asset.balanceOf(_alice);
+    vm.prank(_alice);
+    _vault.redeem(100, _alice, _alice);
+    assertEq(_asset.balanceOf(_alice) - _before, 100);
+  }
+
+  /// @dev The payout probe includes lockups: an agent lockup on the controller holds the payout until it expires
+  function test_WhenTheControllerIsLockedUp_ThePayoutWaitsForTheUnlock() external {
+    _fulfilledRedemption(_alice, 100);
+    vm.prank(_agent);
+    _lockupRule.setLockup(address(_vault), _alice, block.timestamp + 1 days);
+    assertEq(_vault.maxRedeem(_alice), 0);
+    vm.expectRevert(
+      abi.encodeWithSelector(IGated7540Vault.Gated7540Vault_ControllerNotEligible.selector, Reasons.LOCKED)
+    );
+    vm.prank(_alice);
+    _vault.redeem(100, _alice, _alice);
+    vm.warp(block.timestamp + 1 days);
+    vm.prank(_alice);
+    _vault.redeem(100, _alice, _alice);
+  }
+
+  function test_WhenAnAgentRecoversAClaimableRedemption_TheAssetsGoToTheRecoveryAccount() external {
+    _fulfilledRedemption(_alice, 100);
+    _identity.set(_alice, false);
+    _identity.set(_treasury, true);
+    vm.expectEmit(address(_vault));
+    emit IGated7540Vault.ClaimableRecovered(_alice, _treasury, 100, 0, _agent);
+    vm.prank(_agent);
+    _vault.recoverClaimable(_alice, _treasury);
+    assertEq(_asset.balanceOf(_treasury), 100);
+    assertEq(_vault.claimableRedeemRequest(0, _alice), 0);
+    assertEq(_asset.balanceOf(address(_vault)), 0, 'nothing left owed');
+  }
+
+  /// @dev The stranded case: the cap filled after fulfilment, so the controller's own claim fails; the agent delivers
+  function test_WhenACapFilledAfterFulfilment_TheAgentDeliversTheStrandedShares() external {
+    _fulfilledDeposit(_alice, 100);
+    _invest(_bob, 10);
+    _invest(_carol, 10); // cap 2 now full
+    vm.expectRevert(
+      abi.encodeWithSelector(IGated7540Vault.Gated7540Vault_ControllerNotEligible.selector, Reasons.MAX_HOLDERS)
+    );
+    vm.prank(_alice);
+    _vault.mint(100, _alice, _alice);
+
+    vm.expectEmit(address(_vault));
+    emit IGated7540Vault.ClaimableRecovered(_alice, _alice, 0, 100, _agent);
+    vm.prank(_agent);
+    _vault.recoverClaimable(_alice, _alice);
+    assertEq(_vault.balanceOf(_alice), 100);
+    assertEq(_maxHoldersRule.holderCount(address(_vault)), 3, 'exempt from the cap, still counted');
+    assertEq(_vault.claimableDepositRequest(0, _alice), 0);
+  }
+
+  function test_WhenPaused_RecoveryStillWorks() external {
+    _fulfilledDeposit(_alice, 100);
+    _fulfilledRedemption(_bob, 50);
+    _identity.set(_treasury, true);
+    vm.prank(_guardian);
+    _vault.pause();
+    vm.prank(_agent);
+    _vault.recoverClaimable(_alice, _treasury);
+    vm.prank(_agent);
+    _vault.recoverClaimable(_bob, _treasury);
+    assertEq(_vault.balanceOf(_treasury), 100);
+    assertEq(_asset.balanceOf(_treasury), 50);
+  }
+
+  function test_WhenBothSidesAreClaimable_OneRecoveryClearsBoth() external {
+    _fulfilledRedemption(_alice, 40);
+    _fulfilledDeposit(_alice, 100);
+    _identity.set(_treasury, true);
+    vm.expectEmit(address(_vault));
+    emit IGated7540Vault.ClaimableRecovered(_alice, _treasury, 40, 100, _agent);
+    vm.prank(_agent);
+    _vault.recoverClaimable(_alice, _treasury);
+    assertEq(_vault.claimableDepositRequest(0, _alice) + _vault.claimableRedeemRequest(0, _alice), 0);
+  }
+
+  function test_WhenTheRecoveryAccountIsUnverified_ItReverts() external {
+    _fulfilledRedemption(_alice, 100);
+    vm.expectRevert(
+      abi.encodeWithSelector(
+        IGated7540Vault.Gated7540Vault_RecipientNotEligible.selector, Reasons.RECEIVER_NOT_VERIFIED
+      )
+    );
+    vm.prank(_agent);
+    _vault.recoverClaimable(_alice, _eve);
+  }
+
+  function test_WhenTheCallerIsNotTheAgent_ItReverts() external {
+    _fulfilledRedemption(_alice, 100);
+    bytes32 _role = _vault.AGENT_ROLE();
+    vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, _fulfiller, _role));
+    vm.prank(_fulfiller);
+    _vault.recoverClaimable(_alice, _bob);
+  }
+
+  function test_WhenNothingIsClaimable_ItReverts() external {
+    vm.expectRevert(IGated7540Vault.Gated7540Vault_NothingClaimable.selector);
+    vm.prank(_agent);
+    _vault.recoverClaimable(_alice, _bob);
+  }
+
+  function test_WhenTheRecoveryAccountIsZero_ItReverts() external {
+    _fulfilledRedemption(_alice, 100);
+    vm.expectRevert(IGated7540Vault.Gated7540Vault_ZeroAddress.selector);
+    vm.prank(_agent);
+    _vault.recoverClaimable(_alice, address(0));
+  }
+}

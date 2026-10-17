@@ -53,6 +53,18 @@ interface IGated7540Vault {
   );
 
   /**
+   * @notice Emitted when an agent recovers a controller's claimable balances (an enforcement action)
+   * @param _controller The controller whose claimable balances were cleared
+   * @param _to The verified recovery account
+   * @param _assets The claimable redemption assets paid to `_to`
+   * @param _shares The claimable deposit shares minted to `_to`
+   * @param _agent The AGENT_ROLE account that recovered them
+   */
+  event ClaimableRecovered(
+    address indexed _controller, address indexed _to, uint256 _assets, uint256 _shares, address _agent
+  );
+
+  /**
    * @notice Emitted when an agent recovers a pending redemption whose controller cannot receive the shares back
    * @param _controller The controller whose request was cleared
    * @param _to The verified recovery account that received the escrowed shares
@@ -76,7 +88,8 @@ interface IGated7540Vault {
   error Gated7540Vault_AsyncOnly();
 
   /**
-   * @notice Thrown when a deposit request's controller could not receive shares
+   * @notice Thrown when a controller fails its policy pre-flight: on a deposit request or deposit claim (could it
+   *         receive shares) or on a redemption payout (could it act as a sender)
    * @param _reason The reason code from the pre-flight
    */
   error Gated7540Vault_ControllerNotEligible(bytes32 _reason);
@@ -95,8 +108,17 @@ interface IGated7540Vault {
    */
   error Gated7540Vault_ExceedsPending(uint256 _requested, uint256 _pending);
 
+  /// @notice Thrown when recovering the claimable balances of a controller that has none
+  error Gated7540Vault_NothingClaimable();
+
   /// @notice Thrown when fulfilling, rejecting or recovering a controller with nothing pending
   error Gated7540Vault_NothingPending();
+
+  /**
+   * @notice Thrown when a recovery account fails the identity pre-flight for an enforcement delivery
+   * @param _reason The reason code from the pre-flight
+   */
+  error Gated7540Vault_RecipientNotEligible(bytes32 _reason);
 
   /**
    * @notice Thrown when the caller may not act for the owner or controller
@@ -164,6 +186,20 @@ interface IGated7540Vault {
     address _registry,
     address _hook,
     address _custody
+  ) external;
+
+  /**
+   * @notice Recovers a controller's claimable balances to a verified account (an enforcement action)
+   * @dev Only AGENT_ROLE. Pays the claimable redemption assets to `_to` and delivers the claimable deposit shares to
+   *      `_to` as an enforcement mint (FORCED, `from == address(0)`): bypasses pause and the holder cap, but `_to` must
+   *      pass identity. For a controller that became ineligible after fulfilment, or a deposit stranded by a full cap.
+   *      Reverts if nothing is claimable. Emits `ClaimableRecovered`
+   * @param _controller The controller
+   * @param _to The verified recovery account, e.g. custody, the treasury, or the controller's own recovery account
+   */
+  function recoverClaimable(
+    address _controller,
+    address _to
   ) external;
 
   /**

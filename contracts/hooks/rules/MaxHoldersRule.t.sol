@@ -613,3 +613,22 @@ contract MaxHoldersRuleUnit_TokenCallsAreStatic is MaxHoldersRuleUnitTest {
     assertEq(_rule.holderCount(address(_stateful)), 0);
   }
 }
+
+/// @dev Brief §5: FORCED with `from == address(0)` is an enforcement mint: exempt from the cap, still counted
+contract MaxHoldersRuleUnit_ForcedMint is MaxHoldersRuleUnitTest {
+  function test_WhenAnEnforcementMintReachesANewHolderAtAFullCap_ItIsOk() external {
+    _cap(2);
+    _seed(2);
+    _bal(_to, 0);
+    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.FORCED, address(0), _to, 5)), Reasons.TRANSFER_OK);
+  }
+
+  function test_WhenAnEnforcementMintCreatesAHolder_TheCountGoesUp() external {
+    _cap(2);
+    _seed(2);
+    _bal(_to, 5); // post-mint balance == amount: a new holder
+    vm.prank(_hook);
+    _rule.after_(_ctx(IPolicyHook.TransferKind.FORCED, address(0), _to, 5));
+    assertEq(_rule.holderCount(_token), 3);
+  }
+}

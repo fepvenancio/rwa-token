@@ -909,11 +909,39 @@ An Ignition deployment of the whole stack:
   - I adjusted the owner's wording at the boundary: at `count == cap` a full-balance move passes, as pinned by `test_WhenTheSenderLeavesForANewHolderAtTheCap_ItIsOkNet`.
   - Pins: `test_WhenTheCountIsAboveALoweredCap_ANetZeroMoveIsStillRejected` (above the cap) and the `count == cap` test above.
 
+## v0.2.0: design fixes from the 2026-10-17 review (owner decisions; in progress)
+
+Order: M-3, then M-2, then M-1, then the L-5 and L-1 docs. Each M is its own commit, tests first. Bytecode changes, so this is v0.2.0. The change-board findings page is published after the fixes land.
+
+- **M-3: claimable balances (the one post-freeze interface change, `IGated7540Vault`, re-pinned).**
+  - Claim-time eligibility through the hook, with no new business logic in the vault:
+    - deposit claims (`deposit`/`mint`) require `canTransfer(address(0), controller, 1)`, the same probe as `maxDeposit`;
+    - redemption payouts (`redeem`/`withdraw`) require `canTransfer(controller, address(0), 0)`, a zero-amount burn probe: controller identity and lockup, without tripping the frozen-balance check on a controller that holds no shares;
+    - `maxRedeem`/`maxWithdraw` use the same probe, so pre-flight matches.
+  - `recoverClaimable(controller, to)`, AGENT_ROLE:
+    - claimable redemption assets go to `to`;
+    - claimable deposit shares are delivered to `to` by an enforcement mint;
+    - `to` must pass a zero-amount FORCED probe (identity);
+    - emits `ClaimableRecovered(controller, to, assets, shares, agent)`;
+    - works while paused and when the cap is full, which covers the stranded-deposit case.
+  - Base: a new internal `_mintAs(to, amount, kind)` announces the kind and calls `_mint`; `_moveAs` is unchanged.
+  - Brief §5: FORCED with `from == address(0)` is an enforcement mint. Rules treat it as FORCED (exempt from cap, pause and lockup) and still require `to` verified. FORCED with `to == address(0)` is reserved and unused.
+  - Every rule is tested against FORCED-from-zero; `MaxHoldersRule.after_` counts the new holder.
+- **M-2: reverses R2.** Rejected redemption shares return as a plain TRANSFER from the vault to the controller, so cap, pause, lockup and freeze apply. If that is blocked, the reject reverts and the agent uses `recoverRedeemRequest`. The L-2 release moves to the recover path only, since a frozen escrow now blocks a reject. Cap-full tested both ways.
+- **M-1: recovery timelock.**
+  - A second TimelockController: 7-day delay, governance multisig as proposer and executor, no cancellers, and the guardian holds nothing on it.
+  - It holds RECOVERY_ROLE: on every token, vault and the executor it can only `unpause()` and `revokeRole(GUARDIAN_ROLE, ...)`; on the main timelock it can only `revokeRole(CANCELLER_ROLE, ...)` (a `TimelockController` subclass, since OZ can't scope a role admin to revoke-only).
+  - It must not be able to grant roles, change hooks, upgrade, or propose on the main timelock; each is tested to revert.
+  - The hand-over check pins the recovery timelock's exact role set.
+  - Brief §4 updated. Runbook: a compromised governance multisig is out of scope for this control, by design.
+- **L-5:** standard ERC-7540 operators (full delegates); brief corrected; a test pins it.
+- **L-1:** accepted with agent clean-up; `MinPositionRule` (a per-token minimum, attested) later.
+
 ### Remaining brief items (deferred until the first external integrator is known)
 - **ERC-3643 `IToken` read adapter.**
 - **Exact ERC-7943 conformance,** once the ERC is Final. Today there is no 7943 interface ID, because the function names and return types differ (README deviations).
 
-## Docs: `docs/` (plan, 2026-10-17, awaiting review)
+## Docs: `docs/` (built 2026-10-17, awaiting review)
 
 There is no `docs/` folder. The README has the security model and the deployment runbook. Nothing explains how the contracts connect, or follows a holder, an operator or the bank through a flow. The request: an architecture page, plus diagrams of the user flows, the roles, the money and how the protocol works, exact against the code.
 
@@ -959,6 +987,24 @@ Code, interface, test or CI changes. Fixing the open review items. An API refere
 
 ### Done when
 All eight pages exist, checks 1 to 6 pass with their output shown, and the summary lists every place the brief, README or SECURITY.md disagrees with the code.
+
+### As built (2026-10-17)
+- **Pages:** the eight in the table above, with 27 Mermaid diagrams. The README, SECURITY.md and `CLAUDE.md` are not edited, and the README has no link to `docs/`.
+- **Checked against** the contracts and Ignition modules at `6fb8e05` (the page index says so).
+- **Check 2, names:** every identifier, path, link, anchor and `Contract.function` named on the pages exists, and the banned-wording scan is clean.
+- **Check 3, behaviour:** 13 throwaway tests, run on a scratch copy against the deployed stack, all pass. They cover the rule × kind table, the settlement window and weekday formula, the holder cap, pause with the timelock and the guardian's cancel, frozen amounts and event order, intent check order, batch and cancel, the roles after `Activate`, and the 4626 and 7540 worked numbers. The tests are not in the repo.
+- **Check 4, diagrams:** all 27 parse and render with Mermaid 11.4.1. Three were redrawn to be readable, and numbered edge labels were changed because Mermaid printed an error inside the diagram.
+- **Check 5, independent verification:** two fresh agents read the pages against the code over four rounds (full pass, cross-review, then two passes over the edits). They reported about 40 problems, none in the rule × kind table, the reason codes, the formulas or the worked numbers. Each was checked against the code before it was fixed. The larger ones: the 7540 lock bites at `requestRedeem` (a `TRANSFER`), not at a burn; diagram arrows that were not real calls; the order of checks in `requestDeposit`, `fulfillDeposit` and `executeTransfer`; zero-amount calls on the 4626 vault; the ordering inside `Activate`.
+- **Check 6, suite:** `npx hardhat test` on a clean copy of `6fb8e05`: 452 passing (395 solidity, 57 nodejs). Contract source is unchanged by this work.
+- **Where the brief, README and SECURITY.md differ from the code** (not edited):
+  1. README guardian row: the token's `GUARDIAN_ROLE` only pauses. Cancelling timelock operations is a separate `CANCELLER_ROLE` on the timelock, granted in `Activate`.
+  2. README rules row: lists cap, seed and window under the token admin and leaves out `setExemptHolder`.
+  3. README runbook: "MINTER, BURNER and AGENT to the issuer's accounts". `Activate` grants `MINTER_ROLE` and `BURNER_ROLE` on `IntentToken` only.
+  4. README and brief: "minimum delay ≥ 7 days". `Components.ts` only defaults to 7 days and accepts less. The fixture's post-deploy check enforces it, not the module.
+  5. Brief §7: 7540 operators "for claims only". The code also lets an operator call `requestDeposit` and `requestRedeem` for the owner (review item L-5).
+  6. SECURITY.md §3 item 1: "depends only on the deployer". The CREATE2 address depends on the `ProxyDeployer` contract's address, not the deployer account.
+- **Will go stale when review item M-3 (claimable recovery, in progress in another session) lands:** `flows-vaults.md` ("What cannot be undone once fulfilled", the pause table, the 7540 `max*` text), `roles.md` (function table), `money.md` ("only places the asset can leave the vault") and the statements that `ControllerNotEligible` is raised only on `requestDeposit`.
+- **Not yet committed:** another session committed the first version of `docs/` as `e44dbb8` before verification finished. The fixes from the verification rounds are uncommitted edits on top of it.
 
 ## Open questions for the owner
 1. None.

@@ -200,3 +200,16 @@ contract IdentityRuleUnit_Metadata is IdentityRuleUnitTest {
     assertTrue(_rule.supportsInterface(type(IERC165).interfaceId));
   }
 }
+
+/// @dev Brief §5: FORCED with `from == address(0)` is an enforcement mint; the receiver must still be verified
+contract IdentityRuleUnit_ForcedMint is IdentityRuleUnitTest {
+  function test_WhenAnEnforcementMintGoesToAVerifiedAccount_ItIsOk() external {
+    _verified(_to, true);
+    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.FORCED, address(0), _to)), Reasons.TRANSFER_OK);
+  }
+
+  function test_WhenAnEnforcementMintGoesToAnUnverifiedAccount_ItIsRejected() external {
+    _verified(_to, false);
+    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.FORCED, address(0), _to)), Reasons.RECEIVER_NOT_VERIFIED);
+  }
+}

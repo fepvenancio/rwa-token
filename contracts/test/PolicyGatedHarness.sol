@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
+
 import {PolicyGatedERC20Upgradeable} from 'contracts/base/PolicyGatedERC20Upgradeable.sol';
 
 /**
@@ -34,5 +36,19 @@ contract PolicyGatedHarness is PolicyGatedERC20Upgradeable {
     address _hook
   ) external initializer {
     __PolicyGatedERC20_init(_name, _symbol, _admin, _guardian, _registry, _hook);
+  }
+
+  /**
+   * @notice Exposes the internal kind-announcing mint for unit tests
+   * @param _to The receiver
+   * @param _amount The amount
+   * @param _kind The kind the hook sees
+   */
+  function mintAs(
+    address _to,
+    uint256 _amount,
+    IPolicyHook.TransferKind _kind
+  ) external {
+    _mintAs(_to, _amount, _kind);
   }
 }

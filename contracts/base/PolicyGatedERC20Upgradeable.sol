@@ -279,6 +279,26 @@ abstract contract PolicyGatedERC20Upgradeable is
   }
 
   /**
+   * @notice Mints announcing a kind that cannot be inferred from the addresses: FORCED with `from == address(0)` is an
+   *         enforcement mint (brief §5), exempt from pause and the holder cap but still identity-checked on `to`
+   * @dev Kept apart from `_moveAs`, which never sees `from == address(0)`. `_mint` either reaches `_update`, which
+   *      consumes and clears the slots, or reverts, which rolls them back
+   * @param _to The receiver
+   * @param _amount The amount
+   * @param _kind The announced kind
+   */
+  function _mintAs(
+    address _to,
+    uint256 _amount,
+    IPolicyHook.TransferKind _kind
+  ) internal {
+    _KIND_SLOT.asUint256().tstore(uint256(_kind) + 1);
+    _REF_SLOT.asBytes32().tstore(bytes32(0));
+    _DEADLINE_SLOT.asUint256().tstore(0);
+    _mint(_to, _amount);
+  }
+
+  /**
    * @notice Lowers an account's frozen amount so an enforcement action can take `_amount` from it
    * @dev Keeps `frozen <= balance` after the action. Emits `Frozen` before the token `Transfer`, as ERC-7943 requires.
    *      Internal so templates' own enforcement moves (e.g. the 7540 escrow returns) keep the same invariant

@@ -54,7 +54,8 @@ contract InterfaceFreezeTest is Test {
     assertEq(type(IERC7540Redeem).interfaceId, bytes4(0x620ee8e4), 'IERC7540Redeem');
     assertEq(type(IERC7575).interfaceId, bytes4(0x2f0a18c5), 'IERC7575');
     // Re-pinned 2026-10-17 on owner instruction: recoverRedeemRequest added (was 0x34aae296)
-    assertEq(type(IGated7540Vault).interfaceId, bytes4(0x316209a5), 'IGated7540Vault');
+    // Re-pinned in v0.2.0 (2026-10-17): recoverClaimable added, the one post-freeze change (owner decision M-3)
+    assertEq(type(IGated7540Vault).interfaceId, bytes4(0x75f5b0db), 'IGated7540Vault');
     assertEq(type(IIdentityRule).interfaceId, bytes4(0x150c4aea), 'IIdentityRule');
     assertEq(type(IIdentityRegistry).interfaceId, bytes4(0xb9209e33), 'IIdentityRegistry');
     // Added in Phase 7 (2026-10-17), after ProxyDeployer moved to OZ Ownable
@@ -119,6 +120,10 @@ contract InterfaceFreezeTest is Test {
     assertEq(IERC7540Operator.OperatorSet.selector, 0xceb576d9f15e4e200fdb5096d64d5dfd667e16def20c1eefd14256d8e3faa267);
     // Added in Phase 7 (2026-10-17): deployment tooling and the runbook decode it
     assertEq(IProxyDeployer.ProxyDeployed.selector, 0x389a3c9c5265cf3f40a0cf66a7bb66a57b95d2ba6a945110dd880a283b8c0704);
+    // Added in v0.2.0 (owner decision M-3)
+    assertEq(
+      IGated7540Vault.ClaimableRecovered.selector, 0x0c540b8a1efd2cc0ebc90a5c128ab14cb8011c0c1021a7a9acfdffd478e42c04
+    );
   }
 
   function test_WhenReasonsCompile_TheirValuesArePinned() external pure {

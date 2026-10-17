@@ -790,3 +790,37 @@ contract PolicyGatedInvariantTest is PolicyGatedUnitTest {
     }
   }
 }
+
+/// @dev `_mintAs` announces the kind: FORCED with `from == address(0)` is an enforcement mint (brief §5)
+contract PolicyGatedUnit_MintAs is PolicyGatedUnitTest {
+  function test_WhenMintingAsForced_TheHookSeesAForcedContextFromZero() external {
+    vm.expectCall(
+      _hook,
+      abi.encodeCall(
+        IPolicyHook.beforeTransfer, (_ctx(address(0), _bob, 5, address(this), IPolicyHook.TransferKind.FORCED))
+      )
+    );
+    _token.mintAs(_bob, 5, IPolicyHook.TransferKind.FORCED);
+    assertEq(_token.balanceOf(_bob), 5);
+  }
+
+  function test_WhenPaused_AForcedMintStillSettlesButAPlainMintDoesNot() external {
+    vm.prank(_guardian);
+    _token.pause();
+    _token.mintAs(_bob, 5, IPolicyHook.TransferKind.FORCED);
+    assertEq(_token.balanceOf(_bob), 5);
+    vm.expectRevert(_rejected(Reasons.PAUSED));
+    _token.mintAs(_bob, 5, IPolicyHook.TransferKind.MINT);
+  }
+
+  /// @dev The announced kind is consumed: a plain movement right after is still inferred, not FORCED
+  function test_WhenAForcedMintIsFollowedByAPlainTransfer_TheTransferIsPlain() external {
+    _token.mintAs(_bob, 5, IPolicyHook.TransferKind.FORCED);
+    vm.expectCall(
+      _hook,
+      abi.encodeCall(IPolicyHook.beforeTransfer, (_ctx(_bob, _alice, 1, _bob, IPolicyHook.TransferKind.TRANSFER)))
+    );
+    vm.prank(_bob);
+    _token.transfer(_alice, 1);
+  }
+}

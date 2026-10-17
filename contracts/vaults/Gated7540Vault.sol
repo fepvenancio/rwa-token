@@ -240,6 +240,37 @@ contract Gated7540Vault is
   }
 
   /// @inheritdoc IGated7540Vault
+  function recoverClaimable(
+    address _controller,
+    address _to
+  ) external onlyRole(AGENT_ROLE) {
+    if (_to == address(0)) revert Gated7540Vault_ZeroAddress();
+    // The recipient must pass the policy as the receiver of an enforcement move (identity), even for the asset leg,
+    // which is not hooked. A zero-amount FORCED probe: no pause, cap or frozen effect, only who may receive.
+    bytes32 _reason =
+      _check(_context(address(0), _to, 0, _msgSender(), IPolicyHook.TransferKind.FORCED, bytes32(0), 0), _policyHook());
+    if (_reason != Reasons.TRANSFER_OK) revert Gated7540Vault_RecipientNotEligible(_reason);
+
+    Gated7540Storage storage $ = _getGated7540Storage();
+    RedeemState storage _redeem = $.redeems[_controller];
+    DepositState storage _deposit = $.deposits[_controller];
+    uint256 _assets = _redeem.claimableAssets;
+    uint256 _shares = _deposit.claimableShares;
+    if (_assets == 0 && _shares == 0 && _redeem.claimableShares == 0 && _deposit.claimableAssets == 0) {
+      revert Gated7540Vault_NothingClaimable();
+    }
+    // Clear every claimable figure: the redemption's share units were burned at fulfilment, and the deposit's assets
+    // already went to custody at fulfilment, so only `_assets` (held here) and `_shares` (not yet minted) remain.
+    _redeem.claimableAssets = 0;
+    _redeem.claimableShares = 0;
+    _deposit.claimableAssets = 0;
+    _deposit.claimableShares = 0;
+    emit ClaimableRecovered(_controller, _to, _assets, _shares, _msgSender());
+    if (_shares > 0) _mintAs(_to, _shares, IPolicyHook.TransferKind.FORCED);
+    if (_assets > 0) IERC20(asset()).safeTransfer(_to, _assets);
+  }
+
+  /// @inheritdoc IGated7540Vault
   function recoverRedeemRequest(
     address _controller,
     address _to
@@ -407,6 +438,7 @@ contract Gated7540Vault is
     address _controller
   ) public override whenNotPaused returns (uint256 _assets) {
     _onlyControllerOrOperator(_controller);
+    _requirePayoutEligible(_controller);
     if (_shares == 0) revert Gated7540Vault_ZeroAmount();
     RedeemState storage _state = _getGated7540Storage().redeems[_controller];
     if (_shares > _state.claimableShares) revert Gated7540Vault_ExceedsClaimable(_shares, _state.claimableShares);
@@ -427,6 +459,7 @@ contract Gated7540Vault is
     address _controller
   ) public override whenNotPaused returns (uint256 _shares) {
     _onlyControllerOrOperator(_controller);
+    _requirePayoutEligible(_controller);
     if (_assets == 0) revert Gated7540Vault_ZeroAmount();
     RedeemState storage _state = _getGated7540Storage().redeems[_controller];
     if (_assets > _state.claimableAssets) revert Gated7540Vault_ExceedsClaimable(_assets, _state.claimableAssets);
@@ -471,7 +504,7 @@ contract Gated7540Vault is
   function maxRedeem(
     address _controller
   ) public view override returns (uint256 _maxShares) {
-    if (paused()) return 0;
+    if (_payoutReason(_controller) != Reasons.TRANSFER_OK) return 0;
     _maxShares = _getGated7540Storage().redeems[_controller].claimableShares;
   }
 
@@ -482,7 +515,7 @@ contract Gated7540Vault is
   function maxWithdraw(
     address _controller
   ) public view override returns (uint256 _maxAssets) {
-    if (paused()) return 0;
+    if (_payoutReason(_controller) != Reasons.TRANSFER_OK) return 0;
     _maxAssets = _getGated7540Storage().redeems[_controller].claimableAssets;
   }
 
@@ -556,6 +589,7 @@ contract Gated7540Vault is
     address _controller
   ) internal returns (uint256 _shares) {
     _onlyControllerOrOperator(_controller);
+    _requireDepositClaimEligible(_controller);
     if (_assets == 0) revert Gated7540Vault_ZeroAmount();
     DepositState storage _state = _getGated7540Storage().deposits[_controller];
     if (_assets > _state.claimableAssets) revert Gated7540Vault_ExceedsClaimable(_assets, _state.claimableAssets);
@@ -579,6 +613,7 @@ contract Gated7540Vault is
     address _controller
   ) internal returns (uint256 _assets) {
     _onlyControllerOrOperator(_controller);
+    _requireDepositClaimEligible(_controller);
     if (_shares == 0) revert Gated7540Vault_ZeroAmount();
     DepositState storage _state = _getGated7540Storage().deposits[_controller];
     if (_shares > _state.claimableShares) revert Gated7540Vault_ExceedsClaimable(_shares, _state.claimableShares);
@@ -692,6 +727,41 @@ contract Gated7540Vault is
     // convertTo* (which divide by lastPrice) never revert. Claims use the exact claimable ratio, not this price.
     if (_price == 0) _price = 1;
     _getGated7540Storage().lastPrice = _price;
+  }
+
+  /**
+   * @notice Reverts unless the controller could still receive shares: the same probe as `maxDeposit`
+   * @param _controller The controller claiming a fulfilled deposit
+   */
+  function _requireDepositClaimEligible(
+    address _controller
+  ) private view {
+    bytes32 _reason = _canTransfer(address(0), _controller, 1);
+    if (_reason != Reasons.TRANSFER_OK) revert Gated7540Vault_ControllerNotEligible(_reason);
+  }
+
+  /**
+   * @notice Reverts unless the controller may still collect a redemption payout (see `_payoutReason`)
+   * @param _controller The controller collecting a fulfilled redemption
+   */
+  function _requirePayoutEligible(
+    address _controller
+  ) private view {
+    bytes32 _reason = _payoutReason(_controller);
+    if (_reason != Reasons.TRANSFER_OK) revert Gated7540Vault_ControllerNotEligible(_reason);
+  }
+
+  /**
+   * @notice The policy verdict on a controller collecting a redemption payout: a zero-amount burn by the controller.
+   *         Checks who the controller is (identity, lockup, pause) without the frozen-balance check, since its shares
+   *         were escrowed and burned at fulfilment and it typically holds none
+   * @param _controller The controller
+   * @return _reason TRANSFER_OK or the policy's reason code
+   */
+  function _payoutReason(
+    address _controller
+  ) private view returns (bytes32 _reason) {
+    _reason = _canTransfer(_controller, address(0), 0);
   }
 
   /**
