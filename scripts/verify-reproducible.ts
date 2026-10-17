@@ -8,9 +8,11 @@
 //      CREATE2 address. With solc's metadata hash on, (2)-(4) differ; this gate is what keeps it off.
 //
 // Then writes `release-build/`: `manifest.json` (per contract: runtime and creation code hashes, immutable slots) and
-// the production build-info, the reference the council compares a clean build at the release tag against.
+// the production build-info of the in-scope sources only (no tests, mocks or OZ-rooted jobs; the OZ sources a contract
+// imports stay inside its job's solc input, since they are needed to reproduce it). This is the reference the council
+// compares a clean build at the release tag against.
 import { execSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { keccak256, type Hex } from "viem";
@@ -122,10 +124,21 @@ const manifest = Object.fromEntries(
   ]),
 );
 writeFileSync("release-build/manifest.json", `${JSON.stringify(manifest, null, 2)}\n`);
-cpSync("artifacts/build-info", "release-build/build-info", { recursive: true });
-if (!existsSync("release-build/build-info") || readdirSync("release-build/build-info").length === 0) {
-  failures.push("no build-info to publish");
+// Production builds compile each file in its own job, so a build-info's single user source is its root file.
+const inScope = (source: string) =>
+  source.startsWith("contracts/") && !source.startsWith("contracts/test/") && !source.endsWith(".t.sol");
+mkdirSync("release-build/build-info");
+let published = 0;
+for (const file of readdirSync("artifacts/build-info").filter((f) => !f.endsWith(".output.json"))) {
+  const roots = Object.keys(JSON.parse(readFileSync(join("artifacts/build-info", file), "utf8")).userSourceNameMap);
+  if (roots.length !== 1) failures.push(`build-info ${file} has ${roots.length} root files; expected an isolated build`);
+  if (!roots.every(inScope)) continue;
+  for (const part of [file, file.replace(/\.json$/, ".output.json")]) {
+    cpSync(join("artifacts/build-info", part), join("release-build/build-info", part));
+  }
+  published += 1;
 }
+if (published === 0) failures.push("no in-scope build-info to publish");
 
 if (failures.length > 0) {
   console.error(`NOT REPRODUCIBLE\n  ${failures.join("\n  ")}`);
@@ -133,5 +146,6 @@ if (failures.length > 0) {
 }
 console.log(
   `REPRODUCIBLE: ${Object.keys(CONTRACTS).length} contracts identical across 2 production builds, the default profile ` +
-    `and forge; TokenProxy matches ProxyDeployer. Release reference written to release-build/.`,
+    `and forge; TokenProxy matches ProxyDeployer. Release reference written to release-build/ ` +
+    `(${published} in-scope build-info files).`,
 );

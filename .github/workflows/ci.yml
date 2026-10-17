@@ -32,7 +32,7 @@ jobs:
       - run: npm test
 
   analysis:
-    name: Format, Slither gate, Halmos, upgrade safety, reproducibility
+    name: Format, Slither gate, Halmos, upgrade safety, reproducibility (PRs into main)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -54,4 +54,6 @@ jobs:
       - run: npm run test:halmos
       - run: npm run validate:upgrades
       # Same bytecode from 2 clean production builds, the default profile and forge; TokenProxy matches ProxyDeployer.
-      - run: npm run verify:reproducible
+      # About 11 minutes on a hosted runner, so only on PRs into main; tag pushes run it in release.yml before publishing.
+      - if: github.event_name == 'pull_request' && github.base_ref == 'main'
+        run: npm run verify:reproducible

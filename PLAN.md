@@ -805,6 +805,13 @@ An Ignition deployment of the whole stack:
    - the mutation results across all phases;
    - verification commands and tool versions.
 
+### Post-v0.1.0 adjustments (owner, 2026-10-17)
+- **CI time:** `verify:reproducible` (about 11 minutes on a hosted runner) now runs only on pull requests into `main` (`ci.yml`) and on `v*` tags (`release.yml`, before publishing). Pushes to `main` skip it.
+- **Archive size:** the reference build now carries `manifest.json` plus build-info for in-scope sources only: 36 isolated jobs rooted in `contracts/`, excluding `contracts/test/` and `.t.sol`. Tests, mocks and the OZ-rooted `TimelockController` job are dropped. The script fails if a build-info is not single-root.
+  - Size: 42 MB → 2.6 MB compressed (431 MB → 26 MB uncompressed).
+  - The OZ sources a contract imports remain inside its job's solc input, since they are needed to reproduce it.
+- **The `v0.1.0` archive was published before this change and is the larger one.** The next tag gets the trimmed archive.
+
 ### Remaining brief items (deferred until the first external integrator is known)
 - **ERC-3643 `IToken` read adapter.**
 - **Exact ERC-7943 conformance,** once the ERC is Final. Today there is no 7943 interface ID, because the function names and return types differ (README deviations).

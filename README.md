@@ -183,10 +183,12 @@ npm run validate:upgrades   # OZ upgrades-core over a Foundry build with storage
 npm run verify:reproducible # identical bytecode across clean Hardhat (production, default) and forge builds; writes release-build/
 ```
 
-On a `v*` tag, `.github/workflows/release.yml` reruns the reproducibility check and attaches `release-build-<tag>.tar.gz`
-(manifest + build-info, with its sha256) to the release as the council's reference.
+CI runs the reproducibility check on pull requests into `main`. On a `v*` tag, `.github/workflows/release.yml` reruns it
+and attaches `release-build-<tag>.tar.gz` (manifest plus in-scope build-info, with its sha256) to the release as the
+council's reference.
 
-CI (`.github/workflows/ci.yml`) runs all of the above on every push and pull request.
+CI (`.github/workflows/ci.yml`) runs all of the above on every push and pull request, except the reproducibility check
+(pull requests into `main` and tags only).
 
 ## Deviations from the brief
 

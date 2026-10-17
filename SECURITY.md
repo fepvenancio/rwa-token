@@ -18,7 +18,7 @@ item links to where it is maintained; this file only indexes and summarises.
 | Static-analysis suppressions and their reasons | §4 below |
 | Mutation-testing results | §5 below |
 | Findings that contradict reasonable assumptions | §3 below |
-| Reference build for the audited tag (manifest + build-info) | GitHub release `release-build-<tag>.tar.gz`, from `.github/workflows/release.yml` |
+| Reference build for the audited tag | GitHub release `release-build-<tag>.tar.gz` (from `.github/workflows/release.yml`): `manifest.json` plus build-info for in-scope sources only; no tests, mocks or OZ-rooted jobs |
 
 **Audited revision:** a `v*` tag. Its reference build is reproducible from the source at that tag
 (`npm ci && npm run verify:reproducible`) and must match the published archive.
@@ -175,5 +175,6 @@ npm run verify:reproducible
 ```
 
 Tool versions: Node 24, Hardhat 3.20.0, Foundry v1.8.1, slither 0.11.5, halmos 0.3.3, `@openzeppelin/upgrades-core`
-1.46.0. CI (`.github/workflows/ci.yml`) runs all of them on every push. Mythril is not used: it has no Cancun support
+1.46.0. CI (`.github/workflows/ci.yml`) runs all of them on every push, except `verify:reproducible`, which runs on
+pull requests into `main` and, through `release.yml`, on every `v*` tag. Mythril is not used: it has no Cancun support
 (TSTORE/TLOAD/MCOPY).
