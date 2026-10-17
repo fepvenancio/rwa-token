@@ -52,7 +52,8 @@ contract InterfaceFreezeTest is Test {
     assertEq(type(IERC7540Deposit).interfaceId, bytes4(0xce3bbe50), 'IERC7540Deposit');
     assertEq(type(IERC7540Redeem).interfaceId, bytes4(0x620ee8e4), 'IERC7540Redeem');
     assertEq(type(IERC7575).interfaceId, bytes4(0x2f0a18c5), 'IERC7575');
-    assertEq(type(IGated7540Vault).interfaceId, bytes4(0x34aae296), 'IGated7540Vault');
+    // Re-pinned 2026-10-17 on owner instruction: recoverRedeemRequest added (was 0x34aae296)
+    assertEq(type(IGated7540Vault).interfaceId, bytes4(0x316209a5), 'IGated7540Vault');
     assertEq(type(IIdentityRule).interfaceId, bytes4(0x150c4aea), 'IIdentityRule');
     assertEq(type(IIdentityRegistry).interfaceId, bytes4(0xb9209e33), 'IIdentityRegistry');
   }
@@ -93,6 +94,10 @@ contract InterfaceFreezeTest is Test {
       IMaxHoldersRule.HolderExemptionSet.selector, 0x76f53701a110e481b9beccc51135df840459b6ca21581f88b3ee10235891f5e5
     );
     // Added in Phase 5b (2026-10-17)
+    assertEq(
+      IGated7540Vault.RedeemRequestRecovered.selector,
+      0x274953cbe95d9877cd89aea6e3ca427fdd6170aeaa554aaea9ceceb36733cfd5
+    );
     assertEq(IGated7540Vault.Fulfilled.selector, 0xaf0e36efc5836309f8f21b646c6bfec100f3cd067e3a9e9c232c2bcb3d7045ce);
     assertEq(
       IGated7540Vault.DepositRequestRejected.selector,

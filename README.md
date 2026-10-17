@@ -45,7 +45,7 @@ Every contract has its `.t.sol` next to it. [`PLAN.md`](PLAN.md) tracks phases a
 | `GUARDIAN_ROLE` | multisig | none | `pause` the token and cancel pending timelock operations. **It can only stop things:** no unpause, no upgrades, no role or hook changes |
 | `UPGRADER_ROLE` | timelock | ≥ 7 days | upgrade, only to an implementation attested as `IMPLEMENTATION` |
 | `MINTER_ROLE` / `BURNER_ROLE` | issuer | none | mint, and burn (enforcement burns can take frozen tokens) |
-| `AGENT_ROLE` | issuer | none | `forcedTransfer` (clawback; bypasses pause and freeze, still policy-checked), `setFrozen` |
+| `AGENT_ROLE` | issuer | none | `forcedTransfer` (clawback; bypasses pause and freeze, still policy-checked), `setFrozen`; on the 7540 vault, `recoverRedeemRequest` (escrow → verified recovery account) |
 | `EXECUTOR_ROLE` | `IntentExecutor` contract | none | settle holder-signed intents; it cannot alter them |
 | `OPERATOR_ROLE` (executor) | bank / relayer keys | none | submit intents via `execute` / `executeBatch` (all-or-nothing) |
 | `GUARDIAN_ROLE` (executor) | multisig | none | pause the executor only; the timelock unpauses |

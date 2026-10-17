@@ -44,6 +44,7 @@ contract Gated7540VaultUnitTest is Helpers {
   address internal _admin = makeAddr('timelock');
   address internal _guardian = makeAddr('guardian');
   address internal _fulfiller = makeAddr('fulfiller');
+  address internal _agent = makeAddr('agent');
   address internal _custody = makeAddr('custody');
   address internal _alice = makeAddr('alice');
   address internal _bob = makeAddr('bob');
@@ -73,6 +74,7 @@ contract Gated7540VaultUnitTest is Helpers {
     );
     vm.startPrank(_admin);
     _vault.grantRole(_vault.FULFILLER_ROLE(), _fulfiller);
+    _vault.grantRole(_vault.AGENT_ROLE(), _agent);
     vm.stopPrank();
 
     _fund(_alice);
@@ -677,6 +679,84 @@ contract Gated7540VaultUnit_Rejects is Gated7540VaultUnitTest {
   }
 }
 
+contract Gated7540VaultUnit_Recover is Gated7540VaultUnitTest {
+  function _recover(
+    address _controller,
+    address _to
+  ) internal {
+    vm.prank(_agent);
+    _vault.recoverRedeemRequest(_controller, _to);
+  }
+
+  function test_WhenCallerIsNotAnAgent_ItReverts() external {
+    _holdShares(_alice, 50);
+    _requestRedeem(_alice, 50);
+    bytes32 _role = _vault.AGENT_ROLE();
+    vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, _fulfiller, _role));
+    vm.prank(_fulfiller);
+    _vault.recoverRedeemRequest(_alice, _bob);
+  }
+
+  function test_WhenNothingIsPending_ItReverts() external {
+    vm.expectRevert(IGated7540Vault.Gated7540Vault_NothingPending.selector);
+    _recover(_alice, _bob);
+  }
+
+  function test_WhenTheRecipientIsZero_ItReverts() external {
+    _holdShares(_alice, 50);
+    _requestRedeem(_alice, 50);
+    vm.expectRevert(IGated7540Vault.Gated7540Vault_ZeroAddress.selector);
+    _recover(_alice, address(0));
+  }
+
+  function test_WhenAnAgentRecovers_TheEscrowMovesAsForcedAndTheRequestClears(
+    uint256 _shares
+  ) external {
+    _holdShares(_alice, 100);
+    _shares = bound(_shares, 1, 100);
+    _requestRedeem(_alice, _shares);
+    vm.expectCall(
+      _hook,
+      abi.encodeCall(
+        IPolicyHook.beforeTransfer, (_ctx(IPolicyHook.TransferKind.FORCED, address(_vault), _bob, _shares, _agent))
+      )
+    );
+    vm.expectEmit(address(_vault));
+    emit IGated7540Vault.RedeemRequestRecovered(_alice, _bob, _shares, _agent);
+    _recover(_alice, _bob);
+
+    assertEq(_vault.balanceOf(_bob), _shares);
+    assertEq(_vault.balanceOf(address(_vault)), 0);
+    assertEq(_vault.pendingRedeemRequest(0, _alice), 0);
+  }
+
+  function test_WhenPaused_RecoveryStillWorks() external {
+    _holdShares(_alice, 50);
+    _requestRedeem(_alice, 50);
+    vm.prank(_guardian);
+    _vault.pause();
+    _recover(_alice, _bob);
+    assertEq(_vault.balanceOf(_bob), 50);
+  }
+
+  function test_WhenRecovered_LaterFulfilsAndRejectsRevertWithNoRequest() external {
+    _holdShares(_alice, 50);
+    _requestRedeem(_alice, 50);
+    _recover(_alice, _bob);
+    vm.startPrank(_fulfiller);
+    vm.expectRevert(IGated7540Vault.Gated7540Vault_NothingPending.selector);
+    _vault.fulfillRedeem(_alice, 50, 50);
+    vm.expectRevert(IGated7540Vault.Gated7540Vault_NothingPending.selector);
+    _vault.rejectRedeemRequest(_alice);
+    vm.stopPrank();
+  }
+
+  function test_WhenNothingIsPending_FulfilDepositRevertsWithNoRequest() external {
+    vm.expectRevert(IGated7540Vault.Gated7540Vault_NothingPending.selector);
+    _fulfillDeposit(_alice, 1, 1);
+  }
+}
+
 contract Gated7540VaultUnit_ViewsAndAdmin is Gated7540VaultUnitTest {
   function test_WhenPreviewing_ItAlwaysReverts() external {
     vm.expectRevert(IGated7540Vault.Gated7540Vault_AsyncOnly.selector);
@@ -913,6 +993,41 @@ contract Gated7540VaultIntegration_Escrow is Gated7540VaultIntegrationTest {
     assertEq(_vault.balanceOf(address(_vault)), 60);
     assertEq(_vault.pendingRedeemRequest(0, _alice), 60);
   }
+
+  /// @dev Owner-specified: de-verified controller -> reject reverts -> agent recovers to a verified account -> no request
+  function test_WhenTheControllerWasDeverified_TheAgentRecoversToAVerifiedAccount() external {
+    address _treasury = makeAddr('treasury');
+    _identity.set(_treasury, true);
+    _invest(_alice, 100);
+    vm.prank(_alice);
+    _vault.requestRedeem(60, _alice, _alice);
+    _identity.set(_alice, false);
+
+    vm.prank(_fulfiller);
+    vm.expectRevert(
+      abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.RECEIVER_NOT_VERIFIED)
+    );
+    _vault.rejectRedeemRequest(_alice);
+
+    vm.prank(_agent);
+    vm.expectRevert(
+      abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.RECEIVER_NOT_VERIFIED)
+    );
+    _vault.recoverRedeemRequest(_alice, _eve); // the recovery account must be verified too
+
+    vm.prank(_agent);
+    _vault.recoverRedeemRequest(_alice, _treasury);
+    assertEq(_vault.balanceOf(_treasury), 60);
+    assertEq(_vault.balanceOf(address(_vault)), 0);
+    assertEq(_vault.pendingRedeemRequest(0, _alice), 0);
+
+    vm.startPrank(_fulfiller);
+    vm.expectRevert(IGated7540Vault.Gated7540Vault_NothingPending.selector);
+    _vault.fulfillRedeem(_alice, 60, 60);
+    vm.expectRevert(IGated7540Vault.Gated7540Vault_NothingPending.selector);
+    _vault.rejectRedeemRequest(_alice);
+    vm.stopPrank();
+  }
 }
 
 /// @notice Drives requests, fulfilments, claims and rejects across a few controllers
@@ -1021,6 +1136,12 @@ contract Gated7540Handler is Test {
     vm.prank(_fulfiller);
     _vault.rejectRedeemRequest(_actors[_seed % 3]);
   }
+
+  function recoverRedeem(
+    uint256 _seed
+  ) external {
+    _vault.recoverRedeemRequest(_actors[_seed % 3], _actors[(_seed + 1) % 3]);
+  }
 }
 
 contract Gated7540VaultInvariantTest is Gated7540VaultUnitTest {
@@ -1029,6 +1150,9 @@ contract Gated7540VaultInvariantTest is Gated7540VaultUnitTest {
   function setUp() public override {
     super.setUp();
     _handler = new Gated7540Handler(_vault, _asset, _fulfiller);
+    bytes32 _agentRole = _vault.AGENT_ROLE(); // read first: an inline call would consume the prank
+    vm.prank(_admin);
+    _vault.grantRole(_agentRole, address(_handler));
     targetContract(address(_handler));
   }
 

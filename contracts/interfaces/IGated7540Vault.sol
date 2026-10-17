@@ -53,6 +53,15 @@ interface IGated7540Vault {
   );
 
   /**
+   * @notice Emitted when an agent recovers a pending redemption whose controller cannot receive the shares back
+   * @param _controller The controller whose request was cleared
+   * @param _to The verified recovery account that received the escrowed shares
+   * @param _shares The shares moved
+   * @param _agent The AGENT_ROLE account that recovered them
+   */
+  event RedeemRequestRecovered(address indexed _controller, address indexed _to, uint256 _shares, address _agent);
+
+  /**
    * @notice Emitted when the fulfiller rejects a pending redemption request; the shares go back to the controller
    * @param _controller The controller
    * @param _shares The shares returned
@@ -86,7 +95,7 @@ interface IGated7540Vault {
    */
   error Gated7540Vault_ExceedsPending(uint256 _requested, uint256 _pending);
 
-  /// @notice Thrown when rejecting a controller with nothing pending
+  /// @notice Thrown when fulfilling, rejecting or recovering a controller with nothing pending
   error Gated7540Vault_NothingPending();
 
   /**
@@ -155,6 +164,19 @@ interface IGated7540Vault {
     address _registry,
     address _hook,
     address _custody
+  ) external;
+
+  /**
+   * @notice Recovers a controller's whole pending redemption to a verified account (an enforcement action)
+   * @dev Only AGENT_ROLE. Clears the controller's pending bookkeeping and moves the escrowed shares to `_to` internally
+   *      as FORCED: bypasses pause, lockup and the holder cap, but `_to` must pass identity. The path for a controller
+   *      that was de-verified, whose reject reverts. Reverts if nothing is pending
+   * @param _controller The controller
+   * @param _to The verified recovery account, e.g. the treasury
+   */
+  function recoverRedeemRequest(
+    address _controller,
+    address _to
   ) external;
 
   /**

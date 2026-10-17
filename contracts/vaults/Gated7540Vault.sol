@@ -167,6 +167,7 @@ contract Gated7540Vault is
     if (_assets == 0 || _shares == 0) revert Gated7540Vault_ZeroAmount();
     Gated7540Storage storage $ = _getGated7540Storage();
     DepositState storage _state = $.deposits[_controller];
+    if (_state.pendingAssets == 0) revert Gated7540Vault_NothingPending();
     if (_assets > _state.pendingAssets) revert Gated7540Vault_ExceedsPending(_assets, _state.pendingAssets);
 
     _state.pendingAssets -= _assets;
@@ -185,6 +186,7 @@ contract Gated7540Vault is
   ) external onlyRole(FULFILLER_ROLE) {
     if (_assets == 0 || _shares == 0) revert Gated7540Vault_ZeroAmount();
     RedeemState storage _state = _getGated7540Storage().redeems[_controller];
+    if (_state.pendingShares == 0) revert Gated7540Vault_NothingPending();
     if (_shares > _state.pendingShares) revert Gated7540Vault_ExceedsPending(_shares, _state.pendingShares);
 
     _state.pendingShares -= _shares;
@@ -220,6 +222,21 @@ contract Gated7540Vault is
     emit RedeemRequestRejected(_controller, _shares);
     // Internal FORCED move: not an agent action, and the vault needs no AGENT_ROLE on itself.
     _moveAs(address(this), _controller, _shares, IPolicyHook.TransferKind.FORCED, bytes32(0), 0);
+  }
+
+  /// @inheritdoc IGated7540Vault
+  function recoverRedeemRequest(
+    address _controller,
+    address _to
+  ) external onlyRole(AGENT_ROLE) {
+    if (_to == address(0)) revert Gated7540Vault_ZeroAddress();
+    RedeemState storage _state = _getGated7540Storage().redeems[_controller];
+    uint256 _shares = _state.pendingShares;
+    if (_shares == 0) revert Gated7540Vault_NothingPending();
+    _state.pendingShares = 0;
+    emit RedeemRequestRecovered(_controller, _to, _shares, _msgSender());
+    // Internal FORCED move: an enforcement action; identity still applies to the recovery account.
+    _moveAs(address(this), _to, _shares, IPolicyHook.TransferKind.FORCED, bytes32(0), 0);
   }
 
   /// @inheritdoc IGated7540Vault

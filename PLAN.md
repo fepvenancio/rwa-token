@@ -1,6 +1,6 @@
 # PLAN
 
-Status: **5a approved and pushed (`9f8f5b0`, CI green). 5b (`Gated7540Vault` + R1) implemented and green — awaiting review.**
+Status: **Phase 5 complete and pushed (5a `9f8f5b0`, 5b `5791968`, recovery follow-up). Next: Phase 6 (viem integration) — plan.**
 
 Brief v2 ("Gated Token Stack") replaced the original executor-only brief on 2026-10-16. On the same day the owner supplied a reference implementation in `Imported/` (now deleted; its contents live in `contracts/`) and approved, in chat, integrating it with the major findings fixed, a common-bug sweep, and the Wonderland Solidity standards.
 
@@ -476,9 +476,17 @@ Each gets red tests, then the implementation, then green, then a stop for review
 - **Fulfilment while paused:** `fulfillDeposit` works; `fulfillRedeem` reverts, because the escrow BURN is a share movement.
 - **Price and zero inputs:** the price is 1:1 until the first fulfilment. Zero-amount requests revert, as in the spec's reference code; zero-output claims revert; a zero controller reverts.
 
+### 5b approval follow-ups (2026-10-17)
+- **`arbitrary-send-erc20` suppression check:** the guard (`owner == msg.sender || isOperator`) runs before the pull. The test was strengthened to "a non-operator with a victim as owner reverts **and moves nothing**" (fuzzed; the victim has approved the vault), and a revoked-operator case was added. **Mutation check:** removing the guard fails both tests. The suppression stands. Pushed with 5b (`5791968`).
+- **`recoverRedeemRequest(controller, to)`** (owner decision; `AGENT_ROLE`, an enforcement action):
+  - clears the controller's pending redemption;
+  - FORCED-moves the escrow to `to` internally (`to` must pass identity);
+  - emits `RedeemRequestRecovered(controller, to, shares, agent)`;
+  - reverts with `NothingPending` when there is nothing to recover and `ZeroAddress` for a zero `to`.
+
+  Both fulfils now also revert with `NothingPending` when nothing is pending, so after a recovery the fulfil and the reject both say "no request". `IGated7540Vault` was re-pinned `0x34aae296 → 0x316209a5` (= the old id XOR the new selector, matching the compiler), and the new event topic is pinned.
+  - **Tests** (red first): agent-only, nothing pending, zero recipient, the FORCED context with the event, works while paused, and fulfil/reject say "no request" afterwards. Integration runs the owner's sequence: de-verified controller → reject reverts → recovery to an unverified account reverts → recovery to a verified treasury → fulfil and reject revert with no request. **The invariant handler fuzzes recovery**, so escrow == Σ pending still holds across sequences. **Mutation check:** a recovery that doesn't clear pending is caught by 3 tests and the invariant.
+- **Verification:** `npm test` gives 347 passing (346 solidity, 1 nodejs); lint, typecheck and fmt are clean; Slither reports 0; Halmos 4/4.
+
 ## Open questions for the owner
-1. **Review 5b.** Once approved, I'll push it. Phase 6 (viem integration) comes next.
-2. **Escrow recovery for de-verified controllers (gap in R2).**
-   - If the agent recovers escrowed shares with `forcedTransfer` from the vault, `pendingRedeem[controller]` still counts them, so escrow and bookkeeping diverge and a later fulfil or reject for that controller fails.
-   - Proposal: a `FULFILLER_ROLE` (or agent) `recoverRedeemRequest(controller, to)` that clears the pending amount and moves the shares to a verified recovery account (e.g. the treasury) as FORCED, emitting its own event.
-   - It's not built; it needs your decision.
+1. Phase 6 plan (next).
