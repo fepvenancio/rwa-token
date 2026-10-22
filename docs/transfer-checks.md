@@ -165,7 +165,9 @@ Because `FORCED` skips the check but is still counted, the count can end above t
 
 Exempt accounts never count and never trigger the cap. The 7540 vault is exempted for itself in `Activate`, because it holds escrowed shares. `setExemptHolder` adjusts the count by one when the account already has a balance.
 
-Admin functions, all needing `DEFAULT_ADMIN_ROLE` on the token: `setCap`, `seedHolderCount`, `setExemptHolder`. `seedHolderCount` overwrites the count. It is only meant for use while the rule is not in the token's active rule list.
+Admin functions, all needing `DEFAULT_ADMIN_ROLE` on the token: `setCap`, `seedHolderCount`, `setExemptHolder`. `seedHolderCount` overwrites the count with the number it is given. The rule does not check that number and accepts it at any time. It is only meant for use while the rule is not in the token's active rule list.
+
+Without a seed, the count is right only if the rule has seen every movement that added or removed a holder since the token had no holders. The `Tokens` module builds each token's hook from `RULE_ORDER`, which puts this rule in every list, so that holds as long as the rule stays in the list. To stop capping a token, raise the cap with `setCap(token, type(uint256).max)` instead of removing the rule. The count can go stale when the rule is removed and added back later, when a new deployment replaces it (it starts at 0), or when it is added to a token that already has holders. A count that is too high turns away new holders below the cap. One that is too low admits holders past the cap. Once it reaches 0, any movement that empties a non-exempt sender without adding a holder reverts, `forcedTransfer` and `burn` included, because `after_` runs for every kind. [governance-and-deployment.md](governance-and-deployment.md#the-holder-count-across-rule-and-hook-changes) describes how to seed in those cases.
 
 Rule id: `keccak256('MaxHoldersRule.v1')`.
 

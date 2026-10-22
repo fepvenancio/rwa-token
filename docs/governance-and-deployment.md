@@ -151,6 +151,29 @@ A redeployed copy of an existing rule shares its codehash if its constructor arg
 
 The rules need no change. They accept `after_` from whichever hook `ctx.token` currently reports.
 
+## The holder count across rule and hook changes
+
+`MaxHoldersRule` keeps its count in `after_`, which adds one when a movement creates a holder and subtracts one when it empties one. Its state is keyed by token, and it accepts `after_` from whichever hook the token reports, so a new hook whose list still holds the same rule instance keeps the count. The count can go stale whenever the token's list uses a rule instance that missed movements that add or remove a holder:
+
+- the rule is removed with `setRules` or with a new hook, and added back later;
+- a new deployment replaces it, and starts at 0;
+- it is added to a token that already has holders. One instance serves every token (`Components` deploys one), and unless they were set in advance, it has no count, cap or exemptions for a token it has not served.
+
+Governance should not propose these for a token that has holders. To stop capping a token, it schedules `setCap(token, type(uint256).max)` instead, and the rule keeps counting.
+
+If one of them cannot be avoided, `seedHolderCount` must set the true count, and the count must not change between reading it and the seed taking effect. A count read when the batch is proposed is at least the delay old when the batch executes, so putting the seed and the change in one batch is not enough on its own. The procedure:
+
+1. Check that no `unpause` of the token is pending on the recovery timelock. Nobody can cancel one there, and once it is ready it would lift the pause of step 2. If one is pending, execute it first: it succeeds only while the token is paused. Governance schedules no other operation on the token, its hook or the rule's settings for the token until step 4, and the guardian cancels any that is pending on the main timelock.
+2. The guardian pauses the token. While it is paused only `FORCED` movements run, so the agent does not call `forcedTransfer`, `recoverRedeemRequest` or `recoverClaimable` until step 4.
+3. Governance counts the accounts with a balance above zero from the token's `Transfer` events. For an instance that already serves the token with its exemptions (a rule added back), it leaves the exempt accounts out. For an instance that has never served the token (a new deployment, or the shared instance added to a token that ran without it), it keeps them in, because the batch exempts them after the seed and `setExemptHolder` takes each one that holds a balance out of the count.
+4. Governance schedules one batch on the main timelock and executes it after the delay: for an instance that has never served the token `setCap`, then `seedHolderCount(token, count)`, then for that instance `setExemptHolder` for each exemption, then the `setRules` or `setPolicyHook` change, then `token.unpause()`. Without `setCap`, the cap is 0 and the rule rejects every new holder that does not arrive by `FORCED`.
+
+If the token is unpaused at any point before the batch executes, the count no longer holds: cancel the batch and start again. A batch left in place fails at `token.unpause()` while the token is unpaused (`ExpectedPause`), but it would succeed after a second pause.
+
+The token stays paused for at least the delay. PLAN.md tracks a rule version that checks the count on-chain when the batch executes, which would remove the pause for tokens whose holder list fits in one transaction.
+
+Code: `MaxHoldersRule.after_`, `seedHolderCount`, `setExemptHolder`; `BaseRule.onlyHook`; `PolicyGatedERC20Upgradeable._check` and `unpause`.
+
 ## Upgrading a token
 
 1. Deploy the new implementation.
