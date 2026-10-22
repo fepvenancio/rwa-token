@@ -2,7 +2,7 @@
 
 These pages explain how the contracts in `contracts/` work and how they are deployed. They describe what the code does. Where the build brief ([CLAUDE.md](../CLAUDE.md)) or the [README](../README.md) says something different, the code is right, and the page follows the code.
 
-Checked against: the contracts and Ignition modules of release `v0.2.0` (commit `ca88619`), plus the `MaxHoldersRule` seeding change (the v0.3.0 candidate in PLAN.md). If a later commit changes them, these pages may be out of date.
+Checked against: the contracts and Ignition modules of release `v0.2.0` (commit `ca88619`), plus the `MaxHoldersRule` seeding change merged in PR #1 (commit `b6f8e9b`). If a later commit changes them, these pages may be out of date.
 
 ## Which page answers what
 

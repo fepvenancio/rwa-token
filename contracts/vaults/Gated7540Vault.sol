@@ -463,7 +463,8 @@ contract Gated7540Vault is
     if (_assets == 0) revert Gated7540Vault_ZeroAmount();
     RedeemState storage _state = _getGated7540Storage().redeems[_controller];
     if (_assets > _state.claimableAssets) revert Gated7540Vault_ExceedsClaimable(_assets, _state.claimableAssets);
-    // Ceil on the shares deducted: assets can never be drained for zero shares.
+    // Shares deducted round up, so a partial claim never takes fewer than its pro-rata share. That can use the shares
+    // up before the assets; the remaining assets then pay out against zero shares, and they are owed either way.
     _shares = _assets == _state.claimableAssets
       ? _state.claimableShares
       : Math.mulDiv(_assets, _state.claimableShares, _state.claimableAssets, Math.Rounding.Ceil);
@@ -617,7 +618,8 @@ contract Gated7540Vault is
     if (_shares == 0) revert Gated7540Vault_ZeroAmount();
     DepositState storage _state = _getGated7540Storage().deposits[_controller];
     if (_shares > _state.claimableShares) revert Gated7540Vault_ExceedsClaimable(_shares, _state.claimableShares);
-    // Ceil on the assets consumed: shares can never be minted for zero assets.
+    // Assets consumed round up, so a partial claim never takes fewer than its pro-rata share. That can use the assets
+    // up before the shares; the remaining shares are then minted against zero assets, and they are owed either way.
     _assets = _shares == _state.claimableShares
       ? _state.claimableAssets
       : Math.mulDiv(_shares, _state.claimableAssets, _state.claimableShares, Math.Rounding.Ceil);

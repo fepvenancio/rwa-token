@@ -297,7 +297,7 @@ The roles are in [roles.md](roles.md#who-holds-what-after-activate). The test fi
 - the recovery timelock holds exactly `RECOVERY_ROLE` on the main timelock, each token and the executor, nothing on the registry, and `DEFAULT_ADMIN_ROLE` on itself;
 - no known account can cancel on the recovery timelock, the guardian holds nothing there, and governance is its proposer and executor;
 - `ProxyDeployer` is owned by the main timelock;
-- each token runs the hook the council recorded, with the intended rules in order, and no rule has its own access control;
+- each token runs the hook the council recorded, administered by the main timelock, with the intended rules in order, and no rule has its own access control;
 - the guardian can cancel on the main timelock but not propose or execute;
 - both delays are at least 7 days.
 

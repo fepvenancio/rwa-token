@@ -1022,7 +1022,7 @@ All eight pages exist, checks 1 to 6 pass with their output shown, and the summa
 - **Will go stale when review item M-3 (claimable recovery, in progress in another session) lands:** `flows-vaults.md` ("What cannot be undone once fulfilled", the pause table, the 7540 `max*` text), `roles.md` (function table), `money.md` ("only places the asset can leave the vault") and the statements that `ControllerNotEligible` is raised only on `requestDeposit`.
 - **Not yet committed:** another session committed the first version of `docs/` as `e44dbb8` before verification finished. The fixes from the verification rounds are uncommitted edits on top of it.
 
-## v0.3.0 candidate: `MaxHoldersRule` without live seeding (2026-10-22: A done in `49c51d8`; B built, awaiting review)
+## v0.3.0 candidate: `MaxHoldersRule` without live seeding (2026-10-22: A and B merged in PR #1, merge commit `b6f8e9b`)
 
 Source: the snapshot-window discussion on the urwa-policy draft (Ethereum Magicians thread 30048, posts #2 to #5), checked against this repo's code.
 
@@ -1233,5 +1233,33 @@ In Ignition, `Components` deploys v2. `roles.ts` and `Activate` change only the 
 | 0.3 #2: a reinstall is a new installation | Yes: cases 1 and 2 above. |
 | 0.4: the snapshot window | Yes, and the window is wider here, because the seed goes through the 7-day timelock. Change B's list seed closes it. |
 
+## Audit leftovers from 2026-10-17 (approved 2026-10-22)
+
+The two items still open from the 2026-10-17 audit. Both are text only. The build has no metadata hash, so the bytecode and the attested codehashes do not change.
+
+1. **Two `Gated7540Vault` comments overclaim.**
+   - `withdraw`: "assets can never be drained for zero shares". `_claimMint`: "shares can never be minted for zero assets".
+   - Rounding up makes each partial claim take at least its pro-rata share, which can use one side of the claimable pair up first. After that, the rest of the other side moves against zero.
+   - **Proof, in a scratch copy:** with 3 shares claimable for 10 assets, three one-asset withdrawals use the shares up, and the fourth pays an asset for 0 shares. With 10 shares claimable for 3 assets, the fourth one-share mint consumes 0 assets.
+   - Nothing is lost: the remainder is owed to the controller either way.
+   - **Change:** both comments say what the rounding does guarantee, and what happens after one side is used up.
+2. **README runbook step 7 lags `assertHandedOver`.**
+   - **Missing from step 7:** the check that every hook's `ADMIN` is the main timelock, the check that no rule exposes `hasRole` or `owner`, and the recovery timelock in the deployer check.
+   - **Change:** step 7 gets these three.
+   - **Same list in `docs/governance-and-deployment.md` ("After `Activate`"):** it also omits the hook-`ADMIN` check, so it gets that one line too.
+3. **`docs/README.md` "Checked against"** names the PR #1 merge commit `b6f8e9b`, as promised for after the merge.
+
+**Gates:** lint, fmt, tests in both runners, Slither, Aderyn, and a check that the `Gated7540Vault` deployed bytecode is unchanged.
+
+**Result (2026-10-22).**
+- Both comments now say what the rounding guarantees and what happens after one side is used up.
+- README step 7 lists the hook-`ADMIN` check, the rule access-control check and both timelocks in the deployer check. The docs list has the hook-`ADMIN` check.
+- `docs/README.md` names `b6f8e9b`.
+- **Gates:**
+  - lint 0, fmt clean;
+  - 513 passing (453 solidity, 60 nodejs), isolated 453;
+  - Slither 0, Aderyn 0;
+  - the `Gated7540Vault` deployed bytecode hash is unchanged (`303eebf4…`).
+
 ## Open questions for the owner
-1. Review of the PR for Change A and Change B ("v0.3.0 candidate: `MaxHoldersRule` without live seeding").
+1. None.
