@@ -8,12 +8,14 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
  * @notice Caps the number of holders per token. A holder is any account with balance > 0; zero amounts never add one.
  *         Only movements that add a new holder are checked, net of a sender who leaves, so a lowered cap never blocks
  *         existing holders. FORCED is exempt from the cap but still counted. `cap == 0` fails closed
- *      Exempt accounts (e.g. a 7540 escrow vault, a treasury) never count and never trigger the cap; the seeded
- *      count excludes them
- * @dev The count is maintained in `after_` from post-transfer balances. `seedHolderCount` is only legitimate while
- *      the rule is not in the token's active rule set; the correct value is recomputable from the token's `Transfer`
- *      events. With a wrong count, an exit that would take it below zero reverts (fails closed) until re-seeded.
- *      Cap and seed are set by the token's own DEFAULT_ADMIN_ROLE, checked live
+ *      Exempt accounts (e.g. a 7540 escrow vault, a treasury) never count and never trigger the cap; a seeded count
+ *      must exclude them too
+ * @dev The count is maintained in `after_` from post-transfer balances. The three seeds are accepted only while the
+ *      rule is not in the rule list of the token's current hook (`IComplianceHook.rules()`): `seedHolderCountFromHolders`
+ *      proves the count on-chain, `seedHolderCountFromRule` copies it from the instance being replaced, and
+ *      `seedHolderCount` takes it as given. With a wrong count, an exit that would take it below zero reverts (fails
+ *      closed); a seed, with the rule out of the list, is what corrects the count. Cap, seeds and exemptions are set by the token's
+ *      own DEFAULT_ADMIN_ROLE, checked live
  */
 interface IMaxHoldersRule is IComplianceRule {
   /*///////////////////////////////////////////////////////////////
@@ -65,13 +67,40 @@ interface IMaxHoldersRule is IComplianceRule {
   /// @notice Thrown when exempting the zero address
   error MaxHoldersRule_ZeroAddress();
 
+  /**
+   * @notice Thrown when a seed is attempted while this rule is in the token's rule list
+   * @param _token The token
+   */
+  error MaxHoldersRule_RuleActive(address _token);
+
+  /**
+   * @notice Thrown when a holder list is not strictly ascending, which also rejects duplicates and the zero address
+   * @param _index The first entry that is not above the one before it (the first is compared with the zero address)
+   */
+  error MaxHoldersRule_HoldersNotAscending(uint256 _index);
+
+  /**
+   * @notice Thrown when the listed balances do not add up to the total supply: an account outside the list holds tokens
+   * @param _sum The sum of the listed balances
+   * @param _supply The token's total supply
+   */
+  error MaxHoldersRule_HoldersIncomplete(uint256 _sum, uint256 _supply);
+
+  /**
+   * @notice Thrown when the rule to copy from is not in the token's rule list, so its count is not live
+   * @param _token The token
+   * @param _previousRule The rule given
+   */
+  error MaxHoldersRule_PreviousRuleNotActive(address _token, address _previousRule);
+
   /*///////////////////////////////////////////////////////////////
                             LOGIC
   //////////////////////////////////////////////////////////////*/
 
   /**
-   * @notice Overwrites a token's holder count
-   * @dev Only the token's DEFAULT_ADMIN_ROLE. Only legitimate while this rule is not in the token's active rule set
+   * @notice Overwrites a token's holder count with the number given
+   * @dev Only the token's DEFAULT_ADMIN_ROLE, and only while this rule is not in the token's rule list. The number is not
+   *      checked: one read off-chain is as old as the proposal that carries it, so prefer `seedHolderCountFromHolders`
    * @param _token The token
    * @param _count The number of non-exempt accounts with balance > 0
    */
@@ -81,9 +110,39 @@ interface IMaxHoldersRule is IComplianceRule {
   ) external;
 
   /**
+   * @notice Sets a token's holder count from a list of accounts whose balances add up to the total supply
+   * @dev Only the token's DEFAULT_ADMIN_ROLE, and only while this rule is not in the token's rule list. If the listed
+   *      balances add up to `totalSupply()`, no account outside the list holds tokens, so the count is exact when the call
+   *      executes. Entries with no balance are allowed, so the list may be a superset of the holders. Exempt accounts
+   *      that hold tokens must be listed: they are summed but not counted. Exemptions are read as they are when the call
+   *      runs, so set them first
+   * @param _token The token
+   * @param _holders The accounts, in strictly ascending order
+   */
+  function seedHolderCountFromHolders(
+    address _token,
+    address[] calldata _holders
+  ) external;
+
+  /**
+   * @notice Sets a token's holder count by copying it from the rule instance this one replaces
+   * @dev Only the token's DEFAULT_ADMIN_ROLE, only while this rule is not in the token's rule list, and only while
+   *      `_previousRule` is, so the copied count is live when the call executes. The count is copied as it stands, so it
+   *      is exact only if the previous rule's count is and both rules exempt the same accounts that hold tokens.
+   *      Exemptions are not copied: set the same ones on this rule first
+   * @param _token The token
+   * @param _previousRule The instance being replaced
+   */
+  function seedHolderCountFromRule(
+    address _token,
+    IMaxHoldersRule _previousRule
+  ) external;
+
+  /**
    * @notice Exempts an account from a token's holder count and cap, or lifts the exemption
-   * @dev Only the token's DEFAULT_ADMIN_ROLE. If the account holds a balance, the count follows the change, so exempt
-   *      accounts never count
+   * @dev Only the token's DEFAULT_ADMIN_ROLE. If this rule is in the token's rule list and the account holds a balance,
+   *      the count follows the change, so exempt accounts never count. If it is not, the count is left alone, so set
+   *      exemptions before seeding
    * @param _token The token
    * @param _account The account
    * @param _exempt Whether it is exempt
@@ -128,7 +187,7 @@ interface IMaxHoldersRule is IComplianceRule {
   /**
    * @notice A token's holder count
    * @param _token The token
-   * @return _count The number of accounts with balance > 0, as tracked
+   * @return _count The number of non-exempt accounts with balance > 0, as tracked
    */
   function holderCount(
     address _token

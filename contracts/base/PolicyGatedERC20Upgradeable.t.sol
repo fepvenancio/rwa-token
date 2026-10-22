@@ -10,6 +10,7 @@ import {IERC20Permit} from '@openzeppelin/contracts/token/ERC20/extensions/IERC2
 import {Pausable} from '@openzeppelin/contracts/utils/Pausable.sol';
 import {IERC165} from '@openzeppelin/contracts/utils/introspection/IERC165.sol';
 import {Test} from 'forge-std/Test.sol';
+import {Vm} from 'forge-std/Vm.sol';
 
 import {Reasons} from 'interfaces/Errors.sol';
 
@@ -338,6 +339,25 @@ contract PolicyGatedUnit_ForcedTransfer is PolicyGatedUnitTest {
     vm.prank(_agent);
     _token.forcedTransfer(_alice, _bob, _amount);
     assertEq(_token.getFrozen(_alice), _INITIAL - _amount);
+  }
+
+  /// @dev A frozen amount that still fits in what remains is left alone: no write and no `Frozen` event
+  function test_WhenTheFrozenAmountStillFits_ItIsLeftAlone(
+    uint256 _frozen
+  ) external {
+    _frozen = bound(_frozen, 1, _INITIAL - 1);
+    uint256 _amount = _INITIAL - _frozen; // what remains equals the frozen amount
+    vm.prank(_agent);
+    _token.setFrozen(_alice, _frozen);
+
+    vm.recordLogs();
+    vm.prank(_agent);
+    _token.forcedTransfer(_alice, _bob, _amount);
+    Vm.Log[] memory _logs = vm.getRecordedLogs();
+    for (uint256 _i; _i < _logs.length; ++_i) {
+      assertNotEq(_logs[_i].topics[0], IPolicyGated.Frozen.selector, 'Frozen emitted');
+    }
+    assertEq(_token.getFrozen(_alice), _frozen);
   }
 
   function test_WhenPaused_ItStillMoves() external {

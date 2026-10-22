@@ -1022,5 +1022,216 @@ All eight pages exist, checks 1 to 6 pass with their output shown, and the summa
 - **Will go stale when review item M-3 (claimable recovery, in progress in another session) lands:** `flows-vaults.md` ("What cannot be undone once fulfilled", the pause table, the 7540 `max*` text), `roles.md` (function table), `money.md` ("only places the asset can leave the vault") and the statements that `ControllerNotEligible` is raised only on `requestDeposit`.
 - **Not yet committed:** another session committed the first version of `docs/` as `e44dbb8` before verification finished. The fixes from the verification rounds are uncommitted edits on top of it.
 
+## v0.3.0 candidate: `MaxHoldersRule` without live seeding (2026-10-22: A done in `49c51d8`; B built, awaiting review)
+
+Source: the snapshot-window discussion on the urwa-policy draft (Ethereum Magicians thread 30048, posts #2 to #5), checked against this repo's code.
+
+### Where we are (verified 2026-10-22)
+
+- **Every template starts with the rule.** `RULE_ORDER` in `ignition/modules/roles.ts` puts `maxHoldersRule` in the initial set of `intent`, `fund` and `asyncFund`, and `ProxyDeployer` creates each token already bound to its hook. The count starts at 0 with 0 holders and follows every movement, so a token deployed this way never needs a seed.
+- **The 7540 escrow is exempted before any holder exists** (`Activate.ts`), so the exemption does not touch the count.
+- **The count survives hook swaps.** The rule's state is keyed by token, and `onlyHook` accepts whichever hook the token has installed. A new hook that keeps the same rule instance keeps counting.
+- **Only `MaxHoldersRule` keeps state derived from movements** (it is the only rule with `wantsAfter`). Lockups, the window and identity are set directly or read from a registry, so they stay valid while a rule is out of the set.
+
+### When a seed is still needed
+
+The count is wrong whenever the rule instance missed movements on a token that has holders:
+1. the rule is removed from a token's set (`setRules`, or a new hook without it) and added back later;
+2. a new rule instance or version replaces the current one, and starts at 0;
+3. the rule is added to a token that ran without it.
+
+**Today's behaviour.** `seedHolderCount(token, n)` takes a number computed off-chain, and its caller is the main timelock, so the number is at least 7 days old when it lands (P5 allows a seed at any time).
+- **Too high:** the rule turns away new holders below the cap.
+- **Too low:** it admits holders past the cap. Once the count reaches zero, the next full exit that does not create a new holder reverts in `after_`. That includes `forcedTransfer` and `burn` of a full balance, so enforcement is blocked too, until a reseed that itself takes 7 days.
+
+### Change A: never remove the rule (procedure and docs, no code)
+
+- To lift a cap, call `setCap(token, type(uint256).max)` instead of dropping the rule. The count keeps running, so lowering the cap again later is a parameter change, not a reinstall.
+- Review rule: a `setRules` or `setPolicyHook` proposal that drops `MaxHoldersRule` for a token with `totalSupply() > 0` is rejected, unless it follows the paused seeding procedure in `governance-and-deployment.md`.
+- Docs: `transfer-checks.md`, `governance-and-deployment.md` and `roles.md` say this, and name cases 1 to 3 as cold starts.
+- **As built (docs only, no code):**
+  - `transfer-checks.md`, MaxHoldersRule section: the seed is unchecked and accepted at any time; when the count goes stale and what a stale count does; lift a cap with `setCap(token, type(uint256).max)`.
+  - `governance-and-deployment.md`, new section "The holder count across rule and hook changes": the three cold starts, and the procedure for an unavoidable one. It runs:
+    1. no `unpause` pending on the recovery timelock, and no other operation on the token;
+    2. the guardian pauses;
+    3. an off-chain count;
+    4. one batch: `setCap` and the exemptions for an instance that has never served the token, the seed, the rule or hook change, then `unpause`.
+
+    If the token is unpaused before the batch executes, start again. Until B ships, this procedure is the only safe cold start, and it costs a pause of at least the delay.
+  - `roles.md`: a seeded count is at least the delay old when it lands.
+  - **Checked.** Every added sentence was checked against the code, then by an independent read of the diff. That read found two real problems, both fixed:
+    - a pending recovery-timelock `unpause`, which nobody can cancel, could lift the pause mid-procedure;
+    - "new instance" missed the shared rule instance being added to a token that ran without it. That case needs `setCap` too, or the cap is 0.
+
+    It also corrected two wordings: "stale" became "can go stale", because only movements that add or remove a holder change the count.
+
+### Change B: `MaxHoldersRule` v2 with a verified seed (code)
+
+A rule change is a new deployment (brief rule 12): v2 is attested and swapped in per token. It adds:
+- **`seedHolderCountFromHolders(token, address[] holders)`.** Token admin, only while the rule is not in the token's active set. It:
+  1. requires `holders` strictly ascending, so there are no duplicates;
+  2. sums `balanceOf` over the list, and counts the non-zero balances of accounts that are not exempt;
+  3. reverts with `MaxHoldersRule_HoldersIncomplete(sum, supply)` unless the sum equals `totalSupply()`;
+  4. sets the count and emits `HolderCountSeeded`.
+
+  If the listed balances add up to the supply, no unlisted account holds anything, so the count is exact when the batch executes, whatever moved during the delay. A new holder outside the list makes the batch revert instead of installing a stale count. Entries with no balance are allowed. Every new holder must pass `IdentityRule`, so listing all verified identities too keeps the batch valid across the delay, at the cost of more entries.
+- **`seedHolderCountFromRule(token, previousRule)`,** for case 2 when the list is too long. Only while v2 is not active and `previousRule` is. It copies `previousRule.holderCount(token)`: one read, no holder limit, and exact at execution, because the previous rule counts until the same batch swaps it out. Its weakness is exemptions. They are a mapping, so v2 cannot check it has all of v1's, and a missing one leaves the count off by one for that account. Below the limit, prefer the list seed, which is consistent with whatever exemptions v2 has.
+- **`setExemptHolder` leaves the count alone while the rule is not active;** the seed computes it. Today, exempting a holding account (the escrow) on a cold start with a count of 0 underflows, so exemptions could not be set before the seed.
+- **`seedHolderCount(token, n)`** stays, but only while the rule is not active (reverses P5). Its only remaining use is a cold start above the list limit, under a pause (below).
+- **"Active"** means the rule is in `IComplianceHook(IPolicyGated(token).policyHook()).rules()`. A hook without `rules()` makes the seeds revert.
+
+**Measured limit of the list seed.**
+- **First estimate (stand-in):** anvil with Prague rules, a plain ERC-20 behind an ERC-1967 proxy, called through a `TimelockController` batch: about 4,470 gas per entry, so about 3,720 entries.
+- **In-stack (the number that counts):** the production deployment (`deployStack`: Ignition modules, `IntentToken` behind its proxy), a batch on `GovernanceTimelock` of `setCap`, `seedHolderCountFromHolders` and `setRules`, with random-looking addresses that each hold tokens.
+  - 500 entries: 3,627,120 gas; 1,000: 7,072,643; 2,000: 13,978,456. That is about 6,900 gas per entry.
+  - 2,400 entries: 16,746,337 gas, which fits under the 16,777,216 per-transaction cap (EIP-7825). With 2,410, the batch ran out of gas and reverted.
+- **Why it is higher than the estimate:** each listed account that holds tokens also costs a cold read of its exemption in the rule (2,100 gas).
+- **Empty entries:** 1,000 holders plus 1,000 entries with no balance took 11,533,516 gas, so an empty entry costs about 4,500 gas: the balance read still happens. Padding the list as a margin takes room from the 2,400.
+- **Ceiling:** the two cold reads alone cost 4,200 gas per holder, so no implementation of this check can pass about 4,000 holders in one transaction.
+
+**Above the limit.** A cold start with more than about 2,400 listed accounts that hold tokens has two options:
+- `seedHolderCountFromRule`, from an instance that has been counting;
+- a pause. The guardian pauses, the count is taken off-chain, and one batch runs `seedHolderCount`, `setRules` and `unpause`. The pause lasts at least the 7-day delay. The agent must not run `forcedTransfer`, `recoverRedeemRequest` or `recoverClaimable` meanwhile, because FORCED moves while paused. Change A exists so that this never happens.
+
+**Migration, per token, in one timelock batch** (after v2's codehash is attested):
+1. `v2.setCap`;
+2. `v2.setExemptHolder` for each exemption, with no count change while v2 is inactive;
+3. `v2.seedHolderCountFromHolders`, or `seedHolderCountFromRule`;
+4. `hook.setRules`, with v2 in v1's place.
+
+In Ignition, `Components` deploys v2. `roles.ts` and `Activate` change only the contract name.
+
+**Tests first.**
+- **Unit** (`MaxHoldersRule.t.sol`, `vm.mockCall` and `vm.expectCall`):
+  - the list seed counts exactly;
+  - an unlisted holder reverts;
+  - unsorted and duplicate lists revert;
+  - zero-balance entries are allowed;
+  - exempt accounts are summed but not counted;
+  - every seed reverts while active and for a non-admin;
+  - `seedHolderCountFromRule` reverts unless the previous rule is active;
+  - `setExemptHolder` leaves the count while inactive;
+  - fuzz with `bound`.
+- **Integration, today's behaviour first:**
+  - a remove and re-add with a stale seed admits a holder past the cap;
+  - a count that is too low blocks a full `forcedTransfer` once it reaches zero.
+- **Integration, the fix:**
+  - a holder arrives between proposal and execution: the off-chain seed installs a stale count, and the list seed reverts;
+  - a list that includes that holder installs the true count;
+  - v1 to v2 through `seedHolderCountFromRule` keeps the exact count;
+  - a 7540 cold start with the escrow exempt.
+- **Gas:** the in-stack limit, as above.
+- **Planted bugs:**
+  - the ascending check removed;
+  - the supply check removed;
+  - exempt accounts counted;
+  - a seed allowed while active;
+  - `seedHolderCountFromRule` without its active check;
+  - `setExemptHolder` adjusting the count while inactive;
+  - `>` changed to `>=` in `_releaseFrozen` (see the table below).
+
+### Decisions
+
+1. **A now, B later. Owner, 2026-10-22: approved.** A is done. Later the same day the owner noted that the code is a demo, so changes that make it better are fine, and asked for B now.
+2. **Interface change. Owner, 2026-10-22: allowed.** `IMaxHoldersRule` is re-pinned from `0x0e091382` to `0x360b3dad`.
+3. **P5 reversal. Owner, 2026-10-22: reversed.** Every seed reverts while the rule is in the token's rule list.
+4. **`ruleId`. Owner, 2026-10-22: keep `MaxHoldersRule.v1`,** so a hook can never hold the old and the new instance at once. The attested codehash tells the versions apart.
+
+### Change B as built (2026-10-22)
+
+**Code.**
+- `IMaxHoldersRule`:
+  - adds `seedHolderCountFromHolders(token, holders)` and `seedHolderCountFromRule(token, previousRule)`;
+  - adds four errors: `MaxHoldersRule_RuleActive`, `MaxHoldersRule_HoldersNotAscending`, `MaxHoldersRule_HoldersIncomplete` and `MaxHoldersRule_PreviousRuleNotActive`;
+  - updates the NatSpec of the interface, `seedHolderCount` and `setExemptHolder`.
+  - Events are unchanged; `InterfaceFreeze.t.sol` re-pins the interface ID.
+- `MaxHoldersRule`:
+  - an `onlyWhileInactive` modifier on all three seeds;
+  - `_isListed(token, rule)` reads `IComplianceHook(IPolicyGated(token).policyHook()).rules()`, and every call it makes is a view (STATICCALL);
+  - `setExemptHolder` adjusts the count only while the rule is listed;
+  - `_seed` is shared by the three seeds and emits `HolderCountSeeded`;
+  - `ruleId` is unchanged.
+- **Static analysis.**
+  - Slither first flagged `_balance == 0` (rewritten as `> 0`, so no suppression) and three zero-start locals (`slither-disable` with the reason, recorded in SECURITY.md §4).
+  - Aderyn flagged the revert inside the loop. It is acknowledged inline as in `ComplianceHook`, and recorded in SECURITY.md.
+
+**Tests first.**
+- New tests were written against empty stubs: 145 passing, 15 failing. The 15 were exactly the new behaviour.
+- The two tests that document today's behaviour passed before and after, as planned: the stale off-chain seed, and a full `forcedTransfer` reverting at a count of zero.
+- After the implementation: 160 passing in the three affected files.
+- **Unit** (`MaxHoldersRuleUnit_Seeding`):
+  - every seed reverts while the rule is listed, and the list and copy seeds revert for a non-admin;
+  - the list seed counts non-exempt accounts that hold tokens, with `expectCall` on `totalSupply`;
+  - a fuzz over three balances with `bound`;
+  - an account outside the list reverts with the sum and the supply;
+  - unsorted, duplicate and zero-address lists revert with the index;
+  - the copy seed copies a listed previous rule (with `expectCall`) and reverts for an unlisted one;
+  - `setExemptHolder` while unlisted emits only `HolderExemptionSet`.
+- **Existing tests:**
+  - the seed test renamed `..._WhileTheRuleIsInactive_...`;
+  - the unit base mocks the hook's `rules()`, and `_seed` takes the rule out of the list while it seeds;
+  - the fake-token test mocks the attacker's `rules()`;
+  - the static-call test covers both new seeds.
+- **Integration:**
+  - `MaxHoldersRuleIntegration_Seeding`, on a real `IntentToken` and `ComplianceHook`:
+    - the stale off-chain seed;
+    - the list seed reverting when a holder arrives after the proposal, and exact with a superset list (with `canTransfer` parity on the next mint);
+    - the copy seed keeping the live count across a replacement;
+    - the hook rejecting a set with both instances;
+    - every seed reverting while listed;
+    - a full `forcedTransfer` reverting at a count of zero.
+  - `Gated7540VaultIntegration_HolderRuleColdStart`: a new instance on a live vault whose escrow holds shares. The exemption is set while the instance is unlisted, then the list seed runs, then the swap; the count equals the live rule's.
+
+**Docs.**
+- An independent read of the docs and NatSpec diff against the code found eight problems. All are fixed:
+  - the 2,400 limit ignored empty entries, which still cost a balance read (now measured at about 4,500 gas);
+  - "the next seed sets it" holds only if the exemptions are set before the seed; the NatSpec and the docs now say to set them first;
+  - the copy seed is exact only if the old count is and both instances exempt the same accounts; the docs now say how the batch brings the exemptions in line, including for an instance coming back;
+  - "a live count is never overwritten" was overstated, because a batch can take the rule out, seed and put it back;
+  - "fails closed until re-seeded" was overstated;
+  - the governance table did not list the new reverts;
+  - "the seed has to read the count when the batch executes" contradicted the paused procedure;
+  - three nits: the `setExemptHolder` revert condition, the `_index` parameter at index 0, and `holderCount`'s `@return` (non-exempt).
+- `transfer-checks.md`: the three seeds and their errors; `setExemptHolder` while unlisted.
+- `governance-and-deployment.md`: the copy seed for a replacement and the list seed for any cold start, with the measured limit. The paused procedure applies only above that limit, with no live instance to copy from.
+- `roles.md`: the function table.
+- `docs/README.md`: "Checked against" names this change.
+
+**Planted bugs** (three scratch copies; each one run against `MaxHoldersRule.t.sol`, `Gated7540Vault.t.sol` and `RuleSetIntegration.t.sol`):
+- **Caught: all 11 rule bugs,** with 1 to 9 failing tests each:
+  - the ascending check removed, or weakened to allow duplicates;
+  - the supply check removed;
+  - exempt accounts counted;
+  - zero balances counted;
+  - each of the three seeds allowed while the rule is listed;
+  - the copy seed without its previous-rule check;
+  - `setExemptHolder` adjusting an unlisted count;
+  - `_isListed` always false.
+- **`_releaseFrozen` `>` → `>=`:** this is urwa-policy 0.2 #2b, run against the base, vault and token tests. It survived (212 passing). `test_WhenTheFrozenAmountStillFits_ItIsLeftAlone` (fuzzed) was added; it passes on the real code and fails with the bug planted.
+
+**Gates** (2026-10-22, on the final code):
+- `npm run lint:sol`: 0 warnings. `npm run fmt:check`: clean. `npm run typecheck`: clean.
+- `npx hardhat test`: 513 passing (453 solidity, 60 nodejs). `--test-profile isolated`: 453 passing.
+- `slither .`: 0 results. `npm run aderyn`: 0 findings.
+- `npm run validate:upgrades`: 3 of 3 passed.
+- `npm run verify:reproducible`: 13 contracts identical across two production builds, the default profile and forge.
+- **Halmos:** not run locally (not installed on this machine), so CI is the check. Its targets, the nonce, signature and frozen paths in the base and intent code, are not changed by this work.
+- **Attestation impact:** `MaxHoldersRule` gets a new codehash, so it needs a new attestation and a per-token migration (the batch above). Every other contract is unchanged.
+
+### Do the urwa-policy fixes apply here?
+
+| urwa-policy fix | Here |
+|---|---|
+| 0.1 fix 1: read the policy's answer only after the length check | No. The base calls the hook with a Solidity call, which reverts on short or empty return data. There is no hand-written assembly on that path. |
+| 0.1 fix 2: seed only before installation | Yes: change B (reverses P5). |
+| 0.2 #1: the FORCED kind must not leak to the next movement | Already tested: `test_WhenAPlainTransferFollowsAForcedTransferInTheSameTransaction_ItIsAPlainTransfer`, and the EXECUTED case in `IntentSettledUpgradeable.t.sol`. |
+| 0.2 #2a: a forced overdraft reverts with `ERC20InsufficientBalance` | Already tested, for `forcedTransfer` and `burn`. |
+| 0.2 #2b: no `Frozen` event when the frozen amount already fits | Probably untested: no test asserts that no event is emitted when `frozen == balance - amount`. The impact is low, a redundant event. It is in B's planted-bug list; add a test if it survives. |
+| 0.2 #3: the redundant code-length check | No equivalent. |
+| 0.2 #4a and #4b: the zero-amount and self-transfer guards in the cap | Already tested: `test_WhenTheAmountIsZero_ItIsOkEvenUnconfigured` and `test_WhenTheAmountIsZeroOrSelf_NothingIsRead`. |
+| 0.3 #1: the mint pre-flight's operator is zero, not the caller | Applies in principle. `_canTransfer` (and so the vault `max*`) and `isUserAllowed` use the caller for a mint. No rule reads the operator on MINT, so no answer is wrong today; only the pre-flight context depends on who calls it. It is a base change, so an upgrade through the timelock and a new attested implementation. Recommend folding it into the next base bug-fix upgrade, not upgrading for it alone. |
+| 0.3 #2: a reinstall is a new installation | Yes: cases 1 and 2 above. |
+| 0.4: the snapshot window | Yes, and the window is wider here, because the seed goes through the 7-day timelock. Change B's list seed closes it. |
+
 ## Open questions for the owner
-1. None.
+1. Review of the PR for Change A and Change B ("v0.3.0 candidate: `MaxHoldersRule` without live seeding").

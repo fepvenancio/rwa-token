@@ -1861,3 +1861,36 @@ contract Gated7540VaultIntegration_Claimable is Gated7540VaultIntegrationTest {
     _vault.recoverClaimable(_alice, address(0));
   }
 }
+
+/// @notice A second holder-rule instance started on a live vault whose escrow holds shares
+contract Gated7540VaultIntegration_HolderRuleColdStart is Gated7540VaultIntegrationTest {
+  function test_WhenANewInstanceIsSeededFromTheHolderList_TheEscrowIsExemptAndTheCountMatches() external {
+    _invest(_alice, 1000);
+    _invest(_bob, 500);
+    vm.prank(_alice);
+    _vault.requestRedeem(400, _alice, _alice); // the vault now escrows 400 shares
+
+    MaxHoldersRule _replacement = new MaxHoldersRule(); // same code, so already attested
+    ComplianceHook _hook = ComplianceHook(_vault.policyHook());
+    IComplianceRule[] memory _rules = _hook.rules();
+    _rules[2] = _replacement;
+    address[] memory _holders = new address[](3);
+    _holders[0] = _alice;
+    _holders[1] = _bob;
+    _holders[2] = address(_vault);
+    for (uint256 _i = 1; _i < 3; ++_i) {
+      for (uint256 _j = _i; _j > 0 && _holders[_j - 1] > _holders[_j]; --_j) {
+        (_holders[_j - 1], _holders[_j]) = (_holders[_j], _holders[_j - 1]);
+      }
+    }
+
+    // One batch while the replacement is out of the list: exempt the escrow, seed, then swap the rule in.
+    _replacement.setCap(address(_vault), 2);
+    _replacement.setExemptHolder(address(_vault), address(_vault), true);
+    _replacement.seedHolderCountFromHolders(address(_vault), _holders);
+    _hook.setRules(_rules);
+
+    assertEq(_replacement.holderCount(address(_vault)), 2);
+    assertEq(_replacement.holderCount(address(_vault)), _maxHoldersRule.holderCount(address(_vault)));
+  }
+}

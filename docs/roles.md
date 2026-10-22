@@ -144,10 +144,10 @@ Rules have no roles of their own. Each rule asks the token, at call time, who ma
 | Rule function | Allowed if the caller holds, on the token |
 |---|---|
 | `SettlementWindowRule.setWindow` | `DEFAULT_ADMIN_ROLE` |
-| `MaxHoldersRule.setCap`, `seedHolderCount`, `setExemptHolder` | `DEFAULT_ADMIN_ROLE` |
+| `MaxHoldersRule.setCap`, `seedHolderCount`, `seedHolderCountFromHolders`, `seedHolderCountFromRule`, `setExemptHolder` | `DEFAULT_ADMIN_ROLE` |
 | `LockupRule.setLockup` | `AGENT_ROLE` |
 
-After `Activate`, `DEFAULT_ADMIN_ROLE` on a token is the main timelock. So `setWindow`, `setCap`, `seedHolderCount` and `setExemptHolder` take effect only after the timelock delay. The holder count itself still moves with every movement that adds or removes a holder. Lockups are set by the agent with no delay.
+After `Activate`, `DEFAULT_ADMIN_ROLE` on a token is the main timelock. So `setWindow`, `setCap`, the seeds and `setExemptHolder` take effect only after the timelock delay. A count passed to `seedHolderCount` is therefore at least the delay old when it lands. `seedHolderCountFromHolders` and `seedHolderCountFromRule` read the count when the batch executes ([governance-and-deployment.md](governance-and-deployment.md#the-holder-count-across-rule-and-hook-changes)). The holder count itself still moves with every movement that adds or removes a holder. Lockups are set by the agent with no delay.
 
 `afterTransfer` on the hook is open only to `TOKEN`. `after_` on a rule is open only to the hook currently installed on `ctx.token`, which the rule checks by calling `ctx.token.policyHook()`. Neither `ctx.token` nor the `token` argument of the setters is authenticated. Any contract can call these for a token address it controls, but that changes only that address's entries, never a real token's.
 
