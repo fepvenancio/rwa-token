@@ -135,15 +135,17 @@ playing the council and the identity provider, and ends with the post-deploy che
      governance (schedule `deploy`, wait out the delay, execute).
 6. **Identity provider:** verify the 7540 vault, which escrows pending redemptions.
 7. **Post-deploy checks** (the fixture's `assertHandedOver`):
-   - the deployer holds no role on the timelock, registry, tokens or executor;
+   - the deployer holds no role on either timelock, the registry, the tokens or the executor;
    - the timelock holds DEFAULT_ADMIN_ROLE everywhere and is the only UPGRADER;
    - every token's `policyHook()` is the hook address the council recorded in step 4, that hook's `TOKEN` is the
-     token, and its `rules()` equals `RULE_ORDER`. A twin hook with the same immutables but other rules carries the same
-     attested codehash and passes `ProxyDeployer`; this check is what refuses it;
+     token, its `ADMIN` is the main timelock, and its `rules()` equals `RULE_ORDER`. A twin hook with the same
+     immutables but other rules carries the same attested codehash and passes `ProxyDeployer`; this check is what
+     refuses it;
    - the guardian can cancel main-timelock operations but cannot propose or execute them, and holds nothing on the
      recovery timelock;
    - the recovery timelock holds exactly `RECOVERY_ROLE` on each token, vault, the executor and the main timelock,
      nothing elsewhere, and has no cancellers (governance's automatic one is revoked in `Activate`);
+   - no rule exposes `hasRole` or `owner`: rules take their authority from the token's roles at call time;
    - `ProxyDeployer.owner()` is the timelock;
    - `getMinDelay() ≥ 7 days` on both timelocks.
 
