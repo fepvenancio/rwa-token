@@ -46,7 +46,9 @@ contract InterfaceFreezeTest is Test {
     assertEq(type(ILockupRule).interfaceId, bytes4(0xaafb038e), 'ILockupRule');
     assertEq(type(ISettlementWindowRule).interfaceId, bytes4(0xf2058aff), 'ISettlementWindowRule');
     // Re-pinned in Phase 5b (2026-10-17) on owner instruction R1: setExemptHolder / isExemptHolder added (was 0xa13cb93c)
-    assertEq(type(IMaxHoldersRule).interfaceId, bytes4(0x0e091382), 'IMaxHoldersRule');
+    // Re-pinned 2026-10-22 on owner instruction: seedHolderCountFromHolders / seedHolderCountFromRule added (was
+    // 0x0e091382)
+    assertEq(type(IMaxHoldersRule).interfaceId, bytes4(0x360b3dad), 'IMaxHoldersRule');
     // Added in Phase 5a (2026-10-17)
     assertEq(type(IGated4626Vault).interfaceId, bytes4(0xb008690c), 'IGated4626Vault');
     // Added in Phase 5b (2026-10-17). The four ERC-7540 / ERC-7575 ids are the standard's own values.

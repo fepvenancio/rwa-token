@@ -163,15 +163,19 @@ Caps the number of holders of a token. A holder is an account with a balance abo
 
 Because `FORCED` skips the check but is still counted, the count can end above the cap. Lowering the cap does not block existing holders, since a move to an existing holder passes at step 3. While the count is above the cap, step 6 rejects every move to a new holder, including one where the sender leaves. At exactly the cap, only moves where the sender leaves pass.
 
-Exempt accounts never count and never trigger the cap. The 7540 vault is exempted for itself in `Activate`, because it holds escrowed shares. `setExemptHolder` adjusts the count by one when the account already has a balance.
+Exempt accounts never count and never trigger the cap. The 7540 vault is exempted for itself in `Activate`, because it holds escrowed shares. `setExemptHolder` adjusts the count by one when the account already has a balance and the rule is in the token's rule list. While the rule is out of the list it leaves the count alone, so exemptions are set before the seed.
 
-Admin functions, all needing `DEFAULT_ADMIN_ROLE` on the token: `setCap`, `seedHolderCount`, `setExemptHolder`. `seedHolderCount` overwrites the count with the number it is given. The rule does not check that number and accepts it at any time. It is only meant for use while the rule is not in the token's active rule list.
+Admin functions, all needing `DEFAULT_ADMIN_ROLE` on the token: `setCap`, `setExemptHolder` and three seeds. The seeds revert with `MaxHoldersRule_RuleActive` while the rule is in the rule list of the token's current hook, which the rule reads with `rules()`. To seed, a batch seeds before it puts the rule in the list, or takes it out first. A hook without `rules()` makes the seeds revert, and `setExemptHolder` too when it changes the exemption of an account that holds a balance.
+
+- `seedHolderCountFromHolders(token, holders)` takes accounts in strictly ascending order (otherwise `MaxHoldersRule_HoldersNotAscending`), sums their balances and counts the non-exempt ones that hold tokens. It reverts with `MaxHoldersRule_HoldersIncomplete` unless the sum equals `totalSupply()`. A sum equal to the supply means no unlisted account holds tokens, so the count is exact when the call executes. Accounts with no balance may be listed, but every entry costs a balance read, so they take room in the transaction. Exempt accounts that hold tokens must be listed, or the sum falls short. Exemptions are read as they are when the call runs.
+- `seedHolderCountFromRule(token, previousRule)` copies `previousRule.holderCount(token)`. It reverts with `MaxHoldersRule_PreviousRuleNotActive` unless `previousRule` is in the token's rule list, so the count it copies is live. It copies that count as it stands, so the result is exact only if that count is and both instances exempt the same accounts that hold tokens. It does not copy exemptions.
+- `seedHolderCount(token, count)` sets the number it is given, unchecked.
 
 Without a seed, the count is right only if the rule has seen every movement that added or removed a holder since the token had no holders. The `Tokens` module builds each token's hook from `RULE_ORDER`, which puts this rule in every list, so that holds as long as the rule stays in the list. To stop capping a token, raise the cap with `setCap(token, type(uint256).max)` instead of removing the rule. The count can go stale when the rule is removed and added back later, when a new deployment replaces it (it starts at 0), or when it is added to a token that already has holders. A count that is too high turns away new holders below the cap. One that is too low admits holders past the cap. Once it reaches 0, any movement that empties a non-exempt sender without adding a holder reverts, `forcedTransfer` and `burn` included, because `after_` runs for every kind. [governance-and-deployment.md](governance-and-deployment.md#the-holder-count-across-rule-and-hook-changes) describes how to seed in those cases.
 
 Rule id: `keccak256('MaxHoldersRule.v1')`.
 
-Code: `IdentityRule.check`, `LockupRule.check`, `LockupRule.setLockup`, `SettlementWindowRule._isOpen`, `SettlementWindowRule.setWindow`, `MaxHoldersRule.check`, `MaxHoldersRule.after_`.
+Code: `IdentityRule.check`, `LockupRule.check`, `LockupRule.setLockup`, `SettlementWindowRule._isOpen`, `SettlementWindowRule.setWindow`, `MaxHoldersRule.check`, `MaxHoldersRule.after_`, `MaxHoldersRule.seedHolderCountFromHolders`, `MaxHoldersRule.seedHolderCountFromRule`, `MaxHoldersRule.setExemptHolder`.
 
 ## Reason codes
 
