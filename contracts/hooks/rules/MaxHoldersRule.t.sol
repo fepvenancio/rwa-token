@@ -47,7 +47,10 @@ contract MaxHoldersRuleUnitTest is Helpers {
     _setActive(true);
   }
 
-  /// @dev Puts the rule in, or takes it out of, the rule list of the token's hook
+  /**
+   * @dev Puts the rule in, or takes it out of, the rule list of the token's hook
+   * @param _active True to list the rule
+   */
   function _setActive(
     bool _active
   ) internal {
@@ -70,7 +73,10 @@ contract MaxHoldersRuleUnitTest is Helpers {
     _rule.setCap(_token, _value);
   }
 
-  /// @dev Seeds while the rule is out of the list, as required, then puts it back for the test that follows
+  /**
+   * @dev Seeds while the rule is out of the list, as required, then puts it back for the test that follows
+   * @param _count The count to seed
+   */
   function _seed(
     uint256 _count
   ) internal {
@@ -164,6 +170,13 @@ contract MaxHoldersRuleUnit_Seeding is MaxHoldersRuleUnitTest {
   address internal _second = address(0x1002);
   address internal _third = address(0x1003);
 
+  /**
+   * @dev A three-entry holder list, in the order given
+   * @param _a The first entry
+   * @param _b The second entry
+   * @param _c The third entry
+   * @return _holders The list
+   */
   function _list(
     address _a,
     address _b,
@@ -175,6 +188,10 @@ contract MaxHoldersRuleUnit_Seeding is MaxHoldersRuleUnitTest {
     _holders[2] = _c;
   }
 
+  /**
+   * @dev Mocks the token's total supply
+   * @param _amount The supply
+   */
   function _supply(
     uint256 _amount
   ) internal {
@@ -817,7 +834,11 @@ contract MaxHoldersRuleIntegrationTest is IntentTokenIntegrationTest {
     _registry.attest(address(_maxHoldersRule).codehash, IPolicyRegistry.AttestKind.RULE, 'ipfs://max-holders');
   }
 
-  /// @dev The rule list a batch installs: identity, then `_capRule`
+  /**
+   * @dev The rule list a batch installs: identity, then `_capRule`
+   * @param _capRule The holder-cap rule to install
+   * @return _ruleSet The rule list
+   */
   function _ruleSetWith(
     IComplianceRule _capRule
   ) internal view returns (IComplianceRule[] memory _ruleSet) {
@@ -826,7 +847,11 @@ contract MaxHoldersRuleIntegrationTest is IntentTokenIntegrationTest {
     _ruleSet[1] = _capRule;
   }
 
-  /// @dev Insertion sort, ascending; the lists here are short
+  /**
+   * @dev Insertion sort, ascending; the lists here are short
+   * @param _accounts The accounts, sorted in place
+   * @return _sorted The same array, ascending
+   */
   function _ascending(
     address[] memory _accounts
   ) internal pure returns (address[] memory _sorted) {
