@@ -1763,7 +1763,7 @@ The owner pasted a review of E-1 and asked whether it is true. Each finding was 
 3. **Pre-flight on a multi-class fund swap: true, and already documented.** `test_WhenTheFundIsAboveItsLoweredCap_ASwapOfTwoClassesPassesPreflightAndFailsOnTheSecondLeg` reproduces it with two intent-capable classes of one fund and a cap lowered below the investor count: pre-flight says yes, and the second leg fails with `MAX_HOLDERS` because the first leg took the buyer out of the fund. The review's names for the fund's internals (`isInvestor`, `classCount`) are not in the code (`heldClasses`, `positionsOf`), but the mechanism is as described. It is in the NatSpec, in flows-dvp.md and in SECURITY.md.
 4. The review's praise of the tests is accurate as far as I checked: the parity fuzz, the deadline and `validBefore` edge tests and the reentrancy tests with `OPERATOR_ROLE` granted to the attacker exist as described.
 
-What is not done: the brief's §8 phase list does not mention the DvP phases; nothing is committed or pushed.
+What is not done: the brief's §8 phase list does not mention the DvP phases. The work is committed on `fund-layer` (I-1 `0b1b765`, E-1 `128933c`, E-2 `589790a`, the `IntentExecutor` refusal `24b7798`) and not pushed.
 
 #### The `IntentExecutor` refusal (2026-10-23, on the owner's instruction)
 
