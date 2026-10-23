@@ -18,6 +18,7 @@ import {IdentityRule} from 'contracts/hooks/rules/IdentityRule.sol';
 import {LockupRule} from 'contracts/hooks/rules/LockupRule.sol';
 import {MaxHoldersRule} from 'contracts/hooks/rules/MaxHoldersRule.sol';
 import {SettlementWindowRule} from 'contracts/hooks/rules/SettlementWindowRule.sol';
+import {DvPExecutor} from 'contracts/intents/DvPExecutor.sol';
 import {IntentExecutor} from 'contracts/intents/IntentExecutor.sol';
 import {IntentToken} from 'contracts/tokens/IntentToken.sol';
 import {Gated4626Vault} from 'contracts/vaults/Gated4626Vault.sol';
@@ -47,6 +48,7 @@ contract ContractSizesTest is Test {
       address(new ComplianceHook(address(this), IPolicyRegistry(_registry), address(this), new IComplianceRule[](0)))
     );
     _assertFits('IntentExecutor', address(new IntentExecutor(address(this), address(this))));
+    _assertFits('DvPExecutor', address(new DvPExecutor(address(this), address(this))));
     _assertFits('LockupRule', address(new LockupRule()));
     _assertFits('SettlementWindowRule', address(new SettlementWindowRule()));
     _assertFits('MaxHoldersRule', address(new MaxHoldersRule()));

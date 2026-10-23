@@ -7,6 +7,8 @@ import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+import {IDvPExecutor} from 'interfaces/IDvPExecutor.sol';
+import {IERC3009} from 'interfaces/IERC3009.sol';
 import {IERC7540Deposit} from 'interfaces/IERC7540Deposit.sol';
 import {IERC7540Operator} from 'interfaces/IERC7540Operator.sol';
 import {IERC7540Redeem} from 'interfaces/IERC7540Redeem.sol';
@@ -73,6 +75,10 @@ contract InterfaceFreezeTest is Test {
     // Added in the fund layer (2026-10-22), ids computed from the signatures with `cast sig`
     assertEq(type(IFund).interfaceId, bytes4(0x44c4a64f), 'IFund');
     assertEq(type(IFundHoldersRule).interfaceId, bytes4(0x5c275a39), 'IFundHoldersRule');
+    // Added in the DvP executor (E-1, 2026-10-23), ids computed from the signatures with `cast sig`. `IERC3009` is the
+    // subset of ERC-3009 that the executor calls; its id is the XOR of those two selectors, not a standard id
+    assertEq(type(IDvPExecutor).interfaceId, bytes4(0xe68774e8), 'IDvPExecutor');
+    assertEq(type(IERC3009).interfaceId, bytes4(0x61fdaa61), 'IERC3009');
   }
 
   function test_WhenInterfacesCompile_TheirEventTopicsArePinned() external pure {
@@ -144,6 +150,8 @@ contract InterfaceFreezeTest is Test {
     assertEq(IFund.ExemptSet.selector, 0xf33950bf7aa3300efb48f7896f309484c287418977abeba9f08f12cbe451d36a);
     assertEq(IFund.HolderCountUpdated.selector, 0x8ac0638de66e0910c02cbd2be8467a89277dac49177d5811c91422a8f475ba75);
     assertEq(IFund.HolderClassesUpdated.selector, 0x020767ac8d9f815f24bcaa5228933945b8766fe5dff7fe83d918163bcfd787fa);
+    // Added in the DvP executor (E-1, 2026-10-23), topic computed with `cast keccak`
+    assertEq(IDvPExecutor.DvPSettled.selector, 0xf86f6efd1a86b116715d573898aa1ed9745de3ea96e91eb7d0eb96b775182845);
   }
 
   function test_WhenReasonsCompile_TheirValuesArePinned() external pure {
@@ -166,5 +174,7 @@ contract InterfaceFreezeTest is Test {
     assertEq(Reasons.WRONG_EXECUTOR, keccak256('WRONG_EXECUTOR'));
     assertEq(Reasons.INTENT_NOT_YET_VALID, keccak256('INTENT_NOT_YET_VALID'));
     assertEq(Reasons.CONSIDERATION_NEEDS_EXECUTOR, keccak256('CONSIDERATION_NEEDS_EXECUTOR'));
+    // Appended in the DvP executor (2026-10-23)
+    assertEq(Reasons.LEGS_DO_NOT_MATCH, keccak256('LEGS_DO_NOT_MATCH'));
   }
 }

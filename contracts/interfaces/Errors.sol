@@ -46,5 +46,7 @@ library Reasons {
   bytes32 internal constant INTENT_NOT_YET_VALID = keccak256('INTENT_NOT_YET_VALID');
   /// @notice The transfer intent states a consideration but names no executor, so nothing could enforce it
   bytes32 internal constant CONSIDERATION_NEEDS_EXECUTOR = keccak256('CONSIDERATION_NEEDS_EXECUTOR');
+  /// @notice The two legs of a DvP trade do not describe the same trade: parties, amounts, tokens or nonce disagree
+  bytes32 internal constant LEGS_DO_NOT_MATCH = keccak256('LEGS_DO_NOT_MATCH');
 }
 // solhint-enable private-vars-leading-underscore
