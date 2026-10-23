@@ -37,6 +37,7 @@
 .repo-audit/
 .letta/
 .DS_Store
+/docs/superpowers/
 
 # forge (fmt / Slither builds; storage-layout build for upgrades-core)
 /forge-out

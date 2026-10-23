@@ -4,13 +4,16 @@ pragma solidity ^0.8.28;
 import {Test} from 'forge-std/Test.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+import {IFund} from 'interfaces/IFund.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 
 import {ProxyDeployer} from 'contracts/deploy/ProxyDeployer.sol';
+import {Fund} from 'contracts/fund/Fund.sol';
 import {GovernanceTimelock} from 'contracts/governance/GovernanceTimelock.sol';
 import {PolicyRegistry} from 'contracts/governance/PolicyRegistry.sol';
 import {ComplianceHook} from 'contracts/hooks/ComplianceHook.sol';
+import {FundHoldersRule} from 'contracts/hooks/rules/FundHoldersRule.sol';
 import {IdentityRule} from 'contracts/hooks/rules/IdentityRule.sol';
 import {LockupRule} from 'contracts/hooks/rules/LockupRule.sol';
 import {MaxHoldersRule} from 'contracts/hooks/rules/MaxHoldersRule.sol';
@@ -49,6 +52,9 @@ contract ContractSizesTest is Test {
     _assertFits('MaxHoldersRule', address(new MaxHoldersRule()));
     _assertFits('IdentityRule', address(new IdentityRule(IIdentityRegistry(address(this)))));
     _assertFits('ProxyDeployer', address(new ProxyDeployer(address(this))));
+    Fund _fund = new Fund(address(this), IPolicyRegistry(_registry));
+    _assertFits('Fund', address(_fund));
+    _assertFits('FundHoldersRule', address(new FundHoldersRule(IFund(address(_fund)))));
     _assertFits(
       'GovernanceTimelock',
       address(new GovernanceTimelock(7 days, new address[](0), new address[](0), address(this), address(this)))

@@ -1261,5 +1261,189 @@ The two items still open from the 2026-10-17 audit. Both are text only. The buil
   - Slither 0, Aderyn 0;
   - the `Gated7540Vault` deployed bytecode hash is unchanged (`303eebf4…`).
 
+## Fund layer: `Fund` plus `FundHoldersRule` (approved 2026-10-22; F-1 approved and committed on `fund-layer`)
+
+Source: [the assessment](docs/superpowers/specs/2026-10-22-fund-assessment.md) and its [benchmark](docs/superpowers/specs/fund-gas-bench/). On 2026-10-22 the owner asked for this plan using the assessment's defaults for its open questions. No code is written. Nothing here changes an existing contract, so the deployed bytecode of all 13 current contracts stays as it is.
+
+### Goal
+
+A fund is a set of share classes. Each class is an existing gated token or vault, with its own balances, hook and roles. The fund adds what no single class can know: a list of its classes, the number of distinct investors across them, and which classes each investor is in.
+
+- A fund-wide investor cap, enforced through each class's hook like every other policy.
+- Works the same for `IntentToken`, `Gated4626Vault` and `Gated7540Vault`. The fund code never branches on which one a class is.
+- No change to the base, `ComplianceHook`, `ProxyDeployer`, the registry, the existing rules, or any existing interface.
+
+### Assumptions
+
+The first seven are the assessment's defaults for its questions 1 to 7. F8 to F15 are choices made while planning. Say which you want changed.
+
+| # | Assumption | Why |
+|---|---|---|
+| F1 | Per-subscription lots are not solved. `LockupRule` keeps one unlock time per holder and token, so a new subscription resets it. | A lot ledger is a separate design (ERC-1450 batches, ERC-1410 partitions). |
+| F2 | Investors are counted by address. Dust can fill the cap and one investor with two wallets counts twice (finding L-1, accepted for `MaxHoldersRule`, inherited here). `IIdentityRegistry` does not change. | An identity id needs a registry change and an identity provider that supplies it. |
+| F3 | One subscription asset per class. `Gated7540Vault` stays its own share token. | Several assets per class means splitting the share token from the vault (ERC-7575). |
+| F4 | `MAX_CLASSES = 32`. | The mask allows 256. On-chain loops over classes cost about 8,600 gas each, so the limit keeps them bounded. |
+| F5 | Holders can transfer among verified investors. No restricted-transfer rule (the ERC-1450 behaviour) is built. | It is a separate rule, and it must let the 7540 escrow legs through (assessment 5.5). |
+| F6 | Two contracts: `Fund` holds state, `FundHoldersRule` holds policy. | A replaced rule keeps the investor count. `MaxHoldersRule` needed a seeding procedure because its state lives in the rule. Costs about 3,900 gas per movement. |
+| F7 | No class price on chain, so no AUM view. | Needs a price source and an owner. Later. |
+| F8 | `Fund` is `Ownable` like `ProxyDeployer`: the deployer owns it during deployment and `Activate` hands ownership to the timelock. This differs from assessment 5.1, which said an immutable `ADMIN`. | Setting up a fund (`setRule`, `registerClass`, the cap) would otherwise need timelock operations, a 7-day wait on a first deployment. `ComplianceHook` avoids that by taking its rules in the constructor, which `Fund` cannot do because the rule and the fund need each other's address. |
+| F9 | Registration is append-only and only for a class with `totalSupply() == 0`. | A class that already has holders would start with a wrong count, the cold start that `MaxHoldersRule` had to solve. This closes it by construction. A class can be closed to new issuance, not unregistered. |
+| F10 | The fund cap rejects with the existing `MAX_HOLDERS`. One reason is appended: `NOT_FUND_CLASS`. | Fewer frozen codes. The hook order tells which cap fired, because the class cap runs first. |
+| F11 | One hook per class stays. `FundHoldersRule` goes last in `RULE_ORDER`. | A shared hook would make every class pay for every rule in the list (6,945 to 10,219 gas per rule). |
+| F12 | The demo deployment makes the three existing tokens (`intent`, `fund`, `asyncFund`) classes of one demo fund. The Ignition keys `fund` and `asyncFund` already mean the 4626 and 7540 vaults, so the new futures are `fundContract` and `fundHoldersRule`. The old keys are not renamed. | Avoids a clash without touching tests that use the old keys. A 4626 vault named `fund` is a misnomer after this lands, and it is left alone. |
+| F13 | Files: `contracts/fund/Fund.sol`, `contracts/hooks/rules/FundHoldersRule.sol`, `contracts/interfaces/IFund.sol`, `contracts/interfaces/IFundHoldersRule.sol`, each with its `.t.sol` next to it. | Rules live with the rules. |
+| F14 | The class itself is never counted (no storage). Any other account can be exempted with `setExempt`, with the same semantics as `MaxHoldersRule.setExemptHolder`. | The 7540 escrow holds shares at the vault's own address. |
+| F15 | Two review checkpoints, F-1 and F-2 below. | Contracts and Solidity tests first, then deployment, TypeScript tests and docs. |
+
+### Design
+
+**`Fund`** (immutable code, `Ownable`, `IFund`). Immutable: `REGISTRY`. Constant: `MAX_CLASSES`.
+
+State:
+- an append-only class list and a `classIndexOf` mapping (position plus one, so 0 means "not a class");
+- one slot holding `{count, cap}`, packed. The cap is set before the first investor, so the first count write is a 5,000 write and not a 22,100 one (benchmark, M4 against M2);
+- `holder[account]`: one bit per class, plus a top bit for "exempt".
+
+Owner functions:
+- `registerClass(token)` reverts unless the token is new, the list is under `MAX_CLASSES`, the rule is set, `supportsInterface(IPolicyGated)` is true, its current hook lists the rule (`IComplianceHook.rules()`), and `totalSupply() == 0`.
+- `setRule(rule)`: the rule must be attested as RULE in `REGISTRY`.
+- `setHolderCap(cap)`.
+- `setExempt(account, exempt)`: for an account that holds a class, the count follows the change, as in `MaxHoldersRule`.
+
+Rule-only functions: `join(token, account)` and `leave(token, account)`. Each resolves the class itself and reverts for an unregistered token (the second gate, after the rule's own). Each is a no-op for `account == token`. `join` sets the bit and raises the count when the account had no class and is not exempt. `leave` clears the bit and lowers the count when the last class goes and the account is not exempt.
+
+Views: `classCount`, `classAt`, `classIndexOf`, `holderCount`, `holderCap`, `rule`, `heldClasses(account)`, `isExempt(account)`, and `positionsOf(account)`, which returns each class balance the account holds. The rule also needs one combined read (class index, the account's bits, count and cap in one call) because every external call costs several hundred gas even warm. That function is kept only if the measurement shows it saves at least 1,000 gas.
+
+Events, on every state change: `ClassRegistered`, `RuleSet`, `HolderCapSet`, `ExemptSet`, `HolderCountUpdated`, and `HolderClassesUpdated(account, mask)` on every mask change. The last one is the register: about 2,400 gas each, and it replaces an on-chain holder list.
+
+**`FundHoldersRule`** (immutable code, `BaseRule`, `IFundHoldersRule`). Immutable: `FUND`. `ruleId` is `keccak256('FundHoldersRule.v1')`. `wantsAfter` is true. The council attests it as RULE.
+
+`check` runs the cheap tests first:
+1. An unregistered `ctx.token` returns `NOT_FUND_CLASS`, for every movement including burns and zero amounts, so `isUserAllowed` also fails closed on a class that is not registered yet.
+2. Zero amount, self-transfer, a burn, kind FORCED, a receiver equal to `ctx.token`, an exempt receiver, and a receiver who already holds any class return `TRANSFER_OK`.
+3. Otherwise the receiver is a new investor. A cap of 0 rejects. A count below the cap passes. A count at or above the cap passes only when the move is net zero: the sender leaves the fund entirely (full balance, and this is the sender's only class, and the sender is not exempt) and the count is at most the cap. That last test runs only when the cheap one already failed.
+
+`after_` skips zero amounts and self-transfers, calls `join` for a receiver whose class balance went from zero to positive, and calls `leave` for a sender whose balance reached zero. Movements to an existing class holder write nothing. FORCED is exempt from the cap and still counted, as in `MaxHoldersRule`.
+
+**What does not change.** `PolicyGatedERC20Upgradeable`, `ComplianceHook`, `ProxyDeployer`, `PolicyRegistry`, `IntentExecutor`, the three templates and the four existing rules. No vault change, so the 3,030 bytes left in `Gated7540Vault` stay.
+
+### The invariant that is new
+
+Existing rules are safe because their state is keyed by `ctx.token`. The fund's state is shared across classes, so that argument does not carry over. A fake token can pass `onlyHook` by naming itself as the hook's token, and without the gate it could set masks for real investors. Two gates stop that: the rule refuses an unregistered `ctx.token`, and `Fund.join` and `Fund.leave` accept only the installed rule and also refuse an unregistered token. Only the owner (the timelock after hand-over) registers. This gets its own tests and a Halmos property.
+
+### Interfaces and the freeze
+
+- New: `IFund`, `IFundHoldersRule`. Their ERC-165 ids, event topics and the new reason are pinned in `InterfaceFreeze.t.sol`.
+- `Errors.sol` gets `NOT_FUND_CLASS` appended, which the brief allows. No existing id, topic or code changes. The freeze test proves it.
+- Errors are named `Fund_*` and `FundHoldersRule_*` (rule 16).
+
+### Tests first (rule 5: the red run is shown before each implementation)
+
+Unit tests isolate with `vm.mockCall` and `vm.expectCall` (rule 16), fuzz with `bound`:
+1. `Fund.t.sol`:
+   - `registerClass`: each revert (not owner, zero address, duplicate, over `MAX_CLASSES`, no rule set, not ERC-165 `IPolicyGated`, hook does not list the rule, supply above zero);
+   - `setRule`: unattested and zero address;
+   - `join` and `leave`: only the rule, only a registered token, the class itself never counted, each count transition;
+   - `setExempt` on a current holder and on a non-holder;
+   - the views, including `positionsOf` and out-of-range `classAt`.
+2. `FundHoldersRule.t.sol`:
+   - accept and each reject (`NOT_FUND_CLASS` for transfer, mint and burn, `MAX_HOLDERS`);
+   - cap 0, FORCED, the escrow receiver, an exempt receiver;
+   - the net-zero case at the cap, once with the sender keeping another class and once without;
+   - `after_` joins and leaves, a zero amount, a self-transfer;
+   - `*_TokenCallsAreStatic`, the same guard `MaxHoldersRule` has;
+   - fuzz.
+3. The registration gate: a fake token that names itself, and a fake hook calling `after_`, change neither `holderCount` nor any mask; a direct `join` or `leave` from a non-rule reverts.
+4. Integration, three classes (one `IntentToken`, one `Gated4626Vault`, one `Gated7540Vault`), real hooks and the real rule set:
+   - `canTransfer` and the state-changing call agree for each outcome;
+   - 7540 `requestRedeem`, `fulfillRedeem`, `rejectRedeemRequest` and `recoverRedeemRequest` leave the count right (the escrow is never counted);
+   - a hook replacement that keeps the rule keeps the state, and a `setRule` to a new instance keeps the count;
+   - an investor in two classes counts once, and counts zero after leaving both;
+   - the vault `max*` functions return 0 at a full cap.
+5. Invariants (stateful fuzz over the three classes): `holderCount` equals the number of non-exempt accounts with any class bit, and a class bit is set exactly when that account's class balance is positive.
+6. Halmos: an unregistered token cannot change the count or a mask; a join followed by a leave restores the count. Kept only if it runs on the proxied path as the existing properties do.
+7. `ContractSizes.t.sol` gets both contracts.
+
+### Gas
+
+Expected on an ordinary transfer between existing class holders: about +23,000 on top of whatever the class's hook already costs (benchmark M10 at +19,326, plus the separate-contract cost of about 3,900, measured over a hook with `IdentityRule` and a class `MaxHoldersRule`). A first investor by mint is about +47,000. These are expectations, not gates. The real contracts are benchmarked again at the end with the same harness, and the plan stops for review if an ordinary transfer is more than 10% above that.
+
+### Deployment (F-2)
+
+- `Components`: deploys `Fund` (owner is the deployer, `REGISTRY` is the registry) and `FundHoldersRule(fund)`.
+- Council step 1 attests `FundHoldersRule` as RULE with the other rules. The council reads `rule.FUND()`, the fund's code and its owner first: the rule's codehash covers the fund's address and not the fund's code. `Fund` is reviewed but not attested, like `ProxyDeployer`.
+- `roles.ts`: `RULE_ORDER` gets `fundHoldersRule` last for all three tokens. `Tokens` takes it as a rule parameter, so every hook is built with it.
+- `Activate`, after all token deploys: `setRule`, `setHolderCap` (new parameter `fundHolderCap`, default equal to `holderCap`), then `registerClass` for each token, then `transferOwnership(timelock)`. Until a class is registered, every movement on it is rejected with `NOT_FUND_CLASS`, so no balance can exist before registration. The roles that mint come after registration.
+- `assertHandedOver` gains: the fund is owned by the timelock, its rule is the attested instance, and every demo token is a registered class.
+- Runbook (README step 7 and `docs/governance-and-deployment.md`): never remove `FundHoldersRule` from a registered class's hook (same rule as `MaxHoldersRule`, change A), because movements made without it are not recorded; register a class only while its supply is zero; the council check above.
+
+### TypeScript (F-2)
+
+`fixtures.ts` attests the new rule in council step 1. A new `test/nodejs/fund.test.ts`: a class registered through the real timelock after the delay; the fund cap enforced across two classes through viem; `HolderClassesUpdated` decoded; `canTransfer` parity from the TypeScript side. The existing 60 TypeScript tests must pass unchanged apart from the rule list in the fixtures. A test that spreads holders across classes counts each holder once per fund, so it can hit a fund cap equal to the class cap earlier than before. If so, the fixtures raise `fundHolderCap`, and the test body stays as it is.
+
+### Docs (F-2)
+
+- `docs/`: `architecture.md` (contracts table, structure and inheritance diagrams), `roles.md`, `transfer-checks.md` (a `FundHoldersRule` section), `governance-and-deployment.md`, and "Checked against" in `docs/README.md`. Every edited sentence is verified against the code, as in the last docs pass.
+- README: contracts list, rule order, deviations from the brief, runbook step 7.
+- Proposed brief edits, which need your OK because the brief is the standing instruction file: §3 layout gets `contracts/fund/`, and §6 gets `FundHoldersRule` in the rule list.
+
+### Checkpoints and gates
+
+- **F-1:** interfaces, `NOT_FUND_CLASS`, `Fund`, `FundHoldersRule`, the Solidity tests above, the freeze and size tests. Stop for review.
+- **F-2:** Ignition, `fund.test.ts`, the benchmark rerun, the docs. Stop for review.
+- **Gates at each:** `npx hardhat test` in both runners with the summary line pasted, `npm run lint:sol`, `npm run fmt:check`, `slither .`, `npm run aderyn`, `npm run validate:upgrades`, the Halmos run, the isolated profile, and `npm run verify:reproducible` (the manifest grows from 13 to 15: `FundHoldersRule` under ATTESTED, `Fund` under DEPLOYED). The 13 existing entries must be byte-identical to `v0.2.0`. The baseline today is 513 passing (453 Solidity, 60 TypeScript).
+- **Attestation impact:** new `FundHoldersRule` (RULE) and `Fund` (reviewed, not attested). Unchanged: every current attested contract.
+
+### Risks
+
+1. The new invariant above. It is the one place a bug could let one class corrupt the count for all of them.
+2. A rule dropped from a registered class's hook leaves the state silently stale. The runbook forbids it and monitoring should read `hook.rules()`. The fund cannot see it.
+3. Counting by address (F2).
+4. About +23,000 gas on each movement in a class. The cheapest way to cut it is folding the fund count into `MaxHoldersRule`, which saves most of the 10,219 per-rule dispatch cost. That is not in this plan: it merges two rules and re-pins `IMaxHoldersRule`.
+5. Replacing `Fund` itself loses its state. The split exists so that the rule is the part that gets replaced. A `Fund` replacement would need a seeding path like `MaxHoldersRule`'s, and is not planned.
+
+### Not in this plan
+
+Class prices and AUM, restricted transfers, identity ids, lots, an ERC-7575 share split, CREATE2-derived class addresses, a data-contract rule list in `ComplianceHook`, and folding the fund count into `MaxHoldersRule`.
+
+### F-1 as built (2026-10-22, approved by the owner)
+
+Contracts and Solidity tests only. No Ignition, no TypeScript test, no docs (F-2). Committed on `fund-layer`, not pushed.
+
+- **New code:**
+  - `contracts/interfaces/IFund.sol`, `contracts/interfaces/IFundHoldersRule.sol`;
+  - `NOT_FUND_CLASS` appended to `Errors.sol`;
+  - `contracts/fund/Fund.sol`, `contracts/hooks/rules/FundHoldersRule.sol`;
+  - `contracts/test/MockStatefulFund.sol`, a fund whose read writes state, for the static-call guard.
+- **Tests (124 new):**
+  - `Fund.t.sol` 56: every revert, each count transition, exemption, views, and a fuzz run against a plain model of the same rules;
+  - `FundHoldersRule.t.sol` 44: accept and each reject, the net-zero cases, `after_`, the static-call guard, and the registration gate with the real `Fund` (a fake token that names itself, a caller that is not the rule, the real hook of a real class);
+  - `FundIntegration.t.sol` 21: one `IntentToken`, one `Gated4626Vault` and one `Gated7540Vault` with real hooks and rules, covering the cap across classes with pre-flight parity, net zero at the cap, FORCED counted, an unregistered class, the 7540 escrow (request, fulfil, reject at a full cap, recover), a hook replacement and a rule replacement;
+  - `FundInvariant.t.sol` 3 invariants over 128,000 calls per seed (three seeds run): class bits equal positive balances, the count equals the non-exempt investors, and no class, fulfiller or custody account is ever recorded;
+  - `halmos/FundHalmos.t.sol` 5 properties: an unregistered token never changes state, only the rule writes, and the count is right after any two operations on two accounts and any three on one account (the second account already an investor), and join then leave restores the state.
+- **Freeze and size:** `InterfaceFreeze.t.sol` pins both interface ids (computed independently with `cast sig`, and equal to the compiler's), six event topics and the new reason. `ContractSizes.t.sol` and the reproducibility manifest (13 to 15 contracts) have both new contracts.
+- **Red runs.**
+  - The freeze additions failed to compile on the missing `Reasons.NOT_FUND_CLASS` alone.
+  - Against a throwaway stub, none of the 56 `Fund` tests passed.
+  - Against a stub rule, 24 rule tests failed and 20 passed. The 20 are accept-path and "nothing recorded" tests that an always-OK stub satisfies by construction, and each has a failing counterpart.
+  - The integration and invariant suites test existing contracts in combination, so they were not red first. The mutation runs below are their evidence.
+- **Mutation checks, on a scratch copy.**
+  - 40 bugs planted (20 in `Fund`, 20 in the rule), 39 killed by the Solidity tests. The survivor was an equivalent mutant: the `account == token` guard in `leave` was dead code, because `join` never records the class itself. It is removed.
+  - Seven planted in `Fund` for Halmos. Six were killed at first. The seventh (an exempt account that leaves decrements the count) needs the count above zero to show, so the three-operation property now starts with a second investor, and all seven are killed.
+- **Differences from the plan above:**
+  - `admission` is in from the start. Whether it saves the 1,000 gas the plan set as its test stays a measurement for F-2.
+  - `leave` has no guard for the class itself (above). The rule does not skip a receiver equal to the token: the fund ignores it, and a test pins that.
+  - A second `FundHoldersRule` with the same fund has the same codehash, so the registry already attests it. Replacing a rule with identical code needs no attestation. Only changed code does.
+  - `IFund` lists its two constant getters under views, which the lint's declaration order requires.
+- **Finding, rule replacement.** `Fund.setRule` takes effect at once. Until the classes' hooks list the new rule, the old rule's pre-flight still says yes and its `after_` is refused with `Fund_OnlyRule`, so movements revert and the state cannot drift. The integration test shows both. In production `setRule` and every class's `setRules` go in one timelock batch. The runbook in F-2 says so.
+- **Results.**
+  - `npx hardhat test`: 637 passing (577 Solidity, 60 TypeScript), up from 513. The isolated profile: 577 passing.
+  - Lint 0, fmt clean, `tsc` clean, Slither 0, Aderyn 0, upgrades-core 3 of 3 (`Fund` is immutable, so it is outside its scope). Slither's first run found three things in the new code (two locals that start at zero by design, one ignored tuple return) and Aderyn's found two view-call-before-write patterns. Each has an inline suppression with its reason.
+  - `verify:reproducible`: 15 contracts identical across the two production builds.
+  - The deployed bytecode of the 13 existing contracts is identical to `d3574df`, compared against a pristine build of that commit.
+  - Halmos: the 5 fund properties take about 38 seconds. The existing four take 3 seconds. A first draft of one property took 124 seconds, so it was split.
+- **Not yet:** the F-2 benchmark rerun, so the gas expectations above are still estimates.
+- **Note:** `docs/superpowers/` is git-ignored at the owner's request (2026-10-22). The assessment and benchmark linked in this section are local files.
+
 ## Open questions for the owner
 1. None.

@@ -11,6 +11,8 @@ import {IERC7540Deposit} from 'interfaces/IERC7540Deposit.sol';
 import {IERC7540Operator} from 'interfaces/IERC7540Operator.sol';
 import {IERC7540Redeem} from 'interfaces/IERC7540Redeem.sol';
 import {IERC7575} from 'interfaces/IERC7575.sol';
+import {IFund} from 'interfaces/IFund.sol';
+import {IFundHoldersRule} from 'interfaces/IFundHoldersRule.sol';
 import {IGated4626Vault} from 'interfaces/IGated4626Vault.sol';
 import {IGated7540Vault} from 'interfaces/IGated7540Vault.sol';
 import {IGovernanceTimelock} from 'interfaces/IGovernanceTimelock.sol';
@@ -65,6 +67,9 @@ contract InterfaceFreezeTest is Test {
     assertEq(type(IProxyDeployer).interfaceId, bytes4(0x886d8cd8), 'IProxyDeployer');
     // Added in v0.2.0 (owner decision M-1)
     assertEq(type(IGovernanceTimelock).interfaceId, bytes4(0x31993a1c), 'IGovernanceTimelock');
+    // Added in the fund layer (2026-10-22), ids computed from the signatures with `cast sig`
+    assertEq(type(IFund).interfaceId, bytes4(0x44c4a64f), 'IFund');
+    assertEq(type(IFundHoldersRule).interfaceId, bytes4(0x5c275a39), 'IFundHoldersRule');
   }
 
   function test_WhenInterfacesCompile_TheirEventTopicsArePinned() external pure {
@@ -129,6 +134,13 @@ contract InterfaceFreezeTest is Test {
     assertEq(
       IGated7540Vault.ClaimableRecovered.selector, 0x0c540b8a1efd2cc0ebc90a5c128ab14cb8011c0c1021a7a9acfdffd478e42c04
     );
+    // Added in the fund layer (2026-10-22), topics computed with `cast keccak`
+    assertEq(IFund.ClassRegistered.selector, 0xf7aa1688f2f49ca390ca9db30a49ef1701d5823ad13c1d18946e798c371d82e9);
+    assertEq(IFund.RuleSet.selector, 0xad94ea837b15ca544ad01b8e325c9c2ce361fdb551d2c8c6a23d652709f23017);
+    assertEq(IFund.HolderCapSet.selector, 0xa18fd2e9ea8c6d87fce8efb5b336dbfb3af26ec55e3d02dd9bbb04274e4f8130);
+    assertEq(IFund.ExemptSet.selector, 0xf33950bf7aa3300efb48f7896f309484c287418977abeba9f08f12cbe451d36a);
+    assertEq(IFund.HolderCountUpdated.selector, 0x8ac0638de66e0910c02cbd2be8467a89277dac49177d5811c91422a8f475ba75);
+    assertEq(IFund.HolderClassesUpdated.selector, 0x020767ac8d9f815f24bcaa5228933945b8766fe5dff7fe83d918163bcfd787fa);
   }
 
   function test_WhenReasonsCompile_TheirValuesArePinned() external pure {
@@ -145,5 +157,7 @@ contract InterfaceFreezeTest is Test {
     assertEq(Reasons.BAD_SIGNATURE, keccak256('BAD_SIGNATURE'));
     assertEq(Reasons.NO_HOOK, keccak256('NO_HOOK'));
     assertEq(Reasons.NO_RULES, keccak256('NO_RULES'));
+    // Appended in the fund layer (2026-10-22)
+    assertEq(Reasons.NOT_FUND_CLASS, keccak256('NOT_FUND_CLASS'));
   }
 }

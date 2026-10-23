@@ -23,6 +23,7 @@ const ATTESTED = {
   LockupRule: "hooks/rules",
   SettlementWindowRule: "hooks/rules",
   MaxHoldersRule: "hooks/rules",
+  FundHoldersRule: "hooks/rules",
   ComplianceHook: "hooks",
   IntentToken: "tokens",
   Gated4626Vault: "vaults",
@@ -33,6 +34,7 @@ const DEPLOYED = {
   GovernanceTimelock: "governance",
   IntentExecutor: "intents",
   ProxyDeployer: "deploy",
+  Fund: "fund",
   TokenProxy: "deploy",
 } as const;
 const CONTRACTS: Record<string, string> = { ...ATTESTED, ...DEPLOYED };
