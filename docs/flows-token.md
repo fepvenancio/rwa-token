@@ -70,7 +70,7 @@ A holder authorises a transfer with a signature. A bank key submits it. The hold
 EIP-712 typed data:
 
 ```
-TransferIntent(address from,address to,uint256 amount,bytes32 nonce,uint256 deadline,bytes32 ref)
+TransferIntent(address from,address to,uint256 amount,bytes32 nonce,uint256 deadline,bytes32 ref,address executor,uint256 validAfter,address considerationToken,uint256 considerationAmount)
 ```
 
 | Field | Meaning |
@@ -81,6 +81,9 @@ TransferIntent(address from,address to,uint256 amount,bytes32 nonce,uint256 dead
 | `nonce` | 32 random bytes chosen by the signer. Each signer has its own set of nonces |
 | `deadline` | last valid unix timestamp, inclusive |
 | `ref` | a 32-byte reference to an off-chain message, for example the hash of an ISO 20022 message id. The token emits it and puts it in the context. None of the five standard rules reads it |
+| `executor` | the only account allowed to execute the intent. Zero means any holder of `EXECUTOR_ROLE` |
+| `validAfter` | first valid unix timestamp, inclusive. Zero means no lower bound |
+| `considerationToken`, `considerationAmount` | what the signer is to receive for this leg. The token hashes them into the digest the holder signs and reads them only for step 4 below. Only the executor named in `executor` can enforce the payment, if its code does |
 
 Domain: `name` is the token name, `version` is `"1"`, `chainId` is the chain, `verifyingContract` is the token proxy. The token reports it through `eip712Domain()` (ERC-5267), and `intentHash(intent)` returns the digest. A signature is valid for one token on one chain.
 
@@ -99,9 +102,8 @@ sequenceDiagram
   Ho->>Ho: sign TransferIntent (off-chain, no gas)
   Ho->>Op: intent and signature (off-chain)
   opt pre-flight
-    Op->>T: canExecute(intent), called from the executor address
-    T-->>Op: ok or a reason code
-    Op->>Op: verifyTypedData against eip712Domain() for the signature
+    Op->>T: canExecute(intent, sig), called from the executor address
+    T-->>Op: ok or a reason code, the signature included
   end
   Op->>Ex: execute(token, intent, sig)
   Ex->>Ex: onlyRole(OPERATOR_ROLE), whenNotPaused
@@ -109,6 +111,9 @@ sequenceDiagram
   T->>T: onlyRole(EXECUTOR_ROLE)
   T->>T: block.timestamp over deadline? INTENT_EXPIRED
   T->>T: nonce already used for from? NONCE_USED
+  T->>T: consideration stated and no executor named? CONSIDERATION_NEEDS_EXECUTOR
+  T->>T: executor named and not the caller? WRONG_EXECUTOR
+  T->>T: block.timestamp under validAfter? INTENT_NOT_YET_VALID
   T->>T: signature invalid for from? BAD_SIGNATURE
   T->>T: mark the nonce used
   T->>T: _moveAs(EXECUTED, ref, deadline), then _update
@@ -120,15 +125,20 @@ sequenceDiagram
   Ex-->>Op: intentHash
 ```
 
-Checks in `executeTransfer`, in this order. Step 1 reverts with `AccessControlUnauthorizedAccount`. Steps 2 to 4, and the pause, frozen and hook checks inside step 6, revert with `PolicyGated_TransferRejected(reason)`. A zero `to` reverts with `ERC20InvalidReceiver(address(0))` at the start of step 6, before the pause, frozen and hook checks. `canExecute` returns the reason instead of reverting for steps 2 and 3, and for the pause, frozen and hook checks of step 6. It does not check steps 1 and 4, and it does not reproduce the zero-`to` revert. For a zero `to` it returns the result of the pause, frozen and hook checks; with `IdentityRule` and nothing else failing, that is `RECEIVER_NOT_VERIFIED`:
+Checks in `executeTransfer`, in this order. Step 1 reverts with `AccessControlUnauthorizedAccount`. Steps 2 to 7, and the pause, frozen and hook checks inside step 9, revert with `PolicyGated_TransferRejected(reason)`. A zero `to` reverts with `ERC20InvalidReceiver(address(0))` at the start of step 9, before the pause, frozen and hook checks. `canExecute` returns the reason instead of reverting for steps 2 to 7, and for the pause, frozen and hook checks of step 9. It does not check step 1, and it does not reproduce the zero-`to` revert. For a zero `to` it returns the result of the pause, frozen and hook checks; with `IdentityRule` and nothing else failing, that is `RECEIVER_NOT_VERIFIED`:
 
-1. The caller holds `EXECUTOR_ROLE`. After `Activate` that is the `IntentExecutor` contract.
+1. The caller holds `EXECUTOR_ROLE`. After `Activate` that is the `IntentExecutor` contract or the `DvPExecutor` contract.
 2. `block.timestamp > deadline`: reason `INTENT_EXPIRED`.
 3. The nonce was already used by `from`: reason `NONCE_USED`.
-4. The signature does not match `from`: reason `BAD_SIGNATURE`.
-5. The nonce is marked used.
-6. The movement goes through `_update` as `EXECUTED`: pause, frozen balance, then the hook. With the standard rules that means `IdentityRule` on both parties, `LockupRule` on the sender, `SettlementWindowRule` (the window must be open), `MaxHoldersRule`, and `FundHoldersRule`.
-7. `IntentExecuted(intentHash, from, to, amount, executor, ref)` is emitted. `executor` is the account that called the token, so it is the `IntentExecutor` contract when the call came through it.
+4. The intent states a consideration (a non-zero `considerationToken` or `considerationAmount`) and `executor` is zero: reason `CONSIDERATION_NEEDS_EXECUTOR`.
+5. `executor` is non-zero and is not the caller: reason `WRONG_EXECUTOR`.
+6. `block.timestamp < validAfter`: reason `INTENT_NOT_YET_VALID`.
+7. The signature does not match `from`: reason `BAD_SIGNATURE`.
+8. The nonce is marked used.
+9. The movement goes through `_update` as `EXECUTED`: pause, frozen balance, then the hook. With the standard rules that means `IdentityRule` on both parties, `LockupRule` on the sender, `SettlementWindowRule` (the window must be open), `MaxHoldersRule`, and `FundHoldersRule`.
+10. `IntentExecuted(intentHash, from, to, amount, executor, ref)` is emitted. `executor` is the account that called the token, so it is the `IntentExecutor` contract when the call came through it.
+
+An intent can be bound to an executor, and it can state what its signer is to receive for it. The token enforces the binding, and that a stated consideration comes with a named executor. It does not enforce the payment: it never reads `considerationToken` or `considerationAmount` beyond that check. An executor that moves the other leg, and that the intent names, is what makes the payment happen. `IntentExecutor` does not move another leg, so an intent that names it and states a consideration is a record of the terms, not a settlement. `DvPExecutor` is the executor that does enforce a payment ([flows-dvp.md](flows-dvp.md)).
 
 A revert anywhere undoes the nonce write. An intent rejected for being outside the settlement window can be submitted again when the window opens, until its deadline.
 
@@ -260,6 +270,6 @@ sequenceDiagram
 
 While paused, these still work: `approve`, `permit`, `cancelIntent`, `setFrozen`, `setLockup`, `forcedTransfer`, role changes and every view function.
 
-`IntentExecutor` has its own pause. The guardian calls `pause()` on it, and the main or the recovery timelock calls `unpause()`. It stops `execute` and `executeBatch` without touching the token.
+`IntentExecutor` and `DvPExecutor` each have their own pause. The guardian calls `pause()` on one, and the main or the recovery timelock calls `unpause()`. It stops `execute` and `executeBatch`, or `executeDvPGated` and `executeDvP3009`, without touching the token.
 
-Code: `PolicyGatedERC20Upgradeable.pause`, `unpause`; `IntentExecutor.pause`, `unpause`; `ignition/modules/Activate.ts`.
+Code: `PolicyGatedERC20Upgradeable.pause`, `unpause`; `IntentExecutor.pause`, `unpause`; `DvPExecutor.pause`, `unpause`; `ignition/modules/Activate.ts`.

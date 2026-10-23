@@ -6,9 +6,9 @@ How the policy around a token changes after it is live, and how a token gets liv
 
 There are two timelocks.
 
-**The main timelock** holds the admin powers: `DEFAULT_ADMIN_ROLE` on the tokens, the executor, the registry and itself, `UPGRADER_ROLE` on the tokens, `ADMIN` of every hook, and ownership of `ProxyDeployer` and `Fund`. It is `GovernanceTimelock`: OpenZeppelin's `TimelockController` unchanged, except that the holder of `RECOVERY_ROLE` on it may revoke `CANCELLER_ROLE` (and do nothing else).
+**The main timelock** holds the admin powers: `DEFAULT_ADMIN_ROLE` on the tokens, both executors, the registry and itself, `UPGRADER_ROLE` on the tokens, `ADMIN` of every hook, and ownership of `ProxyDeployer` and `Fund`. It is `GovernanceTimelock`: OpenZeppelin's `TimelockController` unchanged, except that the holder of `RECOVERY_ROLE` on it may revoke `CANCELLER_ROLE` (and do nothing else).
 
-**The recovery timelock** is a plain OpenZeppelin `TimelockController`. It holds `RECOVERY_ROLE` on the main timelock, granted by that contract's constructor, and, after `Activate`, on the three tokens and the executor. A token placed later does not get it from its initialiser: whoever holds `DEFAULT_ADMIN_ROLE` on that token (the main timelock, if it is initialised that way) must grant it. As deployed, nobody can cancel the recovery timelock's operations.
+**The recovery timelock** is a plain OpenZeppelin `TimelockController`. It holds `RECOVERY_ROLE` on the main timelock, granted by that contract's constructor, and, after `Activate`, on the three tokens and both executors. A token placed later does not get it from its initialiser: whoever holds `DEFAULT_ADMIN_ROLE` on that token (the main timelock, if it is initialised that way) must grant it. As deployed, nobody can cancel the recovery timelock's operations.
 
 A timelock is itself the account that calls the target contract, so the target sees that timelock as `msg.sender`.
 
@@ -47,12 +47,13 @@ sequenceDiagram
 | Replace the hook | `token.setPolicyHook(newHook)` | `newHook` codehash is attested as `HOOK` |
 | Replace the rule list | `hook.setRules(rules)` | each rule is attested as `RULE`, at most 16, no two share a `ruleId` |
 | Upgrade a token | `token.upgradeToAndCall(newImplementation, data)` | caller holds `UPGRADER_ROLE`; `newImplementation` is attested as `IMPLEMENTATION`. OpenZeppelin also requires the call to go through the proxy and `newImplementation` to be a UUPS implementation (`proxiableUUID`) |
-| Grant or revoke a role | `grantRole`, `revokeRole` on a token, the executor, the registry or the main timelock itself | none |
+| Grant or revoke a role | `grantRole`, `revokeRole` on a token, an executor, the registry or the main timelock itself | none |
+| Let the DvP executor settle against a gated cash token | `cashToken.grantRole(EXECUTOR_ROLE, dvpExecutor)`, with the cash token's administrator as caller | none. `Activate` grants `EXECUTOR_ROLE` only on the intent token it deploys, so a gated cash token is a separate instrument whose own deployment or governance does this ([flows-dvp.md](flows-dvp.md#policy-and-the-fund-layer)) |
 | Window, holder cap, holder-count seed, holder exemption | `SettlementWindowRule` and `MaxHoldersRule` functions | the rule asks the token whether the caller holds `DEFAULT_ADMIN_ROLE`. `setWindow` also rejects an invalid window, and `setExemptHolder` a zero account. The three holder-count seeds also revert while the rule is in the token's rule list, and two of them check their inputs ([below](#the-holder-count-across-rule-and-hook-changes)) |
 | Change the 7540 custody address | `vault.setCustody(newCustody)` | non-zero address |
 | Register a class, set the fund's cap, exempt an account | `fund.registerClass(token)`, `fund.setHolderCap(cap)`, `fund.setExempt(account, exempt)` | `registerClass`: the token reports ERC-165 support for `IPolicyGated`, its hook lists the fund's rule, its total supply is zero, and the fund has room (32 classes). `setHolderCap`: at most `type(uint48).max`. `setExempt`: a non-zero account |
 | Replace the fund's rule | `fund.setRule(newRule)`, with `hook.setRules(list)` on every class in the same batch | `newRule` is attested as `RULE` ([below](#changing-the-funds-rule)) |
-| Unpause the executor | `executor.unpause()` | the executor must be paused |
+| Unpause an executor | `executor.unpause()`, `dvpExecutor.unpause()` | the executor must be paused |
 | Place a new token | `proxyDeployer.deploy(...)` | see below |
 | Change the main timelock's delay | `timelock.updateDelay(newDelay)` | only the timelock itself can call it. OpenZeppelin sets no lower bound |
 
@@ -64,13 +65,13 @@ Governance schedules and executes on the recovery timelock after its delay, and 
 
 | Change | Call, with the recovery timelock as caller |
 |---|---|
-| Unpause a token or the executor | `token.unpause()`, `executor.unpause()` |
-| Remove `GUARDIAN_ROLE` from an account on a token or the executor | `revokeRole(GUARDIAN_ROLE, account)` on it |
+| Unpause a token or an executor | `token.unpause()`, `executor.unpause()`, `dvpExecutor.unpause()` |
+| Remove `GUARDIAN_ROLE` from an account on a token or an executor | `revokeRole(GUARDIAN_ROLE, account)` on it |
 | Remove `CANCELLER_ROLE` from an account on the main timelock: the guardian's, or any other canceller's, governance included | `timelock.revokeRole(CANCELLER_ROLE, account)` |
 
-Any other privileged call to a token, the executor or the main timelock reverts. Role-gated functions fail their role check, and `updateDelay` fails `TimelockUnauthorizedCaller`. Permissionless calls, such as `approve` or renouncing its own role, still succeed and give it nothing. It cannot grant roles there, revoke any other role, upgrade, change a hook or rule list, or schedule, execute or cancel on the main timelock. This path exists because the guardian can cancel these same calls on the main timelock ([roles.md](roles.md#what-the-guardian-can-do)). It bounds the guardian. It does not protect against a compromised governance multisig, which proposes on both timelocks.
+Any other privileged call to a token, an executor or the main timelock reverts. Role-gated functions fail their role check, and `updateDelay` fails `TimelockUnauthorizedCaller`. Permissionless calls, such as `approve` or renouncing its own role, still succeed and give it nothing. It cannot grant roles there, revoke any other role, upgrade, change a hook or rule list, or schedule, execute or cancel on the main timelock. This path exists because the guardian can cancel these same calls on the main timelock ([roles.md](roles.md#what-the-guardian-can-do)). It bounds the guardian. It does not protect against a compromised governance multisig, which proposes on both timelocks.
 
-`RECOVERY_ROLE` is not a role admin, because a role admin could also grant the role. Instead, the tokens, the executor and `GovernanceTimelock` let its holder through for exactly those revocations (their `revokeRole` overrides), and the tokens and the executor accept it in `unpause()`.
+`RECOVERY_ROLE` is not a role admin, because a role admin could also grant the role. Instead, the tokens, both executors and `GovernanceTimelock` let its holder through for exactly those revocations (their `revokeRole` overrides), and the tokens and the executors accept it in `unpause()`.
 
 ```mermaid
 sequenceDiagram
@@ -78,7 +79,7 @@ sequenceDiagram
   participant Gov as Governance multisig
   participant TL as Main timelock
   participant RT as Recovery timelock
-  participant X as Tokens and executor
+  participant X as Tokens and executors
   G->>X: pause()
   Gov->>TL: schedule(token.unpause())
   G->>TL: cancel(id), the veto
@@ -93,7 +94,7 @@ Each `unpause` in such a batch must target a contract that is paused when the ba
 
 The recovery timelock also administers itself. Changing its own roles or delay is one of its own operations.
 
-Code: `GovernanceTimelock.revokeRole`, `PolicyGatedERC20Upgradeable.unpause` and `revokeRole`, `IntentExecutor.unpause` and `revokeRole`.
+Code: `GovernanceTimelock.revokeRole`, `PolicyGatedERC20Upgradeable.unpause` and `revokeRole`, `IntentExecutor` and `DvPExecutor` `unpause` and `revokeRole`.
 
 Things that wait for neither timelock: a guardian pause, a `cancel` on the main timelock, a council attestation or revocation, and the work of the agent, minter, burner, operator and fulfiller.
 
@@ -252,7 +253,7 @@ sequenceDiagram
   D->>Ch: IdentityRule(identityRegistry), LockupRule, SettlementWindowRule, MaxHoldersRule
   D->>Ch: Fund(deployer, registry), FundHoldersRule(fund)
   D->>Ch: IntentToken, Gated4626Vault, Gated7540Vault implementations
-  D->>Ch: ProxyDeployer(deployer), IntentExecutor(deployer, guardian)
+  D->>Ch: ProxyDeployer(deployer), IntentExecutor(deployer, guardian), DvPExecutor(deployer, guardian)
 
   Note over D,Ch: Council step 1
   Co->>Ch: read the fund's code and owner
@@ -289,7 +290,7 @@ sequenceDiagram
 - The four shared rules, `IdentityRule` with the identity registry address as its constructor argument.
 - `Fund(deployer, registry)`, owned by the deployer until `Activate`, and `FundHoldersRule(fund)`, the fifth rule. The fund and its rule need each other, so the rule takes the fund at construction and `Activate` installs the rule in the fund.
 - One implementation per template: `IntentToken`, `Gated4626Vault`, `Gated7540Vault`.
-- `ProxyDeployer(deployer)` and `IntentExecutor(deployer, guardian)`.
+- `ProxyDeployer(deployer)`, `IntentExecutor(deployer, guardian)` and `DvPExecutor(deployer, guardian)`. Neither executor is attested: neither is a hook, a rule or an implementation, and each token authorises an executor by granting it `EXECUTOR_ROLE`.
 
 `Tokens`: one `ComplianceHook` per token, with `ADMIN` = the main timelock and `TOKEN` = the predicted address. The constructor checks each rule against the registry, so council step 1 must be done first. The rule lists:
 
@@ -306,8 +307,8 @@ The symbols above, and the token names in `TOKENS` ("Intent Token", "Gated Fund"
 1. Deploy the three tokens through `ProxyDeployer`. The tokens are initialised with the deployer as admin and the guardian as guardian. Every later call waits for all three deploys, so a hook bound to the wrong address stops the whole stage before anything is configured or granted.
 2. Configure, after the deploys and while the deployer still holds `DEFAULT_ADMIN_ROLE` on the tokens: `SettlementWindowRule.setWindow` for `IntentToken` (`windowOpen`, `windowClose`, `windowDays`), `MaxHoldersRule.setCap` for all three tokens (`holderCap`), and `MaxHoldersRule.setExemptHolder(asyncFund, asyncFund, true)` so the 7540 vault's escrow never counts as a holder.
    The fund is configured in the same stage, while the deployer owns it: `Fund.setRule(fundHoldersRule)` and `Fund.setHolderCap(fundHolderCap)`, then `Fund.registerClass` for `IntentToken`, `Gated4626Vault` and `Gated7540Vault`, each after the one before, so they are classes 1, 2 and 3. Registration checks that the token's hook lists the rule and that its supply is zero, so a hook built without the rule stops `Activate` here. No role has been granted by then, and `Fund` ownership has not moved. The `ProxyDeployer` ownership transfer and the recovery timelock calls wait only for the deploys, so they may already have run.
-3. Grant roles: `MINTER_ROLE` and `BURNER_ROLE` on `IntentToken`; `EXECUTOR_ROLE` on `IntentToken` to the executor; `FULFILLER_ROLE` on the 7540 vault; `AGENT_ROLE` on all three tokens; `UPGRADER_ROLE` on all three tokens to the main timelock; `OPERATOR_ROLE` on the executor; `CANCELLER_ROLE` on the main timelock to the guardian; `RECOVERY_ROLE` on all three tokens and on the executor to the recovery timelock. The grants wait for the deploys and for the three registrations, so no operational role exists on a class the fund has not registered. The window, cap and exemption calls of step 2 and these grants have no order between them.
-4. Hand over: once configuration and the role grants are done, grant `DEFAULT_ADMIN_ROLE` on each token and on the executor to the main timelock, then the deployer renounces it there. The deployer also renounces `DEFAULT_ADMIN_ROLE` on the main timelock once configuration and the grants are done. On the recovery timelock, after the deploys, `Activate` revokes governance's `CANCELLER_ROLE` (OpenZeppelin gave it as a proposer), then the deployer renounces `DEFAULT_ADMIN_ROLE` there. `ProxyDeployer` ownership goes to the main timelock after the deploys, and `Fund` ownership after the three registrations, with no order against the other hand-over calls, so any later token is placed, and any later class registered, through governance.
+3. Grant roles: `MINTER_ROLE` and `BURNER_ROLE` on `IntentToken`; `EXECUTOR_ROLE` on `IntentToken` to the intent executor and to the DvP executor, and to no one else; `FULFILLER_ROLE` on the 7540 vault; `AGENT_ROLE` on all three tokens; `UPGRADER_ROLE` on all three tokens to the main timelock; `OPERATOR_ROLE` on both executors; `CANCELLER_ROLE` on the main timelock to the guardian; `RECOVERY_ROLE` on all three tokens and on both executors to the recovery timelock. The grants wait for the deploys and for the three registrations, so no operational role exists on a class the fund has not registered. The window, cap and exemption calls of step 2 and these grants have no order between them.
+4. Hand over: once configuration and the role grants are done, grant `DEFAULT_ADMIN_ROLE` on each token and on both executors to the main timelock, then the deployer renounces it there. The deployer also renounces `DEFAULT_ADMIN_ROLE` on the main timelock once configuration and the grants are done. On the recovery timelock, after the deploys, `Activate` revokes governance's `CANCELLER_ROLE` (OpenZeppelin gave it as a proposer), then the deployer renounces `DEFAULT_ADMIN_ROLE` there. `ProxyDeployer` ownership goes to the main timelock after the deploys, and `Fund` ownership after the three registrations, with no order against the other hand-over calls, so any later token is placed, and any later class registered, through governance.
 
 The identity provider has to verify the 7540 vault, because the vault holds shares in escrow and `IdentityRule` checks it on both legs. `Activate` does not do this. It can happen any time once the vault's address can be computed, which is after `Components` (`ProxyDeployer.predict`), and must happen before the first redemption request. The runbook and the test fixture do it after `Activate`.
 
@@ -315,9 +316,10 @@ The identity provider has to verify the 7540 vault, because the vault holds shar
 
 The roles are in [roles.md](roles.md#who-holds-what-after-activate). The test fixture's `assertHandedOver` checks that:
 
-- the deployer holds no role on either timelock, the registry, the tokens or the executor;
-- the main timelock holds `DEFAULT_ADMIN_ROLE` on itself, the registry, the tokens and the executor, and is the only `UPGRADER_ROLE` holder among the known accounts;
-- the recovery timelock holds exactly `RECOVERY_ROLE` on the main timelock, each token and the executor, nothing on the registry, and `DEFAULT_ADMIN_ROLE` on itself;
+- the deployer holds no role on either timelock, the registry, the tokens or either executor;
+- the main timelock holds `DEFAULT_ADMIN_ROLE` on itself, the registry, the tokens and both executors, and is the only `UPGRADER_ROLE` holder among the known accounts;
+- the recovery timelock holds exactly `RECOVERY_ROLE` on the main timelock, each token and both executors, nothing on the registry, and `DEFAULT_ADMIN_ROLE` on itself;
+- the DvP executor's `OPERATOR_ROLE` is held by the stack's operator and its `GUARDIAN_ROLE` by the guardian, and `EXECUTOR_ROLE` on `IntentToken` is held by the two executors and by no account the stack knows about;
 - no known account can cancel on the recovery timelock, the guardian holds nothing there, and governance is its proposer and executor;
 - `ProxyDeployer` and `Fund` are owned by the main timelock;
 - the fund runs the rule that points back at it and is attested as `RULE`, its cap is the intended one, and its classes 1, 2 and 3 are `IntentToken`, `Gated4626Vault` and `Gated7540Vault`;

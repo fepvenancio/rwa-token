@@ -207,7 +207,7 @@ Each code is `keccak256` of its name, so `TRANSFER_OK` is not zero. A hook or ru
 | Code | Returned by |
 |---|---|
 | `TRANSFER_OK` | rules and hook, when the movement is allowed |
-| `PAUSED` | the base, while paused and the kind is not `FORCED` |
+| `PAUSED` | the base, while paused and the kind is not `FORCED`; also `DvPExecutor`'s pre-flights, while the executor is paused |
 | `INSUFFICIENT_UNFROZEN` | the base, when `from` does not have enough unfrozen balance |
 | `SENDER_NOT_VERIFIED` | `IdentityRule` |
 | `RECEIVER_NOT_VERIFIED` | `IdentityRule` |
@@ -216,10 +216,16 @@ Each code is `keccak256` of its name, so `TRANSFER_OK` is not zero. A hook or ru
 | `LOCKED` | `LockupRule` |
 | `INTENT_EXPIRED` | `executeTransfer` and `canExecute`, when `block.timestamp > deadline` |
 | `NONCE_USED` | `executeTransfer`, `canExecute`, and `cancelIntent` |
-| `BAD_SIGNATURE` | `executeTransfer` |
+| `BAD_SIGNATURE` | `executeTransfer` and `canExecute` |
+| `WRONG_EXECUTOR` | `executeTransfer` and `canExecute`, when the intent names an executor and the caller is another account |
+| `INTENT_NOT_YET_VALID` | `executeTransfer` and `canExecute`, when `block.timestamp < validAfter` |
+| `CONSIDERATION_NEEDS_EXECUTOR` | `executeTransfer` and `canExecute`, when the intent states a consideration and names no executor |
 | `NO_HOOK` | the base, when the token has no hook. An initialised proxy always has one (initialisation and `setPolicyHook` refuse the zero address), so in practice only a bare implementation returns it |
 | `NO_RULES` | `ComplianceHook`, when its rule list is empty |
 | `NOT_FUND_CLASS` | `FundHoldersRule`, for a token that is not a registered class of the fund, or when the rule is not the fund's installed one |
+| `LEGS_DO_NOT_MATCH` | `DvPExecutor`'s pre-flights, when the two legs of a trade do not describe one trade |
+
+`DvPExecutor`'s ERC-3009 pre-flight also returns `INTENT_NOT_YET_VALID`, `INTENT_EXPIRED`, `NONCE_USED` and `INSUFFICIENT_UNFROZEN` for the buyer's authorization ([flows-dvp.md](flows-dvp.md#pre-flight)).
 
 ## How a rejection reaches the caller
 
@@ -228,6 +234,8 @@ Each code is `keccak256` of its name, so `TRANSFER_OK` is not zero. A hook or ru
 | Any token entry point | revert `PolicyGated_TransferRejected(bytes32 reason)` |
 | `IntentExecutor.execute` | the token's revert, unchanged |
 | `IntentExecutor.executeBatch` | revert `IntentExecutor_BatchItemFailed(index, reason)`, where `reason` is the token's revert data. The whole batch is undone |
+| `DvPExecutor.executeDvPGated`, `executeDvP3009`, when a leg fails | revert `DvPExecutor_LegFailed(leg, reason)`, where `leg` is `CASH` (0) or `SECURITIES` (1) and `reason` is the token's revert data. The whole trade is undone. A failing payout to the seller in the ERC-3009 form reverts with the cash token's own error |
+| `DvPExecutor`, when the two legs do not describe one trade, or the cash does not balance | `DvPExecutor_LegsDoNotMatch()`, or `DvPExecutor_CashNotConserved(account, expected, actual)` |
 | `Gated4626Vault.deposit`, `mint`, `withdraw`, `redeem` when the matching `max*` is lower than the request | OpenZeppelin's `ERC4626ExceededMaxDeposit`, `ERC4626ExceededMaxMint`, `ERC4626ExceededMaxWithdraw`, `ERC4626ExceededMaxRedeem`, before `_update` runs. The vault's `max*` functions ask the hook through a view call, so for a non-zero amount a policy rejection appears as a max of 0 and this error, not as `PolicyGated_TransferRejected`. A zero-amount call passes the max check. It reverts with `PolicyGated_TransferRejected` if the token is paused, or if the hook rejects a zero-amount movement: `IdentityRule` does for an unverified receiver (`deposit`, `mint`) or owner (`withdraw`, `redeem`), and `LockupRule` does for a locked owner. `MaxHoldersRule` does not. The `max*` probe treats the owner as the operator, which matches the real burn with the roles `Activate` grants |
 | `Gated7540Vault.requestDeposit`, the deposit claims `deposit` and `mint`, and the redemption claims `redeem` and `withdraw` | `Gated7540Vault_ControllerNotEligible(reason)`, from the controller check that runs before anything moves |
 | `Gated7540Vault.recoverClaimable` | `Gated7540Vault_RecipientNotEligible(reason)` if `to` fails the pre-flight, a zero-amount `FORCED` mint to `to` through the hook. With the standard rules, `IdentityRule` rejects an unverified `to`, and `FundHoldersRule` rejects everything with `NOT_FUND_CLASS` for a token that is not a registered class or whose rule is retired |
@@ -237,12 +245,12 @@ Each code is `keccak256` of its name, so `TRANSFER_OK` is not zero. A hook or ru
 
 ## Pre-flight calls
 
-Every token has `canTransfer` and `isUserAllowed`. `IntentToken` also has `canExecute`. `canTransfer` and `canExecute` run the same checks as the write path without writing. `isUserAllowed` asks only the hook. All three run at the current block's timestamp. A transaction mined in a later block can see a different time, which matters at a lockup end, a window edge or an intent deadline.
+Every token has `canTransfer` and `isUserAllowed`. `IntentToken` also has `canExecute`, and `DvPExecutor` has `canExecuteDvPGated` and `canExecuteDvP3009` ([flows-dvp.md](flows-dvp.md#pre-flight)). `canTransfer` and `canExecute` run the same checks as the write path without writing. `isUserAllowed` asks only the hook. All three run at the current block's timestamp. A transaction mined in a later block can see a different time, which matters at a lockup end, a window edge, an intent deadline or an intent's `validAfter`.
 
 | Function | What it asks |
 |---|---|
 | `canTransfer(from, to, amount)` | Would a holder-driven movement pass? The kind is `MINT` if `from == 0`, `BURN` if `to == 0`, otherwise `TRANSFER`. The operator is `from`, or the caller for a mint. It runs the pause check, the frozen check and the hook |
-| `canExecute(intent)` | Would `executeTransfer` pass, apart from the signature and the caller's `EXECUTOR_ROLE`? It checks the deadline and the nonce, then the same path with kind `EXECUTED` and the intent's `ref` and `deadline`. The operator is the caller, so call it from the executor's address. It cannot check the signature because the interface has no signature parameter |
+| `canExecute(intent, sig)` | Would `executeTransfer` pass, apart from the caller's `EXECUTOR_ROLE`? It checks the deadline, the nonce, the consideration, the named executor, `validAfter` and the signature, in that order, then the same path with kind `EXECUTED` and the intent's `ref` and `deadline`. The operator is the caller, and it is also the account compared with the intent's `executor`, so call it from the executor's address |
 | `isUserAllowed(user)` | Would the hook accept a mint of amount 0 to `user`? It ignores pause and frozen balance, and returns `false` if there is no hook. With the standard rules, `IdentityRule` rejects an unverified user, and `FundHoldersRule` rejects everything for a token that is not a registered class of its fund. For a registered class this answers "is the user verified" |
 
 Differences from the real call:

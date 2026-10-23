@@ -20,16 +20,17 @@ A fund groups several of these tokens as its share classes. The `Fund` contract 
 | `Fund` | `contracts/fund/` | immutable code, one per fund, owned by the deployer until `Activate` hands it to the main timelock | The fund's classes, the number of distinct investors across them, and each investor's class mask. It holds no policy: `FundHoldersRule` decides and the fund records |
 | `PolicyRegistry` | `contracts/governance/` | immutable, one per deployment | List of attested codehashes, each marked `HOOK`, `RULE` or `IMPLEMENTATION` |
 | `IntentExecutor` | `contracts/intents/` | immutable | Role-gated caller that submits signed intents to a token, one at a time or as an atomic batch |
+| `DvPExecutor` | `contracts/intents/` | immutable | Role-gated caller that settles a share trade against cash atomically, from two signed legs. The cash is a gated token or an ERC-3009 token. See [flows-dvp.md](flows-dvp.md) |
 | `ProxyDeployer` | `contracts/deploy/` | immutable | Creates each token proxy at an address that can be computed before the hook exists |
 | `TokenProxy` | `contracts/deploy/` | the proxy | OpenZeppelin's `ERC1967Proxy`, constructible without init data |
 | `GovernanceTimelock` | `contracts/governance/` | immutable | The main timelock: OpenZeppelin's `TimelockController` plus one power for the recovery timelock, revoking `CANCELLER_ROLE`. Holds the admin powers once deployment is finished |
-| `TimelockController` | OpenZeppelin, not in this repo | immutable | Deployed unmodified as the recovery timelock, which can only unpause the tokens and the executor, revoke `GUARDIAN_ROLE` on them, and revoke `CANCELLER_ROLE` on the main timelock from any holder. Like every OpenZeppelin timelock it is also its own admin |
+| `TimelockController` | OpenZeppelin, not in this repo | immutable | Deployed unmodified as the recovery timelock, which can only unpause the tokens and the executors, revoke `GUARDIAN_ROLE` on them, and revoke `CANCELLER_ROLE` on the main timelock from any holder. Like every OpenZeppelin timelock it is also its own admin |
 
 Two external contracts are neither in this repo nor deployed by it. The identity registry is any contract with `isVerified(address)`, and `IdentityRule` reads it. The vault asset is any standard ERC-20. The vaults credit the amount named in the call, not the amount that arrives, so fee-on-transfer assets are not supported. `Gated7540Vault` also books fixed asset amounts for pending deposits and claimable redemptions, so an asset whose balances change on their own (rebasing) can break its claims.
 
 A token's implementation contract calls `_disableInitializers()` in its constructor, so only a proxy can be initialised. Hooks and rules are not proxies. To change one you deploy a new one and install it.
 
-Code: `PolicyGatedERC20Upgradeable`, `IntentSettledUpgradeable`, `ComplianceHook`, `BaseRule`, `Fund`, `FundHoldersRule`, `PolicyRegistry`, `IntentExecutor`, `ProxyDeployer`, `TokenProxy`, `GovernanceTimelock`.
+Code: `PolicyGatedERC20Upgradeable`, `IntentSettledUpgradeable`, `ComplianceHook`, `BaseRule`, `Fund`, `FundHoldersRule`, `PolicyRegistry`, `IntentExecutor`, `DvPExecutor`, `ProxyDeployer`, `TokenProxy`, `GovernanceTimelock`.
 
 ## Structure
 
@@ -39,6 +40,7 @@ The diagram shows what exists once a token is deployed and what each piece point
 flowchart LR
   PD["ProxyDeployer"] -->|"CREATE2"| Proxy
   Exec["IntentExecutor"] -->|"executeTransfer"| Proxy
+  DvP["DvPExecutor"] -->|"executeTransfer, on two tokens"| Proxy
   subgraph PerToken["One set per token"]
     Proxy["Token proxy"]
     Hook["ComplianceHook"]
@@ -54,9 +56,9 @@ flowchart LR
   Fund -.->|"isAttested for the rule, when it is set"| Reg
 ```
 
-Solid arrows are calls, except `CREATE2`, which is a deployment, and `delegatecall`, which runs the implementation's code against the proxy's storage. Dotted arrows are registry checks that run when something is installed, not on every transfer. `IntentExecutor` appears only for `IntentToken`, which is the only token with `executeTransfer`.
+Solid arrows are calls, except `CREATE2`, which is a deployment, and `delegatecall`, which runs the implementation's code against the proxy's storage. Dotted arrows are registry checks that run when something is installed, not on every transfer. The two executors appear only for `IntentToken`, which is the only template with `executeTransfer`. `DvPExecutor` also calls a second token for the cash leg, a gated cash token or an ERC-3009 token, which is not drawn.
 
-The main timelock administers the tokens, the hook, the registry and the executor, and owns `ProxyDeployer` and `Fund`. The recovery timelock can unpause the tokens and the executor and remove the guardian. [roles.md](roles.md) shows both.
+The main timelock administers the tokens, the hook, the registry and both executors, and owns `ProxyDeployer` and `Fund`. The recovery timelock can unpause the tokens and the executors and remove the guardian. [roles.md](roles.md) shows both.
 
 Code: `ProxyDeployer.deploy`, `PolicyGatedERC20Upgradeable._setHook`, `ComplianceHook._setRules`, `Fund.setRule`.
 
@@ -190,7 +192,7 @@ Code: `PolicyGatedERC20Upgradeable._moveAs`, `_mintAs`, `_consumePending`, `_get
 | Registry | the token's pointer has no setter; only an upgrade to an attested implementation could change it. Rules are vetted against the hook's own immutable `REGISTRY`, which comes with the hook | as for the hook or the implementation | as for the hook or the implementation |
 | Fund rule | `setRule(newRule)` on the fund, and `setRules` on every class's hook in the same batch | the fund's owner and each hook's `ADMIN`, which are the main timelock | the new rule is attested as `RULE`. Until every hook lists it, the old rule rejects every movement |
 | Fund class | `registerClass(token)` on the fund, for a new token only | the fund's owner, which is the main timelock | the token reports ERC-165 support for `IPolicyGated`, its hook lists the rule, its supply is zero, and the fund has room |
-| Executor | grant `EXECUTOR_ROLE` to a new executor, revoke the old one | `DEFAULT_ADMIN_ROLE` | none |
+| Executor | grant `EXECUTOR_ROLE` to a new executor of either kind, revoke the old one | `DEFAULT_ADMIN_ROLE` | none |
 | 7540 custody address | `setCustody` | `DEFAULT_ADMIN_ROLE` | non-zero address |
 
 The registry check looks at `target.codehash`, so hooks, rules and implementations must be plain contracts. The registry is consulted only when something is installed. Revoking an attestation later does not change a token that already runs the revoked code.

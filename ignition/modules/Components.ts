@@ -7,8 +7,9 @@ import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
  *   (`GovernanceTimelock`: proposer and executor are the governance multisig only; the recovery timelock may revoke
  *   CANCELLER_ROLE there and nothing else). The deployer is the admin of both only until `Activate` finishes.
  * - The registry, administered by the timelock from the start.
- * - The shared rules, one implementation per template, the `ProxyDeployer`, and the intent executor (administered by
- *   the deployer until `Activate` hands it over).
+ * - The shared rules, one implementation per template, the `ProxyDeployer`, the intent executor and the DvP executor
+ *   (both administered by the deployer until `Activate` hands them over). Neither executor is attested: neither is a
+ *   hook, a rule or an implementation, and each token authorises it by granting it EXECUTOR_ROLE.
  * - The `Fund` (owned by the deployer until `Activate` hands it over) and the `FundHoldersRule` that points at it. The
  *   rule's codehash covers the fund's address and not the fund's code, so the council reads the fund's code and its
  *   owner before attesting the rule.
@@ -46,6 +47,7 @@ export default buildModule("Components", (m) => {
 
   const proxyDeployer = m.contract("ProxyDeployer", [deployer]);
   const executor = m.contract("IntentExecutor", [deployer, guardian]);
+  const dvpExecutor = m.contract("DvPExecutor", [deployer, guardian]);
 
   return {
     timelock,
@@ -62,5 +64,6 @@ export default buildModule("Components", (m) => {
     asyncFundImpl,
     proxyDeployer,
     executor,
+    dvpExecutor,
   };
 });

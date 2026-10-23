@@ -11,11 +11,14 @@ import { ROLES, TOKENS } from "./roles.js";
  *    three tokens as classes one after another, so class numbers 1 to 3 are intent, fund, asyncFund. Until a class is
  *    registered every movement on it is rejected, so no balance exists before it is.
  * 2. Grant the operational roles, after the registrations; UPGRADER_ROLE goes to the timelock only; the guardian becomes a timelock canceller;
- *    the recovery timelock gets RECOVERY_ROLE (unpause and revoke GUARDIAN_ROLE only) on every token and the executor.
- * 3. Hand over: DEFAULT_ADMIN_ROLE to the timelock on the tokens and the executor; the deployer renounces everywhere,
+ *    the recovery timelock gets RECOVERY_ROLE (unpause and revoke GUARDIAN_ROLE only) on every token and both executors.
+ *    The intent token's EXECUTOR_ROLE goes to the intent executor and to the DvP executor, and to no one else.
+ * 3. Hand over: DEFAULT_ADMIN_ROLE to the timelock on the tokens and both executors; the deployer renounces everywhere,
  *    and `ProxyDeployer` and `Fund` ownership move to the timelock.
  *
- * Outside this module: the identity provider must verify the 7540 vault (it escrows pending redemptions).
+ * Outside this module: the identity provider must verify the 7540 vault (it escrows pending redemptions). A gated cash
+ * token for the DvP executor is a separate instrument, not deployed here: its administrator grants the DvP executor
+ * EXECUTOR_ROLE on it, which for a timelock-administered token is a governance operation.
  */
 export default buildModule("Activate", (m) => {
   const deployer = m.getAccount(0);
@@ -29,6 +32,7 @@ export default buildModule("Activate", (m) => {
   const recoveryTimelock = m.contractAt("TimelockController", p("recoveryTimelock"), { id: "recoveryTimelock" });
   const proxyDeployer = m.contractAt("ProxyDeployer", p("proxyDeployer"));
   const executor = m.contractAt("IntentExecutor", p("executor"));
+  const dvpExecutor = m.contractAt("DvPExecutor", p("dvpExecutor"));
   const windowRule = m.contractAt("SettlementWindowRule", p("windowRule"));
   const maxHoldersRule = m.contractAt("MaxHoldersRule", p("maxHoldersRule"));
   const cap = m.getParameter<bigint>("holderCap");
@@ -100,7 +104,12 @@ export default buildModule("Activate", (m) => {
   // 2. Roles.
   const grant = (
     key: string,
-    contract: (typeof tokens)[keyof typeof tokens] | typeof executor | typeof timelock | typeof recoveryTimelock,
+    contract:
+      | (typeof tokens)[keyof typeof tokens]
+      | typeof executor
+      | typeof dvpExecutor
+      | typeof timelock
+      | typeof recoveryTimelock,
     role: string,
     to: unknown,
   ) =>
@@ -109,22 +118,29 @@ export default buildModule("Activate", (m) => {
     grant("intent_minter", intent, ROLES.MINTER, p("minter")),
     grant("intent_burner", intent, ROLES.BURNER, p("burner")),
     grant("intent_executor", intent, ROLES.EXECUTOR, executor),
+    grant("intent_dvp_executor", intent, ROLES.EXECUTOR, dvpExecutor),
     grant("asyncFund_fulfiller", asyncFund, ROLES.FULFILLER, p("fulfiller")),
     ...Object.entries(tokens).flatMap(([key, token]) => [
       grant(`${key}_agent`, token, ROLES.AGENT, p("agent")),
       grant(`${key}_upgrader`, token, ROLES.UPGRADER, timelock),
     ]),
     grant("executor_operator", executor, ROLES.OPERATOR, p("operator")),
+    grant("dvp_operator", dvpExecutor, ROLES.OPERATOR, p("operator")),
     grant("timelock_canceller", timelock, ROLES.CANCELLER, guardian),
-    // M-1: the recovery timelock may unpause and remove the guardian on every token and the executor (the main
+    // M-1: the recovery timelock may unpause and remove the guardian on every token and both executors (the main
     // timelock already names it in its constructor for CANCELLER_ROLE revocation).
     ...Object.entries(tokens).map(([key, token]) => grant(`${key}_recovery`, token, ROLES.RECOVERY, recoveryTimelock)),
     grant("executor_recovery", executor, ROLES.RECOVERY, recoveryTimelock),
+    grant("dvp_recovery", dvpExecutor, ROLES.RECOVERY, recoveryTimelock),
   ];
 
   // 3. Hand over, strictly after every call that needs the deployer's admin rights.
   const after = [...configured, ...granted];
-  for (const [key, contract] of [...Object.entries(tokens), ["executor", executor] as const]) {
+  for (const [key, contract] of [
+    ...Object.entries(tokens),
+    ["executor", executor] as const,
+    ["dvpExecutor", dvpExecutor] as const,
+  ]) {
     const handed = m.call(contract, "grantRole", [ROLES.DEFAULT_ADMIN, timelock], { id: `${key}_admin_grant`, after });
     m.call(contract, "renounceRole", [ROLES.DEFAULT_ADMIN, deployer], { id: `${key}_admin_renounce`, after: [handed] });
   }

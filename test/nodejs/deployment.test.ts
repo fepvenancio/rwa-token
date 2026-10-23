@@ -8,6 +8,8 @@ import { concatHex, encodeAbiParameters, getContractAddress, isAddressEqual, kec
 import { ROLES, TOKENS } from "../../ignition/modules/roles.js";
 import { deployStack, deployUntilActivate, HOLDER_CAP, REASONS } from "./fixtures.js";
 
+const IDVP_EXECUTOR_ID = "0xe68774e8";
+
 describe("deployment (Ignition: Components → council → Tokens → council → Activate)", async function () {
   const connection = await network.create();
   const { networkHelpers } = connection;
@@ -23,6 +25,23 @@ describe("deployment (Ignition: Components → council → Tokens → council �
     const [ok, reason] = await s.token.read.canTransfer([zeroAddress, s.holders.eve.account.address, 1n]);
     assert.equal(ok, false);
     assert.equal(reason, REASONS.RECEIVER_NOT_VERIFIED);
+  });
+
+  it("wires the DvP executor: roles, ERC-165, EXECUTOR_ROLE on the intent token, and nothing paused", async function () {
+    const s = await networkHelpers.loadFixture(stack);
+    const dvp = s.dvpExecutor;
+    const timelock = s.timelock.address;
+    assert.equal(await dvp.read.supportsInterface([IDVP_EXECUTOR_ID]), true);
+    assert.equal(await dvp.read.paused(), false);
+    assert.equal(await dvp.read.hasRole([ROLES.OPERATOR, s.wallets.operator.account.address]), true);
+    assert.equal(await dvp.read.hasRole([ROLES.GUARDIAN, s.wallets.guardian.account.address]), true);
+    assert.equal(await dvp.read.hasRole([ROLES.RECOVERY, s.recoveryTimelock.address]), true);
+    assert.equal(await dvp.read.hasRole([ROLES.DEFAULT_ADMIN, timelock]), true);
+    assert.equal(await dvp.read.hasRole([ROLES.DEFAULT_ADMIN, s.wallets.deployer.account.address]), false);
+    // The intent token has exactly two executors, the intent executor and the DvP executor.
+    assert.equal(await s.token.read.hasRole([ROLES.EXECUTOR, s.executor.address]), true);
+    assert.equal(await s.token.read.hasRole([ROLES.EXECUTOR, dvp.address]), true);
+    assert.equal(await s.token.read.hasRole([ROLES.EXECUTOR, s.wallets.operator.account.address]), false);
   });
 
   it("puts each token where the council computes it off-chain: CREATE2(ProxyDeployer, keccak256(symbol), TokenProxy(impl, ''))", async function () {
@@ -97,6 +116,12 @@ describe("deployment with a tampered Activate", async function () {
   // A fresh chain: the fixture pins the clock, which only moves forward on a shared connection.
   const connection = await network.create();
   const stages = () => deployUntilActivate(connection);
+
+  it("an Activate that points the DvP executor at another contract leaves the real one with the deployer, and the hand-over check refuses it", async function () {
+    const { activate, parameters } = await connection.networkHelpers.loadFixture(stages);
+    // The intent executor takes the DvP executor's roles and hand-over; the real DvP executor is never touched.
+    await assert.rejects(activate({ ...parameters, dvpExecutor: parameters.executor }), /deployer holds roles on/);
+  });
 
   it("a hook bound to another token stops Activate before any role is granted", async function () {
     const { activate, parameters, components, wallets } = await connection.networkHelpers.loadFixture(stages);

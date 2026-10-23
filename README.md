@@ -2,8 +2,9 @@
 
 Permissioned ERC-20 templates for institutional real-world assets. Every balance movement goes through one
 mechanical base and an external, replaceable policy hook made of small, attested rules. One template adds
-executor-settled transfers: the holder signs an EIP-712 intent, and an executor settles it. A `Fund` groups several of
-these tokens as share classes and counts its investors across them.
+executor-settled transfers: the holder signs an EIP-712 intent, and an executor settles it. A `DvPExecutor` settles a
+share trade against cash in one transaction. A `Fund` groups several of these tokens as share classes and counts its
+investors across them.
 
 > **Proprietary.** Copyright (c) 2026 Filipe Venancio. All rights reserved. See [LICENSE](LICENSE). No use, copying,
 > modification or deployment without prior written permission.
@@ -24,17 +25,18 @@ Fund (one per fund, owned by the timelock)       its classes, investor count and
 FundHoldersRule (one per fund)                   the rule in every class's hook that feeds the fund and enforces its cap
 PolicyRegistry (one per deployment, immutable)  codehash allowlist: HOOK / RULE / IMPLEMENTATION
 IntentExecutor (immutable)                       replaceable, role-gated submitter: execute + atomic executeBatch
+DvPExecutor (immutable)                          role-gated: settles a share trade against cash, both legs or neither
 ```
 
 | Path | Contents |
 |---|---|
-| `contracts/interfaces/` | Frozen ABI: `IPolicyGated`, `IPolicyHook`, `IComplianceRule`, `IComplianceHook`, `IPolicyRegistry`, `ITransferIntent`, `IIntentExecutor`, `IIntentExecutorBatch`, `IIdentityRule`, `IIdentityRegistry`, `ILockupRule`, `ISettlementWindowRule`, `IMaxHoldersRule`, `IFund`, `IFundHoldersRule`, `IGated4626Vault`, `IGated7540Vault`, `IERC7540Operator` / `IERC7540Deposit` / `IERC7540Redeem` / `IERC7575` (spec-exact ids), `Errors.sol` (reason codes) |
+| `contracts/interfaces/` | Frozen ABI: `IPolicyGated`, `IPolicyHook`, `IComplianceRule`, `IComplianceHook`, `IPolicyRegistry`, `ITransferIntent`, `IIntentExecutor`, `IIntentExecutorBatch`, `IDvPExecutor`, `IERC3009`, `IIdentityRule`, `IIdentityRegistry`, `ILockupRule`, `ISettlementWindowRule`, `IMaxHoldersRule`, `IFund`, `IFundHoldersRule`, `IGated4626Vault`, `IGated7540Vault`, `IERC7540Operator` / `IERC7540Deposit` / `IERC7540Redeem` / `IERC7575` (spec-exact ids), `Errors.sol` (reason codes) |
 | `contracts/base/` | `PolicyGatedERC20Upgradeable` |
 | `contracts/governance/` | `PolicyRegistry` |
 | `contracts/mixins/`, `contracts/tokens/` | `IntentSettledUpgradeable`, `IntentToken` |
 | `contracts/hooks/` | `ComplianceHook`, `BaseRule`, `rules/` `IdentityRule`, `LockupRule`, `SettlementWindowRule`, `MaxHoldersRule`, `FundHoldersRule` (recommended order) |
 | `contracts/fund/` | `Fund` |
-| `contracts/intents/` | `IntentExecutor` |
+| `contracts/intents/` | `IntentExecutor`, `DvPExecutor` |
 | `contracts/vaults/` | `Gated4626Vault`, `Gated7540Vault` |
 | `contracts/test/` | Test helpers and mocks, interface-freeze and contract-size guards, Halmos properties |
 
@@ -50,13 +52,13 @@ The audit package (scope, suppressions, mutation results, findings an auditor sh
 |---|---|---|---|
 | `DEFAULT_ADMIN_ROLE` | TimelockController | ≥ 7 days | grant/revoke every role, `unpause`, `setPolicyHook`, change hook rules, manage attesters |
 | `GUARDIAN_ROLE` | multisig | none | `pause` the token and cancel pending main-timelock operations. **It can only stop things:** no unpause, no upgrades, no role or hook changes, and no veto over its own removal (see `RECOVERY_ROLE`) |
-| `RECOVERY_ROLE` | recovery timelock | ≥ 7 days | on every token, vault and the executor: `unpause` and revoke `GUARDIAN_ROLE`; on the main timelock: revoke `CANCELLER_ROLE`. Nothing else. Governance proposes and executes; nobody can cancel |
+| `RECOVERY_ROLE` | recovery timelock | ≥ 7 days | on every token, vault and both executors: `unpause` and revoke `GUARDIAN_ROLE`; on the main timelock: revoke `CANCELLER_ROLE`. Nothing else. Governance proposes and executes; nobody can cancel |
 | `UPGRADER_ROLE` | timelock | ≥ 7 days | upgrade, only to an implementation attested as `IMPLEMENTATION` |
 | `MINTER_ROLE` / `BURNER_ROLE` | issuer | none | mint, and burn (enforcement burns can take frozen tokens) |
 | `AGENT_ROLE` | issuer | none | `forcedTransfer` (clawback; bypasses pause and freeze, still policy-checked), `setFrozen`; on the 7540 vault, `recoverRedeemRequest` (escrow → verified recovery account) and `recoverClaimable` (claimable assets and shares → verified recovery account, even while paused or at a full cap) |
-| `EXECUTOR_ROLE` | `IntentExecutor` contract | none | settle holder-signed intents; it cannot alter them |
-| `OPERATOR_ROLE` (executor) | bank / relayer keys | none | submit intents via `execute` / `executeBatch` (all-or-nothing) |
-| `GUARDIAN_ROLE` (executor) | multisig | none | pause the executor only; the timelock unpauses |
+| `EXECUTOR_ROLE` | `IntentExecutor` and `DvPExecutor` contracts | none | settle holder-signed intents that name no executor or name that executor; neither can alter them |
+| `OPERATOR_ROLE` (executors) | bank / relayer keys | none | submit intents via `execute` / `executeBatch` (all-or-nothing), or trades via `executeDvPGated` / `executeDvP3009` (both legs or neither) |
+| `GUARDIAN_ROLE` (executors) | multisig | none | pause an executor only; the timelock unpauses |
 | `ATTESTER_ROLE` (registry) | security council | none | attest / revoke codehashes |
 | token `DEFAULT_ADMIN_ROLE` → rules | timelock | ≥ 7 days | set a token's holder cap, seed its holder count, set its settlement window |
 | `Fund` owner | timelock | ≥ 7 days | register a class, set the fund's rule and investor cap, exempt an account. Only the installed rule records which classes an account holds |
@@ -95,7 +97,7 @@ playing the council and the identity provider, and ends with the post-deploy che
      then the main timelock (`GovernanceTimelock`: ≥ 7 days, proposer **and** executor the governance multisig only;
      the recovery timelock may revoke `CANCELLER_ROLE` there). The deployer is the admin of both until `Activate`;
    - the `PolicyRegistry`: admin = timelock, attester = council;
-   - the four shared rules, one implementation per template, `ProxyDeployer` (owner = deployer), and `IntentExecutor`;
+   - the four shared rules, one implementation per template, `ProxyDeployer` (owner = deployer), `IntentExecutor` and `DvPExecutor` (neither is attested);
    - the `Fund` (owner = deployer) and the `FundHoldersRule` that points at it.
 
    Parameters: `governance`, `council`, `guardian`, `identityRegistry`, `minDelay`.
@@ -142,14 +144,14 @@ playing the council and the identity provider, and ends with the post-deploy che
    - configure the fund (parameter `fundHolderCap`): install its rule, set its cap, then register the three tokens as
      classes 1 to 3, one after another. Registration refuses a hook that does not list the rule and a token that has
      supply, so a mis-built hook stops `Activate` before any role is granted;
-   - grant roles: MINTER, BURNER and AGENT to the issuer's accounts, EXECUTOR to `IntentExecutor`, FULFILLER to the
-     bank, OPERATOR to the relayer, **UPGRADER to the timelock only**, CANCELLER on the timelock to the guardian;
-   - hand over: DEFAULT_ADMIN_ROLE to the timelock on every token and on the executor; the deployer renounces it there
+   - grant roles: MINTER, BURNER and AGENT to the issuer's accounts, EXECUTOR on `IntentToken` to `IntentExecutor` and `DvPExecutor`, FULFILLER to the
+     bank, OPERATOR on both executors to the relayer, **UPGRADER to the timelock only**, CANCELLER on the timelock to the guardian;
+   - hand over: DEFAULT_ADMIN_ROLE to the timelock on every token and on both executors; the deployer renounces it there
      and on the timelock; `ProxyDeployer` and `Fund` ownership move to the timelock, so any later token is placed, and
      any later class registered, through governance (schedule `deploy`, wait out the delay, execute).
 6. **Identity provider:** verify the 7540 vault, which escrows pending redemptions.
 7. **Post-deploy checks** (the fixture's `assertHandedOver`):
-   - the deployer holds no role on either timelock, the registry, the tokens or the executor;
+   - the deployer holds no role on either timelock, the registry, the tokens or either executor;
    - the timelock holds DEFAULT_ADMIN_ROLE everywhere and is the only UPGRADER;
    - every token's `policyHook()` is the hook address the council recorded in step 4, that hook's `TOKEN` is the
      token, its `ADMIN` is the main timelock, and its `rules()` equals `RULE_ORDER`. A twin hook with the same
@@ -157,8 +159,10 @@ playing the council and the identity provider, and ends with the post-deploy che
      refuses it;
    - the guardian can cancel main-timelock operations but cannot propose or execute them, and holds nothing on the
      recovery timelock;
-   - the recovery timelock holds exactly `RECOVERY_ROLE` on each token, vault, the executor and the main timelock,
+   - the recovery timelock holds exactly `RECOVERY_ROLE` on each token, vault, both executors and the main timelock,
      nothing elsewhere, and has no cancellers (governance's automatic one is revoked in `Activate`);
+   - the DvP executor's operator and guardian are the stack's, and `EXECUTOR_ROLE` on `IntentToken` is held by the two
+     executors and by no account the stack knows about;
    - no rule exposes `hasRole` or `owner`: rules take their authority from the token's roles at call time;
    - `ProxyDeployer.owner()` and `Fund.owner()` are the timelock;
    - the fund's rule is the attested `FundHoldersRule`, whose `FUND()` is the fund, its cap is the intended one, and its
@@ -210,7 +214,7 @@ pip install --require-hashes -r ci/requirements.txt   # slither + halmos with ev
 ```
 
 ```bash
-npm run test:halmos   # symbolic properties: nonce/signature and frozen-balance paths
+npm run test:halmos   # symbolic properties: nonce/signature, frozen-balance, intent executor-binding, fund and DvP paths
 ```
 
 ```bash
@@ -246,7 +250,6 @@ The brief is in [`CLAUDE.md`](CLAUDE.md). Where the code intentionally differs, 
   records the design and the proposed brief edits.
 - **`canTransfer` scope.** It models holder-driven movements, with the operator set to `from`. A simulated burn
   respects frozen tokens. The enforcement paths `burn` and `forcedTransfer` release frozen tokens first.
-- **`canExecute` scope.** It cannot check the signature, because the frozen interface has no signature parameter.
 - **Duplicate rules.** A duplicate `ruleId` reuses `ComplianceHook_DuplicateRule`, so the frozen ABI is unchanged.
 - **Mocks.** The brief's `MockAcceptHook` / `MockRejectHook` are replaced by `vm.mockCall`, per the Wonderland
   testing standard. `MockAsset` arrives with the vaults.

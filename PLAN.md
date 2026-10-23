@@ -1507,14 +1507,264 @@ What that means for delivery versus payment. There is no multi-token atomic sett
 
 What the fund layer does with it. Nothing in `Fund` or `FundHoldersRule` blocks a DvP. The rule treats `EXECUTED` like `TRANSFER`: a new investor is capped, and a whole-balance intent that empties the sender's only class is net zero and passes. This is covered by unit tests and by a TypeScript test that signs a real intent, which `canExecute` and the executor refuse at a full cap and admit for a whole balance. The settlement window rule already applies to `EXECUTED` movements.
 
-A shape that fits the stack, for the owner to react to. None of it is built or decided.
-- A separate immutable executor, like `IntentExecutor`: role-gated, pausable by the guardian, holding `EXECUTOR_ROLE` on the class tokens. No change to the base, the templates, the hook, or any frozen interface.
-- The legs are bound through `ref`. Both parties sign intents whose `ref` is a hash of the trade terms (both tokens, both amounts, both parties, a trade nonce). The executor recomputes the hash from the two intents it is given, requires both `ref`s to equal it and the legs to mirror each other (`from` and `to` swapped), then executes both in one transaction. A failure of either leg, including a hook rejection, reverts both.
-- The cash leg is one of two things: a cash token built from this stack, settled with `executeTransfer`, or an external stablecoin that supports ERC-3009 `receiveWithAuthorization`, where the executor is the payee, receives the cash, delivers the securities and forwards the cash to the seller inside the same transaction. A plain ERC-20 with only `approve` would need the buyer to approve the executor in advance.
-- A pre-flight that combines both legs' `canExecute`. Each `canExecute` uses the caller as the operator, so the view runs from the executor.
+The shape of a DvP executor, and a change to the intent that it needs, are in the next section. It replaces the sketch that was here, which bound the legs through `ref` and a convention.
 
-Open questions: which cash tokens are in scope; whether only `OPERATOR_ROLE` may execute or anyone holding both signatures (the signatures bind the trade, so permissionless execution looks safe, with the window and deadlines still applying); fees; whether the securities leg of a fund share trade is priced off chain only (it is, there is no NAV on chain). Primary subscriptions and redemptions already have their atomic escrow in the 7540 vault, so DvP here means secondary trades. A class switch is a separate case: for `IntentToken` classes it is a burn and a mint by the issuer, and for two 4626 classes it should be a redeem and a deposit by an approved router in one transaction. At a full fund cap the order matters, since the redeem frees the slot first. That last point is reasoning, not tested.
+## DvP: an intent revision and a DvP executor (design 2026-10-23, Option B chosen; I-1, E-1 and E-2 built, awaiting review)
+
+On 2026-10-23 the owner asked for a plan for the DvP executor, and whether the intents should change while the code is still a demo. The analysis below led to a change of the intent and a separate executor. The owner chose Option B for D8 (the intent carries the payment leg) and kept D1 to D7 as recommended. I-1 (the intent revision), E-1 (the executor contract) and E-2 (deployment, TypeScript tests, gas, docs) are built and wait for the owner's review ("I-1 as built", "E-1 as built" and "E-2 as built" at the end of this section).
+
+### Goal and limits
+
+A secondary trade of a share class against cash, settled atomically: both legs move or neither does, and the hook runs on each gated leg, so identity, lockup, the settlement window, the class cap and the fund cap all apply. Not goals: custody across transactions, price discovery, matching, fees, partial fills, more than two legs, cross-chain, and any change to the base, the hook, the rules or the two vault templates.
+
+### What the intent could and could not do before I-1 (read from the code)
+
+1. A signature commits `from`, `to`, `amount`, `nonce`, `deadline` and `ref`. Nothing in it says who may execute the intent or on what condition. `executeTransfer` checks only that the caller holds `EXECUTOR_ROLE`.
+2. So any account holding that role on the token can execute any valid signed intent. Today those are the `IntentExecutor`'s operators. A DvP executor would be a second holder.
+3. `ref` is free-form and nothing reads it. The nonce is random and per signer, so pre-signed trades can be executed in any order. The deadline is inclusive. Signatures are ECDSA or ERC-1271.
+4. `canExecute` leaves the signature out, so its pre-flight can say yes to an intent that then fails with `BAD_SIGNATURE`. That is a gap against the brief's "pre-flight never lies".
+5. `executeBatch(token, intents, sigs)` takes one token.
+6. Only `IntentToken` has intents. The vault templates do not (for the 7540 vault the brief says the request is the intent). The mixin is about 1.9 KB (the base-only harness is 13,174 bytes and `IntentToken` is 15,089), so it would fit in `Gated4626Vault` and, with about 1.1 KB to spare, in `Gated7540Vault`. The design says no for the 7540 vault.
+7. ERC-2612 `permit` is on every template, but its nonce is sequential per owner (OpenZeppelin `Nonces`), so a holder's permits must be used in the order they were signed.
+
+### The hard problem: a leg that can be executed alone
+
+The seller's signed securities intent is a complete instruction. Any executor can run it with no cash leg, and `ref` does not help because nothing reads it. Whatever the DvP executor checks, it cannot stop the intent from being run somewhere else. The options:
+
+| Option | How | Cost | Verdict |
+|---|---|---|---|
+| 0. Convention | The DvP executor is the only `EXECUTOR_ROLE` holder on the token. A reserved prefix of `ref` marks trade intents, and the executor's standalone path refuses it | No change to intents. A governance invariant (nobody else is ever granted the role) and a reserved prefix in a free field that nothing else reads | Works, and is fragile: one later grant to another executor silently removes the guarantee. It also switches off plain intents on that token |
+| 1. Executor binding | Add `address executor` to the signed `TransferIntent`. The token requires `executor == address(0)` or `executor == msg.sender` | Breaking change to the struct, the typehash and the selectors of `executeTransfer`, `canExecute`, `IIntentExecutor.execute` and `executeBatch`. About 12 Solidity and 5 TypeScript files, plus docs. `IntentToken`'s implementation is re-attested and `IntentExecutor` is redeployed | The guarantee is on chain, per intent, and the signer chooses it. Other executors can coexist on the same token. **The core of the fix, taken, together with the consideration fields below** |
+| 2. Escrow in `to` | The seller's intent pays the DvP executor, which forwards | The executor must be a verified identity and exempt from the caps. Tokens strand if the intent is executed alone, so it needs recovery state | Worse |
+| 3. Permit legs | `permit` then `transferFrom` for both legs | The kind is `TRANSFER`, so no window and no `ref` in the context. Sequential nonces. Permits can be front-run. USDT has no permit | A fallback for vault shares only |
+| 4. Witness | The token verifies a signature over a caller-defined typed struct, as Permit2 does | A dynamic typehash inside the token: more audit surface. It contains option 1 | More than this needs |
+
+### The intent revision (I-1), Option B
+
+`TransferIntent` becomes (new fields after `ref`, in this order):
+
+```
+address from; address to; uint256 amount; bytes32 nonce; uint256 deadline; bytes32 ref;
+address executor;            // zero: any EXECUTOR_ROLE holder, as today
+uint256 validAfter;          // zero: no lower bound
+address considerationToken;  // what the signer is to receive for this leg, informational to the token
+uint256 considerationAmount;
+```
+
+What the token checks, in the mixin and in the pre-flight that `canExecute` shares with `executeTransfer`:
+
+- **Executor.** `executor != address(0) && executor != msg.sender` gives `WRONG_EXECUTOR`.
+- **Window.** The intent is executable when `validAfter <= block.timestamp <= deadline`. Before `validAfter` it gives `INTENT_NOT_YET_VALID`. The deadline check is the existing one.
+- **Consistency (the owner's condition for B).** If `considerationToken != address(0)` or `considerationAmount != 0`, then `executor` must be non-zero; otherwise `CONSIDERATION_NEEDS_EXECUTOR`. Without it a signer could put a payment in the message and any executor could run the transfer without it. It is a check on the message's own consistency, not a rule about who, where or when; rule 11 is read that way by the owner's decision.
+- **Signature in the pre-flight.** `canExecute(intent, sig)` includes the signature check (`BAD_SIGNATURE`), so the pre-flight covers the whole write path. `isValidSignatureNow` is a static call, so it stays a view. A bound intent is only executable from its executor, so pre-flight must run from that address (an `eth_call` with `from`, or the executor's `canExecuteDvPGated` and `canExecuteDvP3009`); from any other address it returns `WRONG_EXECUTOR`.
+- The existing checks keep their order and the new ones follow them; tests pin the order.
+
+The token never reads `considerationToken` or `considerationAmount` beyond the consistency check: they are hashed into the signature and nothing else. Only the executor named in the intent enforces the payment. The NatSpec says so.
+
+Reasons appended to `Errors.sol`: `WRONG_EXECUTOR`, `INTENT_NOT_YET_VALID`, `CONSIDERATION_NEEDS_EXECUTOR`. The nonce model, `cancelIntent`, the domain, ERC-1271 and the `IntentExecuted` event do not change. `ref` stays free for the ISO 20022 reference.
+
+What it touches: `ITransferIntent`, `IntentSettledUpgradeable`, `IIntentExecutor`, `IIntentExecutorBatch`, `IntentExecutor`, `Errors.sol`; the intent tests (`IntentSettledUpgradeable.t.sol`, `IntentExecutor.t.sol`, `IntentToken.t.sol`, `RuleSetIntegration.t.sol`), the Halmos intent properties (`IntentTokenHalmos.t.sol`), the TypeScript signing helper and tests (`fixtures.ts`, `intents.test.ts`, `time.test.ts`, `parity.test.ts`, `fund.test.ts`); `InterfaceFreeze.t.sol` (three ids re-pinned); the docs; and brief §5, which prints the struct and the `canExecute` signature and lists the reasons. Existing signed intents stop verifying. There are none outside the tests. Gas per execution rises by about 1.4k inside the call, measured in I-1 (see "I-1 as built"); the plan's earlier estimate of a few hundred was low. `IntentToken` has 9,487 bytes of room, and `ContractSizes.t.sol` guards the limit.
+
+### Why B and not A (the owner's decision)
+
+Option A was `executor` alone, with the trade terms bound by a hash in `ref`. B was proposed in an outside review, and I checked it against the mixin.
+
+- A leaves the seller signing a `bytes32`. The signature does commit to every term, but only a signer whose tool recomputes the hash from the terms is protected, and a custodian policy engine that sees only the typed message cannot apply a price limit. A also spends `ref`, which the brief reserves for the ISO 20022 reference. B puts the payment leg in the typed message and frees `ref`.
+- B makes the executor simpler: no `Trade` struct, no `tradeId`. The executor takes the signed legs and checks that they mirror.
+- B does not make the token enforce the payment. The review said the mixin would; it cannot, because it sees only its own token. That is why the consistency check exists.
+- The soundness argument, to be pinned by tests: the executor requires the securities intent's consideration to equal the cash leg, so it is non-zero; the consistency check then forces a non-zero `executor`; the executor check then forces that executor to be the one calling. A DvP leg therefore cannot be run by any other executor, and none can carry a payment its signer did not see.
+- B does not help the buyer on an ERC-3009 cash leg. The authorization has no consideration fields, so the buyer's wallet shows a value, the executor as payee, and a nonce (a hash of the security token's address and the seller's `intentHash`, see E-1). With a gated cash token the buyer's own intent carries the mirror fields.
+- The cost of B: the frozen struct has 10 fields and fixes the shape of a trade as one consideration leg. A fee leg, a basket or a three-party trade needs another struct change, where under A it would have been a new executor. The token also carries two fields it does not enforce, which a reader may assume it does. The consideration does not reach the hook (`TransferContext` is frozen; only `extra` can grow), so no rule can check a price. Nothing here needs that today.
+
+### The DvP executor (E-1, E-2)
+
+`DvPExecutor`, immutable, with the roles of `IntentExecutor`: the timelock as admin, `OPERATOR_ROLE`, the guardian's pause, the recovery timelock's unpause. It holds `EXECUTOR_ROLE` on the tokens it settles, and nothing else. It is not attested, like `IntentExecutor`, and goes into SECURITY.md scope. It has no sweep: a token sent to it by mistake stays there.
+
+Two entry points, both `OPERATOR_ROLE`, `whenNotPaused`, `nonReentrant`, and neither runs one leg alone:
+
+- **`executeDvPGated(securityToken, cashToken, securitiesIntent, securitiesSig, cashIntent, cashSig)`.** The cash token is an `IntentToken` too. The executor checks that the legs mirror, then calls `cashToken.executeTransfer(cashIntent, cashSig)` and `securityToken.executeTransfer(securitiesIntent, securitiesSig)`. Cash goes buyer to seller and shares seller to buyer directly; the executor holds nothing. Mirror: `securitiesIntent.from == cashIntent.to` and `securitiesIntent.to == cashIntent.from`; `securitiesIntent.amount == cashIntent.considerationAmount` and `cashIntent.amount == securitiesIntent.considerationAmount`; `securitiesIntent.considerationToken == cashToken` and `cashIntent.considerationToken == securityToken`; the two tokens differ. The executor does not compare the `executor` fields: the tokens do, and the consistency check makes them non-zero (see above). The two deadlines and `validAfter` values need not match; each token checks its own, so the trade runs in the overlap.
+- **`executeDvP3009(securityToken, cashToken, securitiesIntent, securitiesSig, authorization)`.** The cash token is a USDC-style ERC-3009 token. The executor checks that `authorization.from == securitiesIntent.to`, that its value is `securitiesIntent.considerationAmount`, that `securitiesIntent.considerationToken == cashToken`, and that `authorization.nonce == keccak256(abi.encode(securityToken, securityToken.intentHash(securitiesIntent)))`. That nonce ties the buyer's authorization to exactly this securities intent on exactly this token; the intent carries every term and names the executor. The token's address is in the nonce because the executor cannot tell an honest token's hash from a counterfeit's: with the bare hash, an operator could pair the buyer's authorization with a substituted token that reports that hash and delivers nothing, and pay the cash to itself (found while building E-1; `test_WhenAnOperatorSubstitutesACounterfeitSecurityToken_TheAuthorizationIsRefused`). The gated form has no such gap, because the buyer's signed intent names the security token in `considerationToken`. Then it calls `receiveWithAuthorization` with the buyer's own times and signature (only the payee can call it, so nobody can front-run it with `transferWithAuthorization`, which has a different typehash), then `securityToken.executeTransfer`, then pays the cash on to the seller, and requires that its own cash balance is what it was before the call and that the seller's balance rose by exactly the value, which refuses fee-on-transfer tokens whether the fee falls on the pull or on the payout. The executor does not map or touch the authorization's times. At the exact second of the deadline the intent (inclusive) and the authorization (strict, in Circle's code) can disagree; the trade then reverts as a whole, and tests pin it.
+- **Cancel.** Either party cancels by spending the nonce on their own token (`cancelIntent`), or for the authorization by `cancelAuthorization`. The trade then fails atomically. No new function.
+- **Pre-flight.** `canExecuteDvPGated` and `canExecuteDvP3009` return `(ok, reason)`. They check, in order, the executor's own pause (`PAUSED`), the match (`LEGS_DO_NOT_MATCH`, a reason appended to `Errors.sol`), and then each leg from the executor's address, cash first, with the token's reason. For the external stablecoin the cash leg is the authorization's window with Circle's strict edges (`INTENT_NOT_YET_VALID`, `INTENT_EXPIRED`), its state (`NONCE_USED`) and the buyer's balance (`INSUFFICIENT_UNFROZEN`). It cannot check the buyer's signature, which the cash token exposes no view for, nor a pause or blocklist on the cash token, so the 3009 pre-flight can say yes to a trade that then fails. Two legs on tokens that share policy state, such as two classes of one fund, each get the current state, and the first leg's movement can change the second's answer. A leg that fails reverts with `DvPExecutor_LegFailed(leg, reason)` carrying the token's revert data.
+- **Event.** `DvPSettled(securitiesIntentHash, seller, buyer, securityToken, cashToken, securityAmount, cashAmount, operator)`. The tokens emit their own `IntentExecuted` as well.
+- **Fund layer.** The securities leg is `EXECUTED`. The fund cap, the net-zero rule for a whole-balance sale, the window, the lockup and identity all apply to it with no change. The executor never holds a class token, so it needs no identity entry and no cap exemption.
+- **Deployment (E-2, not built).** `Components` deploys it. `Activate` grants it `EXECUTOR_ROLE` on `intent` (the only deployed token with intents) and on any gated cash token, which must itself be an `IntentToken`; none is deployed today, so a gated cash leg needs one added to `Tokens`. It also grants `OPERATOR_ROLE` and hands over its admin like the executor's. `assertHandedOver` (in `fixtures.ts`) pins its roles and the set of `EXECUTOR_ROLE` holders on each of those tokens.
+
+### Tests first
+
+- **Token (I-1), each red before green:** `WRONG_EXECUTOR` (zero executor passes, the named one passes, any other fails); `INTENT_NOT_YET_VALID` and the deadline, both inclusive; `CONSIDERATION_NEEDS_EXECUTOR` for amount only, token only and both, and a zero consideration with a zero executor passing; `intentHash` changes with each new field (fuzzed); `canExecute` and `executeTransfer` agree on every reason, `BAD_SIGNATURE` included; an intent with the four new fields at zero behaves as today.
+- **The leg alone:** a securities intent signed for the DvP executor and run through `IntentExecutor` reverts `WRONG_EXECUTOR`; the same with a consideration and a zero executor reverts `CONSIDERATION_NEEDS_EXECUTOR`; the DvP executor has no entry point for one leg. Mutation check in a scratch copy: delete the consistency check and the first test must fail.
+- **Executor unit:** each mirror field, wrong in turn, reverts; changing any field of either intent makes its signature fail; atomicity in both directions (cash leg fails and shares stay, share leg fails and cash stays); the executor holds nothing after any call; a cash token whose transfer re-enters; a fee-on-transfer cash token; a 3009 mock that requires the caller to be the payee; an authorization whose nonce is not the securities intent's hash; an authorization reused for a second intent; the deadline edge for the 3009 leg; a pair that cannot settle twice.
+- **Integration:** a class token and a gated cash token with real hooks and the fund rule, and a 3009 mock; pre-flight parity; the settlement window; a lockup; a whole-balance sale to a new investor at a full fund cap (passes) and a partial sale (refused).
+- **Properties:** a fuzz test that after an ERC-3009 trade the executor's cash balance is exactly what was donated to it and the seller received the value (a stateful invariant would add nothing: beyond its roles and pause flag the executor keeps no state). Two Halmos properties on stub tokens with real balances: if the gated entry point returns, both legs ran once and the intents mirror; if the 3009 entry point returns, the executor kept its cash, the seller received exactly the value, and the nonce was the one that ties the intent.
+- **TypeScript:** real signing of the intents (all ten fields in the typed data) and of the 3009 authorization with viem, through the deployment, with a class created and traded.
+- **Mutation checks** on the executor and on the new intent checks, in a scratch copy.
+
+### Checkpoints and gates
+
+- **I-1:** the intent revision, complete with tests, Halmos, TypeScript and docs. Stop for review.
+- **E-1:** `IDvPExecutor`, `DvPExecutor`, its Solidity tests, the freeze and size entries. Stop for review.
+- **E-2:** Ignition, the TypeScript tests, the benchmark of a DvP, the docs. Stop for review.
+- **Gates at each:** both runners with the summary line, lint, fmt, `tsc`, Slither, Aderyn, upgrades-core, Halmos, the isolated profile, reproducibility. After I-1 the bytecode of `IntentToken` and `IntentExecutor` changes on purpose and nothing else existing does, which the comparison with the pristine build will show.
+
+### Risks
+
+- ERC-3009 is a Draft. USDC's current source (Circle's FiatToken v2.2) has the bytes-signature overload, so contract wallets work, and it takes `receiveWithAuthorization` only from the payee. It also reverts while the token is paused and for a blocklisted party (the executor too), which would fail the whole trade. I read Circle's repository, not each chain's deployed version, and I did not check EURC.
+- An operator that never executes cannot take anything. A trade it ignores expires at its deadline, and either party can cancel.
+- The change to the intent is breaking, and the cost of that is lowest now.
+- The cash leg of kind ERC-3009 leaves the pause and blocklist of an external token outside the hook, so it is a dependency we do not control.
+- The signed consideration is a one-leg shape, frozen with the interface. A second consideration leg is a new struct change.
+
+### Not in this plan
+
+Matching and order books, fees, partial fills, more than two legs, cross-chain settlement, a Permit2 cash leg, class switches, DvP for the two vault templates, and any rule that reads the consideration.
+
+### Decisions (2026-10-23)
+
+| # | Question | Decision |
+|---|---|---|
+| D1 | Revise `TransferIntent` now and add `executor`? | Yes |
+| D2 | Add `validAfter` in the same revision? | Yes |
+| D3 | Make `canExecute` take the signature? | Yes |
+| D4 | Which cash tokens in the first version? | A gated cash token and ERC-3009. Permit2 later, if USDT or an arbitrary ERC-20 is needed |
+| D5 | Who may call the executor? | `OPERATOR_ROLE` only. The signed legs bind every term, so opening it later is a new deployment of an immutable contract, not a rewrite |
+| D6 | `DvPExecutor` beside `IntentExecutor` or replacing it? | Beside. They can share a token safely, and `IntentExecutor` and its tests stay as they are |
+| D7 | The two vault templates? | Out of the first version. Their secondary trades stay plain transfers until the owner says otherwise |
+| D8 | Consideration fields in the intent? | Option B, with the check that a non-zero consideration needs a non-zero executor |
+
+D8 was chosen by the owner in so many words, and D1 to D7 were kept as recommended; I read that as adopting my recommendations. If any of them was meant to stay open, say which.
+
+My defaults, which the owner can overrule: the new fields go after `ref` in the order `executor`, `validAfter`, `considerationToken`, `considerationAmount`; two entry points (gated and 3009) in place of one with a kind flag; cash comes in first; the executor's errors are named `DvPExecutor_<Name>`; the reason names are `WRONG_EXECUTOR`, `INTENT_NOT_YET_VALID` and `CONSIDERATION_NEEDS_EXECUTOR`; the event is `DvPSettled`.
+
+### I-1 as built (2026-10-23, awaiting review)
+
+What changed:
+
+- `ITransferIntent`: `TransferIntent` has the four new fields after `ref`, in the order `executor`, `validAfter`, `considerationToken`, `considerationAmount`; `canExecute(intent, sig)` takes the signature. `Errors.sol` has `WRONG_EXECUTOR`, `INTENT_NOT_YET_VALID` and `CONSIDERATION_NEEDS_EXECUTOR`, each the keccak256 of its name.
+- `IntentSettledUpgradeable`: `_intentPreflight` checks, in this order, the deadline, the nonce, the consideration (either field non-zero needs an executor), the executor (non-zero must be the caller) and `validAfter` (inclusive). `canExecute` and `executeTransfer` then check the signature, then the hook, in the same order. `intentHash` encodes the typehash and the struct in one `abi.encode`; a struct of static fields encodes in place, and the tests build the hash field by field to prove the order. The typehash string has all ten fields.
+- `IntentExecutor`: only a NatSpec sentence changed. Its bytecode changes because the struct type is part of its function selectors.
+- Not touched: the base, the hook, the rules, the vaults, the fund layer, `IIntentExecutor` and `IIntentExecutorBatch` (their ids change because they carry the struct type), the nonce model, `cancelIntent`, the domain, the `IntentExecuted` event.
+
+Rule 11 (no `if` about who or when in a template) is read as the owner decided: these are checks on the signed message's own fields, in the same class as the deadline and the nonce, which were already in the mixin. The brief's §5 now says so.
+
+Tests, written first. With the interface changed and the mixin compiling but behaving as before (a stub), the four intent test files ran **84 passing, 25 failing**: the hash and typehash tests, every executor, `validAfter`, consideration and check-order test, the `canExecute` signature tests, the parity fuzz test, and the two regression tests below. After the mixin change all 109 passed, and the full Solidity run failed only `InterfaceFreeze` on the three changed ids. The ids were computed with `cast sig`; the same method reproduces the three old pinned values.
+
+- `IntentSettledUpgradeable.t.sol`: the typehash pinned as a string; the hash fuzzed over all ten fields and a test that changing each new field changes it; executor binding (zero, the caller, another role holder, any other address, the role check first); `validAfter` (inclusive, the second before, an empty window); the three consideration cases and a fuzz; the check order (six tests); `canExecute` (bad signature, altered intent, ERC-1271 wallet, wrong executor, not yet valid, consideration without executor); and a fuzz that `canExecute` returns exactly what `executeTransfer` reverts with, over the executor, window, consideration, signature, nonce, hook and caller.
+- The regression for the whole design, `IntentExecutor.t.sol` on the real token: an intent that names another executor and states a payment is refused by `IntentExecutor.execute` and by `executeBatch` with `WRONG_EXECUTOR`, nothing moves, and the same signed intent runs from the executor it names. An intent that states a payment and names no executor is refused by every executor. An intent that names `IntentExecutor` settles the transfer alone whatever it states, which pins the claim that a consideration is only a record there.
+- `IntentToken.t.sol`: a bad signature, with `canExecute` and `executeTransfer` agreeing on the real stack.
+- TypeScript: the signing helper has all ten fields; four new tests (all ten fields hash alike in viem and on chain and settle through the real executor; a named other executor is refused and pre-flight says so from each address; a consideration without an executor is refused; `validAfter` is inclusive at its second) and the chain-domain test now expects `canExecute` to say `BAD_SIGNATURE`.
+- Halmos: `check_intentNamingAnotherExecutorNeverExecutes` and `check_considerationWithoutExecutorNeverExecutes`, on the proxied token with a symbolic signature.
+
+Mutation checks, in place and restored, on the mixin: the consideration check dropped; applied to the amount only; applied to the token only; the executor comparison dropped; the `validAfter` check dropped; made exclusive; the signature dropped from `canExecute`; the executor check moved before the nonce check; a field left out of the hash. Each is caught by 1 to 7 tests. The order mutant survived at first, so `test_WhenTheNonceIsUsedAndTheExecutorIsWrong_NonceUsedWins` was added. Dropping the consideration check or the executor comparison also fails exactly the matching Halmos property and no other.
+
+Gas, measured with the real token, a mocked hook and a probe in a scratch copy: `executeTransfer` costs 121,767 gas before and 123,201 after, +1,434 (+1.2%), inside the call. The four extra calldata words add about 500 gas more in a transaction when they are zero. `canExecute` also checks the signature now, which costs more by design.
+
+Gates, on the final tree:
+
+- `npx hardhat test`: **695 passing (623 Solidity, 72 TypeScript)**; the isolated profile: 623 Solidity.
+- `forge fmt --check` and `solhint --max-warnings 0`: clean. `tsc --noEmit`: clean.
+- Halmos: **11 properties pass** (5 fund, 6 intent token) in about 2.5 minutes. Aderyn: 0 findings. upgrades-core: 3 upgradeable contracts, 3 passed.
+- `verify:reproducible`: 15 contracts identical across two production builds, the default profile and forge; `TokenProxy` matches `ProxyDeployer`.
+- Bytecode against `82c3c92`, built from a clean worktree: exactly `IntentToken` and `IntentExecutor` differ, and the other 35 contracts are byte-identical. That is the change the plan expected.
+- Slither: **0 results** (311 contracts, 97 detectors), run on the final tree after the last source edit, which was NatSpec and test files only.
+
+A fresh agent checked the documentation diff against the code. It found one wrong statement (the token "signs" and "never reads" the consideration), four overclaims and several stale sentences; all are fixed. One sentence it flagged as unpinned, that `IntentExecutor` treats a consideration as a record, now has a test.
+
+What was not done in I-1, and E-1 and E-2 then did: the executor contract (`IDvPExecutor`, `DvPExecutor`), the Ignition and TypeScript work, and the DvP docs and the brief's executor line.
+
+### E-1 as built (2026-10-23, awaiting review)
+
+What was built:
+
+- `IDvPExecutor` and `DvPExecutor` (6,710 bytes of runtime code, 17,866 under the limit): `executeDvPGated`, `executeDvP3009`, their pre-flights `canExecuteDvPGated` and `canExecuteDvP3009`, `pause` and `unpause`, with the roles, the guardian pause and the recovery timelock of `IntentExecutor`. Each entry point is `nonReentrant`, `OPERATOR_ROLE` and `whenNotPaused`. There is no entry point that runs one leg.
+- `IERC3009`, the two functions of ERC-3009 the executor calls. `Errors.sol` has one more reason, `LEGS_DO_NOT_MATCH`.
+- Test mocks: `MockERC3009Token` (USDC-shaped, with Circle's checks and an optional transfer fee), `MockReentrantCashToken`, `MockReentrantGatedToken`, `MockFakeSecurityToken`.
+- Pins: `InterfaceFreeze.t.sol` has the ids of `IDvPExecutor` and `IERC3009` (computed with `cast sig`), the `DvPSettled` topic and the new reason; `ContractSizes.t.sol` has `DvPExecutor`.
+- Not touched: the base, the hook, the rules, the vaults, the fund layer, `IntentExecutor`, Ignition, the brief.
+
+Where the build differs from the plan above, and why:
+
+- **The authorization's nonce includes the security token's address:** `keccak256(abi.encode(securityToken, securityToken.intentHash(securitiesIntent)))`, not the bare hash. With the bare hash an operator could pair the buyer's authorization with a substituted security token that reports the genuine hash and delivers nothing, and pay the buyer's cash to an account of its own. The executor cannot tell an honest token's hash from a counterfeit's. The gated form is not exposed, because the buyer's signed intent names the security token. This changes what the buyer signs, so E-2's TypeScript helper must compute this nonce. `test_WhenAnOperatorSubstitutesACounterfeitSecurityToken_TheAuthorizationIsRefused` is the regression; it builds the authorization the naive design would have produced.
+- **A failing leg reverts with `DvPExecutor_LegFailed(leg, reason)`** carrying the token's revert data, as `IntentExecutor.executeBatch` does for its items, instead of bubbling the token's error unchanged. With two tokens the operator needs to know which leg refused. The legs are the two gated legs, or the pull of the cash and the securities leg; the 3009 payout to the seller is not wrapped, and a failure there (a blocklisted seller, a re-entering token) reverts with the cash token's own error.
+- **The seller's cash balance is checked as well as the executor's.** A fee on the payout leaves the executor whole and the seller short; only the seller check sees it.
+- **The pre-flight returns the executor's own pause as `PAUSED` and a mismatch as `LEGS_DO_NOT_MATCH`.** The 3009 pre-flight cannot check the buyer's signature or a pause or blocklist on the cash token, and says so in its NatSpec.
+- **The executor-balance property is a fuzz test, not a stateful invariant**, because beyond its roles and its pause flag the executor keeps no state between calls.
+- Modifier order is `nonReentrant onlyRole whenNotPaused`, because Aderyn flags the guard when it is not first.
+
+Tests, written first. With the interfaces, the mocks and a stub executor whose settlement functions reverted and whose pre-flights answered no, `DvPExecutor.t.sol` ran **13 passing, 54 failing** (the 13 are nine constructor, role and ERC-165 tests, and four tests that passed for nothing: two with a bare `vm.expectRevert()`, and two reentrancy tests whose low-level call `vm.expectRevert` does not check; all four were later made exact). After the implementation all 67 passed. A test for the gated-path reentrancy guard, and the fixes that a mutation run and a review forced, made it 72. They are:
+
+- Unit, with every external call mocked and the ones that matter to a test expected (or expected not to happen): the constructor and roles (the recovery rules of M-1); the gated entry point (role, pause, both legs and the event, each mirrored field wrong in turn, equal tokens, a failing cash leg that never runs the securities leg, a failing securities leg, both failing and the cash leg reported first, a security token or a cash token without code); the 3009 entry point (role, pause, the happy path and the event, each authorization field wrong in turn, equal tokens, the executor ending with more or less cash, the seller receiving anything but the value, a failing pull that never runs the securities leg, a failing delivery that never pays the seller, a security token without code); and both pre-flights (each reason, Circle's strict edges at 10, 11, 1999 and 2000, the cash leg reported before the securities leg in the gated one and the authorization before the securities leg in the 3009 one).
+- Integration on the real stack (`RuleSetIntegrationTest` as the base, so identity, lockup, settlement window and the holder cap are real), with a real gated cash token: a trade settles and the executor keeps nothing; a locked seller undoes the cash leg; a buyer without cash moves no shares; both failing reports the cash leg; a Saturday trade waits for Monday; at a full holder cap a partial sale to a new holder is refused and a whole-balance sale is admitted; a seller's or buyer's cancel fails the trade atomically; a mismatched pair; an intent naming another executor, or stating a payment with none; a paused executor; a second attempt; a token that revoked the executor. Every case that is a policy refusal compares pre-flight with the real call. The revoked executor is the known gap: pre-flight says yes, because the tokens' own `canExecute` does not check the caller's role either, and the test pins that.
+- Integration with the ERC-3009 mock: the happy path, a locked seller, an authorization that belongs to another intent, one that pays less than the stated consideration, the counterfeit token, a used authorization, an authorization that ends on the intent's deadline (the intent's last second is lost, because the intent's deadline is inclusive and `validBefore` is exclusive) and one that ends a second later (it settles on the deadline), a fee-on-transfer token with its exact error, a stray balance hiding a fee, and the fuzz test that the executor's balance is exactly what was donated to it.
+- Integration on the fund layer (`FundIntegrationTest` as the base): at a full fund of three investors, a partial sale to a new investor is refused with `MAX_HOLDERS` at the securities leg, a whole-balance sale to a new investor is admitted and the count stays at three, and a partial sale to an existing investor is admitted.
+- Reentrancy: a cash token that calls back as an operator during the pull, and during the payout, and a gated token that calls back, are each stopped by the guard. (The first version of these tests passed with the guard removed, because `vm.expectRevert` does not compare the data of a low-level call; they now compare the returned data.)
+- Halmos on stub tokens with real balances: if the gated entry point returns, both legs ran once and the intents mirror; if the 3009 entry point returns, the securities leg ran once, the cash was pulled once, the executor kept its cash, the seller received exactly the value, and the nonce was the one that ties the intent.
+
+Mutation checks, in place and restored, 26 in all: the pause, role and reentrancy modifiers dropped (gated and 3009); each of the seven mirror conditions dropped; the two legs swapped; each of the five authorization conditions dropped, and the bare-hash nonce; the executor and the seller conservation checks dropped; the securities leg never run; the seller never paid; the pre-flight legs swapped, both window edges moved, the pause ignored. Each is caught by 1 to 18 tests. Two weaknesses in my own tests showed up and were fixed: the 3009 reentrancy mutant survived (the assertion above), and the gated guard had no test. Halmos catches the dropped mirror conditions, the dropped securities leg, the dropped nonce, payer, value and token conditions, and the dropped executor conservation check, each with the property that targets it.
+
+Gates, on the final tree:
+
+- `npx hardhat test`: **767 passing (695 Solidity, 72 TypeScript)**; the isolated profile: 695 Solidity.
+- `forge fmt --check`, `solhint --max-warnings 0` and `tsc --noEmit`: clean. Aderyn: 0 findings (five inline suppressions with reasons, three of them as in `IntentExecutor`). upgrades-core: 3 of 3.
+- Halmos: **13 properties pass** (2 executor, 5 fund, 6 intent token). This, upgrades-core, `verify:reproducible` and the bytecode comparison ran before the last edits, which touched only NatSpec, inline suppressions and tests.
+- Bytecode against `82c3c92`, from a clean worktree: `IntentToken` and `IntentExecutor` differ (I-1), `DvPExecutor` is new, and the other 35 contracts are byte-identical.
+- `verify:reproducible`, with `DvPExecutor` added to its list for this run only (E-2 adds it for good): **16 contracts identical** across two production builds, the default profile and forge, with `DvPExecutor` among them.
+- Slither: **0 results** (337 contracts, 97 detectors) on the final tree. The first run found three `unused-return` findings, the ignored `ok` of the tokens' `canExecute`, which the reason already carries; they are suppressed inline with that reason.
+
+A fresh agent checked the E-1 record, the NatSpec and the tests against the code, and looked for a way an operator, a counterfeit token or a party could redirect value. It found none: each party's signature covers the parts of the trade that decide where its own value goes, and the operator's choices (the token addresses, which signed legs to pair, the signature bytes and the timing) are pinned by the mirror and by the nonce. It found one wrong statement of mine in the tests (a no-code test that failed on the mirror check instead), a dozen overclaims in the record and NatSpec, and one gap, all fixed or documented below.
+
+Known limits, as documented in the NatSpec:
+
+- Pre-flight checks neither `OPERATOR_ROLE` nor that the executor holds `EXECUTOR_ROLE` on the tokens, because the tokens' own `canExecute` does not check the caller's role. After a token revokes the executor, pre-flight still says yes and the real call fails; the post-deploy check that pins the role set (E-2) is what guards that.
+- The 3009 pre-flight cannot see the buyer's signature, nor a pause or blocklist on the cash token.
+- A 3009 trade whose seller is the executor itself reverts with `DvPExecutor_CashNotConserved` (the executor cannot sign an intent, so this is unreachable with a valid signature). A seller who is also the buyer reverted too, with pre-flight saying yes; that was a bug in E-1, fixed in E-2 ("Validation of an outside review").
+- There is no on-chain allowlist of tokens. A party who signs a trade that names a counterfeit token loses to it.
+- In the 3009 form the buyer's signature covers the securities intent only through an opaque nonce, so a wallet cannot show what the buyer receives. In the gated form the cash intent states it in clear.
+- Two legs on tokens that share policy state, such as two classes of one fund, each get the current state in pre-flight.
+
+What was not done in E-1, and E-2 then did: the Ignition module and the post-deploy checks for the executor, the TypeScript tests and signing helper including the new nonce, the gas of a DvP, the docs and SECURITY.md entries, the brief's lines, and `DvPExecutor` in `verify-reproducible.ts`.
+
+### E-2 as built (2026-10-23, awaiting review)
+
+What changed:
+
+- `Components` deploys `DvPExecutor(deployer, guardian)`. `Activate` grants it `EXECUTOR_ROLE` on the intent token (the intent token's executors are now exactly `IntentExecutor` and `DvPExecutor`), `OPERATOR_ROLE` to the same `operator` account as the intent executor, and `RECOVERY_ROLE` to the recovery timelock, then hands its admin to the main timelock like the other contracts. Neither executor is attested.
+- A gated cash token is not deployed by `Activate`. It is a separate instrument; its administrator grants the DvP executor `EXECUTOR_ROLE` (a governance operation if the timelock administers it). The ERC-3009 token is external (USDC).
+- The post-deploy check (`assertHandedOver`, now exported) adds the DvP executor to the deployer-holds-nothing, timelock-is-admin and recovery-role-set pins, pins its operator and guardian, and pins `EXECUTOR_ROLE` on the intent token: the two executors hold it, and no account the stack knows about does.
+- TypeScript: `signIntent` takes the token whose domain is signed; `dvpNonce`, `signGatedTrade`, `sign3009Trade` and `deployGatedCashToken` in `fixtures.ts`; `dvp.test.ts` (seven flows and the gas test); deployment and governance tests extended.
+- Docs: a new page, [flows-dvp.md](docs/flows-dvp.md), and edits to the architecture, roles, governance-and-deployment, money, transfer-checks and flows-token pages, the docs index, the README (components, roles, runbook, post-deploy checks) and SECURITY.md (scope, trust and limits, mutation rows). The brief's §1, §3 and §5 and `verify-reproducible.ts` (16 contracts) carry the new contract.
+
+Tests, written first. With the helpers and the new tests in place and no deployment wiring, the TypeScript suite ran **69 passing, 14 failing**: the 11 new DvP, deployment and governance tests, and three existing governance tests that now name the DvP executor. After the wiring all 83 passed. They are:
+
+- `dvp.test.ts`, through the production deployment: a gated trade settles and the events name the executor; an ERC-3009 trade settles with the helper-computed nonce; the bare-hash nonce is refused; the settlement window refuses a Saturday trade and admits it on Monday; at a full holder cap a partial sale to a new investor is refused and a whole-balance sale is admitted; the intent executor cannot settle a DvP-bound intent, and an intent that states a payment and names no executor is refused; only the operator submits, and a paused executor refuses and pre-flight says `PAUSED`.
+- Deployment: the DvP executor's roles, its ERC-165 id and nothing paused; an `Activate` pointed at the wrong contract leaves the real executor with the deployer and the hand-over check refuses it.
+- Governance: the guardian pause, the recovery batch (unpause and guardian removal) and the forbidden-calls list now include the DvP executor; and an `EXECUTOR_ROLE` granted on the intent token to the operator key, through the timelock, fails the post-deploy check.
+
+Mutation checks on the wiring, in place and restored: the DvP executor never granted `EXECUTOR_ROLE`, its operator role or its recovery role; never handed over; the operator key also granted `EXECUTOR_ROLE`; the DvP operator role given to the minter. Each makes `Activate` fail the post-deploy check (the deployment, DvP and governance tests fail). Dropping the check for stray `EXECUTOR_ROLE` holders is caught by the governance test that grants one. A first run of this script was wrong: it left the previous mutant's file in place for the next one, so its results were discarded and it was redone with both files restored before each mutant.
+
+Gas, measured on the local chain with the real policy on the security token and identity on the gated cash token (`npx hardhat test nodejs test/nodejs/dvp.test.ts` prints it): a gated trade **382,001**; an ERC-3009 trade **296,445** (with a mock cash token, which is cheaper than USDC behind its proxy and blocklist); for scale, one securities intent through `IntentExecutor` 205,829 and one plain cash transfer 68,663. The test asserts only loose ceilings.
+
+Gates, on the final tree:
+
+- `npx hardhat test`: **781 passing (698 Solidity, 83 TypeScript)**; the isolated profile: 698 Solidity.
+- `forge fmt --check`, `solhint --max-warnings 0` and `tsc --noEmit`: clean. Aderyn: 0 findings. upgrades-core: 3 of 3.
+- Halmos: **13 properties pass**.
+- `verify:reproducible`: **16 contracts identical** across two production builds, the default profile and forge, with `DvPExecutor` in the list permanently.
+- Bytecode against `82c3c92`: `IntentToken` and `IntentExecutor` differ (I-1), `DvPExecutor` is new (6,710 bytes), the other 35 are identical.
+- Slither: **0 results** (338 contracts, 97 detectors). It ran before the last edits, which touched NatSpec and documentation only.
+- A fresh agent checked the E-2 documentation against the code. It found one wrong statement (SECURITY.md said no deployed executor enforces a payment, which was true before `DvPExecutor`), four overclaims (the fee-on-transfer error, `cancelAuthorization` which no test covers and which the buyer does not call directly, the whole-balance sale at the fund-wide cap which holds only if the sale empties the seller's only class, and gas figures that vary by a few hundred between runs), and seven stale sentences that still said "the executor" or listed suppressions and mutants without the DvP executor. All are fixed. The same pass found that the DvP executor's `revokeRole`, `unpause` and `pause` overrides had no recorded mutants; four were run (recovery cannot revoke the guardian, recovery can revoke any role, recovery cannot unpause, anyone can pause) and each is caught by one test in `DvPExecutorUnit_Roles`.
+
+#### Validation of an outside review
+
+The owner pasted a review of E-1 and asked whether it is true. Each finding was reproduced with a test before anything was changed.
+
+1. **Self-trade in `executeDvP3009`: true, a bug in my code, fixed.** If the seller, the buyer and the authorization's payer are one account, pre-flight returned yes and execution reverted with `DvPExecutor_CashNotConserved(seller, before + price, before)`: the executor read the seller's balance before the pull took the price from the same account, so the payout could not raise it by the price. The test reproduced the exact revert. The fix is Option 2 of the review: the seller's balance is read after the pull and the delivery, immediately before the payout, so the check measures the payout alone. Option 1 (forbid self-trades) would make the executor decide who may trade with whom, which belongs to a rule, not to the executor, and the gated form already settles a self-trade (the review is right about that, and a test now pins it). The Halmos property no longer excludes the self-trade case; it asserts a net change of zero for a seller who is also the payer. The mutant that reads the balance before the pull is killed by the new Solidity test; Halmos cannot kill it, because its property is about what holds when a call returns, and the mutant only makes a legitimate call revert.
+2. **`IntentExecutor` settles an intent that states a consideration, free of payment: true, and a design property, not changed.** The test that pins it was mine (`test_WhenTheIntentNamesTheIntentExecutor_ItSettlesTheTransferAloneWhateverItStates`), and SECURITY.md says so. The risk the review describes is real: a signer who reads the consideration fields and does not check which contract the `executor` field names is protected only if it names `DvPExecutor`. The attacker needs the `IntentExecutor` operator to submit the intent, and the operator could move the shares of a plain intent in the same way, so the consideration fields add no new theft; they add a false sense of safety. The recommendation is sound: have `IntentExecutor` refuse an intent whose consideration is non-zero (a few lines in `execute` and `executeBatch`, a new error, tests), so a stated payment can only settle through an executor that enforces it. It reverses decision D6's "`IntentExecutor` and its tests stay as they are", and it removes the use of the consideration fields as a record on a free-of-payment intent (`ref` remains for the reference). **This is the owner's decision.**
+3. **Pre-flight on a multi-class fund swap: true, and already documented.** `test_WhenTheFundIsAboveItsLoweredCap_ASwapOfTwoClassesPassesPreflightAndFailsOnTheSecondLeg` reproduces it with two intent-capable classes of one fund and a cap lowered below the investor count: pre-flight says yes, and the second leg fails with `MAX_HOLDERS` because the first leg took the buyer out of the fund. The review's names for the fund's internals (`isInvestor`, `classCount`) are not in the code (`heldClasses`, `positionsOf`), but the mechanism is as described. It is in the NatSpec, in flows-dvp.md and in SECURITY.md.
+4. The review's praise of the tests is accurate as far as I checked: the parity fuzz, the deadline and `validBefore` edge tests and the reentrancy tests with `OPERATOR_ROLE` granted to the attacker exist as described.
+
+What is not done: the decision on `IntentExecutor` above; the brief's §8 phase list does not mention the DvP phases; nothing is committed or pushed.
 
 ## Open questions for the owner
-1. DvP: whether to plan it next as a separate executor (see "DvP and the fund layer"), and which cash tokens are in scope.
-2. Nothing on `fund-layer` is pushed. Push, or open a pull request, only when you say. The branch carries PR #2's commit `d3574df` until PR #2 merges.
+1. DvP: decisions D1 to D8 are recorded in the DvP section (D8: Option B). I-1, E-1 and E-2 are built and wait for your review. One decision is open: whether `IntentExecutor` should refuse an intent that states a consideration ("E-2 as built", "Validation of an outside review").
+2. Nothing on `fund-layer` is pushed, and the DvP section is not committed. Push, or open a pull request, only when you say. The branch carries PR #2's commit `d3574df` until PR #2 merges.

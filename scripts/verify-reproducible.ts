@@ -33,6 +33,7 @@ const DEPLOYED = {
   PolicyRegistry: "governance",
   GovernanceTimelock: "governance",
   IntentExecutor: "intents",
+  DvPExecutor: "intents",
   ProxyDeployer: "deploy",
   Fund: "fund",
   TokenProxy: "deploy",

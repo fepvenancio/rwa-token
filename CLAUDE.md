@@ -19,7 +19,7 @@ Separate contracts, separate concerns:
 1. Base — accounting, roles, enforcement primitives, hook pointer. The only thing that cannot be hot-swapped.
 2. Policy hook — one `IPolicyHook` per token (`ComplianceHook`), timelocked replacement, dispatching to an ordered list of `IComplianceRule`.
 3. Mixins — `IntentSettled` (EIP-712 intents, nonces, `executeTransfer`). Opt-in per template.
-4. Executor — `IntentExecutor`: role-gated caller that validates and submits intents. Replaceable. Grows into multi-leg DvP later.
+4. Executors — `IntentExecutor`: role-gated caller that validates and submits intents. Replaceable. `DvPExecutor`: role-gated, settles a share trade against cash atomically from two signed legs, the cash being a gated token or an ERC-3009 token. Replaceable. More than two legs later.
 
 ## 2. Non-negotiable rules
 
@@ -53,7 +53,7 @@ Separate contracts, separate concerns:
 
 ```
 contracts/
-  interfaces/   IPolicyGated.sol  IPolicyHook.sol  IComplianceRule.sol  IPolicyRegistry.sol  ITransferIntent.sol  IIntentExecutor.sol  IIntentExecutorBatch.sol  Errors.sol
+  interfaces/   IPolicyGated.sol  IPolicyHook.sol  IComplianceRule.sol  IPolicyRegistry.sol  ITransferIntent.sol  IIntentExecutor.sol  IIntentExecutorBatch.sol  IDvPExecutor.sol  IERC3009.sol  Errors.sol
   base/         PolicyGatedERC20Upgradeable.sol  PolicyGatedERC20Upgradeable.t.sol
   governance/   PolicyRegistry.sol  PolicyRegistry.t.sol
   mixins/       IntentSettledUpgradeable.sol  IntentSettledUpgradeable.t.sol
@@ -62,8 +62,8 @@ contracts/
   hooks/        ComplianceHook.sol  ComplianceHook.t.sol  BaseRule.sol
   hooks/rules/  IdentityRule.sol  SettlementWindowRule.sol  MaxHoldersRule.sol  LockupRule.sol  FundHoldersRule.sol  (+ .t.sol)
   fund/         Fund.sol  Fund.t.sol
-  intents/      IntentExecutor.sol  IntentExecutor.t.sol
-  test/         MockAcceptHook.sol  MockRejectHook.sol  MockReentrantRule.sol  MockIdentityRegistry.sol  MockAsset.sol
+  intents/      IntentExecutor.sol  IntentExecutor.t.sol  DvPExecutor.sol  DvPExecutor.t.sol
+  test/         MockAcceptHook.sol  MockRejectHook.sol  MockReentrantRule.sol  MockIdentityRegistry.sol  MockAsset.sol  MockERC3009Token.sol  MockReentrantCashToken.sol  MockReentrantGatedToken.sol  MockFakeSecurityToken.sol
 test/nodejs/    *.test.ts   (viem + node:test: EIP-712 signing, settlement flows, vault flows)
 ignition/modules/
 PLAN.md
@@ -105,7 +105,7 @@ The base also implements ERC-2612 `permit` (`ERC20PermitUpgradeable`); it shares
 
 **Guardian** (built into the base, by default). `GUARDIAN_ROLE`, held by a multisig, is the only power with no delay. It can: `pause()`; and cancel any pending timelock operation (it holds the timelock's `CANCELLER_ROLE`). It cannot `unpause()`, change the hook, grant roles, or upgrade — those are timelock-only. Asymmetry is deliberate: the guardian can only stop things. `PAUSER_ROLE` is therefore replaced by `GUARDIAN_ROLE` for `pause()`; `unpause()` is `onlyTimelock`. Guardian membership changes go through the timelock.
 
-**Recovery timelock** (owner decision M-1). A guardian that could cancel its own removal would not be stop-only, so a second `TimelockController` (same ≥7-day delay, governance multisig as proposer and executor, no cancellers, guardian holds nothing on it) holds `RECOVERY_ROLE`. On every token, vault and the executor that role allows exactly `unpause()` and `revokeRole(GUARDIAN_ROLE, …)`; on the main timelock (`GovernanceTimelock`, an OZ subclass) exactly `revokeRole(CANCELLER_ROLE, …)`. It cannot grant roles, change hooks, upgrade, or propose on the main timelock. Governance keeps a path the guardian cannot block; the guardian can still stop everything else. A compromised governance multisig is out of scope for this control, by design. No expiring pause: it would turn a security control into a timer.
+**Recovery timelock** (owner decision M-1). A guardian that could cancel its own removal would not be stop-only, so a second `TimelockController` (same ≥7-day delay, governance multisig as proposer and executor, no cancellers, guardian holds nothing on it) holds `RECOVERY_ROLE`. On every token, vault and executor that role allows exactly `unpause()` and `revokeRole(GUARDIAN_ROLE, …)`; on the main timelock (`GovernanceTimelock`, an OZ subclass) exactly `revokeRole(CANCELLER_ROLE, …)`. It cannot grant roles, change hooks, upgrade, or propose on the main timelock. Governance keeps a path the guardian cannot block; the guardian can still stop everything else. A compromised governance multisig is out of scope for this control, by design. No expiring pause: it would turn a security control into a timer.
 
 **Policy registry** (one per deployment, `PolicyRegistry`). Immutable contract. Maps `codehash → attested kind` (`HOOK`, `RULE`, `IMPLEMENTATION`). `ATTESTER_ROLE` (security council multisig) attests after review and revokes; `DEFAULT_ADMIN_ROLE` (timelock) manages attesters. Checks are by `extcodehash` of the target, so targets must be plain contracts (rule 12). Enforced at:
 
@@ -159,13 +159,17 @@ struct TransferIntent {
     bytes32 nonce;       // ERC-3009-style random nonce, tracked per signer in a used/unused map
     uint256 deadline;    // inclusive
     bytes32 ref;         // off-chain reference (ISO 20022 msgId hash / bizId)
+    address executor;    // the only executor allowed to run it; zero = any EXECUTOR_ROLE holder
+    uint256 validAfter;  // inclusive; zero = no lower bound
+    address considerationToken;   // what the signer is to receive for this leg; signed, never enforced by the token
+    uint256 considerationAmount;
 }
 
 interface ITransferIntent {
     event IntentExecuted(bytes32 indexed intentHash, address indexed from, address indexed to, uint256 amount, address executor, bytes32 ref);
     event IntentCancelled(address indexed from, bytes32 indexed nonce);
 
-    function canExecute(TransferIntent calldata intent) external view returns (bool ok, bytes32 reason);
+    function canExecute(TransferIntent calldata intent, bytes calldata sig) external view returns (bool ok, bytes32 reason);
     function executeTransfer(TransferIntent calldata intent, bytes calldata sig) external returns (bytes32 intentHash);  // EXECUTOR_ROLE
     function cancelIntent(bytes32 nonce) external;
     function intentHash(TransferIntent calldata intent) external view returns (bytes32);
@@ -193,10 +197,12 @@ Semantics to spec in NatSpec and enforce in tests:
 
 * `canTransfer` / `canExecute` run the exact same path as the state-changing call minus the write. Pre-flight never lies.
 * `executeTransfer` only by `EXECUTOR_ROLE`. Executor cannot alter the intent, only execute or not.
-* Nonces per-signer, random, single-use. Cancel marks the nonce used. Deadline check `block.timestamp <= deadline`.
+* Nonces per-signer, random, single-use. Cancel marks the nonce used. Deadline check `block.timestamp <= deadline`; `validAfter` check `block.timestamp >= validAfter`.
+* Executor binding (owner decision, 2026-10-23): an intent with a non-zero `executor` executes only from that account (`WRONG_EXECUTOR`). A non-zero `considerationToken` or `considerationAmount` requires a non-zero `executor` (`CONSIDERATION_NEEDS_EXECUTOR`). The token never reads the consideration beyond that check; only the named executor enforces the payment. The checks run in the order deadline, nonce, consideration, executor, `validAfter`, signature, then the hook, in both `canExecute` and `executeTransfer`. They are checks on the signed message, like the deadline and the nonce, so they stay in the mixin (rule 11).
 * EIP-712 domain: name = token name, version `"1"`, chainId, verifyingContract. `EIP712Upgradeable`.
 * Hook address read once per `_update` into a local; mid-tx changes cannot alter the outcome.
-* Reason codes in `Errors.sol`, ERC-1594 style: `TRANSFER_OK`, `PAUSED`, `INSUFFICIENT_UNFROZEN`, `SENDER_NOT_VERIFIED`, `RECEIVER_NOT_VERIFIED`, `OUTSIDE_SETTLEMENT_WINDOW`, `MAX_HOLDERS`, `LOCKED`, `INTENT_EXPIRED`, `NONCE_USED`, `BAD_SIGNATURE`.
+* DvP (owner decision, 2026-10-23): `DvPExecutor` runs two signed legs atomically, the cash leg first, and has no entry point that runs one leg alone. The legs must mirror: the parties are swapped, each amount is the other leg's stated consideration, each stated consideration token is the other leg's token, and the two tokens differ (`DvPExecutor_LegsDoNotMatch`, and `LEGS_DO_NOT_MATCH` in its pre-flights). For an ERC-3009 cash leg the buyer's authorization is payable to the executor and its nonce is `keccak256(abi.encode(securityToken, intentHash))`, never the bare hash: the executor cannot tell an honest token's hash from a counterfeit's. The executor must end with the cash balance it started with, and the payout must raise the seller's balance by exactly the price. A failing leg reverts with `DvPExecutor_LegFailed(leg, reason)`.
+* Reason codes in `Errors.sol`, ERC-1594 style: `TRANSFER_OK`, `PAUSED`, `INSUFFICIENT_UNFROZEN`, `SENDER_NOT_VERIFIED`, `RECEIVER_NOT_VERIFIED`, `OUTSIDE_SETTLEMENT_WINDOW`, `MAX_HOLDERS`, `LOCKED`, `INTENT_EXPIRED`, `NONCE_USED`, `BAD_SIGNATURE`; appended 2026-10-23: `WRONG_EXECUTOR`, `INTENT_NOT_YET_VALID`, `CONSIDERATION_NEEDS_EXECUTOR`, `LEGS_DO_NOT_MATCH`.
 * ERC-165 for `IPolicyGated`, `IPolicyHook`, `IComplianceRule`, `IPolicyRegistry`, `ITransferIntent`, plus the matching ERC-7943 fungible interface ID where the function set overlaps.
 * Events and reason codes are frozen with the interfaces. New reason codes may be appended, never renamed or renumbered.
 * FORCED with `from == address(0)` is an enforcement mint; rules treat it as FORCED (exempt from cap, pause, lockup) and still require `to` verified. FORCED with `to == address(0)` is reserved and currently unused. The base announces it with `_mintAs(to, amount, kind)`; `_moveAs` never sees `from == address(0)`.

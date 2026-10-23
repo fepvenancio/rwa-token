@@ -35,7 +35,7 @@ In scope, all under `contracts/` (`.t.sol` files and `contracts/test/` are test 
 | Policy | `hooks/ComplianceHook`, `hooks/BaseRule`, `hooks/rules/{Identity,Lockup,SettlementWindow,MaxHolders,FundHolders}Rule` |
 | Fund | `fund/Fund` (not a proxy, not attested; the `FundHoldersRule` codehash covers its address, not its code) |
 | Governance | `governance/PolicyRegistry`, `governance/GovernanceTimelock` (the main timelock: OZ `TimelockController` plus a revoke-`CANCELLER_ROLE`-only `RECOVERY_ROLE`) |
-| Settlement | `intents/IntentExecutor` |
+| Settlement | `intents/IntentExecutor`, `intents/DvPExecutor` (neither is a proxy, and neither is attested: each token authorises an executor by granting it `EXECUTOR_ROLE`) |
 | Deployment | `deploy/ProxyDeployer`, `deploy/TokenProxy` |
 | Interfaces | `interfaces/*` (frozen; ERC-165 ids, event topics and reason codes pinned by `contracts/test/InterfaceFreeze.t.sol`) |
 
@@ -84,10 +84,40 @@ Build: solc 0.8.30, `evmVersion: cancun`, optimizer 200 runs, no metadata hash, 
 
 Further limits recorded during review:
 
-- **`canExecute` cannot check signatures.** The frozen interface has no signature parameter. Integrators pre-flight a
-  signature with `verifyTypedData` against the chain-reported ERC-5267 domain (`intents.test.ts`).
+- **`canExecute` checks the signature, and the executor binding.** An intent that names an executor pre-flights only
+  from that address: from any other, once the deadline and nonce checks pass, it returns `WRONG_EXECUTOR`.
+  `canExecute` does not check the caller's `EXECUTOR_ROLE` (`intents.test.ts`).
+- **The token does not enforce a stated consideration.** An intent can state what its signer is to receive
+  (`considerationToken`, `considerationAmount`). The token hashes both fields into the digest the holder signs and reads
+  them only to reject an intent that states a consideration without naming an executor
+  (`CONSIDERATION_NEEDS_EXECUTOR`). Only the executor the intent names can enforce the payment, if its code does.
+  `DvPExecutor` does. `IntentExecutor` moves one token and forwards the intent, so a consideration stated for an intent
+  that names it is only a record, and the shares move without payment
+  (`test_WhenTheIntentNamesTheIntentExecutor_ItSettlesTheTransferAloneWhateverItStates`). Whether `IntentExecutor`
+  should refuse such an intent is an open decision (PLAN.md, "Validation of an outside review").
+- **What the DvP executor trusts, and what it does not** ([`docs/flows-dvp.md`](docs/flows-dvp.md)). An operator chooses
+  which signed legs to pair, when to submit, and the token addresses, and cannot redirect value: each party's signature
+  covers the other party, the amounts, both tokens and the executor, the mirror check ties the two together, and for an
+  ERC-3009 cash leg the buyer's nonce commits to the whole securities intent and to the security token's address.
+  The address matters. With the bare intent hash as the nonce, an operator could pair the buyer's authorization with a
+  substituted security token that reports the genuine hash and delivers nothing
+  (`test_WhenAnOperatorSubstitutesACounterfeitSecurityToken_TheAuthorizationIsRefused`). There is no on-chain allowlist
+  of tokens: a party who signs a trade that names a counterfeit token loses to it. In the ERC-3009 form the buyer's
+  wallet shows an opaque nonce and cannot show what the buyer receives.
+- **DvP pre-flight limits.** It does not check `OPERATOR_ROLE` or the executor's `EXECUTOR_ROLE` on the tokens. For an
+  ERC-3009 cash token it cannot check the buyer's signature or the token's pause and blocklist. Legs on tokens that share
+  policy state, such as two classes of one fund, are each checked against the state before either has run, so a swap
+  that the first leg turns into a new investor can pass pre-flight and fail on the second leg
+  (`test_WhenTheFundIsAboveItsLoweredCap_ASwapOfTwoClassesPassesPreflightAndFailsOnTheSecondLeg`).
+- **ERC-3009 is a Draft, and its token is outside the hook.** The executor was written against Circle's FiatToken v2.2,
+  which has the `bytes` signature overload of `receiveWithAuthorization`; that overload has to be present on any token
+  and chain it is used with. A blocklisted executor, buyer or seller, or a paused cash token, fails the whole trade. A
+  fee-on-transfer cash token fails the trade: usually in the payout, with the cash token's own `ERC20InsufficientBalance`
+  because the executor received less than it must pay, and with `DvPExecutor_CashNotConserved` when a stray balance
+  in the executor covers the shortfall or the fee falls on the payout alone. Anything sent to the executor by mistake
+  stays there: it has no sweep.
 - **Pre-flight answers for the latest block; a write lands in the next one.** At a time boundary (lockup end, window
-  close, intent deadline) they can differ by one second (`time.test.ts`).
+  close, intent deadline, intent `validAfter`) they can differ by one second (`time.test.ts`).
 - **7540 operators are full delegates** (review L-5). Per ERC-7540, an approved operator can create requests that pull
   the owner's assets or shares under any controller, not only claim. Owners should approve only custodians they would
   trust with the assets. Pinned by `test_WhenAnOperatorRequestsUnderItsOwnController_ItIsAFullDelegatePerErc7540`.
@@ -116,7 +146,7 @@ Slither 0.11.5 runs as a CI gate with 0 findings. Project-wide exclusions (`slit
 |---|---|
 | `naming-convention` | Wonderland style uses `_camelCase` for parameters and internals |
 | `assembly` | ERC-7201 storage accessors only |
-| `timestamp` | Intent deadlines, lockups and settlement windows are time-based by specification |
+| `timestamp` | Intent deadlines and `validAfter`, lockups and settlement windows are time-based by specification |
 | `calls-loop` | The hook calls at most 16 attested rules |
 
 Inline suppressions (each carries its reason on the line above, in the source):
@@ -136,6 +166,7 @@ Inline suppressions (each carries its reason on the line above, in the source):
 | `Gated7540Vault` | `missing-inheritance` | `IERC7575` re-declares inherited ERC-4626 functions; conformance pinned by ERC-165 id `0x2f0a18c5` |
 | `Gated7540Vault` `requestDeposit` | `arbitrary-send-erc20` | `owner` is the caller or an approved operator. Fuzzed: a non-operator with a victim owner reverts and moves nothing. Removing the guard fails 2 tests |
 | `ProxyDeployer` `deploy` | `unused-return` | `initialize` returns nothing; success is checked by the post-init assertions |
+| `DvPExecutor` `canExecuteDvPGated`, `canExecuteDvP3009` | `unused-return` | The token's `ok` is `reason == TRANSFER_OK`, so the reason carries it |
 | `TokenProxy` `_unsafeAllowUninitialized` | `dead-code` | Called from `ERC1967Proxy`'s constructor; Slither does not trace it through the override |
 
 Aderyn 0.6.8 (Cyfrin) runs as a second CI gate (`npm run aderyn`, 0 findings), from the sha256-pinned release binary
@@ -163,7 +194,7 @@ Inline acknowledgements (reason on the line above each `aderyn-ignore`):
 | `abi-encode-packed-hash-collision` (high) | `ProxyDeployer._initCodeHash` | False positive: only the second operand varies; the first is fixed creation code | Fuzzed `predict` formula test; off-chain CREATE2 test |
 | `storage-array-memory-edit` (high) | `SettlementWindowRule.check`, `isOpen` | False positive: a read-only copy of a storage struct into memory | Window tests |
 | `unused-state-variable` | `Gated7540Vault` ERC-7201 location | False positive: read in assembly | `Gated7540VaultUnit_Storage`: the formula equals the constant and the slot holds custody and `lastPrice` |
-| `unchecked-return` | `_grantRole` in constructors and initialisers; `Address.functionCall` in `ProxyDeployer` | `_grantRole` returns false only if the role is already held; `initialize` returns nothing | Role and deploy tests |
+| `unchecked-return` | `_grantRole` in constructors and initialisers; `Address.functionCall` in `ProxyDeployer`; `_executeLeg` in `DvPExecutor` | `_grantRole` returns false only if the role is already held; `initialize` returns nothing; the cash leg's digest is not needed and the securities leg's digest was read before the call | Role, deploy and DvP tests |
 | `costly-loop`, `require-revert-in-loop` | `ComplianceHook._setRules`, `IntentExecutor.executeBatch`, `MaxHoldersRule.seedHolderCountFromHolders` | By design: at most 16 rules, and invalid rules must fail closed; batches are atomic; an unsorted holder list must fail the whole seed | Hook, batch and seed tests |
 | `literal-instead-of-constant` | calendar arithmetic; `10 ** decimals()` | Calendar constants; `decimals()` is read at runtime | Window and vault tests |
 | `empty-block`, `modifier-used-only-once` | `BaseRule.after_`, `__IntentSettled_init`, `onlyAdmin`, `Fund.onlyRule` | By design | n/a |
@@ -183,6 +214,9 @@ Each row is a bug deliberately planted, the run that caught it, then restored fr
 |---|---|---|
 | Halmos (proxied `IntentToken`) | nonce not consumed; cancel not recorded; frozen check skipped; burn not releasing frozen | the matching symbolic property, each |
 | Executor | batch made best-effort | 3 tests |
+| `DvPExecutor` (2026-10-23) | pause, role or reentrancy guard dropped on either entry point; each of the seven mirror conditions dropped; the two legs swapped; each of the five authorization conditions dropped, and the bare-hash nonce; the executor's or the seller's cash check dropped, and the seller's balance read before the pull; the securities leg never run; the seller never paid; the pre-flight legs swapped, either window edge moved, the pause ignored | 1 to 18 tests each. Halmos catches the dropped mirror conditions, the dropped securities leg, the dropped nonce, payer, value and token conditions, and the dropped executor cash check. Two weaknesses in the first tests showed up and were fixed: a reentrancy test that passed with the guard removed (`vm.expectRevert` does not compare the data of a low-level call), and a gated-path guard with no test |
+| DvP deployment (2026-10-23) | `Activate` skips the DvP executor's EXECUTOR_ROLE on the intent token, its OPERATOR_ROLE or its RECOVERY_ROLE, or its hand-over; grants the operator key EXECUTOR_ROLE on the intent token; gives the DvP operator role to the minter | the post-deploy check, which pins the DvP executor's roles and the set of EXECUTOR_ROLE holders (the deployment tests fail). Dropping the check of stray EXECUTOR_ROLE holders is caught by the governance test that grants one |
+| Intent revision (2026-10-23) | consideration check dropped, or applied to the amount only, or to the token only; executor comparison dropped; `validAfter` check dropped, or made exclusive; signature dropped from `canExecute`; executor check moved before the nonce check; a field left out of the hash | 2 to 7 tests each. Dropping the consideration check or the executor comparison is also caught by the matching Halmos property (`check_considerationWithoutExecutorNeverExecutes`, `check_intentNamingAnotherExecutorNeverExecutes`). The order mutant first survived and `test_WhenTheNonceIsUsedAndTheExecutorIsWrong_NonceUsedWins` was added |
 | `MaxHoldersRule` | exit decrement dropped; self-transfer skip dropped; exemption ignored on decrement | invariant (real token, 4 actors) and unit tests |
 | `MaxHoldersRule` seeding (2026-10-22) | ascending check removed, or weakened to allow duplicates; supply check removed; exempt accounts counted; zero balances counted; each of the three seeds allowed while the rule is listed; copy seed without its previous-rule check; exemption adjusting an unlisted count; listing check always false | 1 to 9 tests each (11 of 11) |
 | `PolicyGatedERC20Upgradeable._releaseFrozen` | `>` weakened to `>=`, so a frozen amount that already fits is rewritten and `Frozen` emitted | survived the whole suite; `test_WhenTheFrozenAmountStillFits_ItIsLeftAlone` was added and now catches it |
@@ -201,7 +235,7 @@ Each row is a bug deliberately planted, the run that caught it, then restored fr
 | `Gated7540Vault` price (L-3) | the minimum price of 1 removed | 3 tests (`Gated7540VaultUnit_ZeroPrice` and the fulfilment fuzz) |
 | `Gated7540Vault` claims (M-3) | deposit-claim, mint-claim, redeem or withdraw eligibility check removed; `maxRedeem` back to pause-only; `recoverClaimable` without the recipient check; enforcement mint downgraded to a plain MINT; payout probe with amount 1 | 1 to 11 tests each (`Gated7540VaultIntegration_Claimable`). The amount-1 probe breaks 11, since it would block payouts to controllers holding no shares |
 | `Gated7540Vault` reject (M-2) | rejected shares returned as FORCED again (the old R2) | 5 tests, including the steering attack at a full cap, the paused reject and the frozen escrow |
-| Recovery timelock (M-1) | base or executor `revokeRole` lets RECOVERY_ROLE revoke any role, or not the guardian; recovery cannot `unpause`; `GovernanceTimelock` lets it revoke any role, or not CANCELLER | 1 to 2 tests each (`PolicyGatedUnit_Recovery`, `IntentExecutorUnit_Recovery`, `GovernanceTimelockUnitTest`) |
+| Recovery timelock (M-1) | base or executor `revokeRole` lets RECOVERY_ROLE revoke any role, or not the guardian; recovery cannot `unpause`; `GovernanceTimelock` lets it revoke any role, or not CANCELLER. On `DvPExecutor` (2026-10-23): the same three, and `pause` open to anyone | 1 to 2 tests each (`PolicyGatedUnit_Recovery`, `IntentExecutorUnit_Recovery`, `DvPExecutorUnit_Roles`, `GovernanceTimelockUnitTest`) |
 | Recovery deployment (M-1) | `Activate` skips the executor's RECOVERY_ROLE, or leaves governance as a recovery-timelock canceller | The hand-over check, which pins the recovery timelock's exact role set and its lack of cancellers (59 TS tests fail) |
 | Base enforcement | `forcedTransfer` keeps frozen tokens | `invariant_FrozenNeverExceedsBalance` and 2 unit tests. With the old no-op handler, the invariant missed it |
 | Base transient context | ref slot not cleared | Not killable: an equivalent mutant. The ref is read only when the kind slot is set, and every movement that sets the kind rewrites the ref first |

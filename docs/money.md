@@ -9,7 +9,7 @@ What the code does not have: fees of any kind, interest or yield logic, a price 
 
 ## `IntentToken`: the token is the instrument
 
-There is no asset behind the token and no payment inside the contracts. The token's balances are the record. Settlement of cash, if any, happens outside the chain, and the intent's `ref` ties the on-chain move to that off-chain message.
+There is no asset behind the token and no payment inside the token. The token's balances are the record. Settlement of cash, if any, happens outside the chain, and the intent's `ref` ties the on-chain move to that off-chain message. When the cash is itself a token, `DvPExecutor` can settle the shares and the cash in one transaction ([flows-dvp.md](flows-dvp.md)). An intent can state what its signer is to receive (`considerationToken`, `considerationAmount`). The token never moves it or checks that it was paid; it only rejects a stated consideration that names no executor. Only the executor the intent names can enforce the payment, if its code does. `DvPExecutor` is the one that does: it settles the share leg and the cash leg together ([flows-dvp.md](flows-dvp.md)).
 
 | Event | Who calls | Effect on balances | Effect on `totalSupply` |
 |---|---|---|---|
@@ -17,6 +17,7 @@ There is no asset behind the token and no payment inside the contracts. The toke
 | Redeem or destroy | burner: `burn(from, amount)` | `from` down | down |
 | Transfer | holder or spender | `from` down, `to` up | none |
 | Settle an intent | operator through the executor | `from` down, `to` up | none |
+| Settle a trade ([flows-dvp.md](flows-dvp.md)) | operator through the DvP executor | the seller's shares down and the buyer's up, and the buyer's cash down and the seller's up, together or not at all | none |
 | Clawback | agent: `forcedTransfer` | `from` down, `to` up | none |
 
 ```mermaid

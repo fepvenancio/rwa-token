@@ -5,6 +5,9 @@ import {
   BaseError,
   ContractFunctionRevertedError,
   decodeErrorResult,
+  encodeAbiParameters,
+  encodeFunctionData,
+  hashTypedData,
   isAddressEqual,
   keccak256,
   toHex,
@@ -48,6 +51,7 @@ const REASON_NAMES = [
   "WRONG_EXECUTOR",
   "INTENT_NOT_YET_VALID",
   "CONSIDERATION_NEEDS_EXECUTOR",
+  "LEGS_DO_NOT_MATCH",
 ] as const;
 
 /** `Errors.sol` reason codes, keyed by name; `reasonName` maps a code back for readable assertions. */
@@ -129,6 +133,7 @@ export async function deployUntilActivate(connection: NetworkConnection) {
     fundHoldersRule,
     proxyDeployer,
     executor,
+    dvpExecutor,
   } =
     components;
   const attest = async (target: Address, kind: number, uri: string) => {
@@ -167,6 +172,7 @@ export async function deployUntilActivate(connection: NetworkConnection) {
   const parameters = {
     ...addresses,
     executor: executor.address,
+    dvpExecutor: dvpExecutor.address,
     guardian: address(guardian),
     governance: address(governance),
     recoveryTimelock: recoveryTimelock.address,
@@ -214,6 +220,7 @@ export async function deployUntilActivate(connection: NetworkConnection) {
       vault4626,
       vault7540,
       executor,
+      dvpExecutor,
       hooks: { token: hooks.intentHook, vault4626: hooks.fundHook, vault7540: hooks.asyncFundHook },
       implementations: {
         token: components.intentImpl,
@@ -232,7 +239,9 @@ export type Stack = Awaited<ReturnType<typeof deployStack>>;
 /**
  * Hand-over check, the same one the runbook prescribes after a live deployment:
  * - the deployer holds no role (every `*_ROLE()` getter, so later roles are covered) on the timelock, registry,
- *   tokens or executor, while the timelock holds DEFAULT_ADMIN_ROLE on each, so the check is not vacuous;
+ *   tokens or either executor, while the timelock holds DEFAULT_ADMIN_ROLE on each, so the check is not vacuous;
+ * - the DvP executor's operator is the stack's operator and its guardian the stack's guardian, and EXECUTOR_ROLE on the
+ *   intent token is held by the intent executor and the DvP executor and by no account the stack knows about;
  * - UPGRADER_ROLE is held by the timelock and nobody else that the stack knows about;
  * - every token runs the hook the council reviewed, bound to it, administered by the timelock, with the intended
  *   ordered rule list (`RULE_ORDER`); rules have no access control of their own;
@@ -240,10 +249,10 @@ export type Stack = Awaited<ReturnType<typeof deployStack>>;
  * - `ProxyDeployer` is owned by the timelock, so no token can be placed outside governance;
  * - the fund is owned by the timelock, runs the attested rule that points back at it, has the intended cap, and holds
  *   the three tokens as its classes, in that order;
- * - the recovery timelock holds exactly RECOVERY_ROLE on each token, the executor and the main timelock (nothing else,
- *   nowhere else), has no cancellers, and the guardian holds nothing on it.
+ * - the recovery timelock holds exactly RECOVERY_ROLE on each token, both executors and the main timelock (nothing
+ *   else, nowhere else), has no cancellers, and the guardian holds nothing on it.
  */
-async function assertHandedOver(s: Omit<Stack, "holders" | "identity" | "asset" | "implementations">) {
+export async function assertHandedOver(s: Omit<Stack, "holders" | "identity" | "asset" | "implementations">) {
   const deployer = s.wallets.deployer.account.address;
   const timelock = s.timelock.address;
   const known = Object.values(s.wallets).map((w) => w.account.address);
@@ -271,10 +280,10 @@ async function assertHandedOver(s: Omit<Stack, "holders" | "identity" | "asset" 
     }
     return held.sort();
   };
-  for (const c of [s.timelock, s.recoveryTimelock, s.registry, s.token, s.vault4626, s.vault7540, s.executor]) {
+  for (const c of [s.timelock, s.recoveryTimelock, s.registry, s.token, s.vault4626, s.vault7540, s.executor, s.dvpExecutor]) {
     assert.deepEqual(await heldBy(c, deployer), [], `deployer holds roles on ${c.address}`);
   }
-  for (const c of [s.timelock, s.registry, s.token, s.vault4626, s.vault7540, s.executor]) {
+  for (const c of [s.timelock, s.registry, s.token, s.vault4626, s.vault7540, s.executor, s.dvpExecutor]) {
     assert.ok((await heldBy(c, timelock)).includes(ROLES.DEFAULT_ADMIN), `timelock lacks DEFAULT_ADMIN_ROLE on ${c.address}`);
   }
   // M-1: the recovery timelock's complete role set, pinned so a change that widens it fails the deploy.
@@ -285,6 +294,7 @@ async function assertHandedOver(s: Omit<Stack, "holders" | "identity" | "asset" 
     [s.vault4626, [ROLES.RECOVERY]],
     [s.vault7540, [ROLES.RECOVERY]],
     [s.executor, [ROLES.RECOVERY]],
+    [s.dvpExecutor, [ROLES.RECOVERY]],
     [s.registry, []],
     [s.recoveryTimelock, [ROLES.DEFAULT_ADMIN]], // OZ makes every timelock its own admin
   ];
@@ -299,6 +309,17 @@ async function assertHandedOver(s: Omit<Stack, "holders" | "identity" | "asset" 
   assert.equal(await s.recoveryTimelock.read.hasRole([await s.recoveryTimelock.read.PROPOSER_ROLE(), governance]), true);
   assert.equal(await s.recoveryTimelock.read.hasRole([await s.recoveryTimelock.read.EXECUTOR_ROLE(), governance]), true);
   assert.ok((await s.recoveryTimelock.read.getMinDelay()) >= 7n * 86_400n, "recovery timelock delay below 7 days");
+  // The DvP executor: the stack's operator submits through it and the guardian can pause it.
+  assert.deepEqual(await heldBy(s.dvpExecutor, s.wallets.operator.account.address), [ROLES.OPERATOR], "DvP executor operator");
+  assert.deepEqual(await heldBy(s.dvpExecutor, s.wallets.guardian.account.address), [ROLES.GUARDIAN], "DvP executor guardian");
+  // EXECUTOR_ROLE on the intent token: the two executor contracts and no account the stack knows about, so nothing
+  // can run a signed intent without going through one of them.
+  for (const executor of [s.executor, s.dvpExecutor]) {
+    assert.equal(await s.token.read.hasRole([ROLES.EXECUTOR, executor.address]), true, `${executor.address} lacks EXECUTOR_ROLE on the intent token`);
+  }
+  for (const account of known) {
+    assert.equal(await s.token.read.hasRole([ROLES.EXECUTOR, account]), false, `${account} holds EXECUTOR_ROLE on the intent token`);
+  }
   for (const t of [s.token, s.vault4626, s.vault7540]) {
     assert.equal(await t.read.hasRole([ROLES.UPGRADER, timelock]), true, `timelock lacks UPGRADER_ROLE on ${t.address}`);
     for (const account of known) assert.equal(await t.read.hasRole([ROLES.UPGRADER, account]), false, `${account} can upgrade`);
@@ -369,8 +390,13 @@ export type Intent = {
   considerationAmount: bigint;
 };
 
+/** Anything that reports its EIP-712 domain through ERC-5267, as every token and the ERC-3009 mock here does. */
+type DomainSource = {
+  read: { eip712Domain: () => Promise<readonly [Hex, string, string, bigint, Address, Hex, readonly bigint[]]> };
+};
+
 /** The token's EIP-712 domain as the chain reports it (ERC-5267), so signing never re-derives it off-chain. */
-export async function intentDomain(token: Stack["token"]) {
+export async function intentDomain(token: DomainSource) {
   const [, name, version, chainId, verifyingContract] = await token.read.eip712Domain();
   return { name, version, chainId, verifyingContract };
 }
@@ -392,6 +418,8 @@ export async function signIntent(
     considerationAmount?: bigint;
   },
   domainOverride: Partial<Awaited<ReturnType<typeof intentDomain>>> = {},
+  /** The token the intent is for: its domain is the one signed. Defaults to the stack's intent token. */
+  token: DomainSource = s.token,
 ) {
   const now = (await s.publicClient.getBlock()).timestamp;
   const intent: Intent = {
@@ -406,7 +434,7 @@ export async function signIntent(
     considerationToken: fields.considerationToken ?? zeroAddress,
     considerationAmount: fields.considerationAmount ?? 0n,
   };
-  const domain = { ...(await intentDomain(s.token)), ...domainOverride };
+  const domain = { ...(await intentDomain(token)), ...domainOverride };
   const sig = await signer.signTypedData({ domain, types: INTENT_TYPES, primaryType: "TransferIntent", message: intent });
   return { intent, sig, domain };
 }
@@ -425,4 +453,145 @@ export async function revertOf(call: Promise<unknown>, abi: Abi) {
     const { errorName, args } = decodeErrorResult({ abi, data: reverted.raw });
     return { errorName, args: (args ?? []) as readonly unknown[] };
   }
+}
+
+// ---- DvP ---------------------------------------------------------------------------------------------------------------
+
+/** The typed data of an ERC-3009 `receiveWithAuthorization`, as Circle's FiatToken and the test mock define it. */
+export const RECEIVE_AUTHORIZATION_TYPES = {
+  ReceiveWithAuthorization: [
+    { name: "from", type: "address" },
+    { name: "to", type: "address" },
+    { name: "value", type: "uint256" },
+    { name: "validAfter", type: "uint256" },
+    { name: "validBefore", type: "uint256" },
+    { name: "nonce", type: "bytes32" },
+  ],
+} as const;
+
+/** The buyer's authorization as `DvPExecutor.executeDvP3009` takes it; its payee is always the executor. */
+export type Authorization = { from: Address; value: bigint; validAfter: bigint; validBefore: bigint; nonce: Hex; signature: Hex };
+
+/**
+ * The nonce that ties a buyer's ERC-3009 authorization to one securities intent on one security token:
+ * `keccak256(abi.encode(securityToken, intentHash))`. The token's address is in it, so an operator cannot pair the
+ * authorization with another token that merely reports the same hash.
+ */
+export function dvpNonce(securityToken: Address, securitiesIntentHash: Hex): Hex {
+  return keccak256(encodeAbiParameters([{ type: "address" }, { type: "bytes32" }], [securityToken, securitiesIntentHash]));
+}
+
+type Trader = Stack["holders"]["alice"];
+type TokenHandle = DomainSource & { address: Address };
+
+/**
+ * A gated trade: the seller signs the securities intent (executor = the DvP executor, stating the cash it is to
+ * receive), the buyer signs the cash intent on the cash token (stating the shares it is to receive).
+ */
+export async function signGatedTrade(
+  s: Stack,
+  trade: { seller: Trader; buyer: Trader; securityToken: TokenHandle; cashToken: TokenHandle; shares: bigint; cash: bigint; deadline?: bigint },
+) {
+  const { seller, buyer, securityToken, cashToken, shares, cash, deadline } = trade;
+  const dvp = s.dvpExecutor.address;
+  const securities = await signIntent(
+    s,
+    seller,
+    { to: buyer.account.address, amount: shares, deadline, executor: dvp, considerationToken: cashToken.address, considerationAmount: cash },
+    {},
+    securityToken,
+  );
+  const payment = await signIntent(
+    s,
+    buyer,
+    { to: seller.account.address, amount: cash, deadline, executor: dvp, considerationToken: securityToken.address, considerationAmount: shares },
+    {},
+    cashToken,
+  );
+  return { securities, payment };
+}
+
+/**
+ * An ERC-3009 trade: the seller signs the securities intent; the buyer signs an authorization to the executor whose
+ * nonce is `dvpNonce(securityToken, intentHash)`, computed here from the typed data and not read from the chain.
+ */
+export async function sign3009Trade(
+  s: Stack,
+  trade: {
+    seller: Trader;
+    buyer: Trader;
+    securityToken: TokenHandle;
+    cashToken: TokenHandle;
+    shares: bigint;
+    cash: bigint;
+    deadline?: bigint;
+    validBefore?: bigint;
+    /** Replaces the nonce the helper would compute, to build the authorizations that must be refused. */
+    nonce?: (intentHash: Hex) => Hex;
+  },
+) {
+  const { seller, buyer, securityToken, cashToken, shares, cash, deadline } = trade;
+  const securities = await signIntent(
+    s,
+    seller,
+    { to: buyer.account.address, amount: shares, deadline, executor: s.dvpExecutor.address, considerationToken: cashToken.address, considerationAmount: cash },
+    {},
+    securityToken,
+  );
+  const intentHash = hashTypedData({ domain: securities.domain, types: INTENT_TYPES, primaryType: "TransferIntent", message: securities.intent });
+  const now = (await s.publicClient.getBlock()).timestamp;
+  const message = {
+    from: buyer.account.address,
+    to: s.dvpExecutor.address,
+    value: cash,
+    validAfter: 0n,
+    validBefore: trade.validBefore ?? now + 3_600n,
+    nonce: trade.nonce ? trade.nonce(intentHash) : dvpNonce(securityToken.address, intentHash),
+  };
+  const signature = await buyer.signTypedData({
+    domain: await intentDomain(cashToken),
+    types: RECEIVE_AUTHORIZATION_TYPES,
+    primaryType: "ReceiveWithAuthorization",
+    message,
+  });
+  const authorization: Authorization = {
+    from: message.from,
+    value: message.value,
+    validAfter: message.validAfter,
+    validBefore: message.validBefore,
+    nonce: message.nonce,
+    signature,
+  };
+  return { securities, authorization, intentHash };
+}
+
+/**
+ * A gated cash token for tests: an `IntentToken` behind a fresh `ProxyDeployer`, with the stack's identity rule as its
+ * only rule, administered by the deployer (a live deployment would use the timelock), with the DvP executor holding
+ * EXECUTOR_ROLE. The council attests its hook and implementation as it would for any token.
+ */
+export async function deployGatedCashToken(connection: NetworkConnection, s: Stack) {
+  const { viem } = connection;
+  const deployer = s.wallets.deployer.account.address;
+  const attest = async (target: Address, kind: number) => {
+    const code = await s.publicClient.getCode({ address: target });
+    await s.registry.write.attest([keccak256(code!), kind, "ipfs://review"], { account: s.wallets.attester.account });
+  };
+  const implementation = await viem.deployContract("IntentToken");
+  await attest(implementation.address, ATTEST.IMPLEMENTATION);
+  const proxyDeployer = await viem.deployContract("ProxyDeployer", [deployer]);
+  const symbol = "gUSD";
+  const predicted = await proxyDeployer.read.predict([symbol, implementation.address]);
+  const hook = await viem.deployContract("ComplianceHook", [s.timelock.address, s.registry.address, predicted, [s.rules.identityRule.address]]);
+  await attest(hook.address, ATTEST.HOOK);
+  const data = encodeFunctionData({
+    abi: implementation.abi,
+    functionName: "initialize",
+    args: ["Gated USD", symbol, deployer, s.wallets.guardian.account.address, s.registry.address, hook.address],
+  });
+  await proxyDeployer.write.deploy([symbol, implementation.address, data, hook.address]);
+  const token = await viem.getContractAt("IntentToken", predicted);
+  await token.write.grantRole([ROLES.EXECUTOR, s.dvpExecutor.address]);
+  await token.write.grantRole([ROLES.MINTER, s.wallets.minter.account.address]);
+  return token;
 }
