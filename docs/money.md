@@ -59,7 +59,7 @@ The vault does not change the price on a schedule. The price moves through the r
 
 Example, a 6-decimal asset and an empty vault. A deposit of 1,000 assets (`1000e6`) mints `1000e6 x 10^6 / 1 = 1e15` raw shares, which is 1,000 shares at 12 decimals. Redeeming all of them pays `1e15 x (1000e6 + 1) / (1e15 + 10^6) = 1000e6`, so the full 1,000 assets come back.
 
-Who is checked: the receiver of shares on a deposit (`IdentityRule`, `MaxHoldersRule`), and the owner of shares on a redemption (`IdentityRule`, `LockupRule`, frozen amount). The party who pays assets in, and the party who receives assets out, are not checked.
+Who is checked: the receiver of shares on a deposit (`IdentityRule`, `MaxHoldersRule`, `FundHoldersRule`), and the owner of shares on a redemption (`IdentityRule`, `LockupRule`, frozen amount). The party who pays assets in, and the party who receives assets out, are not checked.
 
 Code: OpenZeppelin `ERC4626Upgradeable._convertToShares`, `_convertToAssets`, `totalAssets`; `Gated4626Vault._decimalsOffset`.
 
@@ -97,7 +97,7 @@ Solid arrows are the asset. Dotted arrows are shares.
 | `fulfillDeposit` | the `custody` address |
 | `rejectDepositRequest` | the controller of the request |
 | `redeem`, `withdraw` | the `receiver` chosen by the controller or its operator |
-| `recoverClaimable` | `to`, the recovery account the agent names, which must pass the vault's policy as the receiver of a `FORCED` move (with the deployed rules, only `IdentityRule` can refuse it) |
+| `recoverClaimable` | `to`, the recovery account the agent names, which must pass the vault's policy as the receiver of a `FORCED` move (with the deployed rules, `IdentityRule` can refuse an unverified account, and `FundHoldersRule` everything for a token that is not a registered class or whose rule is retired) |
 
 These are the vault's own functions. Two other things can also move the asset: an upgrade to another attested implementation, and powers held by the asset's own issuer.
 
@@ -115,7 +115,7 @@ Share decimals equal the asset's decimals. There is no offset.
 
 ### Worked example
 
-A 6-decimal asset, so shares also have 6 decimals. Amounts below are whole units. Alice starts with 1,000 assets and has approved the vault on the asset. The fulfiller starts with 500 assets and has also approved the vault. Alice is verified. The identity provider has verified the vault, and `Activate` has exempted the vault from `MaxHoldersRule` and set a holder cap with room for Alice.
+A 6-decimal asset, so shares also have 6 decimals. Amounts below are whole units. Alice starts with 1,000 assets and has approved the vault on the asset. The fulfiller starts with 500 assets and has also approved the vault. Alice is verified. The identity provider has verified the vault, and `Activate` has exempted the vault from `MaxHoldersRule` and set a holder cap with room for Alice. The fund's investor cap has room for her too.
 
 | Step | Alice assets | Vault assets | Custody assets | Fulfiller assets | Alice shares | Vault shares | Share supply |
 |---|---|---|---|---|---|---|---|

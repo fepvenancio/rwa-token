@@ -15,7 +15,8 @@ import {BaseRule} from 'contracts/hooks/BaseRule.sol';
 /**
  * @title FundHoldersRule
  * @notice Caps the number of distinct investors across the classes of one fund, as specified in `IFundHoldersRule`
- * @dev Holds no state of its own: every read and write goes to the fund, so replacing this rule keeps the count.
+ * @dev Holds no state of its own: every read and write goes to the fund, so replacing this rule keeps the count. A
+ *      replaced rule rejects every movement until the classes' hooks list the new one.
  *      `check` reads the fund once, with `admission`, and reads it again for the sender only when the cap is already
  *      full. `after_` sees post-movement balances, as `MaxHoldersRule` does
  */
@@ -64,8 +65,11 @@ contract FundHoldersRule is BaseRule, IFundHoldersRule {
   function check(
     IPolicyHook.TransferContext calldata _ctx
   ) external view returns (bytes32 _reason) {
-    (uint256 _index, uint256 _held, bool _exempt, uint256 _count, uint256 _cap) = FUND.admission(_ctx.token, _ctx.to);
-    if (_index == 0) return Reasons.NOT_FUND_CLASS;
+    (uint256 _index, uint256 _held, bool _exempt, uint256 _count, uint256 _cap, address _installed) =
+      FUND.admission(_ctx.token, _ctx.to);
+    // An unregistered token, or a rule the fund has replaced: reject everything, so a retired rule never says yes in a
+    // pre-flight while its `after_` would be refused.
+    if (_index == 0 || _installed != address(this)) return Reasons.NOT_FUND_CLASS;
 
     // Not a new investor: nothing to count, or the receiver is already counted or never counted. FORCED is exempt from
     // the cap and still counted in `after_`. The class itself is the 7540 escrow.
@@ -113,7 +117,7 @@ contract FundHoldersRule is BaseRule, IFundHoldersRule {
     if (_ctx.from == address(0) || _ctx.from == _ctx.token) return false;
     // Only the sender's classes and exemption are needed; the index, count and cap were read for the receiver.
     // slither-disable-next-line unused-return
-    (, uint256 _fromHeld, bool _fromExempt,,) = FUND.admission(_ctx.token, _ctx.from);
+    (, uint256 _fromHeld, bool _fromExempt,,,) = FUND.admission(_ctx.token, _ctx.from);
     if (_fromExempt || _fromHeld != 1 << (_index - 1)) return false;
     // The exact equality is the definition of "sender leaves" (balance == amount); see after_.
     // slither-disable-next-line incorrect-equality

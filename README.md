@@ -2,7 +2,8 @@
 
 Permissioned ERC-20 templates for institutional real-world assets. Every balance movement goes through one
 mechanical base and an external, replaceable policy hook made of small, attested rules. One template adds
-executor-settled transfers: the holder signs an EIP-712 intent, and an executor settles it.
+executor-settled transfers: the holder signs an EIP-712 intent, and an executor settles it. A `Fund` groups several of
+these tokens as share classes and counts its investors across them.
 
 > **Proprietary.** Copyright (c) 2026 Filipe Venancio. All rights reserved. See [LICENSE](LICENSE). No use, copying,
 > modification or deployment without prior written permission.
@@ -19,17 +20,20 @@ Gated4626Vault (ERC-4626, gated max*, decimals offset 6), Gated7540Vault (ERC-75
 ComplianceHook (one per token, immutable) ──► ordered list of ≤16 attested IComplianceRule (first rejection wins)
 IdentityRule, LockupRule, SettlementWindowRule, MaxHoldersRule   hook-agnostic, shared across tokens; per-token
                                                  config authorised live by the token's own roles
+Fund (one per fund, owned by the timelock)       its classes, investor count and per-investor class mask
+FundHoldersRule (one per fund)                   the rule in every class's hook that feeds the fund and enforces its cap
 PolicyRegistry (one per deployment, immutable)  codehash allowlist: HOOK / RULE / IMPLEMENTATION
 IntentExecutor (immutable)                       replaceable, role-gated submitter: execute + atomic executeBatch
 ```
 
 | Path | Contents |
 |---|---|
-| `contracts/interfaces/` | Frozen ABI: `IPolicyGated`, `IPolicyHook`, `IComplianceRule`, `IComplianceHook`, `IPolicyRegistry`, `ITransferIntent`, `IIntentExecutor`, `IIntentExecutorBatch`, `IIdentityRule`, `IIdentityRegistry`, `ILockupRule`, `ISettlementWindowRule`, `IMaxHoldersRule`, `IGated4626Vault`, `IGated7540Vault`, `IERC7540Operator` / `IERC7540Deposit` / `IERC7540Redeem` / `IERC7575` (spec-exact ids), `Errors.sol` (reason codes) |
+| `contracts/interfaces/` | Frozen ABI: `IPolicyGated`, `IPolicyHook`, `IComplianceRule`, `IComplianceHook`, `IPolicyRegistry`, `ITransferIntent`, `IIntentExecutor`, `IIntentExecutorBatch`, `IIdentityRule`, `IIdentityRegistry`, `ILockupRule`, `ISettlementWindowRule`, `IMaxHoldersRule`, `IFund`, `IFundHoldersRule`, `IGated4626Vault`, `IGated7540Vault`, `IERC7540Operator` / `IERC7540Deposit` / `IERC7540Redeem` / `IERC7575` (spec-exact ids), `Errors.sol` (reason codes) |
 | `contracts/base/` | `PolicyGatedERC20Upgradeable` |
 | `contracts/governance/` | `PolicyRegistry` |
 | `contracts/mixins/`, `contracts/tokens/` | `IntentSettledUpgradeable`, `IntentToken` |
-| `contracts/hooks/` | `ComplianceHook`, `BaseRule`, `rules/` `IdentityRule`, `LockupRule`, `SettlementWindowRule`, `MaxHoldersRule` (recommended order) |
+| `contracts/hooks/` | `ComplianceHook`, `BaseRule`, `rules/` `IdentityRule`, `LockupRule`, `SettlementWindowRule`, `MaxHoldersRule`, `FundHoldersRule` (recommended order) |
+| `contracts/fund/` | `Fund` |
 | `contracts/intents/` | `IntentExecutor` |
 | `contracts/vaults/` | `Gated4626Vault`, `Gated7540Vault` |
 | `contracts/test/` | Test helpers and mocks, interface-freeze and contract-size guards, Halmos properties |
@@ -55,6 +59,7 @@ The audit package (scope, suppressions, mutation results, findings an auditor sh
 | `GUARDIAN_ROLE` (executor) | multisig | none | pause the executor only; the timelock unpauses |
 | `ATTESTER_ROLE` (registry) | security council | none | attest / revoke codehashes |
 | token `DEFAULT_ADMIN_ROLE` → rules | timelock | ≥ 7 days | set a token's holder cap, seed its holder count, set its settlement window |
+| `Fund` owner | timelock | ≥ 7 days | register a class, set the fund's rule and investor cap, exempt an account. Only the installed rule records which classes an account holds |
 | token `AGENT_ROLE` → rules | issuer | none | set or clear per-holder lockups |
 | `FULFILLER_ROLE` (7540 vault) | bank | none | fulfil deposits/redemptions at off-chain NAV; reject pending requests |
 
@@ -66,7 +71,9 @@ The audit package (scope, suppressions, mutation results, findings an auditor sh
 - **Immutable policy components.** Hooks and rules are never proxies. Changing one means deploying a new one and
   swapping it in through the timelock. The hook's admin, registry and token are `immutable`, so they are part of the
   attested codehash.
-- **Fail closed.** `TRANSFER_OK` is non-zero, and a hook with no rules rejects everything (`NO_RULES`). Every
+- **Fail closed.** `TRANSFER_OK` is non-zero, a hook with no rules rejects everything (`NO_RULES`), and a token that is
+  not a registered class of its fund, or whose hook lists a rule the fund has replaced, rejects everything
+  (`NOT_FUND_CLASS`). Every
   rejection reverts with `PolicyGated_TransferRejected(bytes32 reason)`; `transfer` never returns `false`.
 - **Pre-flight parity.** `canTransfer` and `canExecute` run the same checks as the state-changing path.
 - **Reentrancy.** `_update` is `nonReentrant` (transient storage); rules cannot call back into the token.
@@ -88,7 +95,8 @@ playing the council and the identity provider, and ends with the post-deploy che
      then the main timelock (`GovernanceTimelock`: ≥ 7 days, proposer **and** executor the governance multisig only;
      the recovery timelock may revoke `CANCELLER_ROLE` there). The deployer is the admin of both until `Activate`;
    - the `PolicyRegistry`: admin = timelock, attester = council;
-   - the four rules, one implementation per template, `ProxyDeployer` (owner = deployer), and `IntentExecutor`.
+   - the four shared rules, one implementation per template, `ProxyDeployer` (owner = deployer), and `IntentExecutor`;
+   - the `Fund` (owner = deployer) and the `FundHoldersRule` that points at it.
 
    Parameters: `governance`, `council`, `guardian`, `identityRegistry`, `minDelay`.
 2. **Council step 1.** Attest only when two independent sources agree:
@@ -100,6 +108,9 @@ playing the council and the identity provider, and ends with the post-deploy che
      `immutableSlots` with the bytes at the same positions in the deployed code, and confirm those bytes are the
      expected constructor arguments (e.g. `IdentityRule`'s identity registry; an implementation's own address). Then
      confirm the keccak256 of the result equals `extcodehash`.
+   - For `FundHoldersRule`, also read the `Fund` it points at (`FUND()`): the rule's codehash covers the fund's address,
+     not the fund's code. Check the fund's runtime code against the manifest's `Fund` entry, filling its `immutableSlots`
+     (the registry address) as for the rules, and that its `owner()` is the deployer. `Fund` itself is not attested.
    - Then `attest(codehash, RULE | IMPLEMENTATION, auditUri)`. The record for the change board reads: computed from the
      source at tag X, matched the release build, matched the chain.
 
@@ -128,11 +139,14 @@ playing the council and the identity provider, and ends with the post-deploy che
      leaves no proxy and does not use up the symbol. Every later call waits for all three deploys, so one
      mis-bound hook grants nothing anywhere;
    - configure: settlement window, holder caps, the 7540 vault's holder-cap exemption;
+   - configure the fund (parameter `fundHolderCap`): install its rule, set its cap, then register the three tokens as
+     classes 1 to 3, one after another. Registration refuses a hook that does not list the rule and a token that has
+     supply, so a mis-built hook stops `Activate` before any role is granted;
    - grant roles: MINTER, BURNER and AGENT to the issuer's accounts, EXECUTOR to `IntentExecutor`, FULFILLER to the
      bank, OPERATOR to the relayer, **UPGRADER to the timelock only**, CANCELLER on the timelock to the guardian;
    - hand over: DEFAULT_ADMIN_ROLE to the timelock on every token and on the executor; the deployer renounces it there
-     and on the timelock; `ProxyDeployer` ownership moves to the timelock, so any later token is placed through
-     governance (schedule `deploy`, wait out the delay, execute).
+     and on the timelock; `ProxyDeployer` and `Fund` ownership move to the timelock, so any later token is placed, and
+     any later class registered, through governance (schedule `deploy`, wait out the delay, execute).
 6. **Identity provider:** verify the 7540 vault, which escrows pending redemptions.
 7. **Post-deploy checks** (the fixture's `assertHandedOver`):
    - the deployer holds no role on either timelock, the registry, the tokens or the executor;
@@ -146,7 +160,9 @@ playing the council and the identity provider, and ends with the post-deploy che
    - the recovery timelock holds exactly `RECOVERY_ROLE` on each token, vault, the executor and the main timelock,
      nothing elsewhere, and has no cancellers (governance's automatic one is revoked in `Activate`);
    - no rule exposes `hasRole` or `owner`: rules take their authority from the token's roles at call time;
-   - `ProxyDeployer.owner()` is the timelock;
+   - `ProxyDeployer.owner()` and `Fund.owner()` are the timelock;
+   - the fund's rule is the attested `FundHoldersRule`, whose `FUND()` is the fund, its cap is the intended one, and its
+     classes 1 to 3 are the three tokens, in that order;
    - `getMinDelay() ≥ 7 days` on both timelocks.
 
    The recovery timelock's proposer and executor is the governance multisig. A compromised governance multisig is
@@ -225,7 +241,9 @@ The brief is in [`CLAUDE.md`](CLAUDE.md). Where the code intentionally differs, 
   is planned as a separate adapter interface.
 - **Pause roles.** The base follows the brief's guardian prose: `pause` needs `GUARDIAN_ROLE`, and `unpause` needs
   the timelock. The brief's interface comments still say `PAUSER_ROLE`.
-- **Extra reason codes.** `NO_HOOK` and `NO_RULES` are appended.
+- **Extra reason codes.** `NO_HOOK`, `NO_RULES` and `NOT_FUND_CLASS` are appended.
+- **Fund layer.** `Fund`, `FundHoldersRule`, `IFund` and `IFundHoldersRule` are not in the brief. [`PLAN.md`](PLAN.md)
+  records the design and the proposed brief edits.
 - **`canTransfer` scope.** It models holder-driven movements, with the operator set to `from`. A simulated burn
   respects frozen tokens. The enforcement paths `burn` and `forcedTransfer` release frozen tokens first.
 - **`canExecute` scope.** It cannot check the signature, because the frozen interface has no signature parameter.

@@ -35,7 +35,7 @@ sequenceDiagram
 
 `mint(shares, receiver)` is the same with `maxMint`, `previewMint` (assets rounded up) and the same MINT step.
 
-Only the receiver of the shares is checked by `IdentityRule`. The caller who pays the assets is not. `MaxHoldersRule` applies if the receiver is a new holder. The caller must have approved the vault on the asset. The asset is pulled before the shares are minted, so a rejection by the hook reverts the whole call, asset transfer included.
+Only the receiver of the shares is checked by `IdentityRule`. The caller who pays the assets is not. `MaxHoldersRule` applies if the receiver is a new holder, and `FundHoldersRule` if the receiver would be a new investor of the fund. The caller must have approved the vault on the asset. The asset is pulled before the shares are minted, so a rejection by the hook reverts the whole call, asset transfer included.
 
 ### Withdraw and redeem
 
@@ -60,11 +60,11 @@ sequenceDiagram
 
 `withdraw(assets, receiver, owner)` is the same with `maxWithdraw` and `previewWithdraw` (shares rounded up).
 
-`IdentityRule` needs `owner` verified. `LockupRule` rejects a locked owner. Its `BURNER_ROLE` exemption looks at the operator. The `max*` probe uses the owner as the operator, and the burn uses the caller. So a non-zero redemption for a locked owner needs both to hold the vault's `BURNER_ROLE`, or only the owner if the owner is the caller. `Activate` grants that role on neither vault. The frozen amount cannot be redeemed. The `receiver` of the assets is not checked by anything.
+`IdentityRule` needs `owner` verified. `LockupRule` rejects a locked owner. Its `BURNER_ROLE` exemption looks at the operator. The `max*` probe uses the owner as the operator, and the burn uses the caller. So a non-zero redemption for a locked owner needs both to hold the vault's `BURNER_ROLE`, or only the owner if the owner is the caller. `Activate` grants that role on neither vault. The frozen amount cannot be redeemed. `FundHoldersRule` passes a redemption, apart from `NOT_FUND_CLASS` for a vault that is not a registered class. The `receiver` of the assets is not checked by anything.
 
 ### The `max*` functions
 
-These are how the vault reports what the hook will allow. Integrators are expected to call them before depositing or redeeming. `deposit`, `mint`, `withdraw` and `redeem` check the matching `max*` first, so for a non-zero amount a policy rejection appears as `ERC4626ExceededMaxDeposit`, `ERC4626ExceededMaxMint`, `ERC4626ExceededMaxWithdraw` or `ERC4626ExceededMaxRedeem` with a max of 0, not as `PolicyGated_TransferRejected`. The probe treats the owner as the operator, while the real burn's operator is the caller. The two agree unless an account holds the vault's `BURNER_ROLE`, which `Activate` never grants. A zero-amount call passes the max check. It reverts with `PolicyGated_TransferRejected` if the token is paused, or if the hook rejects a zero-amount movement: an unverified party (`IdentityRule`), or a locked owner on `redeem` or `withdraw` (`LockupRule`). `MaxHoldersRule` passes zero amounts, so a receiver blocked only by a full holder cap succeeds with a zero-amount `deposit` or `mint`. An allowed party also succeeds and moves nothing.
+These are how the vault reports what the hook will allow. Integrators are expected to call them before depositing or redeeming. `deposit`, `mint`, `withdraw` and `redeem` check the matching `max*` first, so for a non-zero amount a policy rejection appears as `ERC4626ExceededMaxDeposit`, `ERC4626ExceededMaxMint`, `ERC4626ExceededMaxWithdraw` or `ERC4626ExceededMaxRedeem` with a max of 0, not as `PolicyGated_TransferRejected`. The probe treats the owner as the operator, while the real burn's operator is the caller. The two agree unless an account holds the vault's `BURNER_ROLE`, which `Activate` never grants. A zero-amount call passes the max check. It reverts with `PolicyGated_TransferRejected` if the token is paused, or if the hook rejects a zero-amount movement: an unverified party (`IdentityRule`), or a locked owner on `redeem` or `withdraw` (`LockupRule`). `MaxHoldersRule` passes zero amounts, and so does `FundHoldersRule` for a registered class, so a receiver blocked only by a full holder cap succeeds with a zero-amount `deposit` or `mint`. For a vault that is not a registered class, or whose hook lists a replaced fund rule, `FundHoldersRule` rejects even a zero amount with `NOT_FUND_CLASS`. An allowed party also succeeds and moves nothing.
 
 | Function | Returns |
 |---|---|
@@ -172,9 +172,9 @@ sequenceDiagram
   V->>A: transfer(receiver, assets)
 ```
 
-- **Request.** `shares` and `controller` must be non-zero. If the caller is neither `owner` nor an operator of `owner`, the vault spends the caller's ERC-20 share allowance from `owner`. The shares move from `owner` to the vault as an ordinary `TRANSFER`, so the same checks apply as for a transfer: pause, frozen balance, `IdentityRule` on the owner and on the vault, `LockupRule` on the owner. The vault must therefore be verified by the identity registry. That is the identity provider's step; `Activate` does not do it. `Activate` exempts the vault from the holder cap, so escrow never fills a slot.
+- **Request.** `shares` and `controller` must be non-zero. If the caller is neither `owner` nor an operator of `owner`, the vault spends the caller's ERC-20 share allowance from `owner`. The shares move from `owner` to the vault as an ordinary `TRANSFER`, so the same checks apply as for a transfer: pause, frozen balance, `IdentityRule` on the owner and on the vault, `LockupRule` on the owner. The vault must therefore be verified by the identity registry. That is the identity provider's step; `Activate` does not do it. `Activate` exempts the vault from the holder cap, so escrow never fills a slot. `FundHoldersRule` passes the vault as the receiver, because a class never counts itself, and an owner whose whole balance moves into escrow stops being counted as an investor of the fund until the shares come back.
 - **Fulfil.** The fulfiller picks `shares` and the `assets` they pay. The checks are the same as for a deposit fulfilment: both non-zero, something pending, and `shares` not above `pendingShares`. The escrowed shares are burned as `BURN` from the vault. Then the vault pulls `assets` from the fulfiller's wallet with `transferFrom`. While the token is paused the burn is rejected, so fulfilment waits. The burn is checked against the vault, not the controller, so a request can be fulfilled even if its controller has lost verification since. The claim check below then stops that controller from collecting.
-- **Claim.** `redeem` and `withdraw` revert with `EnforcedPause` while paused. Only the controller or an operator of it can claim (`Gated7540Vault_Unauthorized` otherwise). The controller must then pass a payout check, a zero-amount burn pre-flight `canTransfer(controller, 0, 0)`: `IdentityRule` needs the controller verified and `LockupRule` rejects a locked controller. The pre-flight treats the controller as the operator, so a controller holding the vault's `BURNER_ROLE` would pass the lock; `Activate` never grants that role on a vault. Because the amount is 0, the frozen check never fails. If the pre-flight fails, the claim reverts with `Gated7540Vault_ControllerNotEligible(reason)`. The assets go to a `receiver` the caller picks, and the receiver is not checked. No shares move, because the burn already happened.
+- **Claim.** `redeem` and `withdraw` revert with `EnforcedPause` while paused. Only the controller or an operator of it can claim (`Gated7540Vault_Unauthorized` otherwise). The controller must then pass a payout check, a zero-amount burn pre-flight `canTransfer(controller, 0, 0)`: `IdentityRule` needs the controller verified, `LockupRule` rejects a locked controller, and `FundHoldersRule` passes it for a registered class. The pre-flight treats the controller as the operator, so a controller holding the vault's `BURNER_ROLE` would pass the lock; `Activate` never grants that role on a vault. Because the amount is 0, the frozen check never fails. If the pre-flight fails, the claim reverts with `Gated7540Vault_ControllerNotEligible(reason)`. The assets go to a `receiver` the caller picks, and the receiver is not checked. No shares move, because the burn already happened.
 
 | Call | Reverts if | Result |
 |---|---|---|
@@ -198,11 +198,12 @@ Both return the escrowed shares without a fulfilment, and both clear the control
 - the frozen amount of the vault's own balance;
 - `IdentityRule` on the vault and on the controller;
 - `LockupRule` on the vault;
-- `MaxHoldersRule` if the controller would become a new holder.
+- `MaxHoldersRule` if the controller would become a new holder;
+- `FundHoldersRule` if the controller would become a new investor of the fund.
 
 If any check fails, the reject reverts with `PolicyGated_TransferRejected(reason)`, nothing changes, and the shares stay in escrow.
 
-`recoverRedeemRequest` is `FORCED`. It ignores pause and `LockupRule`, and `MaxHoldersRule` does not apply its cap. `IdentityRule` still needs `to` verified. If the agent has frozen part of the vault's own balance and the remaining balance would fall below that amount, the frozen amount is first lowered to the remaining balance, as `forcedTransfer` does.
+`recoverRedeemRequest` is `FORCED`. It ignores pause and `LockupRule`, and `MaxHoldersRule` and `FundHoldersRule` do not apply their caps (both still count the new holder). `IdentityRule` still needs `to` verified. If the agent has frozen part of the vault's own balance and the remaining balance would fall below that amount, the frozen amount is first lowered to the remaining balance, as `forcedTransfer` does.
 
 The controller is named by the person who made the request, and it can be a different account from the owner who escrowed the shares. A reject returns the shares to the controller, under the same checks as any transfer to it, so a reject cannot be used to move shares to a new holder past a full cap or while paused (owner decision M-2).
 
@@ -283,10 +284,10 @@ A partial fulfilment, or a new request after a fulfilment, leaves a controller w
 The reject functions and `recoverRedeemRequest` act only on pending amounts. Once `fulfillDeposit` or `fulfillRedeem` has run, the amounts are claimable, and two things can happen to them.
 
 - **The controller, or an operator of it, claims them.** Each claim re-checks the controller. A deposit claim needs the controller to be able to receive shares, and the mint also checks the `receiver`. A redemption claim needs the controller to pass the payout check described above: verified and not locked. The `receiver` of redemption assets is not checked. If a check fails, the claim reverts and the amounts stay claimable.
-- **The agent calls `recoverClaimable(controller, to)`.** After the `AGENT_ROLE` check, `to` must not be the zero address (`Gated7540Vault_ZeroAddress`). Then it must pass the policy as the receiver of an enforcement move, which in practice is `IdentityRule`; otherwise the call reverts `Gated7540Vault_RecipientNotEligible(reason)`. If the controller has nothing claimable, it reverts `Gated7540Vault_NothingClaimable`. Otherwise it:
+- **The agent calls `recoverClaimable(controller, to)`.** After the `AGENT_ROLE` check, `to` must not be the zero address (`Gated7540Vault_ZeroAddress`). Then it must pass the policy as the receiver of an enforcement move, which in practice is `IdentityRule`, and `FundHoldersRule` if the token is not a registered class or its rule is retired; otherwise the call reverts `Gated7540Vault_RecipientNotEligible(reason)`. If the controller has nothing claimable, it reverts `Gated7540Vault_NothingClaimable`. Otherwise it:
   1. clears all four of the controller's claimable amounts;
   2. emits `ClaimableRecovered(controller, to, assets, shares, agent)`;
-  3. mints the claimable deposit shares to `to` as `FORCED` with `from` = 0, which ignores pause and the holder cap but still runs `IdentityRule` on `to`;
+  3. mints the claimable deposit shares to `to` as `FORCED` with `from` = 0, which ignores pause and the holder caps (the fund's included, which still counts the new investor) but still runs `IdentityRule` on `to`;
   4. pays the claimable redemption assets to `to`.
 
   It works while the token is paused.

@@ -227,20 +227,51 @@ contract FundUnit_SetHolderCap is FundUnitTest {
     assertEq(_fund.holderCap(), 2);
   }
 
-  function test_WhenTheCapExceedsUint128_Reverts() external {
-    uint256 _tooBig = uint256(type(uint128).max) + 1;
-    vm.expectRevert(abi.encodeWithSelector(SafeCast.SafeCastOverflowedUintDowncast.selector, 128, _tooBig));
+  function test_WhenTheCapExceedsUint48_Reverts() external {
+    uint256 _tooBig = uint256(type(uint48).max) + 1;
+    vm.expectRevert(abi.encodeWithSelector(SafeCast.SafeCastOverflowedUintDowncast.selector, 48, _tooBig));
     vm.prank(_owner);
     _fund.setHolderCap(_tooBig);
   }
 
-  function testFuzz_WhenTheCapFitsUint128_ItIsStored(
+  function testFuzz_WhenTheCapFitsUint48_ItIsStored(
     uint256 _cap
   ) external {
-    _cap = bound(_cap, 0, type(uint128).max);
+    _cap = bound(_cap, 0, type(uint48).max);
     vm.prank(_owner);
     _fund.setHolderCap(_cap);
     assertEq(_fund.holderCap(), _cap);
+  }
+
+  /// @dev The rule, the count and the cap share one slot: a write to any of them must leave the other two alone
+  function test_WhenTheRuleCountAndCapShareASlot_NoWriteDisturbsTheOthers() external {
+    address _token = _registered('classA');
+    address _next = makeAddr('next');
+    _attest(_next, true);
+    vm.prank(_owner);
+    _fund.setHolderCap(type(uint48).max);
+
+    _join(_token, _alice);
+    _join(_token, _bob);
+    assertEq(_fund.rule(), _rule);
+    assertEq(_fund.holderCap(), type(uint48).max);
+    assertEq(_fund.holderCount(), 2);
+
+    vm.prank(_owner);
+    _fund.setRule(_next);
+    assertEq(_fund.holderCap(), type(uint48).max);
+    assertEq(_fund.holderCount(), 2);
+
+    vm.prank(_owner);
+    _fund.setHolderCap(5);
+    assertEq(_fund.rule(), _next);
+    assertEq(_fund.holderCount(), 2);
+
+    vm.prank(_next);
+    _fund.leave(_token, _alice);
+    assertEq(_fund.rule(), _next);
+    assertEq(_fund.holderCap(), 5);
+    assertEq(_fund.holderCount(), 1);
   }
 
   function test_WhenTheCapIsLoweredBelowTheCount_TheCountIsUntouched() external {
@@ -641,28 +672,38 @@ contract FundUnit_Views is FundUnitTest {
     _join(_classC, _alice);
     _join(_classA, _bob);
 
-    (uint256 _index, uint256 _classes, bool _exemptFlag, uint256 _count, uint256 _cap) =
+    (uint256 _index, uint256 _classes, bool _exemptFlag, uint256 _count, uint256 _cap, address _installed) =
       _fund.admission(_classC, _alice);
     assertEq(_index, 3);
     assertEq(_classes, 6);
     assertFalse(_exemptFlag);
     assertEq(_count, 2);
     assertEq(_cap, 9);
+    assertEq(_installed, _rule);
 
     _exempt(_alice, true);
-    (, _classes, _exemptFlag, _count,) = _fund.admission(_classC, _alice);
+    (, _classes, _exemptFlag, _count,,) = _fund.admission(_classC, _alice);
     assertEq(_classes, 6);
     assertTrue(_exemptFlag);
     assertEq(_count, 1);
   }
 
+  function test_WhenTheRuleIsReplaced_AdmissionReportsTheNewOne() external {
+    address _next = makeAddr('next');
+    _attest(_next, true);
+    vm.prank(_owner);
+    _fund.setRule(_next);
+    (,,,,, address _installed) = _fund.admission(_classA, _alice);
+    assertEq(_installed, _next);
+  }
+
   function test_WhenTheTokenIsNotAClass_AdmissionReportsIndexZero() external {
-    (uint256 _index,,,,) = _fund.admission(makeAddr('unknown'), _alice);
+    (uint256 _index,,,,,) = _fund.admission(makeAddr('unknown'), _alice);
     assertEq(_index, 0);
   }
 
   function test_WhenTheAccountIsTheZeroAddress_AdmissionReportsNoClasses() external view {
-    (uint256 _index, uint256 _classes, bool _exemptFlag,,) = _fund.admission(_classA, address(0));
+    (uint256 _index, uint256 _classes, bool _exemptFlag,,,) = _fund.admission(_classA, address(0));
     assertEq(_index, 1);
     assertEq(_classes, 0);
     assertFalse(_exemptFlag);
@@ -690,6 +731,122 @@ contract FundUnit_Views is FundUnitTest {
   }
 }
 
+/// @notice A class stub for `registerClass` whose read `WRITING` writes: 1 `policyHook`, 2 `totalSupply`, 0 none
+contract FundStatefulClass {
+  address public immutable HOOK;
+  uint8 public immutable WRITING;
+  uint256 public writes;
+
+  constructor(
+    address _hook,
+    uint8 _writing
+  ) {
+    HOOK = _hook;
+    WRITING = _writing;
+  }
+
+  function supportsInterface(
+    bytes4 _interfaceId
+  ) external pure returns (bool _supported) {
+    _supported = _interfaceId == 0x01ffc9a7 || _interfaceId == type(IPolicyGated).interfaceId;
+  }
+
+  function policyHook() external returns (address _hook) {
+    if (WRITING == 1) ++writes;
+    _hook = HOOK;
+  }
+
+  function totalSupply() external returns (uint256 _supply) {
+    if (WRITING == 2) ++writes;
+    _supply = 0;
+  }
+}
+
+/// @notice A hook stub whose `rules()` lists one rule and writes when asked to
+contract FundStatefulHook {
+  address public immutable RULE;
+  bool public immutable WRITES;
+  uint256 public writes;
+
+  constructor(
+    address _rule,
+    bool _writes
+  ) {
+    RULE = _rule;
+    WRITES = _writes;
+  }
+
+  function rules() external returns (IComplianceRule[] memory _list) {
+    if (WRITES) ++writes;
+    _list = new IComplianceRule[](1);
+    _list[0] = IComplianceRule(RULE);
+  }
+}
+
+/// @notice A registry stub whose `isAttested` writes
+contract FundStatefulRegistry {
+  uint256 public writes;
+
+  function isAttested(
+    address,
+    IPolicyRegistry.AttestKind
+  ) external returns (bool _attested) {
+    ++writes;
+    _attested = true;
+  }
+}
+
+/// @notice Every external read `Fund` makes before it writes goes through a view interface, so it is a STATICCALL: a
+///         callee whose read writes makes the call revert, and the same call with a quiet callee succeeds
+contract FundUnit_CallsAreStatic is FundUnitTest {
+  function _classWithWriteIn(
+    uint8 _writing,
+    bool _hookWrites
+  ) internal returns (address _token) {
+    _token = address(new FundStatefulClass(address(new FundStatefulHook(_rule, _hookWrites)), _writing));
+  }
+
+  function test_WhenTheClassAndItsHookOnlyRead_RegistrationSucceeds() external {
+    _setRule();
+    address _token = _classWithWriteIn(0, false);
+    vm.prank(_owner);
+    _fund.registerClass(_token);
+    assertEq(_fund.classIndexOf(_token), 1);
+  }
+
+  function test_WhenThePolicyHookReadWrites_RegistrationReverts() external {
+    _setRule();
+    address _token = _classWithWriteIn(1, false);
+    vm.expectRevert(bytes('')); // a write inside a STATICCALL reverts with empty data, bubbled by the fund
+    vm.prank(_owner);
+    _fund.registerClass(_token);
+  }
+
+  function test_WhenTheRulesReadWrites_RegistrationReverts() external {
+    _setRule();
+    address _token = _classWithWriteIn(0, true);
+    vm.expectRevert(bytes('')); // a write inside a STATICCALL reverts with empty data, bubbled by the fund
+    vm.prank(_owner);
+    _fund.registerClass(_token);
+  }
+
+  function test_WhenTheTotalSupplyReadWrites_RegistrationReverts() external {
+    _setRule();
+    address _token = _classWithWriteIn(2, false);
+    vm.expectRevert(bytes('')); // a write inside a STATICCALL reverts with empty data, bubbled by the fund
+    vm.prank(_owner);
+    _fund.registerClass(_token);
+  }
+
+  function test_WhenTheRegistryReadWrites_SetRuleReverts() external {
+    FundStatefulRegistry _stateful = new FundStatefulRegistry();
+    Fund _own = new Fund(_owner, IPolicyRegistry(address(_stateful)));
+    vm.expectRevert(bytes('')); // a write inside a STATICCALL reverts with empty data, bubbled by the fund
+    vm.prank(_owner);
+    _own.setRule(_rule);
+  }
+}
+
 /// @notice Random joins, leaves and exemption changes against a plain model of the same rules
 contract FundUnit_Model is FundUnitTest {
   uint256 internal constant _CLASSES = 3;
@@ -710,6 +867,8 @@ contract FundUnit_Model is FundUnitTest {
     _accounts.push(_bob);
     _accounts.push(makeAddr('carol'));
     _accounts.push(makeAddr('dave'));
+    vm.prank(_owner);
+    _fund.setHolderCap(7);
   }
 
   function testFuzz_WhenOperationsApply_CountAndMasksMatchTheModel(
@@ -747,5 +906,8 @@ contract FundUnit_Model is FundUnitTest {
       if (_mask != 0 && !_isExempt[_a]) ++_expectedCount;
     }
     assertEq(_fund.holderCount(), _expectedCount, 'count');
+    // They share a slot with the count, so no join, leave or exemption may touch them.
+    assertEq(_fund.rule(), _rule, 'rule');
+    assertEq(_fund.holderCap(), 7, 'cap');
   }
 }

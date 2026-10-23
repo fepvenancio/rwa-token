@@ -2,13 +2,14 @@
 
 These pages explain how the contracts in `contracts/` work and how they are deployed. They describe what the code does. Where the build brief ([CLAUDE.md](../CLAUDE.md)) or the [README](../README.md) says something different, the code is right, and the page follows the code.
 
-Checked against: the contracts and Ignition modules of release `v0.2.0` (commit `ca88619`), plus the `MaxHoldersRule` seeding change merged in PR #1 (commit `b6f8e9b`). If a later commit changes them, these pages may be out of date.
+Checked against: the contracts and Ignition modules of release `v0.2.0` (commit `ca88619`), plus the `MaxHoldersRule` seeding change merged in PR #1 (commit `b6f8e9b`), plus the fund layer (`Fund`, `FundHoldersRule` and their Ignition steps) on the `fund-layer` branch. If a later commit changes them, these pages may be out of date.
 
 ## Which page answers what
 
 | Question | Page |
 |---|---|
 | What are the contracts, and how do they connect? | [architecture.md](architecture.md) |
+| How does a fund count its investors across share classes? | [architecture.md](architecture.md#the-fund) and [transfer-checks.md](transfer-checks.md#fundholdersrule) |
 | Who can call what, and who holds each role after deployment? | [roles.md](roles.md) |
 | What happens inside a transfer? Why was it rejected? | [transfer-checks.md](transfer-checks.md) |
 | How do I mint, burn, sign an intent, claw back, freeze or pause? | [flows-token.md](flows-token.md) |
@@ -27,6 +28,8 @@ Other documents in the repo: [README.md](../README.md) has the security model su
 | Token | A proxy running `IntentToken`, `Gated4626Vault` or `Gated7540Vault`. Vault shares are tokens too |
 | Movement | Any change to a token balance: transfer, mint, burn, forced transfer, executed intent |
 | Hook | The `ComplianceHook` bound to one token. The token asks it about every movement |
+| Fund | The `Fund` contract: the classes of one fund, how many distinct investors hold any of them, and which classes each investor holds |
+| Class | A token registered in a fund. Any of the three templates can be a class |
 | Rule | A small contract the hook calls, with `check` (a view) and `after_`. Examples: `IdentityRule`, `LockupRule` |
 | Kind | How the hook sees a movement: `TRANSFER`, `EXECUTED`, `FORCED`, `MINT`, `BURN` |
 | Context | The `TransferContext` struct the token builds for each movement and passes to the hook and rules |

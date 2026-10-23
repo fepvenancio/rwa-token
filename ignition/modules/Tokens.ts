@@ -20,6 +20,7 @@ export default buildModule("Tokens", (m) => {
     lockupRule: m.getParameter<string>("lockupRule"),
     windowRule: m.getParameter<string>("windowRule"),
     maxHoldersRule: m.getParameter<string>("maxHoldersRule"),
+    fundHoldersRule: m.getParameter<string>("fundHoldersRule"),
   };
 
   const hookFor = (key: keyof typeof TOKENS, implementation: string) => {

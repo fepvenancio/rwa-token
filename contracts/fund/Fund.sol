@@ -19,18 +19,21 @@ import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
  *         `IFund`. Not a proxy, and it holds no policy: the installed rule decides, the fund only records
  * @dev `Ownable` like `ProxyDeployer`: the deployer owns it while it is configured and `Activate` hands ownership to the
  *      timelock. An immutable admin would force a timelock operation, and its delay, onto every first deployment.
- *      An account's state is one slot: bit `n - 1` for class `n`, and the top bit for "exempt". The investor count and
- *      the cap share a slot, so the first count write is not a write to an empty slot
+ *      An account's state is one slot: bit `n - 1` for class `n`, and the top bit for "exempt". The installed rule, the
+ *      investor count and the cap share one slot. The first count write is then never a write to an empty slot, and the
+ *      rule, which the rule checks on every movement, is read together with the count and the cap at no extra cost
  */
 contract Fund is Ownable, ERC165, IFund {
   /**
-   * @notice The investor count and cap, packed into one slot
+   * @notice The installed rule, the investor count and the cap, packed into one slot
+   * @param rule The rule allowed to call `join` and `leave`; the zero address until set
    * @param count The number of distinct non-exempt accounts that hold at least one class
    * @param cap The most investors the rule admits
    */
   struct Investors {
-    uint128 count;
-    uint128 cap;
+    address rule;
+    uint48 count;
+    uint48 cap;
   }
 
   /// @inheritdoc IFund
@@ -45,11 +48,8 @@ contract Fund is Ownable, ERC165, IFund {
   /// @inheritdoc IFund
   IPolicyRegistry public immutable REGISTRY;
 
-  /// @notice The investor count and cap
+  /// @notice The installed rule, the investor count and the cap
   Investors internal _investors;
-
-  /// @notice The rule allowed to call `join` and `leave`; the zero address until set
-  address internal _installedRule;
 
   /// @notice The registered classes, in registration order
   address[] internal _classes;
@@ -66,7 +66,7 @@ contract Fund is Ownable, ERC165, IFund {
   // Kept as a modifier so the rule gate is visible in the `join` and `leave` signatures.
   // aderyn-ignore-next-line(modifier-used-only-once)
   modifier onlyRule() {
-    if (msg.sender != _installedRule) revert Fund_OnlyRule(msg.sender);
+    if (msg.sender != _investors.rule) revert Fund_OnlyRule(msg.sender);
     _;
   }
 
@@ -91,7 +91,7 @@ contract Fund is Ownable, ERC165, IFund {
     if (_classIndex[_token] != 0) revert Fund_AlreadyRegistered(_token);
     uint256 _count = _classes.length;
     if (_count >= MAX_CLASSES) revert Fund_TooManyClasses(MAX_CLASSES);
-    address _installed = _installedRule;
+    address _installed = _investors.rule;
     if (_installed == address(0)) revert Fund_RuleNotSet();
     if (!ERC165Checker.supportsInterface(_token, type(IPolicyGated).interfaceId)) revert Fund_NotPolicyGated(_token);
     if (!_hookListsRule(_token, _installed)) revert Fund_RuleNotListed(_token, _installed);
@@ -115,8 +115,8 @@ contract Fund is Ownable, ERC165, IFund {
     // View interface: compiled to STATICCALL, so the registry cannot change state or re-enter before the write below.
     // aderyn-ignore-next-line(reentrancy-state-change)
     if (!REGISTRY.isAttested(_rule, IPolicyRegistry.AttestKind.RULE)) revert Fund_NotAttested(_rule);
-    address _oldRule = _installedRule;
-    _installedRule = _rule;
+    address _oldRule = _investors.rule;
+    _investors.rule = _rule;
     emit RuleSet(_oldRule, _rule);
   }
 
@@ -124,7 +124,7 @@ contract Fund is Ownable, ERC165, IFund {
   function setHolderCap(
     uint256 _cap
   ) external onlyOwner {
-    uint128 _newCap = SafeCast.toUint128(_cap);
+    uint48 _newCap = SafeCast.toUint48(_cap);
     uint256 _oldCap = _investors.cap;
     _investors.cap = _newCap;
     emit HolderCapSet(_oldCap, _cap);
@@ -215,7 +215,7 @@ contract Fund is Ownable, ERC165, IFund {
 
   /// @inheritdoc IFund
   function rule() external view returns (address _rule) {
-    _rule = _installedRule;
+    _rule = _investors.rule;
   }
 
   /// @inheritdoc IFund
@@ -236,7 +236,7 @@ contract Fund is Ownable, ERC165, IFund {
   function admission(
     address _token,
     address _account
-  ) external view returns (uint256 _index, uint256 _held, bool _exempt, uint256 _count, uint256 _cap) {
+  ) external view returns (uint256 _index, uint256 _held, bool _exempt, uint256 _count, uint256 _cap, address _rule) {
     _index = _classIndex[_token];
     uint256 _state = _holder[_account];
     _held = _state & _CLASS_BITS;
@@ -244,6 +244,7 @@ contract Fund is Ownable, ERC165, IFund {
     Investors memory _snapshot = _investors;
     _count = _snapshot.count;
     _cap = _snapshot.cap;
+    _rule = _snapshot.rule;
   }
 
   /// @inheritdoc IFund
@@ -289,7 +290,7 @@ contract Fund is Ownable, ERC165, IFund {
   function _moveCount(
     bool _up
   ) internal {
-    uint128 _count = _investors.count;
+    uint48 _count = _investors.count;
     _count = _up ? _count + 1 : _count - 1;
     _investors.count = _count;
     emit HolderCountUpdated(_count);

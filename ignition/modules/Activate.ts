@@ -7,10 +7,13 @@ import { ROLES, TOKENS } from "./roles.js";
  * bound to it, so every later step (configuration, roles, hand-over) runs only for correctly bound tokens. Then:
  *
  * 1. Configure while the deployer is the tokens' admin: settlement window, holder caps, the 7540 escrow exemption.
- * 2. Grant the operational roles; UPGRADER_ROLE goes to the timelock only; the guardian becomes a timelock canceller;
+ *    The fund is configured the same way while the deployer owns it: install its rule, set its cap, then register the
+ *    three tokens as classes one after another, so class numbers 1 to 3 are intent, fund, asyncFund. Until a class is
+ *    registered every movement on it is rejected, so no balance exists before it is.
+ * 2. Grant the operational roles, after the registrations; UPGRADER_ROLE goes to the timelock only; the guardian becomes a timelock canceller;
  *    the recovery timelock gets RECOVERY_ROLE (unpause and revoke GUARDIAN_ROLE only) on every token and the executor.
  * 3. Hand over: DEFAULT_ADMIN_ROLE to the timelock on the tokens and the executor; the deployer renounces everywhere,
- *    and `ProxyDeployer` ownership moves to the timelock.
+ *    and `ProxyDeployer` and `Fund` ownership move to the timelock.
  *
  * Outside this module: the identity provider must verify the 7540 vault (it escrows pending redemptions).
  */
@@ -29,6 +32,8 @@ export default buildModule("Activate", (m) => {
   const windowRule = m.contractAt("SettlementWindowRule", p("windowRule"));
   const maxHoldersRule = m.contractAt("MaxHoldersRule", p("maxHoldersRule"));
   const cap = m.getParameter<bigint>("holderCap");
+  const fundContract = m.contractAt("Fund", p("fundContract"));
+  const fundCap = m.getParameter<bigint>("fundHolderCap");
 
   // Every token deploy; all configuration and roles wait for all of them, so one mis-bound hook grants nothing anywhere.
   const deploys: ReturnType<typeof m.call>[] = [];
@@ -81,6 +86,17 @@ export default buildModule("Activate", (m) => {
     m.call(maxHoldersRule, "setExemptHolder", [asyncFund, asyncFund, true], { after: deploys }),
   ];
 
+  // The fund: rule and cap first, then each class in turn (a chain, so the numbering never depends on scheduling).
+  const ruleSet = m.call(fundContract, "setRule", [p("fundHoldersRule")], { after: deploys });
+  const capSet = m.call(fundContract, "setHolderCap", [fundCap], { after: deploys });
+  const registered: ReturnType<typeof m.call>[] = [];
+  let previous: ReturnType<typeof m.call>[] = [ruleSet, capSet];
+  for (const [key, token] of Object.entries(tokens)) {
+    const registration = m.call(fundContract, "registerClass", [token], { id: `${key}_register`, after: previous });
+    registered.push(registration);
+    previous = [registration];
+  }
+
   // 2. Roles.
   const grant = (
     key: string,
@@ -88,7 +104,7 @@ export default buildModule("Activate", (m) => {
     role: string,
     to: unknown,
   ) =>
-    m.call(contract, "grantRole", [role, to as string], { id: `${key}_grant`, after: deploys });
+    m.call(contract, "grantRole", [role, to as string], { id: `${key}_grant`, after: [...deploys, ...registered] });
   const granted = [
     grant("intent_minter", intent, ROLES.MINTER, p("minter")),
     grant("intent_burner", intent, ROLES.BURNER, p("burner")),
@@ -124,6 +140,8 @@ export default buildModule("Activate", (m) => {
   });
   // Any later token goes through governance: the deployer EOA can no longer place one.
   m.call(proxyDeployer, "transferOwnership", [timelock], { id: "proxyDeployer_owner", after: deploys });
+  // The fund is configured, so it goes to governance too: a later class or rule change is a timelock operation.
+  m.call(fundContract, "transferOwnership", [timelock], { id: "fund_owner", after: registered });
 
   return { intent, fund, asyncFund };
 });

@@ -22,7 +22,7 @@ sequenceDiagram
   T->>H: afterTransfer (holder count)
 ```
 
-Checks with the standard rules: `IdentityRule` needs `to` verified. `MaxHoldersRule` rejects if `to` is a new holder and the cap is full. Paused rejects it.
+Checks with the standard rules: `IdentityRule` needs `to` verified. `MaxHoldersRule` rejects if `to` is a new holder and the cap is full. `FundHoldersRule` rejects if `to` would be a new investor of a full fund, and with `NOT_FUND_CLASS` if the token is not a registered class of its fund. Paused rejects it.
 
 Reverts: `AccessControlUnauthorizedAccount` without the role. A zero `to` reverts with `ERC20InvalidReceiver(address(0))` before `_update`. Otherwise `PolicyGated_TransferRejected(PAUSED | RECEIVER_NOT_VERIFIED | MAX_HOLDERS)`.
 
@@ -57,7 +57,7 @@ A holder sends tokens with `transfer`. A spender with allowance uses `transferFr
 
 `approve` and `permit` change an allowance. They do not move tokens and do not call the hook, so they work while the token is paused. `permit` is ERC-2612 and uses the same EIP-712 domain as signed intents.
 
-Checks with the standard rules: pause, `balance - frozen >= amount`, `IdentityRule` on both parties, `LockupRule` on the sender, `MaxHoldersRule` if the receiver is a new holder. `SettlementWindowRule` does not apply to a direct transfer.
+Checks with the standard rules: pause, `balance - frozen >= amount`, `IdentityRule` on both parties, `LockupRule` on the sender, `MaxHoldersRule` if the receiver is a new holder, `FundHoldersRule` if the receiver would be a new investor of the fund. `SettlementWindowRule` does not apply to a direct transfer.
 
 Code: ERC-20 functions inherited from OpenZeppelin; `PolicyGatedERC20Upgradeable._update`.
 
@@ -80,7 +80,7 @@ TransferIntent(address from,address to,uint256 amount,bytes32 nonce,uint256 dead
 | `amount` | token amount |
 | `nonce` | 32 random bytes chosen by the signer. Each signer has its own set of nonces |
 | `deadline` | last valid unix timestamp, inclusive |
-| `ref` | a 32-byte reference to an off-chain message, for example the hash of an ISO 20022 message id. The token emits it and puts it in the context. None of the four standard rules reads it |
+| `ref` | a 32-byte reference to an off-chain message, for example the hash of an ISO 20022 message id. The token emits it and puts it in the context. None of the five standard rules reads it |
 
 Domain: `name` is the token name, `version` is `"1"`, `chainId` is the chain, `verifyingContract` is the token proxy. The token reports it through `eip712Domain()` (ERC-5267), and `intentHash(intent)` returns the digest. A signature is valid for one token on one chain.
 
@@ -127,7 +127,7 @@ Checks in `executeTransfer`, in this order. Step 1 reverts with `AccessControlUn
 3. The nonce was already used by `from`: reason `NONCE_USED`.
 4. The signature does not match `from`: reason `BAD_SIGNATURE`.
 5. The nonce is marked used.
-6. The movement goes through `_update` as `EXECUTED`: pause, frozen balance, then the hook. With the standard rules that means `IdentityRule` on both parties, `LockupRule` on the sender, `SettlementWindowRule` (the window must be open), and `MaxHoldersRule`.
+6. The movement goes through `_update` as `EXECUTED`: pause, frozen balance, then the hook. With the standard rules that means `IdentityRule` on both parties, `LockupRule` on the sender, `SettlementWindowRule` (the window must be open), `MaxHoldersRule`, and `FundHoldersRule`.
 7. `IntentExecuted(intentHash, from, to, amount, executor, ref)` is emitted. `executor` is the account that called the token, so it is the `IntentExecutor` contract when the call came through it.
 
 A revert anywhere undoes the nonce write. An intent rejected for being outside the settlement window can be submitted again when the window opens, until its deadline.
@@ -207,9 +207,9 @@ sequenceDiagram
   T-->>A: event ForcedTransfer(from, to, amount, agent)
 ```
 
-The hook still decides. With the standard rules: `IdentityRule` needs `to` verified and does not look at `from`. `LockupRule` passes. `MaxHoldersRule` does not apply the cap, but counts the new holder. Pause and the frozen amount do not stop it.
+The hook still decides. With the standard rules: `IdentityRule` needs `to` verified and does not look at `from`. `LockupRule` passes. `MaxHoldersRule` does not apply the cap, but counts the new holder. `FundHoldersRule` does the same for the fund, and still rejects with `NOT_FUND_CLASS` if the token is not a registered class. Pause and the frozen amount do not stop it.
 
-If the forced amount cuts into the frozen amount, `_releaseFrozen` lowers the frozen amount to what is left and emits `Frozen`. The token emits `Frozen`, then `Transfer`, then `ForcedTransfer`. With `MaxHoldersRule` installed, the rule's own `HolderCountUpdated` event can appear between `Transfer` and `ForcedTransfer`.
+If the forced amount cuts into the frozen amount, `_releaseFrozen` lowers the frozen amount to what is left and emits `Frozen`. The token emits `Frozen`, then `Transfer`, then `ForcedTransfer`. With `MaxHoldersRule` installed, the rule's own `HolderCountUpdated` event can appear between `Transfer` and `ForcedTransfer`, and with `FundHoldersRule` installed the fund's `HolderClassesUpdated` and `HolderCountUpdated` events can too.
 
 Code: `PolicyGatedERC20Upgradeable.forcedTransfer`, `_releaseFrozen`, `_moveAs`.
 

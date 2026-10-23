@@ -9,6 +9,9 @@ import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
  * - The registry, administered by the timelock from the start.
  * - The shared rules, one implementation per template, the `ProxyDeployer`, and the intent executor (administered by
  *   the deployer until `Activate` hands it over).
+ * - The `Fund` (owned by the deployer until `Activate` hands it over) and the `FundHoldersRule` that points at it. The
+ *   rule's codehash covers the fund's address and not the fund's code, so the council reads the fund's code and its
+ *   owner before attesting the rule.
  *
  * Next: the council attests the rules and implementations (council step 1), then `Tokens`.
  */
@@ -32,6 +35,10 @@ export default buildModule("Components", (m) => {
   const lockupRule = m.contract("LockupRule");
   const windowRule = m.contract("SettlementWindowRule");
   const maxHoldersRule = m.contract("MaxHoldersRule");
+  // The fund and its rule need each other's address, so the rule takes the fund at construction and `Activate` installs
+  // the rule in the fund with `setRule`. Not `fund`: that key already means the 4626 vault in these modules.
+  const fundContract = m.contract("Fund", [deployer, registry]);
+  const fundHoldersRule = m.contract("FundHoldersRule", [fundContract]);
 
   const intentImpl = m.contract("IntentToken");
   const fundImpl = m.contract("Gated4626Vault");
@@ -48,6 +55,8 @@ export default buildModule("Components", (m) => {
     lockupRule,
     windowRule,
     maxHoldersRule,
+    fundContract,
+    fundHoldersRule,
     intentImpl,
     fundImpl,
     asyncFundImpl,

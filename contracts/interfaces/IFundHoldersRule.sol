@@ -10,9 +10,10 @@ import {IFund} from 'interfaces/IFund.sol';
  *         that holds at least one class, and counts once however many classes it holds. The state lives in the fund, so
  *         a replaced rule keeps the count
  * @dev A token that is not a registered class of the fund is rejected with `Reasons.NOT_FUND_CLASS` on every movement,
- *      so a class is unusable until it is registered. Only a new investor is checked, net of a sender who leaves the
- *      fund, so a lowered cap never blocks existing investors. FORCED is exempt from the cap but still counted. A cap of
- *      0 fails closed. The class itself and exempt accounts never count
+ *      so a class is unusable until it is registered. So is every class of a rule that is no longer the fund's
+ *      installed one, so a retired rule never says yes in a pre-flight while the write fails. Only a new investor is
+ *      checked, net of a sender who leaves the fund, so a lowered cap never blocks existing investors. FORCED is exempt
+ *      from the cap but still counted. A cap of 0 fails closed. The class itself and exempt accounts never count
  */
 interface IFundHoldersRule is IComplianceRule {
   /*///////////////////////////////////////////////////////////////

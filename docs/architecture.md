@@ -4,6 +4,8 @@ This repo holds one base contract and three tokens built on it. Every balance mo
 
 The base does only mechanical work: roles, pause, frozen balances, forced transfers, and the pointer to the hook. Everything about who may hold, send or receive lives in rules.
 
+A fund groups several of these tokens as its share classes. The `Fund` contract records which tokens are classes and how many distinct investors hold any of them, and `FundHoldersRule`, one more rule in each class's hook, feeds it and enforces a fund-wide cap. See [The fund](#the-fund).
+
 ## The contracts
 
 | Contract | File | Proxy or immutable | What it does |
@@ -14,7 +16,8 @@ The base does only mechanical work: roles, pause, frozen balances, forced transf
 | `Gated4626Vault` | `contracts/vaults/` | UUPS proxy | ERC-4626 vault. The shares are a gated token |
 | `Gated7540Vault` | `contracts/vaults/` | UUPS proxy | ERC-7540 asynchronous vault. The shares are a gated token |
 | `ComplianceHook` | `contracts/hooks/` | immutable, one per token | Holds an ordered list of up to 16 rules. First rejection wins |
-| `BaseRule` and four rules | `contracts/hooks/`, `contracts/hooks/rules/` | `BaseRule` abstract; each rule immutable, one instance shared by every token whose hook lists it | `IdentityRule`, `LockupRule`, `SettlementWindowRule`, `MaxHoldersRule`. As deployed, `SettlementWindowRule` is on `IntentToken`'s hook only |
+| `BaseRule` and five rules | `contracts/hooks/`, `contracts/hooks/rules/` | `BaseRule` abstract; each rule immutable, one instance shared by every token whose hook lists it (`FundHoldersRule` is bound to one fund, so it is shared by that fund's classes) | `IdentityRule`, `LockupRule`, `SettlementWindowRule`, `MaxHoldersRule`, `FundHoldersRule`. As deployed, `SettlementWindowRule` is on `IntentToken`'s hook only |
+| `Fund` | `contracts/fund/` | immutable code, one per fund, owned by the deployer until `Activate` hands it to the main timelock | The fund's classes, the number of distinct investors across them, and each investor's class mask. It holds no policy: `FundHoldersRule` decides and the fund records |
 | `PolicyRegistry` | `contracts/governance/` | immutable, one per deployment | List of attested codehashes, each marked `HOOK`, `RULE` or `IMPLEMENTATION` |
 | `IntentExecutor` | `contracts/intents/` | immutable | Role-gated caller that submits signed intents to a token, one at a time or as an atomic batch |
 | `ProxyDeployer` | `contracts/deploy/` | immutable | Creates each token proxy at an address that can be computed before the hook exists |
@@ -26,7 +29,7 @@ Two external contracts are neither in this repo nor deployed by it. The identity
 
 A token's implementation contract calls `_disableInitializers()` in its constructor, so only a proxy can be initialised. Hooks and rules are not proxies. To change one you deploy a new one and install it.
 
-Code: `PolicyGatedERC20Upgradeable`, `IntentSettledUpgradeable`, `ComplianceHook`, `BaseRule`, `PolicyRegistry`, `IntentExecutor`, `ProxyDeployer`, `TokenProxy`, `GovernanceTimelock`.
+Code: `PolicyGatedERC20Upgradeable`, `IntentSettledUpgradeable`, `ComplianceHook`, `BaseRule`, `Fund`, `FundHoldersRule`, `PolicyRegistry`, `IntentExecutor`, `ProxyDeployer`, `TokenProxy`, `GovernanceTimelock`.
 
 ## Structure
 
@@ -42,18 +45,20 @@ flowchart LR
     Proxy -->|"beforeTransfer, wantsAfter, afterTransfer"| Hook
   end
   Proxy -->|"delegatecall"| Impl["Implementation: one per template, shared by its tokens"]
-  Hook -->|"check, after_"| Rules["Shared rules: four on IntentToken's hook, three on each vault's"]
+  Hook -->|"check, after_"| Rules["Shared rules: five on IntentToken's hook, four on each vault's"]
   Rules -->|"IdentityRule only: isVerified"| IdReg["Identity registry (external)"]
+  Rules -->|"FundHoldersRule only: admission, join, leave"| Fund["Fund (one per fund)"]
   Proxy -->|"vaults only: asset transfers"| Asset["Vault asset (external)"]
   Proxy -.->|"isAttested, at install and upgrade"| Reg["PolicyRegistry"]
   Hook -.->|"isAttested for each rule, when the list is installed"| Reg
+  Fund -.->|"isAttested for the rule, when it is set"| Reg
 ```
 
 Solid arrows are calls, except `CREATE2`, which is a deployment, and `delegatecall`, which runs the implementation's code against the proxy's storage. Dotted arrows are registry checks that run when something is installed, not on every transfer. `IntentExecutor` appears only for `IntentToken`, which is the only token with `executeTransfer`.
 
-The main timelock administers the tokens, the hook, the registry and the executor, and owns `ProxyDeployer`. The recovery timelock can unpause the tokens and the executor and remove the guardian. [roles.md](roles.md) shows both.
+The main timelock administers the tokens, the hook, the registry and the executor, and owns `ProxyDeployer` and `Fund`. The recovery timelock can unpause the tokens and the executor and remove the guardian. [roles.md](roles.md) shows both.
 
-Code: `ProxyDeployer.deploy`, `PolicyGatedERC20Upgradeable._setHook`, `ComplianceHook._setRules`.
+Code: `ProxyDeployer.deploy`, `PolicyGatedERC20Upgradeable._setHook`, `ComplianceHook._setRules`, `Fund.setRule`.
 
 ## Calls during one movement
 
@@ -111,7 +116,10 @@ flowchart BT
   LR["LockupRule"] --> BR
   SW["SettlementWindowRule"] --> BR
   MH["MaxHoldersRule"] --> BR
+  FH["FundHoldersRule"] --> BR
   BR --> ICR["IComplianceRule"]
+  FU["Fund"] --> IFU["IFund"]
+  FU --> OWN["Ownable (OZ)"]
 ```
 
 The two vaults inherit `ERC4626Upgradeable` and the base side by side. Each overrides `_update` once, to resolve the two parents, and the override only calls `super._update`. The result is that vault shares are moved by the base's `_update` like any other token.
@@ -132,6 +140,29 @@ On both vaults the base's `mint(address,uint256)` and `burn(address,uint256)` al
 
 Code: `IntentSettledUpgradeable`, `Gated4626Vault`, `Gated7540Vault`.
 
+## The fund
+
+A fund is a set of share classes. Each class is one of the three tokens, with its own balances, hook and roles, so a class can be an `IntentToken`, a `Gated4626Vault` or a `Gated7540Vault`, and the fund never branches on which. `Fund` adds what no single class can know: which tokens are its classes, how many distinct investors hold any of them, and which classes each investor holds. It does not add up balances across classes, because units of different classes are not comparable. `positionsOf(account)` returns the account's balance in each class it holds, and a caller prices them.
+
+What it keeps:
+
+- **Classes.** An append-only list, numbered from 1 in the order of `registerClass`, at most `MAX_CLASSES` (32). `classIndexOf(token)` is 0 for a token that is not a class. Registration is permanent. A token can be registered only if it is new, the rule is set, it reports ERC-165 support for `IPolicyGated`, its current hook lists the installed rule (read with `rules()`), and its total supply is zero. The last check closes the cold start: a class with holders the fund never saw would start with a wrong count.
+- **Each account's classes.** One storage slot per account: bit `n - 1` is set while the account holds class `n`, and the top bit means "exempt". The class token itself is never recorded as holding itself, which is how the 7540 vault's escrow stays out of the count without a stored exemption.
+- **The investor count.** The number of accounts that hold at least one class and are not exempt. An account that holds three classes counts once. An exempt account never counts. `setExempt` on an account that holds a class moves the count by one.
+- **The cap and the installed rule.** The installed rule, the count and the cap share one slot (the count and the cap are 48 bits each). The first count write is then never a write to an empty slot, and the rule can be read with the count and cap at no extra cost.
+
+Who records which classes an account holds: only the installed rule, through `join` and `leave`, and only for a registered class. (The owner's `setExempt` also moves the count, for an account that holds a class.) `FundHoldersRule.after_` calls `join` when an account's balance in a class goes from zero to positive, and `leave` when it reaches zero. A movement that changes neither writes nothing. `join` and `leave` do nothing for an account that already has, or already lacks, the class. The fund's state is shared by every class, so a token that only names itself in a movement must not reach it. `FundHoldersRule.check` rejects a token that is not a registered class, and `Fund.join` and `Fund.leave` revert for one (`Fund_NotAClass`), which is what stops a fake token that calls `after_` directly.
+
+Each change to an account's classes emits `HolderClassesUpdated(account, classes)`, and each change to the count emits `HolderCountUpdated(count)`. With the class tokens' own `Transfer` events these are the investor register, so the fund keeps no on-chain list of holders.
+
+Who configures it: the fund is `Ownable`. The deployer owns it while `Activate` configures it, and then ownership moves to the main timelock. The owner calls `registerClass`, `setRule` (the rule must be attested as `RULE`), `setHolderCap` (at most `type(uint48).max`) and `setExempt`. `join` and `leave` are for the installed rule only.
+
+What `FundHoldersRule` decides is in [transfer-checks.md](transfer-checks.md#fundholdersrule). In short, it rejects a new investor over the cap, and rejects every movement of a token that is not a registered class or whose hook lists a rule that is no longer the fund's. Replacing the rule therefore takes one timelock batch that sets it in the fund and in every class's hook. [governance-and-deployment.md](governance-and-deployment.md#changing-the-funds-rule) has the steps.
+
+What it costs, measured on `IntentToken` proxies with `IdentityRule` and a class `MaxHoldersRule` as the baseline: about 26,900 gas more on an ordinary transfer between existing holders, about 31,800 more when an existing investor takes a second class, and about 53,300 to 57,300 more when a new investor joins the fund. Recording a new investor is one fresh storage write for the account's slot (about 22,100) and a rewrite of the shared slot for the count (about 5,000).
+
+Code: `Fund`, `FundHoldersRule`.
+
 ## Storage
 
 The base and each template keep their state in ERC-7201 namespaced slots, so a later upgrade can add fields without moving existing ones.
@@ -141,6 +172,8 @@ The base and each template keep their state in ERC-7201 namespaced slots, so a l
 | `gated.storage.PolicyGatedERC20` | registry address, hook address, frozen amount per account |
 | `gated.storage.IntentSettled` | `nonces[signer][nonce]` |
 | `gated.storage.Gated7540Vault` | `custody`, `lastPrice`, `deposits[controller]`, `redeems[controller]`, `operators[controller][operator]` |
+
+`Fund` is not upgradeable, so it uses plain storage: the slot with the installed rule, the count and the cap, the class list, the class number of each token, and one state slot per account.
 
 The base also uses three transient-storage slots of its own, `gated.transient.kind`, `gated.transient.ref` and `gated.transient.deadline`. A fourth transient slot belongs to OpenZeppelin's `ReentrancyGuardTransient`. A function that transfers tokens between two accounts as `FORCED` or `EXECUTED` writes the three slots just before calling `_transfer`, through `_moveAs`. The enforcement mint in `Gated7540Vault.recoverClaimable` writes them before calling `_mint`, through `_mintAs`. `_update` reads them and clears them. The token cannot infer these two kinds from the addresses, so this is how the hook learns them. The transient slots live for one transaction.
 
@@ -155,9 +188,11 @@ Code: `PolicyGatedERC20Upgradeable._moveAs`, `_mintAs`, `_consumePending`, `_get
 | Token implementation | UUPS `upgradeToAndCall` | `UPGRADER_ROLE`, which is the main timelock | the new implementation's codehash is attested as `IMPLEMENTATION` |
 | Rule logic | deploy a new rule and put it in the list | as for the rule list | as for the rule list |
 | Registry | the token's pointer has no setter; only an upgrade to an attested implementation could change it. Rules are vetted against the hook's own immutable `REGISTRY`, which comes with the hook | as for the hook or the implementation | as for the hook or the implementation |
+| Fund rule | `setRule(newRule)` on the fund, and `setRules` on every class's hook in the same batch | the fund's owner and each hook's `ADMIN`, which are the main timelock | the new rule is attested as `RULE`. Until every hook lists it, the old rule rejects every movement |
+| Fund class | `registerClass(token)` on the fund, for a new token only | the fund's owner, which is the main timelock | the token reports ERC-165 support for `IPolicyGated`, its hook lists the rule, its supply is zero, and the fund has room |
 | Executor | grant `EXECUTOR_ROLE` to a new executor, revoke the old one | `DEFAULT_ADMIN_ROLE` | none |
 | 7540 custody address | `setCustody` | `DEFAULT_ADMIN_ROLE` | non-zero address |
 
 The registry check looks at `target.codehash`, so hooks, rules and implementations must be plain contracts. The registry is consulted only when something is installed. Revoking an attestation later does not change a token that already runs the revoked code.
 
-Code: `PolicyGatedERC20Upgradeable.setPolicyHook`, `_authorizeUpgrade`, `ComplianceHook.setRules`, `PolicyRegistry.isAttested`.
+Code: `PolicyGatedERC20Upgradeable.setPolicyHook`, `_authorizeUpgrade`, `ComplianceHook.setRules`, `Fund.setRule`, `Fund.registerClass`, `PolicyRegistry.isAttested`.

@@ -43,6 +43,7 @@ const REASON_NAMES = [
   "BAD_SIGNATURE",
   "NO_HOOK",
   "NO_RULES",
+  "NOT_FUND_CLASS",
 ] as const;
 
 /** `Errors.sol` reason codes, keyed by name; `reasonName` maps a code back for readable assertions. */
@@ -58,6 +59,8 @@ export const MONDAY_10AM = MONDAY + 10n * 3_600n;
 export const WINDOW_OPEN = 9 * 3_600;
 export const WINDOW_CLOSE = 17 * 3_600;
 export const HOLDER_CAP = 3n;
+/** The fund-wide investor cap, one number for the three demo classes. */
+export const FUND_HOLDER_CAP = 3n;
 
 const ATTEST = { HOOK: 1, RULE: 2, IMPLEMENTATION: 3 } as const;
 
@@ -118,6 +121,8 @@ export async function deployUntilActivate(connection: NetworkConnection) {
     lockupRule,
     windowRule,
     maxHoldersRule,
+    fundContract,
+    fundHoldersRule,
     proxyDeployer,
     executor,
   } =
@@ -128,7 +133,7 @@ export async function deployUntilActivate(connection: NetworkConnection) {
   };
 
   // Council step 1.
-  for (const rule of [identityRule, lockupRule, windowRule, maxHoldersRule]) {
+  for (const rule of [identityRule, lockupRule, windowRule, maxHoldersRule, fundHoldersRule]) {
     await attest(rule.address, ATTEST.RULE, `ipfs://rule-review/${rule.address}`);
   }
   for (const impl of [components.intentImpl, components.fundImpl, components.asyncFundImpl]) {
@@ -143,6 +148,7 @@ export async function deployUntilActivate(connection: NetworkConnection) {
     lockupRule: lockupRule.address,
     windowRule: windowRule.address,
     maxHoldersRule: maxHoldersRule.address,
+    fundHoldersRule: fundHoldersRule.address,
     intentImpl: components.intentImpl.address,
     fundImpl: components.fundImpl.address,
     asyncFundImpl: components.asyncFundImpl.address,
@@ -171,6 +177,8 @@ export async function deployUntilActivate(connection: NetworkConnection) {
     operator: address(operator),
     fulfiller: address(fulfiller),
     holderCap: HOLDER_CAP,
+    fundContract: fundContract.address,
+    fundHolderCap: FUND_HOLDER_CAP,
     windowOpen: WINDOW_OPEN,
     windowClose: WINDOW_CLOSE,
     windowDays: await windowRule.read.MON_TO_FRI(),
@@ -194,7 +202,8 @@ export async function deployUntilActivate(connection: NetworkConnection) {
       recoveryTimelock,
       registry,
       identity,
-      rules: { identityRule, lockupRule, windowRule, maxHoldersRule },
+      rules: { identityRule, lockupRule, windowRule, maxHoldersRule, fundHoldersRule },
+      fund: fundContract,
       proxyDeployer,
       asset,
       token,
@@ -225,6 +234,8 @@ export type Stack = Awaited<ReturnType<typeof deployStack>>;
  *   ordered rule list (`RULE_ORDER`); rules have no access control of their own;
  * - the guardian can cancel timelock operations but cannot propose or execute them;
  * - `ProxyDeployer` is owned by the timelock, so no token can be placed outside governance;
+ * - the fund is owned by the timelock, runs the attested rule that points back at it, has the intended cap, and holds
+ *   the three tokens as its classes, in that order;
  * - the recovery timelock holds exactly RECOVERY_ROLE on each token, the executor and the main timelock (nothing else,
  *   nowhere else), has no cancellers, and the guardian holds nothing on it.
  */
@@ -309,6 +320,16 @@ async function assertHandedOver(s: Omit<Stack, "holders" | "identity" | "asset" 
     assert.ok(!names.includes("hasRole") && !names.includes("owner"), `rule ${rule.address} has its own access control`);
   }
   assert.ok(isAddressEqual(await s.proxyDeployer.read.owner(), timelock), "ProxyDeployer is not owned by the timelock");
+  assert.ok(isAddressEqual(await s.fund.read.owner(), timelock), "the fund is not owned by the timelock");
+  assert.ok(isAddressEqual(await s.fund.read.rule(), s.rules.fundHoldersRule.address), "the fund runs another rule");
+  assert.ok(isAddressEqual(await s.rules.fundHoldersRule.read.FUND(), s.fund.address), "the fund rule points at another fund");
+  assert.equal(await s.registry.read.isAttested([s.rules.fundHoldersRule.address, ATTEST.RULE]), true, "the fund rule is not attested");
+  assert.equal(await s.fund.read.holderCap(), FUND_HOLDER_CAP, "fund cap");
+  const classes = [s.token, s.vault4626, s.vault7540];
+  assert.equal(await s.fund.read.classCount(), BigInt(classes.length), "class count");
+  for (const [i, t] of classes.entries()) {
+    assert.ok(isAddressEqual(await s.fund.read.classAt([BigInt(i + 1)]), t.address), `class ${i + 1} is not ${t.address}`);
+  }
   const guardian = s.wallets.guardian.account.address;
   assert.equal(await s.timelock.read.hasRole([await s.timelock.read.CANCELLER_ROLE(), guardian]), true);
   assert.equal(await s.timelock.read.hasRole([await s.timelock.read.PROPOSER_ROLE(), guardian]), false);

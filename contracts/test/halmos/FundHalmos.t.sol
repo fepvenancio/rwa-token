@@ -190,6 +190,9 @@ contract FundHalmos is Test {
     if (_fund.heldClasses(_accountA) != 0 && !_fund.isExempt(_accountA)) ++_expected;
     if (_fund.heldClasses(_accountB) != 0 && !_fund.isExempt(_accountB)) ++_expected;
     assert(_fund.holderCount() == _expected);
+    // They share a slot with the count, so no join, leave or exemption may touch them.
+    assert(_fund.rule() == _rule);
+    assert(_fund.holderCap() == 10);
   }
 
   /// @dev One of four operations: join, leave, exempt, unexempt. The class is read only where it matters, which keeps

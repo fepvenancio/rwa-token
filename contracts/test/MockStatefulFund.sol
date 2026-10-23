@@ -18,12 +18,13 @@ contract MockStatefulFund {
    * @return _exempt Not exempt
    * @return _count An empty fund
    * @return _cap A cap of one
+   * @return _rule The caller, so the rule would be the installed one if the call succeeded
    */
   function admission(
     address,
     address
-  ) external returns (uint256 _index, uint256 _held, bool _exempt, uint256 _count, uint256 _cap) {
+  ) external returns (uint256 _index, uint256 _held, bool _exempt, uint256 _count, uint256 _cap, address _rule) {
     ++writes;
-    (_index, _held, _exempt, _count, _cap) = (1, 0, false, 0, 1);
+    (_index, _held, _exempt, _count, _cap, _rule) = (1, 0, false, 0, 1, msg.sender);
   }
 }

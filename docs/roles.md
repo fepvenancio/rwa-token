@@ -24,6 +24,7 @@ The word "operator" means three different things in this repo:
 | Main timelock | itself | `DEFAULT_ADMIN_ROLE` | OpenZeppelin's constructor makes every timelock its own admin |
 | Main timelock | each `ComplianceHook` | `ADMIN` (immutable) | constructor |
 | Main timelock | `ProxyDeployer` | owner | `Activate` calls `transferOwnership` |
+| Main timelock | `Fund` | owner | `Activate` calls `transferOwnership`, after it has registered the three tokens |
 | Recovery timelock | each token, `IntentExecutor` | `RECOVERY_ROLE` | `Activate` |
 | Recovery timelock | main timelock | `RECOVERY_ROLE` | `GovernanceTimelock` constructor |
 | Recovery timelock | itself | `DEFAULT_ADMIN_ROLE` | OpenZeppelin's constructor |
@@ -39,9 +40,9 @@ The word "operator" means three different things in this repo:
 | Relayer / bank key | `IntentExecutor` | `OPERATOR_ROLE` | `Activate` |
 | Bank (fulfiller) | `Gated7540Vault` | `FULFILLER_ROLE` | `Activate` |
 
-Until `Activate` finishes, the deployer account holds `DEFAULT_ADMIN_ROLE` on each token, on the executor and on both timelocks, and owns `ProxyDeployer`. To hand over, `Activate` does four things:
+Until `Activate` finishes, the deployer account holds `DEFAULT_ADMIN_ROLE` on each token, on the executor and on both timelocks, and owns `ProxyDeployer` and `Fund`. To hand over, `Activate` does four things:
 1. grants the main timelock `DEFAULT_ADMIN_ROLE` on the tokens and the executor;
-2. moves `ProxyDeployer` ownership to the main timelock;
+2. moves `ProxyDeployer` and `Fund` ownership to the main timelock;
 3. revokes governance's `CANCELLER_ROLE` on the recovery timelock;
 4. has the deployer renounce `DEFAULT_ADMIN_ROLE` on the tokens, the executor and both timelocks.
 
@@ -62,6 +63,7 @@ flowchart LR
   TL -->|"admin"| Reg["PolicyRegistry"]
   TL -->|"admin"| Exec["IntentExecutor"]
   TL -->|"deploy"| PD["ProxyDeployer"]
+  TL -->|"registerClass, setRule, cap, exemptions"| Fund["Fund"]
   TL -->|"window, cap, count seed, exemptions"| Rules["Rules"]
   Gov -->|"schedule, execute; nobody can cancel"| RTL["Recovery timelock"]
   RTL -->|"unpause, revoke GUARDIAN_ROLE"| Tokens
@@ -136,10 +138,13 @@ Code: `PolicyGatedERC20Upgradeable`, `IntentSettledUpgradeable`, `Gated4626Vault
 | Recovery timelock | `schedule`, `execute` and their batch forms | `PROPOSER_ROLE`, `EXECUTOR_ROLE`: governance |
 | Recovery timelock | `cancel(id)` | `CANCELLER_ROLE`, which nobody holds after `Activate` |
 | Recovery timelock | `updateDelay`, `grantRole`, `revokeRole` | the recovery timelock itself |
+| `Fund` | `registerClass(token)`, `setRule(rule)`, `setHolderCap(cap)`, `setExempt(account, exempt)` | owner (OpenZeppelin `Ownable`) |
+| `Fund` | `join(token, account)`, `leave(token, account)` | the installed rule only, and only for a registered class |
+| `Fund` | `transferOwnership`, `renounceOwnership` | owner. Renouncing would freeze the class list, the rule, the cap and the exemptions for good |
 | `ProxyDeployer` | `deploy(...)` | owner |
 | `ProxyDeployer` | `transferOwnership`, `renounceOwnership` | owner (OpenZeppelin `Ownable`). Renouncing would disable `deploy` for good |
 
-Rules have no roles of their own. Each rule asks the token, at call time, who may configure it for that token:
+Rules have no roles of their own. `FundHoldersRule` has nothing to configure: its cap and exemptions live in the fund, and only the fund's owner sets them. Each of the other rules asks the token, at call time, who may configure it for that token:
 
 | Rule function | Allowed if the caller holds, on the token |
 |---|---|
@@ -149,9 +154,9 @@ Rules have no roles of their own. Each rule asks the token, at call time, who ma
 
 After `Activate`, `DEFAULT_ADMIN_ROLE` on a token is the main timelock. So `setWindow`, `setCap`, the seeds and `setExemptHolder` take effect only after the timelock delay. A count passed to `seedHolderCount` is therefore at least the delay old when it lands. `seedHolderCountFromHolders` and `seedHolderCountFromRule` read the count when the batch executes ([governance-and-deployment.md](governance-and-deployment.md#the-holder-count-across-rule-and-hook-changes)). The holder count itself still moves with every movement that adds or removes a holder. Lockups are set by the agent with no delay.
 
-`afterTransfer` on the hook is open only to `TOKEN`. `after_` on a rule is open only to the hook currently installed on `ctx.token`, which the rule checks by calling `ctx.token.policyHook()`. Neither `ctx.token` nor the `token` argument of the setters is authenticated. Any contract can call these for a token address it controls, but that changes only that address's entries, never a real token's.
+`afterTransfer` on the hook is open only to `TOKEN`. `after_` on a rule is open only to the hook currently installed on `ctx.token`, which the rule checks by calling `ctx.token.policyHook()`. Neither `ctx.token` nor the `token` argument of the setters is authenticated. Any contract can call these for a token address it controls, but that changes only that address's entries, never a real token's. `FundHoldersRule.after_` can be reached the same way, and there the entries are shared by every class, so the fund refuses any token that is not a registered class (`Fund_NotAClass`), and only the owner registers one.
 
-Code: `ComplianceHook`, `PolicyRegistry`, `IntentExecutor`, `ProxyDeployer`, `BaseRule.onlyHook`, `SettlementWindowRule.setWindow`, `MaxHoldersRule.onlyTokenAdmin`, `LockupRule.setLockup`.
+Code: `ComplianceHook`, `PolicyRegistry`, `IntentExecutor`, `ProxyDeployer`, `Fund`, `BaseRule.onlyHook`, `SettlementWindowRule.setWindow`, `MaxHoldersRule.onlyTokenAdmin`, `LockupRule.setLockup`, `FundHoldersRule.after_`.
 
 ## What the guardian can do
 
@@ -188,4 +193,4 @@ Code: `ignition/modules/Components.ts`, `test/nodejs/fixtures.ts` (`assertHanded
 - Mint or burn vault shares through `mint(to, amount)` or `burn(from, amount)`. They are role-gated on `IntentToken`; on the vaults they have no role check and revert for every caller. Shares are minted by ERC-4626 `deposit` and `mint(shares, receiver)`, by 7540 deposit claims and by `recoverClaimable`. They are burned by 4626 redemptions and 7540 redemption fulfilments.
 - Make `transfer` return `false`. A movement that the base's pause and frozen checks or the hook reject reverts with `PolicyGated_TransferRejected(reason)`. OpenZeppelin's own checks (zero address, allowance, the reentrancy guard) revert with their own errors. A zero-amount transfer, or one to yourself, that the rules allow returns `true` and moves nothing.
 - Let the executor change an intent. It passes the holder's signed fields to the token, which checks the signature.
-- Let a rule configure itself for a token. Each rule reads the permission from the token.
+- Let a rule configure itself for a token. Each rule that has per-token settings reads the permission from the token. `FundHoldersRule` has none: the fund's owner sets the cap and the exemptions.

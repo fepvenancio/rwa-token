@@ -52,7 +52,9 @@ contract FundHoldersRuleUnitTest is Helpers {
     uint256 _cap
   ) internal {
     vm.mockCall(
-      _fund, abi.encodeCall(IFund.admission, (_token, _account)), abi.encode(_INDEX, _held, _exempt, _count, _cap)
+      _fund,
+      abi.encodeCall(IFund.admission, (_token, _account)),
+      abi.encode(_INDEX, _held, _exempt, _count, _cap, address(_rule))
     );
   }
 
@@ -147,12 +149,39 @@ contract FundHoldersRuleUnit_Check is FundHoldersRuleUnitTest {
   ) external {
     IPolicyHook.TransferKind _kind = IPolicyHook.TransferKind(bound(_kindSeed, 0, 4));
     address _receiver = _burn ? address(0) : _to;
-    vm.mockCall(_fund, abi.encodeCall(IFund.admission, (_token, _receiver)), abi.encode(0, 0, false, 0, 5));
+    vm.mockCall(
+      _fund, abi.encodeCall(IFund.admission, (_token, _receiver)), abi.encode(0, 0, false, 0, 5, address(_rule))
+    );
     assertEq(_check(_kind, _from, _receiver, _amount), Reasons.NOT_FUND_CLASS);
   }
 
   function test_WhenTheTokenIsNotAClass_AZeroAmountIsStillRejectedSoIsUserAllowedFailsClosed() external {
-    vm.mockCall(_fund, abi.encodeCall(IFund.admission, (_token, _to)), abi.encode(0, 0, false, 0, 5));
+    vm.mockCall(_fund, abi.encodeCall(IFund.admission, (_token, _to)), abi.encode(0, 0, false, 0, 5, address(_rule)));
+    assertEq(_check(IPolicyHook.TransferKind.MINT, address(0), _to, 0), Reasons.NOT_FUND_CLASS);
+  }
+
+  function testFuzz_WhenTheRuleIsNotTheFundsInstalledOne_EveryMovementIsRejected(
+    uint8 _kindSeed,
+    uint256 _amount,
+    bool _burn,
+    address _installed
+  ) external {
+    vm.assume(_installed != address(_rule));
+    IPolicyHook.TransferKind _kind = IPolicyHook.TransferKind(bound(_kindSeed, 0, 4));
+    address _receiver = _burn ? address(0) : _to;
+    // A registered class, an uncapped fund and a receiver who already holds a class: only the retired rule is wrong.
+    vm.mockCall(
+      _fund,
+      abi.encodeCall(IFund.admission, (_token, _receiver)),
+      abi.encode(_INDEX, _OTHER_BIT, false, 0, 5, _installed)
+    );
+    assertEq(_check(_kind, _from, _receiver, _amount), Reasons.NOT_FUND_CLASS);
+  }
+
+  function test_WhenTheRuleIsNotTheFundsInstalledOne_AZeroAmountProbeIsRejectedToo() external {
+    vm.mockCall(
+      _fund, abi.encodeCall(IFund.admission, (_token, _to)), abi.encode(_INDEX, 0, false, 0, 5, makeAddr('newRule'))
+    );
     assertEq(_check(IPolicyHook.TransferKind.MINT, address(0), _to, 0), Reasons.NOT_FUND_CLASS);
   }
 
@@ -181,7 +210,9 @@ contract FundHoldersRuleUnit_Check is FundHoldersRuleUnitTest {
   }
 
   function test_WhenTheReceiverIsTheClassItself_ItIsOkAtAFullCap() external {
-    vm.mockCall(_fund, abi.encodeCall(IFund.admission, (_token, _token)), abi.encode(_INDEX, 0, false, 3, 3));
+    vm.mockCall(
+      _fund, abi.encodeCall(IFund.admission, (_token, _token)), abi.encode(_INDEX, 0, false, 3, 3, address(_rule))
+    );
     assertEq(_check(IPolicyHook.TransferKind.TRANSFER, _from, _token, 1), Reasons.TRANSFER_OK);
   }
 
@@ -267,7 +298,9 @@ contract FundHoldersRuleUnit_Check is FundHoldersRuleUnitTest {
 
   function test_WhenTheSenderIsTheClassItself_EmptyingItFreesNoSlot() external {
     _newReceiver(3, 3);
-    vm.mockCall(_fund, abi.encodeCall(IFund.admission, (_token, _token)), abi.encode(_INDEX, _BIT, false, 3, 3));
+    vm.mockCall(
+      _fund, abi.encodeCall(IFund.admission, (_token, _token)), abi.encode(_INDEX, _BIT, false, 3, 3, address(_rule))
+    );
     _bal(_token, 10);
     assertEq(_check(IPolicyHook.TransferKind.TRANSFER, _token, _to, 10), Reasons.MAX_HOLDERS);
   }
@@ -394,12 +427,96 @@ contract FundHoldersRuleUnit_After is FundHoldersRuleUnitTest {
   }
 }
 
+/// @notice A class token whose `balanceOf` writes. Its `policyHook` does not, so `onlyHook` passes and the balance reads run
+contract FundHoldersRuleStatefulBalanceToken {
+  address public immutable HOOK;
+  uint256 public writes;
+
+  constructor(
+    address _hook
+  ) {
+    HOOK = _hook;
+  }
+
+  function policyHook() external view returns (address _hook) {
+    _hook = HOOK;
+  }
+
+  function balanceOf(
+    address
+  ) external returns (uint256 _balance) {
+    ++writes;
+    _balance = 10;
+  }
+}
+
+/// @notice A fund at a full cap whose `admission` writes only when asked about `SENDER`, so the receiver read passes and
+///         the sender read is the one under test. The class is number 1 and the sender holds only it
+contract FundHoldersRuleFundWritingOnSender {
+  address public immutable SENDER;
+  bool public immutable WRITES;
+  uint256 public writes;
+
+  constructor(
+    address _sender,
+    bool _writes
+  ) {
+    SENDER = _sender;
+    WRITES = _writes;
+  }
+
+  function admission(
+    address,
+    address _account
+  ) external returns (uint256 _index, uint256 _held, bool _exempt, uint256 _count, uint256 _cap, address _rule) {
+    if (_account == SENDER && WRITES) ++writes;
+    (_index, _held, _exempt, _count, _cap, _rule) = (1, _account == SENDER ? 1 : 0, false, 1, 1, msg.sender);
+  }
+}
+
 contract FundHoldersRuleUnit_TokenAndFundCallsAreStatic is FundHoldersRuleUnitTest {
   function test_WhenTheFundTriesToWriteDuringCheck_CheckReverts() external {
     MockStatefulFund _stateful = new MockStatefulFund();
     FundHoldersRule _statefulRule = new FundHoldersRule(IFund(address(_stateful)));
     vm.expectRevert(bytes('')); // a write inside a STATICCALL reverts with empty data, bubbled by the rule
     _statefulRule.check(_ctx(IPolicyHook.TransferKind.TRANSFER, _from, _to, 1));
+  }
+
+  function test_WhenTheFundTriesToWriteDuringTheSenderRead_CheckReverts() external {
+    // Control: the same path with a fund that does not write reaches the net-zero test and decides.
+    FundHoldersRuleFundWritingOnSender _quiet = new FundHoldersRuleFundWritingOnSender(_from, false);
+    FundHoldersRule _quietRule = new FundHoldersRule(IFund(address(_quiet)));
+    _bal(_from, 10);
+    assertEq(
+      _quietRule.check(_ctx(IPolicyHook.TransferKind.TRANSFER, _from, _to, 10)),
+      Reasons.TRANSFER_OK,
+      'control: net zero'
+    );
+
+    FundHoldersRuleFundWritingOnSender _writing = new FundHoldersRuleFundWritingOnSender(_from, true);
+    FundHoldersRule _writingRule = new FundHoldersRule(IFund(address(_writing)));
+    vm.expectRevert(bytes('')); // a write inside a STATICCALL reverts with empty data, bubbled by the rule
+    _writingRule.check(_ctx(IPolicyHook.TransferKind.TRANSFER, _from, _to, 10));
+  }
+
+  function test_WhenTheTokenTriesToWriteDuringTheSenderBalanceRead_CheckReverts() external {
+    FundHoldersRuleFundWritingOnSender _quiet = new FundHoldersRuleFundWritingOnSender(_from, false);
+    FundHoldersRule _quietRule = new FundHoldersRule(IFund(address(_quiet)));
+    FundHoldersRuleStatefulBalanceToken _stateful = new FundHoldersRuleStatefulBalanceToken(_hook);
+    IPolicyHook.TransferContext memory _context = _ctx(IPolicyHook.TransferKind.TRANSFER, _from, _to, 10);
+    _context.token = address(_stateful);
+    vm.expectRevert(bytes('')); // a write inside a STATICCALL reverts with empty data, bubbled by the rule
+    _quietRule.check(_context);
+  }
+
+  function test_WhenTheTokenTriesToWriteDuringTheBalanceReadsInAfter_AfterReverts() external {
+    // The token passes `onlyHook` (its `policyHook` does not write), so the balance read is the call under test.
+    FundHoldersRuleStatefulBalanceToken _stateful = new FundHoldersRuleStatefulBalanceToken(_hook);
+    IPolicyHook.TransferContext memory _context = _ctx(IPolicyHook.TransferKind.MINT, address(0), _to, 10);
+    _context.token = address(_stateful);
+    vm.prank(_hook);
+    vm.expectRevert(bytes('')); // a write inside a STATICCALL reverts with empty data, bubbled by the rule
+    _rule.after_(_context);
   }
 
   function test_WhenTheTokenTriesToWriteDuringTheBalanceReadsOrHookLookup_AfterReverts() external {
@@ -420,21 +537,28 @@ contract FundHoldersRuleUnit_Fuzz is FundHoldersRuleUnitTest {
     bool _exempt,
     uint128 _count,
     uint128 _cap,
+    address _installed,
     uint256 _amount,
     uint256 _senderBalance
   ) external {
     IPolicyHook.TransferKind _kind = IPolicyHook.TransferKind(bound(_kindSeed, 0, 4));
-    vm.mockCall(_fund, abi.encodeCall(IFund.admission, (_token, _to)), abi.encode(_index, _held, _exempt, _count, _cap));
     vm.mockCall(
-      _fund, abi.encodeCall(IFund.admission, (_token, _from)), abi.encode(_index, _held, _exempt, _count, _cap)
+      _fund,
+      abi.encodeCall(IFund.admission, (_token, _to)),
+      abi.encode(_index, _held, _exempt, _count, _cap, _installed)
+    );
+    vm.mockCall(
+      _fund,
+      abi.encodeCall(IFund.admission, (_token, _from)),
+      abi.encode(_index, _held, _exempt, _count, _cap, _installed)
     );
     _bal(_from, _senderBalance);
 
     bytes32 _reason = _check(_kind, _from, _to, _amount);
     bool _known = _reason == Reasons.TRANSFER_OK || _reason == Reasons.MAX_HOLDERS || _reason == Reasons.NOT_FUND_CLASS;
     assertTrue(_known);
-    // An unregistered token is the only source of NOT_FUND_CLASS, and a registered one never produces it.
-    assertEq(_reason == Reasons.NOT_FUND_CLASS, _index == 0);
+    // An unregistered token or a retired rule is the only source of NOT_FUND_CLASS.
+    assertEq(_reason == Reasons.NOT_FUND_CLASS, _index == 0 || _installed != address(_rule));
   }
 }
 

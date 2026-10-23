@@ -1261,7 +1261,7 @@ The two items still open from the 2026-10-17 audit. Both are text only. The buil
   - Slither 0, Aderyn 0;
   - the `Gated7540Vault` deployed bytecode hash is unchanged (`303eebf4…`).
 
-## Fund layer: `Fund` plus `FundHoldersRule` (approved 2026-10-22; F-1 approved and committed on `fund-layer`)
+## Fund layer: `Fund` plus `FundHoldersRule` (approved 2026-10-22; F-1 and F-2 approved and committed on `fund-layer`, not pushed)
 
 Source: [the assessment](docs/superpowers/specs/2026-10-22-fund-assessment.md) and its [benchmark](docs/superpowers/specs/fund-gas-bench/). On 2026-10-22 the owner asked for this plan using the assessment's defaults for its open questions. No code is written. Nothing here changes an existing contract, so the deployed bytecode of all 13 current contracts stays as it is.
 
@@ -1301,7 +1301,7 @@ The first seven are the assessment's defaults for its questions 1 to 7. F8 to F1
 
 State:
 - an append-only class list and a `classIndexOf` mapping (position plus one, so 0 means "not a class");
-- one slot holding `{count, cap}`, packed. The cap is set before the first investor, so the first count write is a 5,000 write and not a 22,100 one (benchmark, M4 against M2);
+- one slot holding `{rule, count, cap}`: the installed rule, and a 48-bit count and cap. The rule is set before the first investor, so the first count write is a 5,000 write and not a 22,100 one (benchmark, M4 against M2), and the rule is read with the count and cap for free. (F-1 had `{count, cap}` in 128 bits each, with the rule in a slot of its own. F-2 changed it, see "F-2 as built".)
 - `holder[account]`: one bit per class, plus a top bit for "exempt".
 
 Owner functions:
@@ -1319,7 +1319,7 @@ Events, on every state change: `ClassRegistered`, `RuleSet`, `HolderCapSet`, `Ex
 **`FundHoldersRule`** (immutable code, `BaseRule`, `IFundHoldersRule`). Immutable: `FUND`. `ruleId` is `keccak256('FundHoldersRule.v1')`. `wantsAfter` is true. The council attests it as RULE.
 
 `check` runs the cheap tests first:
-1. An unregistered `ctx.token` returns `NOT_FUND_CLASS`, for every movement including burns and zero amounts, so `isUserAllowed` also fails closed on a class that is not registered yet.
+1. An unregistered `ctx.token`, or a rule that is not the fund's installed one (added in F-2), returns `NOT_FUND_CLASS`, for every movement including burns and zero amounts, so `isUserAllowed` also fails closed on a class that is not registered yet.
 2. Zero amount, self-transfer, a burn, kind FORCED, a receiver equal to `ctx.token`, an exempt receiver, and a receiver who already holds any class return `TRANSFER_OK`.
 3. Otherwise the receiver is a new investor. A cap of 0 rejects. A count below the cap passes. A count at or above the cap passes only when the move is net zero: the sender leaves the fund entirely (full balance, and this is the sender's only class, and the sender is not exempt) and the count is at most the cap. That last test runs only when the cheap one already failed.
 
@@ -1435,15 +1435,86 @@ Contracts and Solidity tests only. No Ignition, no TypeScript test, no docs (F-2
   - `leave` has no guard for the class itself (above). The rule does not skip a receiver equal to the token: the fund ignores it, and a test pins that.
   - A second `FundHoldersRule` with the same fund has the same codehash, so the registry already attests it. Replacing a rule with identical code needs no attestation. Only changed code does.
   - `IFund` lists its two constant getters under views, which the lint's declaration order requires.
-- **Finding, rule replacement.** `Fund.setRule` takes effect at once. Until the classes' hooks list the new rule, the old rule's pre-flight still says yes and its `after_` is refused with `Fund_OnlyRule`, so movements revert and the state cannot drift. The integration test shows both. In production `setRule` and every class's `setRules` go in one timelock batch. The runbook in F-2 says so.
+- **Finding, rule replacement (superseded in F-2).** `Fund.setRule` takes effect at once. In F-1, until the classes' hooks listed the new rule, the old rule's pre-flight still said yes and its `after_` was refused with `Fund_OnlyRule` only for movements that change a holder's classes, so a transfer between existing holders went through. An outside review of F-1 pointed at both halves. F-2 makes the old rule fail closed in `check` instead, see "F-2 as built".
 - **Results.**
   - `npx hardhat test`: 637 passing (577 Solidity, 60 TypeScript), up from 513. The isolated profile: 577 passing.
   - Lint 0, fmt clean, `tsc` clean, Slither 0, Aderyn 0, upgrades-core 3 of 3 (`Fund` is immutable, so it is outside its scope). Slither's first run found three things in the new code (two locals that start at zero by design, one ignored tuple return) and Aderyn's found two view-call-before-write patterns. Each has an inline suppression with its reason.
   - `verify:reproducible`: 15 contracts identical across the two production builds.
   - The deployed bytecode of the 13 existing contracts is identical to `d3574df`, compared against a pristine build of that commit.
   - Halmos: the 5 fund properties take about 38 seconds. The existing four take 3 seconds. A first draft of one property took 124 seconds, so it was split.
-- **Not yet:** the F-2 benchmark rerun, so the gas expectations above are still estimates.
+- **Not yet (done in F-2):** the benchmark rerun, so the gas expectations above were estimates.
 - **Note:** `docs/superpowers/` is git-ignored at the owner's request (2026-10-22). The assessment and benchmark linked in this section are local files.
 
+### F-2 as built (2026-10-23, approved by the owner)
+
+Ignition, the TypeScript tests, the benchmark rerun, the docs, and two changes to F-1's code that came out of the measurements and an outside review. The owner approved it, the fail-closed change included, and it is committed on `fund-layer`, not pushed.
+
+- **Deployment.**
+  - `Components` deploys `Fund(deployer, registry)` and `FundHoldersRule(fund)`. `RULE_ORDER` puts `fundHoldersRule` last for all three tokens, and `Tokens` takes it as a rule parameter.
+  - `Activate` takes `fundContract`, `fundHoldersRule` and `fundHolderCap`. The plan said `fundHolderCap` would default to `holderCap`. I made it required, like `holderCap`, because that is simpler, and did not check whether Ignition can default one parameter to another. After the token deploys it calls `setRule` and `setHolderCap`, then `registerClass` for `intent`, `fund` and `asyncFund`, chained so they are classes 1, 2 and 3. The role grants wait for the registrations, and `Fund` ownership moves to the timelock after them.
+  - `assertHandedOver` gained: the fund is owned by the timelock, runs the attested rule that points back at it, has the intended cap, and holds the three tokens as classes 1 to 3 in order.
+- **TypeScript.** `fund.test.ts` has 7 tests: the deployment, the register events decoded, the cap across three classes with pre-flight parity, an executor-settled intent at a full cap (refused, with `canExecute` agreeing, and a whole-balance intent admitted), a class created after hand-over (rejected until the timelock registers it), the rule replaced in one timelock batch, and the rule set alone (every movement fails closed, pre-flight included). `deployment.test.ts` gained a twin hook without the fund rule, which now stops `Activate` at `registerClass`. Two existing tests changed for the fifth rule: a hard-coded rule count of 3 in `governance.test.ts`, and the twin hook in `deployment.test.ts`, which now lists the fund rule so that it still reaches the post-deploy check. The other 58 pass unchanged.
+- **Benchmark on the real contracts**, over a hook with `IdentityRule` and a class `MaxHoldersRule`, gas including the 21,000 intrinsic (harness in `docs/superpowers/specs/fund-gas-bench/`):
+
+  | Movement | Added by the fund layer |
+  |---|---|
+  | transfer between existing holders | +26,906 |
+  | mint to an existing holder | +25,285 |
+  | existing investor takes a second class | +31,808 |
+  | first investor ever | +53,346 |
+  | new investor by transfer | +54,964 |
+  | whole-balance move to a new holder | +57,342 |
+  | burn, investor stays in the fund | +33,124 |
+  | burn, investor leaves the fund | +32,724 |
+
+  The plan expected about +23,000 for an ordinary transfer and +47,000 for a first investor, so the real cost is 17% and 13% above it, over the plan's 10% line. The estimate took the lean in-rule variant (+19,326) and added the 3,900 split cost, and the real rule is closer to the non-lean variant with a separate contract (+26,674). It is not a bug, and nothing here stops on it, but the plan said to stop, so it is reported.
+- **`admission`, measured.** Against a variant that reads the fund with separate lazy calls, the single `admission` read costs 2,247 more on an ordinary movement and 3,474 more on a burn, and saves 2,460 when a new investor joins. It fails the plan's test of saving 1,000 on the common path. It is kept because of the next point: the rule rides in the slot that `admission` reads anyway.
+- **Change to F-1: the retired rule fails closed.** An outside review of F-1 made two points, both checked. First, while a class's hook lists a rule the fund has replaced, `canTransfer` says yes but a mint to a new holder reverts, which breaks "pre-flight never lies". Second, and not in my F-1 note, a transfer between two existing holders needs no write to the fund, so under the retired rule it went through. I proved that second point on `19323f3` with a probe test before changing anything. The fix is the review's own: `admission` also returns the installed rule, and `FundHoldersRule.check` returns `NOT_FUND_CLASS` for every movement unless that rule is itself. To make it free, the installed rule, the count and the cap share one slot (`address rule`, `uint48 count`, `uint48 cap`), so the new read costs nothing extra: measured, +254 gas on an ordinary movement, and about 1,700 less on every join and leave, because the count write no longer needs a separate rule-slot read. The cap now reverts above `type(uint48).max`. `IFund`'s interface id does not change (a return type is not in a selector). `NOT_FUND_CLASS`'s NatSpec widened and its value did not. During a replacement the class is now closed to everything, `forcedTransfer` included, until its hook lists the new rule, so the batch is the only safe way to change the rule, as the runbook says.
+- **Tests added.** `FundIntegration_Claimable`: a 7540 deposit fulfilled while the fund has room, the fund then filled through two other classes, the claim refused with `ControllerNotEligible(MAX_HOLDERS)`, and `recoverClaimable` delivering it as a counted enforcement mint (count 3 over a cap of 2). Static-call tests for the reads that the first suite left out: the balance reads in `after_`, the sender's `admission` and balance in `check`, and `Fund`'s reads in `registerClass` and `setRule`, each with a control showing the revert comes from the write. Packed-slot tests: no write to the rule, the count or the cap disturbs the other two (also asserted at every step of the model fuzz and in the Halmos properties).
+- **Mutation checks.** The Solidity set was run again on the new code, with seven mutants added and the dead-code one removed (46 planted in `Fund` and the rule, all caught). Six wiring mutants in the Ignition modules (fund ownership not handed over, cap never set, a class not registered, the intent hook built without the rule, classes registered in another order, the rule not installed) are all caught by the fixture's checks. Halmos: all seven F-1 mutants caught, and the properties now also assert that the rule and the cap never move.
+- **Docs.** `architecture.md` (the fund section, tables, diagrams), `transfer-checks.md` (a `FundHoldersRule` section, the order table, the reason code), `roles.md`, `governance-and-deployment.md` (a section on changing the fund's rule, the deployment steps, the checks), `flows-token.md`, `flows-vaults.md`, `money.md`, `docs/README.md`, the root README (runbook steps 1, 2, 5 and 7, security model, deviations) and SECURITY.md (scope, suppressions). A fresh agent that had not seen my reasoning checked every changed sentence against the code and found three wrong claims, four overclaims and a set of stale sentences on pages the diff had not touched. All are fixed. One it named is older than the fund layer and I left it: the README says three interface files are extra to the brief, and it is more.
+- **Results.**
+  - `npx hardhat test`: 658 passing (590 Solidity, 68 TypeScript), up from 637. The isolated profile: 590 passing.
+  - Lint 0, fmt clean, `tsc` clean, Slither 0, Aderyn 0, upgrades-core 3 of 3, Halmos 5 fund properties in 39 s (and the existing 4 in 7 s).
+  - `verify:reproducible`: 15 contracts identical across the two production builds. The 13 existing contracts' deployed bytecode is identical to `d3574df`.
+- **Brief.** On the owner's go-ahead, `CLAUDE.md` got two edits: the §3 layout lists `contracts/fund/` and `FundHoldersRule.sol`, and §6 has a `FundHoldersRule` entry. It notes that the rule's state is shared by every class, so it is sound only through the fund's registration gate. The points the review raised about the market, an identity adapter or a TypeScript kit were set aside at the owner's request.
+
+### The review of F-1, claim by claim (2026-10-23)
+
+The pasted review's code and architecture claims, checked against the repo:
+
+| Claim | Verdict |
+|---|---|
+| Its line references (`Fund.sol`, `FundHoldersRule.sol`, `FundIntegration.t.sol`, PLAN.md line 1438) | Accurate for `19323f3`. It read the real code |
+| Pre-flight says yes while a mint to a new holder reverts, after `setRule` alone | True and documented in F-1 |
+| A transfer between existing holders still succeeds under the retired rule | True. Proved with a probe on `19323f3`. My F-1 note ("movements revert") overstated it. Fixed in F-2 as above |
+| `recoverClaimable` across classes at a full cap has no test | True. Added, and it behaves as the review predicted |
+| Every external call in a rule is proven to be a STATICCALL | Overstated: the guard covered `policyHook` and the first `admission` only. Completed in F-2 |
+| Packing makes the first investor "a 5,000 write instead of 22,100" | Imprecise: only the count write. The account's own slot is still a fresh 22,100, and a new investor costs about +53,000 in all |
+| 125k to 135k gas for a warm transfer, 180k to 200k to onboard | Close for a three-rule hook (128,050 for a transfer, 183,676 for a new investor by transfer, 205,926 for a first mint). More with a longer rule list |
+| "72+ planted mutants killed" | Not checkable as stated. The fund layer's own count is 46 Solidity, 7 Halmos and 6 deployment mutants, all caught after F-2 |
+| "No cold-start seeding problem by construction" | True for registration. A rule dropped from a registered class's hook still leaves the state stale, and the docs say so |
+| Standard interfaces keep the stack composable with DeFi and custodians | Overstated. A gated token reverts for any counterparty that is not verified, so every venue contract must itself be a verified holder |
+| Address-based counting, per-holder lockup instead of per-lot | Accurate, and F2 and F1 in this plan |
+
+Not assessed: the scores, the market and buyer claims, the audit-cost figures, and the identity-adapter and relayer-kit suggestions.
+
+### DvP and the fund layer (considered, not built)
+
+What exists. `IntentToken.executeTransfer` moves one token between two accounts on the signature of the sender, and the movement reaches the hook as `EXECUTED`, with the intent's `ref` and `deadline` in the context. `IntentExecutor.executeBatch(token, intents, sigs)` takes one token and is all-or-nothing for the intents in it.
+
+What that means for delivery versus payment. There is no multi-token atomic settlement today. A securities leg and a cash leg are two intents on two tokens, and `executeBatch` cannot hold both because it takes one token. Even two separate calls would not make a DvP, because each signed intent can be executed alone: an operator could execute the securities leg and never the cash leg, and nothing on chain ties them. The `ref` field is free-form and nothing reads it. So the executor is not yet a DvP engine, and the brief's "grows into multi-leg DvP later" is still to do.
+
+What the fund layer does with it. Nothing in `Fund` or `FundHoldersRule` blocks a DvP. The rule treats `EXECUTED` like `TRANSFER`: a new investor is capped, and a whole-balance intent that empties the sender's only class is net zero and passes. This is covered by unit tests and by a TypeScript test that signs a real intent, which `canExecute` and the executor refuse at a full cap and admit for a whole balance. The settlement window rule already applies to `EXECUTED` movements.
+
+A shape that fits the stack, for the owner to react to. None of it is built or decided.
+- A separate immutable executor, like `IntentExecutor`: role-gated, pausable by the guardian, holding `EXECUTOR_ROLE` on the class tokens. No change to the base, the templates, the hook, or any frozen interface.
+- The legs are bound through `ref`. Both parties sign intents whose `ref` is a hash of the trade terms (both tokens, both amounts, both parties, a trade nonce). The executor recomputes the hash from the two intents it is given, requires both `ref`s to equal it and the legs to mirror each other (`from` and `to` swapped), then executes both in one transaction. A failure of either leg, including a hook rejection, reverts both.
+- The cash leg is one of two things: a cash token built from this stack, settled with `executeTransfer`, or an external stablecoin that supports ERC-3009 `receiveWithAuthorization`, where the executor is the payee, receives the cash, delivers the securities and forwards the cash to the seller inside the same transaction. A plain ERC-20 with only `approve` would need the buyer to approve the executor in advance.
+- A pre-flight that combines both legs' `canExecute`. Each `canExecute` uses the caller as the operator, so the view runs from the executor.
+
+Open questions: which cash tokens are in scope; whether only `OPERATOR_ROLE` may execute or anyone holding both signatures (the signatures bind the trade, so permissionless execution looks safe, with the window and deadlines still applying); fees; whether the securities leg of a fund share trade is priced off chain only (it is, there is no NAV on chain). Primary subscriptions and redemptions already have their atomic escrow in the 7540 vault, so DvP here means secondary trades. A class switch is a separate case: for `IntentToken` classes it is a burn and a mint by the issuer, and for two 4626 classes it should be a redeem and a deposit by an approved router in one transaction. At a full fund cap the order matters, since the redeem frees the slot first. That last point is reasoning, not tested.
+
 ## Open questions for the owner
-1. None.
+1. DvP: whether to plan it next as a separate executor (see "DvP and the fund layer"), and which cash tokens are in scope.
+2. Nothing on `fund-layer` is pushed. Push, or open a pull request, only when you say. The branch carries PR #2's commit `d3574df` until PR #2 merges.

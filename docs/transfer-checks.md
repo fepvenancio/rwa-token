@@ -85,8 +85,8 @@ The initial order is passed to the hook's constructor. The main timelock can lat
 
 | Token | Order |
 |---|---|
-| `IntentToken` | `IdentityRule`, `LockupRule`, `SettlementWindowRule`, `MaxHoldersRule` |
-| `Gated4626Vault`, `Gated7540Vault` | `IdentityRule`, `LockupRule`, `MaxHoldersRule` |
+| `IntentToken` | `IdentityRule`, `LockupRule`, `SettlementWindowRule`, `MaxHoldersRule`, `FundHoldersRule` |
+| `Gated4626Vault`, `Gated7540Vault` | `IdentityRule`, `LockupRule`, `MaxHoldersRule`, `FundHoldersRule` |
 
 Order decides which reason the caller sees. A sender who is both unverified and locked gets `SENDER_NOT_VERIFIED`, because `IdentityRule` runs first.
 
@@ -103,6 +103,10 @@ Code: `ComplianceHook.beforeTransfer`, `afterTransfer`, `_setRules`.
 | `SettlementWindowRule` | passes | needs an open window | passes | passes | passes |
 | `MaxHoldersRule.check` | caps a new holder | caps a new holder | passes | caps a new holder | passes |
 | `MaxHoldersRule.after_` | updates the count | updates the count | updates the count | updates the count | updates the count |
+| `FundHoldersRule.check` | caps a new investor | caps a new investor | passes | caps a new investor | passes |
+| `FundHoldersRule.after_` | updates the fund | updates the fund | updates the fund | updates the fund | updates the fund |
+
+`FundHoldersRule.check` has one more outcome that applies to every kind, `FORCED` and `BURN` included: `NOT_FUND_CLASS`, for a token that is not a registered class of the fund and for a rule the fund has replaced (see [FundHoldersRule](#fundholdersrule)). The row shows what it does once the token is a class and the rule is the fund's.
 
 The `FORCED` column also covers the enforcement mint in `recoverClaimable`, where `from` is 0. Each standard rule has a unit test for that case. No code path produces `FORCED` with `to == 0`; the project brief reserves it.
 
@@ -175,7 +179,26 @@ Without a seed, the count is right only if the rule has seen every movement that
 
 Rule id: `keccak256('MaxHoldersRule.v1')`.
 
-Code: `IdentityRule.check`, `LockupRule.check`, `LockupRule.setLockup`, `SettlementWindowRule._isOpen`, `SettlementWindowRule.setWindow`, `MaxHoldersRule.check`, `MaxHoldersRule.after_`, `MaxHoldersRule.seedHolderCountFromHolders`, `MaxHoldersRule.seedHolderCountFromRule`, `MaxHoldersRule.setExemptHolder`.
+### FundHoldersRule
+
+Caps the number of distinct investors across all the classes of one fund. An investor is an account that holds at least one class and is not exempt, and it counts once however many classes it holds. The rule keeps no state of its own. It reads and writes the fund (`Fund`, see [architecture.md](architecture.md#the-fund)), so replacing the rule keeps the count. The rule holds the fund's address as an immutable, so each fund has its own rule instance, shared by that fund's classes.
+
+`check` reads the fund once, with `admission(token, to)`, and runs these steps in order, stopping at the first that applies:
+
+1. The token is not a registered class of the fund, or the fund's installed rule is not this rule: rejects with `NOT_FUND_CLASS`. This is for every movement, a zero amount, a burn and `FORCED` included, so a retired rule never says yes in a pre-flight while the write fails, and `isUserAllowed` is false for a class that is not registered yet.
+2. `amount == 0`, `from == to`, `to == address(0)`, the kind is `FORCED`, `to` is the class token itself (the 7540 vault's escrow), `to` is exempt, or `to` already holds any class: passes. It is not a new investor.
+3. If the cap is 0, rejects with `MAX_HOLDERS`.
+4. If the count is below the cap, passes.
+5. If the count equals the cap, passes only when the sender leaves the fund. The rule reads the sender's `admission` and balance for this, and only here. The sender leaves when it is not the zero address and not the class token, is not exempt, holds only this class, and its whole balance equals `amount`. A sender who holds a second class stays an investor and frees no slot.
+6. Otherwise rejects with `MAX_HOLDERS`. That includes a count above a lowered cap, where nobody new is admitted, a sender who leaves included.
+
+`after_` runs after the balances moved. It does nothing if `amount == 0` or `from == to`. Otherwise it calls `Fund.join(token, to)` when `to`'s balance now equals `amount` (it had none before), and `Fund.leave(token, from)` when `from`'s balance is now 0. A movement between accounts that stay holders of the class writes nothing. `FORCED` skips the cap at step 2 and is still counted, so the count can end above the cap.
+
+The cap and the exemptions are set on the fund by its owner, not on the token, so they take effect after the main timelock's delay. A fund-wide count by address has the weaknesses of `MaxHoldersRule`'s: one investor with two wallets counts twice, and a dust transfer to a verified account takes a slot until the agent takes it back.
+
+Rule id: `keccak256('FundHoldersRule.v1')`.
+
+Code: `IdentityRule.check`, `LockupRule.check`, `LockupRule.setLockup`, `SettlementWindowRule._isOpen`, `SettlementWindowRule.setWindow`, `MaxHoldersRule.check`, `MaxHoldersRule.after_`, `MaxHoldersRule.seedHolderCountFromHolders`, `MaxHoldersRule.seedHolderCountFromRule`, `MaxHoldersRule.setExemptHolder`, `FundHoldersRule.check`, `FundHoldersRule.after_`, `Fund.admission`, `Fund.join`, `Fund.leave`.
 
 ## Reason codes
 
@@ -196,6 +219,7 @@ Each code is `keccak256` of its name, so `TRANSFER_OK` is not zero. A hook or ru
 | `BAD_SIGNATURE` | `executeTransfer` |
 | `NO_HOOK` | the base, when the token has no hook. An initialised proxy always has one (initialisation and `setPolicyHook` refuse the zero address), so in practice only a bare implementation returns it |
 | `NO_RULES` | `ComplianceHook`, when its rule list is empty |
+| `NOT_FUND_CLASS` | `FundHoldersRule`, for a token that is not a registered class of the fund, or when the rule is not the fund's installed one |
 
 ## How a rejection reaches the caller
 
@@ -206,7 +230,7 @@ Each code is `keccak256` of its name, so `TRANSFER_OK` is not zero. A hook or ru
 | `IntentExecutor.executeBatch` | revert `IntentExecutor_BatchItemFailed(index, reason)`, where `reason` is the token's revert data. The whole batch is undone |
 | `Gated4626Vault.deposit`, `mint`, `withdraw`, `redeem` when the matching `max*` is lower than the request | OpenZeppelin's `ERC4626ExceededMaxDeposit`, `ERC4626ExceededMaxMint`, `ERC4626ExceededMaxWithdraw`, `ERC4626ExceededMaxRedeem`, before `_update` runs. The vault's `max*` functions ask the hook through a view call, so for a non-zero amount a policy rejection appears as a max of 0 and this error, not as `PolicyGated_TransferRejected`. A zero-amount call passes the max check. It reverts with `PolicyGated_TransferRejected` if the token is paused, or if the hook rejects a zero-amount movement: `IdentityRule` does for an unverified receiver (`deposit`, `mint`) or owner (`withdraw`, `redeem`), and `LockupRule` does for a locked owner. `MaxHoldersRule` does not. The `max*` probe treats the owner as the operator, which matches the real burn with the roles `Activate` grants |
 | `Gated7540Vault.requestDeposit`, the deposit claims `deposit` and `mint`, and the redemption claims `redeem` and `withdraw` | `Gated7540Vault_ControllerNotEligible(reason)`, from the controller check that runs before anything moves |
-| `Gated7540Vault.recoverClaimable` | `Gated7540Vault_RecipientNotEligible(reason)` if `to` fails the pre-flight, a zero-amount `FORCED` mint to `to` through the hook. With the standard rules only `IdentityRule` can reject it |
+| `Gated7540Vault.recoverClaimable` | `Gated7540Vault_RecipientNotEligible(reason)` if `to` fails the pre-flight, a zero-amount `FORCED` mint to `to` through the hook. With the standard rules, `IdentityRule` rejects an unverified `to`, and `FundHoldersRule` rejects everything with `NOT_FUND_CLASS` for a token that is not a registered class or whose rule is retired |
 | `Gated7540Vault.redeem`, `withdraw` while paused | OpenZeppelin's `EnforcedPause`, before any other check |
 
 `transfer` never returns `false`. A rejected transfer reverts.
@@ -219,7 +243,7 @@ Every token has `canTransfer` and `isUserAllowed`. `IntentToken` also has `canEx
 |---|---|
 | `canTransfer(from, to, amount)` | Would a holder-driven movement pass? The kind is `MINT` if `from == 0`, `BURN` if `to == 0`, otherwise `TRANSFER`. The operator is `from`, or the caller for a mint. It runs the pause check, the frozen check and the hook |
 | `canExecute(intent)` | Would `executeTransfer` pass, apart from the signature and the caller's `EXECUTOR_ROLE`? It checks the deadline and the nonce, then the same path with kind `EXECUTED` and the intent's `ref` and `deadline`. The operator is the caller, so call it from the executor's address. It cannot check the signature because the interface has no signature parameter |
-| `isUserAllowed(user)` | Would the hook accept a mint of amount 0 to `user`? It ignores pause and frozen balance, and returns `false` if there is no hook. With the four standard rules only `IdentityRule` can reject a zero-amount mint, so this answers "is the user verified" |
+| `isUserAllowed(user)` | Would the hook accept a mint of amount 0 to `user`? It ignores pause and frozen balance, and returns `false` if there is no hook. With the standard rules, `IdentityRule` rejects an unverified user, and `FundHoldersRule` rejects everything for a token that is not a registered class of its fund. For a registered class this answers "is the user verified" |
 
 Differences from the real call:
 

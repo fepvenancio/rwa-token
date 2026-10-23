@@ -37,7 +37,8 @@ library Reasons {
   bytes32 internal constant NO_HOOK = keccak256('NO_HOOK');
   /// @notice The policy hook has an empty rule set; an unconfigured hook rejects everything
   bytes32 internal constant NO_RULES = keccak256('NO_RULES');
-  /// @notice The token is not a registered class of the fund whose rule is in its hook; every movement is rejected
+  /// @notice The token is not a registered class of the fund, or the fund rule in its hook is not the fund's installed
+  ///         rule; every movement is rejected
   bytes32 internal constant NOT_FUND_CLASS = keccak256('NOT_FUND_CLASS');
 }
 // solhint-enable private-vars-leading-underscore

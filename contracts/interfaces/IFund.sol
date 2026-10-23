@@ -10,10 +10,12 @@ import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
  *         any of them, and which classes each investor holds
  * @dev Classes are numbered from 1 in the order they were registered, and 0 means "not a class". Class `n` owns bit
  *      `n - 1` of an investor's class mask. A class never counts itself as an investor, because a 7540 vault escrows
- *      shares at its own address. Only the installed rule writes investor state, and only for a registered class: the
- *      fund's state is shared by every class, so a token that merely names itself in a movement must not reach it.
- *      The fund does not check which hooks list the installed rule after registration. Changing the rule needs the same
- *      timelock batch to change every class's rule list, or the old rule's `after_` calls revert
+ *      shares at its own address. Only the installed rule records which classes an account holds, and only for a
+ *      registered class: the fund's state is shared by every class, so a token that merely names itself in a movement
+ *      must not reach it. The owner's `setExempt` also moves the count, for an account that holds a class.
+ *      The fund does not check which hooks list the installed rule after registration. A rule that is no longer the
+ *      installed one rejects every movement of the classes whose hook still lists it (`NOT_FUND_CLASS`), so changing the
+ *      rule needs the same timelock batch to change every class's rule list
  */
 interface IFund {
   /*///////////////////////////////////////////////////////////////
@@ -154,7 +156,8 @@ interface IFund {
 
   /**
    * @notice Sets the investor cap
-   * @dev Only the owner. Lowering it below the count blocks new investors until the count falls back
+   * @dev Only the owner. Lowering it below the count blocks new investors until the count falls back. Reverts above
+   *      `type(uint48).max`, the width the cap and the count are stored in
    * @param _cap The cap; 0 admits no new investor
    */
   function setHolderCap(
@@ -279,6 +282,7 @@ interface IFund {
 
   /**
    * @notice Everything the rule needs to decide on a receiver, in one call
+   * @dev The installed rule, the count and the cap share one storage slot, so reading the rule costs nothing extra
    * @param _token The class token
    * @param _account The receiver
    * @return _index The class number of `_token`, or 0 when it is not a class
@@ -286,11 +290,12 @@ interface IFund {
    * @return _exempt Whether `_account` is exempt
    * @return _count The investor count
    * @return _cap The investor cap
+   * @return _rule The installed rule, so a rule that was replaced can tell and reject
    */
   function admission(
     address _token,
     address _account
-  ) external view returns (uint256 _index, uint256 _classes, bool _exempt, uint256 _count, uint256 _cap);
+  ) external view returns (uint256 _index, uint256 _classes, bool _exempt, uint256 _count, uint256 _cap, address _rule);
 
   /**
    * @notice An account's balance in each class it holds

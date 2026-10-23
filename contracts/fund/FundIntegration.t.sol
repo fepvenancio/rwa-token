@@ -561,6 +561,45 @@ contract FundIntegration_VaultEscrow is FundIntegrationTest {
   }
 }
 
+contract FundIntegration_Claimable is FundIntegrationTest {
+  function setUp() public override {
+    super.setUp();
+    _fund.setHolderCap(2);
+  }
+
+  function test_WhenAnotherClassFillsTheFundBeforeAClaim_TheClaimIsBlockedAndRecoverClaimableDeliversCounted()
+    external
+  {
+    // alice's deposit is fulfilled while the fund has room, and she has not claimed yet.
+    vm.prank(_alice);
+    _vault7540.requestDeposit(7e6, _alice, _alice);
+    vm.prank(_fulfiller);
+    _vault7540.fulfillDeposit(_alice, 7e6, 7e6);
+    assertEq(_fund.holderCount(), 0);
+
+    // Two other investors fill the fund through the other two classes.
+    _mintToken(_bob, 1 ether);
+    _deposit4626(_carol, 1e6);
+    assertEq(_fund.holderCount(), 2);
+
+    // The claim re-runs the policy, so it is refused (owner decision M-3), and the shares stay claimable.
+    vm.expectRevert(
+      abi.encodeWithSelector(IGated7540Vault.Gated7540Vault_ControllerNotEligible.selector, Reasons.MAX_HOLDERS)
+    );
+    vm.prank(_alice);
+    _vault7540.mint(7e6, _alice, _alice);
+    assertEq(_vault7540.claimableDepositRequest(0, _alice), 7e6);
+
+    // The agent delivers them as an enforcement mint: exempt from the cap and still counted.
+    vm.prank(_agent);
+    _vault7540.recoverClaimable(_alice, _alice);
+    assertEq(_vault7540.balanceOf(_alice), 7e6);
+    assertEq(_fund.holderCount(), 3);
+    assertEq(_fund.heldClasses(_alice), 4);
+    assertEq(_vault7540.claimableDepositRequest(0, _alice), 0);
+  }
+}
+
 contract FundIntegration_Replacement is FundIntegrationTest {
   function test_WhenTheHookIsReplacedKeepingTheRule_TheStateAndTheRecordingContinue() external {
     _mintToken(_alice, 1 ether);
@@ -583,7 +622,7 @@ contract FundIntegration_Replacement is FundIntegrationTest {
     assertEq(_fund.heldClasses(_carol), 1);
   }
 
-  function test_WhenTheRuleIsReplaced_TheCountSurvivesAndTheWindowBetweenTheTwoStepsFailsClosed() external {
+  function test_WhenTheRuleIsReplaced_TheCountSurvivesAndTheWindowBetweenTheTwoStepsFailsClosedWithParity() external {
     _mintToken(_alice, 1 ether);
     _mintToken(_bob, 1 ether);
     assertEq(_fund.holderCount(), 2);
@@ -594,17 +633,25 @@ contract FundIntegration_Replacement is FundIntegrationTest {
     _fund.setRule(address(_next));
     assertEq(_fund.holderCount(), 2);
 
-    // The hooks still list the old rule. Its pre-flight says yes, and its `after_` is refused by the fund, so the
-    // movement reverts: the state cannot drift. In production both steps go in one timelock batch.
-    assertEq(_fundRule.check(_ctxFor(address(_token), _carol)), Reasons.TRANSFER_OK);
-    vm.expectRevert(abi.encodeWithSelector(IFund.Fund_OnlyRule.selector, address(_fundRule)));
+    // The hooks still list the old rule, which is no longer the fund's. It rejects every movement, the ones that would
+    // not touch the fund's state too, and the pre-flight says the same as the write: nothing drifts, nothing lies.
+    assertEq(_fundRule.check(_ctxFor(address(_token), _carol)), Reasons.NOT_FUND_CLASS);
+    (bool _ok, bytes32 _reason) = _token.canTransfer(address(0), _carol, 1);
+    assertFalse(_ok);
+    assertEq(_reason, Reasons.NOT_FUND_CLASS);
+    vm.expectRevert(_rejected(Reasons.NOT_FUND_CLASS));
     _mintToken(_carol, 1 ether);
+    // A transfer between two existing holders needs no write to the fund, and is refused all the same.
+    _assertTransferParity(_alice, _bob, 0.5 ether, Reasons.NOT_FUND_CLASS);
+    assertFalse(_token.isUserAllowed(_alice));
+    assertEq(_fund.holderCount(), 2);
 
     for (uint256 _i; _i < 3; ++_i) {
       _hooks[_i].setRules(_rules(_next));
     }
     _mintToken(_carol, 1 ether);
     assertEq(_fund.holderCount(), 3);
+    _assertTransferParity(_alice, _bob, 0.5 ether, Reasons.TRANSFER_OK);
   }
 
   function _ctxFor(

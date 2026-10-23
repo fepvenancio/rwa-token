@@ -60,16 +60,36 @@ describe("deployment with a twin hook passed to Activate", async function () {
   it("a twin of the reviewed hook (same immutables, weaker rules) installs, and the post-deploy check rejects it", async function () {
     const { activate, parameters, components } = await connection.networkHelpers.loadFixture(stages);
     const token = await components.proxyDeployer.read.predict([TOKENS.intent.symbol, components.intentImpl.address]);
-    // Same admin, registry and token as the reviewed hook, so the same codehash, already attested: only max-holders.
+    // Same admin, registry and token as the reviewed hook, so the same codehash, already attested: only max-holders
+    // and the fund rule, which the fund needs in order to register the class.
+    const twin = await connection.viem.deployContract("ComplianceHook", [
+      components.timelock.address,
+      components.registry.address,
+      token,
+      [components.maxHoldersRule.address, components.fundHoldersRule.address],
+    ]);
+    assert.equal(await components.registry.read.isAttested([twin.address, 1]), true, "the attestation covers the twin");
+    // ProxyDeployer checks the binding only, so Activate completes; the hand-over check is what refuses it.
+    await assert.rejects(activate({ ...parameters, intentHook: twin.address }), /runs another hook/);
+  });
+
+  it("a twin without the fund rule never gets registered, so Activate stops before ownership or roles move", async function () {
+    const { activate, parameters, components, wallets } = await connection.networkHelpers.loadFixture(stages);
+    const token = await components.proxyDeployer.read.predict([TOKENS.intent.symbol, components.intentImpl.address]);
     const twin = await connection.viem.deployContract("ComplianceHook", [
       components.timelock.address,
       components.registry.address,
       token,
       [components.maxHoldersRule.address],
     ]);
-    assert.equal(await components.registry.read.isAttested([twin.address, 1]), true, "the attestation covers the twin");
-    // ProxyDeployer checks the binding only, so Activate completes; the hand-over check is what refuses it.
-    await assert.rejects(activate({ ...parameters, intentHook: twin.address }), /runs another hook/);
+    await assert.rejects(activate({ ...parameters, intentHook: twin.address }), /Fund_RuleNotListed/);
+
+    // The fund stays with the deployer, empty, and no operational role was granted on the unregistered class.
+    assert.ok(isAddressEqual(await components.fundContract.read.owner(), wallets.deployer.account.address));
+    assert.equal(await components.fundContract.read.classCount(), 0n);
+    const intent = await connection.viem.getContractAt("IntentToken", token);
+    assert.equal(await intent.read.hasRole([ROLES.AGENT, wallets.agent.account.address]), false);
+    assert.equal(await intent.read.hasRole([ROLES.DEFAULT_ADMIN, components.timelock.address]), false);
   });
 });
 

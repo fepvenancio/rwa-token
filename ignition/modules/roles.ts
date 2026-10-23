@@ -25,11 +25,11 @@ export const TOKENS = {
 
 /**
  * Each token's ordered rule list (brief §6: Identity → Lockup → SettlementWindow → MaxHolders; vaults have no EXECUTED
- * transfers to window). `Tokens` builds the hooks from it and the post-deploy check compares `hook.rules()` against it:
- * a hook's attested codehash covers its immutables, not this list.
+ * transfers to window), then the fund-wide `FundHoldersRule` last. `Tokens` builds the hooks from it and the post-deploy
+ * check compares `hook.rules()` against it: a hook's attested codehash covers its immutables, not this list.
  */
 export const RULE_ORDER = {
-  intent: ["identityRule", "lockupRule", "windowRule", "maxHoldersRule"],
-  fund: ["identityRule", "lockupRule", "maxHoldersRule"],
-  asyncFund: ["identityRule", "lockupRule", "maxHoldersRule"],
+  intent: ["identityRule", "lockupRule", "windowRule", "maxHoldersRule", "fundHoldersRule"],
+  fund: ["identityRule", "lockupRule", "maxHoldersRule", "fundHoldersRule"],
+  asyncFund: ["identityRule", "lockupRule", "maxHoldersRule", "fundHoldersRule"],
 } as const satisfies Record<keyof typeof TOKENS, readonly string[]>;

@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import { network } from "hardhat";
 import { encodeFunctionData, getAddress, isAddressEqual, keccak256, toHex, zeroHash, type Abi, type Address, type Hex } from "viem";
 
-import { ROLES } from "../../ignition/modules/roles.js";
+import { ROLES, RULE_ORDER } from "../../ignition/modules/roles.js";
 import { deployStack, revertOf, type Stack } from "./fixtures.js";
 
 const IMPLEMENTATION_SLOT = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
@@ -153,7 +153,7 @@ describe("governance through the timelock", async function () {
 
     await networkHelpers.time.increase(swap.delay - 1n);
     assert.equal(getAddress(await s.token.read.policyHook()), getAddress(s.hooks.token.address));
-    assert.equal((await s.hooks.vault4626.read.rules()).length, 3);
+    assert.equal((await s.hooks.vault4626.read.rules()).length, RULE_ORDER.fund.length);
     await networkHelpers.time.increase(1n);
     await viem.assertions.emitWithArgs(swap.execute(), s.token, "PolicyHookChanged", [
       getAddress(s.hooks.token.address),
