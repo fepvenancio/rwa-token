@@ -36,12 +36,15 @@ contract HalmosAcceptAllHook {
 }
 
 /**
- * @notice Halmos symbolic properties on the nonce/signature and frozen-balance paths of the real, proxied IntentToken
+ * @notice Halmos symbolic properties on the nonce/signature, frozen-balance and executor-binding paths of the real,
+ *         proxied IntentToken
  * @dev Run with `npm run test:halmos`. Hardhat compiles this file but does not run `check_` functions.
  *      Halmos discards reverting paths, so liveness properties turn a revert into `assert(false)` explicitly.
  *      `vm.assume` is used here as a symbolic path constraint; the Wonderland "bound, not assume" rule targets fuzzing.
  *      Mutation-checked on 2026-10-16: each property fails when its guarded line is removed (nonce consumption,
- *      nonce cancellation, the unfrozen-balance check, the frozen release on burn)
+ *      nonce cancellation, the unfrozen-balance check, the frozen release on burn). Mutation-checked on 2026-10-23: the
+ *      consideration property fails when the consideration check is removed, and the executor property fails when the
+ *      executor comparison is removed
  */
 contract IntentTokenHalmos is Test {
   IntentToken internal _token;
@@ -85,7 +88,7 @@ contract IntentTokenHalmos is Test {
     vm.prank(_minter);
     _token.mint(_holder, _amount);
     ITransferIntent.TransferIntent memory _i =
-      ITransferIntent.TransferIntent(_holder, _other, _amount, _nonce, _deadline, _ref);
+      ITransferIntent.TransferIntent(_holder, _other, _amount, _nonce, _deadline, _ref, address(0), 0, address(0), 0);
 
     vm.prank(_executor);
     try _token.executeTransfer(_i, _sig) {
@@ -110,7 +113,66 @@ contract IntentTokenHalmos is Test {
     vm.prank(_holder);
     _token.cancelIntent(_nonce);
     ITransferIntent.TransferIntent memory _i =
-      ITransferIntent.TransferIntent(_holder, _other, _amount, _nonce, _deadline, _ref);
+      ITransferIntent.TransferIntent(_holder, _other, _amount, _nonce, _deadline, _ref, address(0), 0, address(0), 0);
+
+    vm.prank(_executor);
+    try _token.executeTransfer(_i, _sig) {
+      assert(false);
+    } catch {}
+  }
+
+  /// @notice An intent that names an executor never executes from any other caller, whatever else it says and
+  ///         whatever the signature
+  function check_intentNamingAnotherExecutorNeverExecutes(
+    uint256 _amount,
+    bytes32 _nonce,
+    uint256 _deadline,
+    bytes32 _ref,
+    address _named,
+    uint256 _validAfter,
+    address _considerationToken,
+    uint256 _considerationAmount,
+    bytes memory _sig
+  ) public {
+    vm.assume(_named != address(0) && _named != _executor);
+    vm.prank(_minter);
+    _token.mint(_holder, _amount);
+    ITransferIntent.TransferIntent memory _i = ITransferIntent.TransferIntent(
+      _holder, _other, _amount, _nonce, _deadline, _ref, _named, _validAfter, _considerationToken, _considerationAmount
+    );
+
+    vm.prank(_executor);
+    try _token.executeTransfer(_i, _sig) {
+      assert(false);
+    } catch {}
+  }
+
+  /// @notice An intent that states a consideration and names no executor never executes, whoever submits it
+  function check_considerationWithoutExecutorNeverExecutes(
+    uint256 _amount,
+    bytes32 _nonce,
+    uint256 _deadline,
+    bytes32 _ref,
+    uint256 _validAfter,
+    address _considerationToken,
+    uint256 _considerationAmount,
+    bytes memory _sig
+  ) public {
+    vm.assume(_considerationToken != address(0) || _considerationAmount != 0);
+    vm.prank(_minter);
+    _token.mint(_holder, _amount);
+    ITransferIntent.TransferIntent memory _i = ITransferIntent.TransferIntent(
+      _holder,
+      _other,
+      _amount,
+      _nonce,
+      _deadline,
+      _ref,
+      address(0),
+      _validAfter,
+      _considerationToken,
+      _considerationAmount
+    );
 
     vm.prank(_executor);
     try _token.executeTransfer(_i, _sig) {

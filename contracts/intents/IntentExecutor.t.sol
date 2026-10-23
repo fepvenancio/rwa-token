@@ -42,7 +42,11 @@ contract IntentExecutorUnitTest is Helpers {
       amount: _seed + 1,
       nonce: keccak256(abi.encode('nonce', _seed)),
       deadline: 1000 + _seed,
-      ref: keccak256(abi.encode('ref', _seed))
+      ref: keccak256(abi.encode('ref', _seed)),
+      executor: address(uint160(0x3000 + _seed)),
+      validAfter: _seed,
+      considerationToken: address(uint160(0x4000 + _seed)),
+      considerationAmount: _seed + 2
     });
   }
 
@@ -300,7 +304,7 @@ contract IntentExecutorIntegration_Execute is IntentExecutorIntegrationTest {
     (ITransferIntent.TransferIntent memory _i, bytes memory _sig) = _signedIntent(_bob, 50 ether, keccak256('n'));
 
     vm.prank(address(_intentExecutor));
-    (bool _ok,) = _token.canExecute(_i);
+    (bool _ok,) = _token.canExecute(_i, _sig);
     assertTrue(_ok);
 
     vm.expectEmit(address(_token));
@@ -308,6 +312,67 @@ contract IntentExecutorIntegration_Execute is IntentExecutorIntegrationTest {
     vm.prank(_operator);
     _intentExecutor.execute(address(_token), _i, _sig);
     assertEq(_token.balanceOf(_bob), 50 ether);
+  }
+
+  function test_WhenTheIntentNamesTheIntentExecutor_ItSettlesTheTransferAloneWhateverItStates() external {
+    // A stated consideration is a record here: the executor moves one token and forwards the intent, so the shares
+    // move and nothing else does.
+    (ITransferIntent.TransferIntent memory _i, bytes memory _sig) =
+      _signedIntentFor(_bob, 5 ether, keccak256('n'), address(_intentExecutor), makeAddr('cashToken'), 500e6);
+
+    vm.expectEmit(address(_token));
+    emit ITransferIntent.IntentExecuted(_token.intentHash(_i), _alice, _bob, 5 ether, address(_intentExecutor), _i.ref);
+    vm.prank(_operator);
+    _intentExecutor.execute(address(_token), _i, _sig);
+    assertEq(_token.balanceOf(_bob), 5 ether);
+  }
+
+  /// @dev The leg of a trade cannot be run alone: an intent that names the DvP executor, and states the payment it is
+  ///      for, is refused by the plain executor, however it is submitted
+  function test_WhenTheIntentNamesAnotherExecutor_TheIntentExecutorCannotRunIt() external {
+    address _dvp = makeAddr('dvpExecutor');
+    (ITransferIntent.TransferIntent memory _i, bytes memory _sig) =
+      _signedIntentFor(_bob, 5 ether, keccak256('n'), _dvp, makeAddr('cashToken'), 500e6);
+
+    vm.expectRevert(_rejected(Reasons.WRONG_EXECUTOR));
+    vm.prank(_operator);
+    _intentExecutor.execute(address(_token), _i, _sig);
+
+    ITransferIntent.TransferIntent[] memory _intents = new ITransferIntent.TransferIntent[](1);
+    bytes[] memory _sigs = new bytes[](1);
+    (_intents[0], _sigs[0]) = (_i, _sig);
+    vm.expectRevert(
+      abi.encodeWithSelector(
+        IIntentExecutorBatch.IntentExecutor_BatchItemFailed.selector, 0, _rejected(Reasons.WRONG_EXECUTOR)
+      )
+    );
+    vm.prank(_operator);
+    _intentExecutor.executeBatch(address(_token), _intents, _sigs);
+
+    assertEq(_token.balanceOf(_bob), 0);
+    assertFalse(_token.nonceUsed(_alice, keccak256('n')));
+
+    // The same signed intent runs from the executor it names, once that executor holds the role.
+    bytes32 _executorRole = _token.EXECUTOR_ROLE();
+    vm.prank(_admin);
+    _token.grantRole(_executorRole, _dvp);
+    vm.prank(_dvp);
+    _token.executeTransfer(_i, _sig);
+    assertEq(_token.balanceOf(_bob), 5 ether);
+  }
+
+  function test_WhenTheIntentStatesAPaymentButNamesNoExecutor_NoExecutorCanRunIt() external {
+    (ITransferIntent.TransferIntent memory _i, bytes memory _sig) =
+      _signedIntentFor(_bob, 5 ether, keccak256('n'), address(0), makeAddr('cashToken'), 500e6);
+
+    vm.expectRevert(_rejected(Reasons.CONSIDERATION_NEEDS_EXECUTOR));
+    vm.prank(_operator);
+    _intentExecutor.execute(address(_token), _i, _sig);
+
+    vm.expectRevert(_rejected(Reasons.CONSIDERATION_NEEDS_EXECUTOR));
+    vm.prank(_executor);
+    _token.executeTransfer(_i, _sig);
+    assertEq(_token.balanceOf(_bob), 0);
   }
 
   function test_WhenTheTokenRevokesTheExecutor_SettlementFails() external {

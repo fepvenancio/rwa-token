@@ -63,7 +63,7 @@ describe("time-based flows", async function () {
 
     // The same intent waits out the weekend and settles at Monday's open.
     await time.increaseTo(nextMonday + BigInt(WINDOW_OPEN) - 2n);
-    assert.deepEqual(await s.token.read.canExecute([atClose.intent], { account: s.executor.address }), [false, REASONS.OUTSIDE_SETTLEMENT_WINDOW]);
+    assert.deepEqual(await s.token.read.canExecute([atClose.intent, atClose.sig], { account: s.executor.address }), [false, REASONS.OUTSIDE_SETTLEMENT_WINDOW]);
     await time.setNextBlockTimestamp(nextMonday + BigInt(WINDOW_OPEN));
     await execute(s, atClose.intent, atClose.sig);
     assert.equal(await s.token.read.balanceOf([bob.account.address]), 2n);
@@ -79,10 +79,25 @@ describe("time-based flows", async function () {
     await time.setNextBlockTimestamp(deadline);
     await execute(s, onTime.intent, onTime.sig);
     // The latest block now sits on the deadline, so pre-flight still says yes; a write would land a second later.
-    assert.deepEqual(await s.token.read.canExecute([late.intent], { account: s.executor.address }), [true, REASONS.TRANSFER_OK]);
+    assert.deepEqual(await s.token.read.canExecute([late.intent, late.sig], { account: s.executor.address }), [true, REASONS.TRANSFER_OK]);
 
     await time.increaseTo(deadline + 1n);
-    assert.deepEqual(await s.token.read.canExecute([late.intent], { account: s.executor.address }), [false, REASONS.INTENT_EXPIRED]);
+    assert.deepEqual(await s.token.read.canExecute([late.intent, late.sig], { account: s.executor.address }), [false, REASONS.INTENT_EXPIRED]);
     await rejected(s, execute(s, late.intent, late.sig), REASONS.INTENT_EXPIRED);
+  });
+
+  it("an intent's validAfter is inclusive: refused the second before, settled at it", async function () {
+    const s = await networkHelpers.loadFixture(funded);
+    const { alice, bob } = s.holders;
+    const validAfter = BigInt(await time.latest()) + 600n;
+    const { intent, sig } = await signIntent(s, alice, { to: bob.account.address, amount: 1n, validAfter, deadline: validAfter + DAY });
+
+    assert.deepEqual(await s.token.read.canExecute([intent, sig], { account: s.executor.address }), [false, REASONS.INTENT_NOT_YET_VALID]);
+    await time.setNextBlockTimestamp(validAfter - 1n);
+    await rejected(s, execute(s, intent, sig), REASONS.INTENT_NOT_YET_VALID);
+
+    await time.setNextBlockTimestamp(validAfter);
+    await execute(s, intent, sig);
+    assert.equal(await s.token.read.balanceOf([bob.account.address]), 1n);
   });
 });

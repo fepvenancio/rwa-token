@@ -170,7 +170,7 @@ describe("pre-flight parity matrix", async function () {
         const { alice, bob } = s.holders;
         const { intent, sig } = await signIntent(s, alice, { to: bob.account.address, amount: 1n });
         // The token sees the executor contract as operator, so pre-flight is asked from its address.
-        const [ok, reason] = await s.token.read.canExecute([intent], { account: s.executor.address });
+        const [ok, reason] = await s.token.read.canExecute([intent, sig], { account: s.executor.address });
         assert.equal(reasonName(reason), c.intent);
         assert.equal(ok, c.intent === "TRANSFER_OK");
         const operator = s.wallets.operator.account;

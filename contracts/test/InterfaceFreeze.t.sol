@@ -40,10 +40,13 @@ contract InterfaceFreezeTest is Test {
     assertEq(type(IComplianceRule).interfaceId, bytes4(0x93d5c2be), 'IComplianceRule');
     assertEq(type(IComplianceHook).interfaceId, bytes4(0x2604e338), 'IComplianceHook');
     assertEq(type(IPolicyRegistry).interfaceId, bytes4(0x947f9fc8), 'IPolicyRegistry');
-    assertEq(type(ITransferIntent).interfaceId, bytes4(0x7a2b1b79), 'ITransferIntent');
-    assertEq(type(IIntentExecutor).interfaceId, bytes4(0xd2319653), 'IIntentExecutor');
+    // Re-pinned 2026-10-23 on owner instruction (intent revision I-1): `TransferIntent` gained executor, validAfter,
+    // considerationToken and considerationAmount, and `canExecute` takes the signature. Ids computed from the
+    // signatures with `cast sig` (was 0x7a2b1b79, 0xd2319653 and 0x117727cb)
+    assertEq(type(ITransferIntent).interfaceId, bytes4(0x51128254), 'ITransferIntent');
+    assertEq(type(IIntentExecutor).interfaceId, bytes4(0x4e8890b4), 'IIntentExecutor');
     // Added in Phase 3 (2026-10-16): executeBatch, pause, unpause
-    assertEq(type(IIntentExecutorBatch).interfaceId, bytes4(0x117727cb), 'IIntentExecutorBatch');
+    assertEq(type(IIntentExecutorBatch).interfaceId, bytes4(0x58c0d550), 'IIntentExecutorBatch');
     // Added in Phase 4 (2026-10-16)
     assertEq(type(ILockupRule).interfaceId, bytes4(0xaafb038e), 'ILockupRule');
     assertEq(type(ISettlementWindowRule).interfaceId, bytes4(0xf2058aff), 'ISettlementWindowRule');
@@ -159,5 +162,9 @@ contract InterfaceFreezeTest is Test {
     assertEq(Reasons.NO_RULES, keccak256('NO_RULES'));
     // Appended in the fund layer (2026-10-22)
     assertEq(Reasons.NOT_FUND_CLASS, keccak256('NOT_FUND_CLASS'));
+    // Appended in the intent revision (2026-10-23)
+    assertEq(Reasons.WRONG_EXECUTOR, keccak256('WRONG_EXECUTOR'));
+    assertEq(Reasons.INTENT_NOT_YET_VALID, keccak256('INTENT_NOT_YET_VALID'));
+    assertEq(Reasons.CONSIDERATION_NEEDS_EXECUTOR, keccak256('CONSIDERATION_NEEDS_EXECUTOR'));
   }
 }

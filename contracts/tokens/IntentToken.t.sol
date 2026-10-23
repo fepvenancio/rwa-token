@@ -137,13 +137,29 @@ contract IntentTokenIntegrationTest is Test {
     uint256 _amount,
     bytes32 _nonce
   ) internal view returns (ITransferIntent.TransferIntent memory _i, bytes memory _sig) {
+    (_i, _sig) = _signedIntentFor(_to, _amount, _nonce, address(0), address(0), 0);
+  }
+
+  /// @dev An intent from alice that names `_boundTo` as its only executor and states what she is to receive
+  function _signedIntentFor(
+    address _to,
+    uint256 _amount,
+    bytes32 _nonce,
+    address _boundTo,
+    address _considerationToken,
+    uint256 _considerationAmount
+  ) internal view returns (ITransferIntent.TransferIntent memory _i, bytes memory _sig) {
     _i = ITransferIntent.TransferIntent({
       from: _alice,
       to: _to,
       amount: _amount,
       nonce: _nonce,
       deadline: block.timestamp + 1 days,
-      ref: bytes32('ISO20022:MSG-1')
+      ref: bytes32('ISO20022:MSG-1'),
+      executor: _boundTo,
+      validAfter: 0,
+      considerationToken: _considerationToken,
+      considerationAmount: _considerationAmount
     });
     (uint8 _v, bytes32 _r, bytes32 _s) = vm.sign(_alicePk, _token.intentHash(_i));
     _sig = abi.encodePacked(_r, _s, _v);
@@ -261,7 +277,7 @@ contract IntentTokenIntegration_Intents is IntentTokenIntegrationTest {
   function test_WhenTheReceiverIsVerified_TheIntentSettles() external {
     (ITransferIntent.TransferIntent memory _i, bytes memory _sig) = _signedIntent(_bob, 50 ether, keccak256('n1'));
     vm.prank(_executor);
-    (bool _ok,) = _token.canExecute(_i);
+    (bool _ok,) = _token.canExecute(_i, _sig);
     assertTrue(_ok);
     vm.prank(_executor);
     _token.executeTransfer(_i, _sig);
@@ -270,7 +286,7 @@ contract IntentTokenIntegration_Intents is IntentTokenIntegrationTest {
 
   function test_WhenTheReceiverIsUnverified_TheIntentFailsAndPreflightAgrees() external {
     (ITransferIntent.TransferIntent memory _i, bytes memory _sig) = _signedIntent(_eve, 1, keccak256('n2'));
-    (bool _ok, bytes32 _reason) = _token.canExecute(_i);
+    (bool _ok, bytes32 _reason) = _token.canExecute(_i, _sig);
     assertFalse(_ok);
     assertEq(_reason, Reasons.RECEIVER_NOT_VERIFIED);
     vm.expectRevert(_rejected(Reasons.RECEIVER_NOT_VERIFIED));
@@ -278,11 +294,26 @@ contract IntentTokenIntegration_Intents is IntentTokenIntegrationTest {
     _token.executeTransfer(_i, _sig);
   }
 
+  function test_WhenTheSignatureIsBad_PreflightAgreesWithTheRealStack() external {
+    (ITransferIntent.TransferIntent memory _i,) = _signedIntent(_bob, 1, keccak256('n4'));
+    (, uint256 _evePk) = makeAddrAndKey('eve');
+    (uint8 _v, bytes32 _r, bytes32 _s) = vm.sign(_evePk, _token.intentHash(_i));
+    bytes memory _badSig = abi.encodePacked(_r, _s, _v);
+
+    vm.prank(_executor);
+    (bool _ok, bytes32 _reason) = _token.canExecute(_i, _badSig);
+    assertFalse(_ok);
+    assertEq(_reason, Reasons.BAD_SIGNATURE);
+    vm.expectRevert(_rejected(Reasons.BAD_SIGNATURE));
+    vm.prank(_executor);
+    _token.executeTransfer(_i, _badSig);
+  }
+
   function test_WhenTheSenderIsFrozen_TheIntentFailsAndPreflightAgrees() external {
     vm.prank(_agent);
     _token.setFrozen(_alice, 1000 ether);
-    (ITransferIntent.TransferIntent memory _i,) = _signedIntent(_bob, 1, keccak256('n3'));
-    (bool _ok, bytes32 _reason) = _token.canExecute(_i);
+    (ITransferIntent.TransferIntent memory _i, bytes memory _sig) = _signedIntent(_bob, 1, keccak256('n3'));
+    (bool _ok, bytes32 _reason) = _token.canExecute(_i, _sig);
     assertFalse(_ok);
     assertEq(_reason, Reasons.INSUFFICIENT_UNFROZEN);
   }

@@ -78,7 +78,7 @@ contract RuleSetIntegrationTest is IntentTokenIntegrationTest {
     bytes32 _expected
   ) internal {
     vm.prank(_executor);
-    (bool _ok, bytes32 _reason) = _token.canExecute(_i);
+    (bool _ok, bytes32 _reason) = _token.canExecute(_i, _sig);
     assertEq(_reason, _expected, 'canExecute reason');
     assertEq(_ok, _expected == Reasons.TRANSFER_OK);
     if (_expected != Reasons.TRANSFER_OK) vm.expectRevert(_rejected(_expected));

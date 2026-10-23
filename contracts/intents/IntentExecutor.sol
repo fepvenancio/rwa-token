@@ -13,8 +13,8 @@ import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
  * @notice Replaceable, role-gated submitter of holder-signed transfer intents. Tokens authorise it by granting it
  *         their EXECUTOR_ROLE; operators (bank / relayer keys) hold OPERATOR_ROLE here
  * @dev Immutable, not a proxy: replacing it means deploying a new executor and moving the token's EXECUTOR_ROLE.
- *      Forward-only: the token remains the single source of truth for signature, nonce, deadline, freeze, pause and
- *      policy checks, so nothing is checked twice. The executor holds no funds and no state of its own
+ *      Forward-only: the token remains the single source of truth for signature, nonce, window, executor binding,
+ *      freeze, pause and policy checks, so nothing is checked twice. The executor holds no funds and no state of its own
  */
 contract IntentExecutor is AccessControl, Pausable, IIntentExecutor, IIntentExecutorBatch {
   /// @notice Role allowed to submit intents

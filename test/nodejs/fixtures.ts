@@ -11,6 +11,7 @@ import {
   type Abi,
   type Address,
   type Hex,
+  zeroAddress,
 } from "viem";
 
 import Activate from "../../ignition/modules/Activate.js";
@@ -44,6 +45,9 @@ const REASON_NAMES = [
   "NO_HOOK",
   "NO_RULES",
   "NOT_FUND_CLASS",
+  "WRONG_EXECUTOR",
+  "INTENT_NOT_YET_VALID",
+  "CONSIDERATION_NEEDS_EXECUTOR",
 ] as const;
 
 /** `Errors.sol` reason codes, keyed by name; `reasonName` maps a code back for readable assertions. */
@@ -345,10 +349,25 @@ export const INTENT_TYPES = {
     { name: "nonce", type: "bytes32" },
     { name: "deadline", type: "uint256" },
     { name: "ref", type: "bytes32" },
+    { name: "executor", type: "address" },
+    { name: "validAfter", type: "uint256" },
+    { name: "considerationToken", type: "address" },
+    { name: "considerationAmount", type: "uint256" },
   ],
 } as const;
 
-export type Intent = { from: Address; to: Address; amount: bigint; nonce: Hex; deadline: bigint; ref: Hex };
+export type Intent = {
+  from: Address;
+  to: Address;
+  amount: bigint;
+  nonce: Hex;
+  deadline: bigint;
+  ref: Hex;
+  executor: Address;
+  validAfter: bigint;
+  considerationToken: Address;
+  considerationAmount: bigint;
+};
 
 /** The token's EIP-712 domain as the chain reports it (ERC-5267), so signing never re-derives it off-chain. */
 export async function intentDomain(token: Stack["token"]) {
@@ -356,11 +375,22 @@ export async function intentDomain(token: Stack["token"]) {
   return { name, version, chainId, verifyingContract };
 }
 
-/** A fresh intent from `signer`: random nonce (as the signer's HSM would choose), one-hour deadline, random ref. */
+/**
+ * A fresh intent from `signer`: random nonce (as the signer's HSM would choose), one-hour deadline, random ref, and by
+ * default no executor binding, no `validAfter` and no consideration.
+ */
 export async function signIntent(
   s: Stack,
   signer: Stack["holders"]["alice"],
-  fields: { to: Address; amount: bigint; deadline?: bigint },
+  fields: {
+    to: Address;
+    amount: bigint;
+    deadline?: bigint;
+    executor?: Address;
+    validAfter?: bigint;
+    considerationToken?: Address;
+    considerationAmount?: bigint;
+  },
   domainOverride: Partial<Awaited<ReturnType<typeof intentDomain>>> = {},
 ) {
   const now = (await s.publicClient.getBlock()).timestamp;
@@ -371,6 +401,10 @@ export async function signIntent(
     nonce: toHex(crypto.getRandomValues(new Uint8Array(32))),
     deadline: fields.deadline ?? now + 3_600n,
     ref: toHex(crypto.getRandomValues(new Uint8Array(32))),
+    executor: fields.executor ?? zeroAddress,
+    validAfter: fields.validAfter ?? 0n,
+    considerationToken: fields.considerationToken ?? zeroAddress,
+    considerationAmount: fields.considerationAmount ?? 0n,
   };
   const domain = { ...(await intentDomain(s.token)), ...domainOverride };
   const sig = await signer.signTypedData({ domain, types: INTENT_TYPES, primaryType: "TransferIntent", message: intent });

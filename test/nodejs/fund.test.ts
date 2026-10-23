@@ -167,7 +167,7 @@ describe("fund: investors counted across classes", async function () {
 
     // Intent settlement is the EXECUTED kind: the fund cap applies to it like any other movement.
     const { intent, sig } = await signIntent(s, alice, { to: dave.account.address, amount: 1n });
-    assert.deepEqual(await s.token.read.canExecute([intent], { account: s.executor.address }), [false, REASONS.MAX_HOLDERS]);
+    assert.deepEqual(await s.token.read.canExecute([intent, sig], { account: s.executor.address }), [false, REASONS.MAX_HOLDERS]);
     const failure = await revertOf(
       s.executor.write.execute([s.token.address, intent, sig], { account: s.wallets.operator.account }),
       [...s.executor.abi, ...s.token.abi] as Abi,
@@ -177,7 +177,7 @@ describe("fund: investors counted across classes", async function () {
 
     // A whole-balance intent is net zero, so it passes: alice leaves the fund as dave joins it.
     const whole = await signIntent(s, alice, { to: dave.account.address, amount: 10n ** 18n });
-    assert.deepEqual(await s.token.read.canExecute([whole.intent], { account: s.executor.address }), [true, REASONS.TRANSFER_OK]);
+    assert.deepEqual(await s.token.read.canExecute([whole.intent, whole.sig], { account: s.executor.address }), [true, REASONS.TRANSFER_OK]);
     await s.executor.write.execute([s.token.address, whole.intent, whole.sig], { account: s.wallets.operator.account });
     assert.equal(await s.fund.read.holderCount(), FUND_HOLDER_CAP);
     assert.equal(await s.fund.read.heldClasses([alice.account.address]), 0n);
