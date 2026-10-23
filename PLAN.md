@@ -2226,7 +2226,263 @@ Decision 2 of the second outside review, built as the second of the two separate
 ### Not in this plan
 
 A `JurisdictionRule`, amount-level lockups, an ERC-3643 read adapter, ERC-1066 style reason codes, a recovery address for identity re-keying. The assessment calls them secondary, and none of them changes what the items above build.
+## Credential layer: `CredentialRegistry` plus `CredentialRule` (track A; planned 2026-10-23; C-1 built and awaiting review, C-2 not started)
+
+Source: [the assessment](docs/superpowers/specs/2026-10-23-credential-layer-assessment.md) and the [three research reports](docs/superpowers/specs/research-2026-10-23/). On 2026-10-23 the owner asked for this plan using the assessment's defaults for its section 6. No code is written. Nothing here changes an existing contract's code, an existing interface id or an existing event, so the bytecode of every contract already in the manifest stays as it is.
+
+### Goal
+
+Today identity is one yes or no per address (`IdentityRule` over `IIdentityRegistry.isVerified`). A bank needs to know, per address, who vouched for it, what it is (customer, professional investor, fund, bank, infrastructure), until when, and its standing, and each token needs to say which of those it accepts. A holder whose credential lapses must still be able to exit.
+
+- One small registry holds the record. One small rule applies a per-token policy to it.
+- The record is written by attesters, either directly or from an EIP-712 credential the attester signed off chain. That signed record is the verifiable-credential part: W3C credentials stay off chain, the issuer's service verifies them and signs this record.
+- No change to the base, `ComplianceHook`, `PolicyRegistry`, the other rules or any frozen interface. `CredentialRegistry` also answers `isVerified`, so the existing `IdentityRule` can read it unchanged.
+
+### Where this starts
+
+Track A touches files the DvP work has uncommitted edits in: `Errors.sol`, `InterfaceFreeze.t.sol`, `ContractSizes.t.sol`, `verify-reproducible.ts`, `Components.ts`, `roles.ts` and the docs. So it starts only after the DvP work is committed, on a new branch cut from that commit, in a `git worktree` outside `/Users/address0/dev/gated-token-stack` (one HEAD serves every session there). The baseline test count is taken at that commit and written into C-1. For reference: the committed code at `82c3c92` passes 658 (590 Solidity, 68 TypeScript), which I ran from a clean export on 2026-10-23. The DvP session records 792 (707, 85) on its working tree, which I have not re-run.
+
+### Assumptions
+
+C1 to C12 are the assessment's defaults. Say which you want changed.
+
+| # | Assumption | Why |
+|---|---|---|
+| C1 | One record per address. Two attesters vouching for one wallet share the one slot (see decision 12). | Keeps a check to one slot read per party. |
+| C2 | The qualification bits are fixed in a shared `Quals` library (bits 0 to 7 named, 8 to 15 reserved, 16 to 31 free for a deployment). The registry never interprets them. | The meaning of a bit is a legal question, so it lives in one reviewable place. |
+| C3 | `CredentialRegistry` and `CredentialRule` are immutable contracts, not proxies. A schema change means a new registry, a new rule and `setRules`. | Rule 12 for the rule. The registry follows `PolicyRegistry` and the executors. |
+| C4 | The registry stores flags only. No names, no evidence hashes, no URIs, no hashes of personal data. | EDPB Guidelines 02/2025: hashes of personal data stay personal data. The link from address to person stays with the attester. |
+| C5 | `validUntil` is required and non-zero for an `ACTIVE` record. There is no cap on validity. | A credential that cannot lapse is the failure seen in Securitize. A cap is arbitrary and left to the attester's process. |
+| C6 | At most 64 attesters. Ids are never reused. | The rule's per-token trust is a `uint64` bitmap. Reusing an id would revive old records. |
+| C7 | Holder caps still count addresses (finding A5). Omnibus wallets and entity ids are out of v1. | Needs an entity map. Say so in anything bank-facing. |
+| C8 | No change for ERC-7943. | Track B (assessment decision 9). |
+| C9 | The rule has no `after_` and no running state. | The pitfalls in assessment 3.2: counters by type drift and state is missed while a rule is out of the list. |
+| C10 | A token's policy is set by the token's `DEFAULT_ADMIN_ROLE`, read live with `hasRole`, as `SettlementWindowRule.setWindow` does. | Same authority as the other per-token configuration. |
+| C11 | `ctx.operator` is used only to test `BURNER_ROLE` on a `BURN`, as `LockupRule` does. A spender is never checked. | Keeps pre-flight honest. Same documented caveat as `LockupRule`. |
+| C12 | `IdentityRule`, `IIdentityRegistry` and `MockIdentityRegistry` stay as they are and stay supported. | External ERC-3643 style registries still plug in through them. |
+
+### Design
+
+**`CredentialRegistry`** (immutable, `AccessControl`, `EIP712`, `ERC165`, `ICredentialRegistry`, `IIdentityRegistry`). Roles: `DEFAULT_ADMIN_ROLE`, `GUARDIAN_ROLE`, `RECOVERY_ROLE`. Constructor `(admin, guardian)`, administered by the deployer until `Activate` hands over, as `IntentExecutor` is.
+
+Record, one slot, 25 bytes used: `validUntil` (`uint64`), `status` (`uint8`), `quals` (`uint32`), `country` (`uint16`, ISO 3166-1 numeric), `attester` (`uint8`), `issuedAt` (`uint64`), `guardianBlock` (`bool`).
+
+Status values: `NONE`, `ACTIVE`, `EXIT_ONLY`, `BLOCKED`, `LAPSED`. `LAPSED` is only ever returned by `profileOf`, never stored, and no write accepts it.
+
+`profileOf(subject)` returns `(status, quals, country, attester)` with the effective status, resolved in this order:
+1. never written: `NONE`;
+2. `guardianBlock` set, or stored `BLOCKED`: `BLOCKED`;
+3. the attester is killed: `EXIT_ONLY`;
+4. stored `ACTIVE` and `block.timestamp > validUntil`: `LAPSED`;
+5. otherwise the stored status.
+
+`isVerified(subject)` is `profileOf(subject).status == ACTIVE`.
+
+Writers:
+- `set(subject, validUntil, quals, country)`: an active attester; stores `ACTIVE`, `issuedAt = block.timestamp`. `quals` must be inside the attester's allowed mask; `validUntil` must be in the future.
+- `register(credential, sig)`: anyone submits an EIP-712 `Credential(subject, validUntil, quals, country, issuedAt)` signed by an attester. Checked with OpenZeppelin `SignatureChecker`, so an HSM-backed or Safe attester works through ERC-1271. Same checks as `set`, plus `issuedAt` strictly above the stored one and not in the future. The domain is name, version `"1"`, chain id and the registry address.
+- `setStatus(subject, status)`: the record's own attester; `ACTIVE` (only while `validUntil` is in the future), `EXIT_ONLY` or `BLOCKED`. Sets `issuedAt = block.timestamp`, so an older signed credential cannot overwrite it.
+
+Guardian (stop only, no delay): `blockSubject(subject)`, `killAttester(id)`.
+
+Admin, a timelock after hand-over: `addAttester(account, allowedQuals)` (returns the id), `setAttesterAccount(id, account)` (key rotation without reissuing), `setAttesterQuals(id, allowedQuals)` (affects only later writes), `killAttester(id)`.
+
+Admin or recovery (decision 11): `clearGuardianBlock(subject)`, `reviveAttester(id)`. `RECOVERY_ROLE` may also revoke `GUARDIAN_ROLE` and nothing else, the same override the tokens and executors have.
+
+Events on every state change (rule 16): `CredentialSet`, `StatusSet`, `SubjectBlocked`, `SubjectUnblocked`, `AttesterAdded`, `AttesterAccountSet`, `AttesterQualsSet`, `AttesterKilled`, `AttesterRevived`.
+
+**`CredentialRule`** (immutable, `BaseRule`, `ICredentialRule`). Immutable: `REGISTRY`. `ruleId` is `keccak256('CredentialRule.v1')`. `wantsAfter` is false. The council attests it as RULE.
+
+Per-token policy, one slot, set by `setPolicy(token, requireAll, requireAny, forbidAny, attesters)`: three `uint32` masks and a `uint64` attester bitmap. A record is *eligible* for a token when: the status is `ACTIVE`, the attester's bit is in `attesters`, `quals & requireAll == requireAll`, `requireAny == 0` or `quals & requireAny != 0`, and `quals & forbidAny == 0`. `attesters == 0` means unconfigured, which admits nobody.
+
+| Kind | Sender must be | Receiver must be |
+|---|---|---|
+| `TRANSFER`, `EXECUTED` | `ACTIVE`, `EXIT_ONLY` or `LAPSED` | eligible |
+| `MINT` | none | eligible |
+| `BURN` from a holder or a vault | `ACTIVE`, `EXIT_ONLY` or `LAPSED` | none |
+| `BURN` whose operator holds the token's `BURNER_ROLE` | none | none |
+| `FORCED` | none | eligible |
+
+The role lookup for the enforcement burn happens only when the sender check would otherwise fail. Zero amounts are not skipped: the 7540 vault's zero-amount burn probe must still see a blocked controller. A sender that is `NONE` or `BLOCKED` gets `SENDER_NOT_VERIFIED`. A receiver that is `NONE`, `BLOCKED` or `EXIT_ONLY` gets `RECEIVER_NOT_VERIFIED`, `LAPSED` gets `CREDENTIAL_EXPIRED`, and an active receiver that fails the policy, or any receiver of a token with no policy, gets `RECEIVER_NOT_ELIGIBLE`. Unconfigured affects receivers only: a sender needs no policy, so existing holders can still exit.
+
+**What does not change.** `PolicyGatedERC20Upgradeable`, `ComplianceHook`, `PolicyRegistry`, `ProxyDeployer`, the executors, `Fund`, the templates and the other five rules. `IdentityRule` stays in the manifest and is only taken out of the demo deployment's rule order (C-2).
+
+### Decisions
+
+Numbers 1 to 10 are the assessment's section 6, adopted at the owner's instruction to use its defaults. 11 to 17 came up while planning. They are my defaults, and the owner can overrule any of them.
+
+| # | Question | Decision |
+|---|---|---|
+| 1 | Scope | Track A now. The tokenised-deposit needs (decimals, references, role split, supply cap, issuance switch) are track B, a separate plan. On the owner's direction of 2026-10-23 they are built as new legos around the unchanged token, not as changes to it (see "Track B, on the same pieces") |
+| 2 | Lapse and kill | A lapsed credential and a killed attester give exit-only. An explicit block stops everything |
+| 3 | Enforcement burn | A burn by `BURNER_ROLE` skips the sender check, unlike `IdentityRule` today |
+| 4 | Forced receiver | A `FORCED` move needs an eligible receiver (stricter than JPMD) |
+| 5 | Signed credential in v1 | Yes |
+| 6 | Qualification bits | The eight in `Quals`; counsel reviews the wording before any bank relies on it |
+| 7 | Target chain and the Cancun EVM | Closed 2026-10-23 by the owner: Cancun and signed intents are accepted, and the code is not designed around chains that lack them. A deployment still has to confirm its chain has EIP-1153 |
+| 8 | Fast emergency upgrade path | Open. Not part of track A |
+| 9 | ERC-7943 adapter | Open. Track B |
+| 10 | Omnibus and entities | Out of v1 (C7) |
+| 11 | Who reverses a guardian action | The main timelock **and** the recovery timelock. The assessment said the timelock only. The guardian holds `CANCELLER_ROLE` on the main timelock and could cancel the operation that unblocks what it blocked, which is the reason the recovery timelock exists (owner decision M-1). So `clearGuardianBlock` and `reviveAttester` accept `DEFAULT_ADMIN_ROLE` or `RECOVERY_ROLE` |
+| 12 | One attester overwriting another's record | Allowed only if the slot is `NONE`, the same attester wrote it, or the previous attester is killed. Otherwise it reverts. The assessment did not say |
+| 13 | Reason codes | Two appended, `CREDENTIAL_EXPIRED` and `RECEIVER_NOT_ELIGIBLE`. `LAPSED` exists as a return value so the first one is accurate. `SENDER_NOT_VERIFIED` and `RECEIVER_NOT_VERIFIED` are reused |
+| 14 | Demo deployment | `credentialRule` replaces `identityRule` in `RULE_ORDER` for all three tokens, and the Ignition key `identityRule` is renamed, not left as a misnomer. `IdentityRule` stays in the repo and in the manifest |
+| 15 | Where the files go | `contracts/identity/CredentialRegistry.sol`, `contracts/hooks/rules/CredentialRule.sol`, `contracts/interfaces/ICredentialRegistry.sol`, `ICredentialRule.sol` and `Quals.sol`, each contract with its `.t.sol` next to it. The new `identity/` folder needs a brief edit, proposed in C-2 |
+| 16 | Attester set-up at deployment | The deployer is the registry's admin until `Activate`, which adds the first attester, sets each token's policy, grants `RECOVERY_ROLE` to the recovery timelock, hands `DEFAULT_ADMIN_ROLE` to the main timelock and renounces. After that, adding an attester or changing a policy waits for the timelock delay |
+| 17 | Gas stop line | Expect +11,000 to +15,000 gas per ordinary movement over `IdentityRule` (an estimate from EIP-2929 prices, not measured). Stop for review if the measured figure is more than +20,000 |
+
+### Interfaces and the freeze
+
+- New: `ICredentialRegistry`, `ICredentialRule`, the `Quals` library. Their ERC-165 ids, event topics, the `Quals` values and the two new reasons are pinned in `InterfaceFreeze.t.sol`.
+- `Errors.sol` gets `CREDENTIAL_EXPIRED` and `RECEIVER_NOT_ELIGIBLE` appended, which the brief allows. No existing id, topic or code changes. The freeze test proves it.
+- `IIdentityRegistry` is not touched. The registry's ERC-165 answers both ids.
+- Errors are named `CredentialRegistry_*` and `CredentialRule_*` (rule 16).
+
+### Tests first (rule 5: the red run is shown before each implementation)
+
+Unit tests isolate with `vm.mockCall` and `vm.expectCall`, fuzz with `bound`:
+1. `CredentialRegistry.t.sol`:
+   - `set`, `register`, `setStatus` and every revert (not an attester, killed attester, quals outside the allowed mask, `validUntil` in the past or zero, `LAPSED` as an input, wrong status transition);
+   - `profileOf` for each of the five resolution steps, and `isVerified` equal to `ACTIVE`;
+   - the expiry boundary: the second equal to `validUntil` and the one after;
+   - replay: the same signed credential twice, an older one over a newer one, an old one after a direct write, another chain id or registry address, an ERC-1271 attester, a signature by a rotated-out key;
+   - a guardian block cannot be cleared by an attester, by a signed credential or by `setStatus`; both timelock paths clear it; a killed attester gives `EXIT_ONLY` and `reviveAttester` restores it;
+   - the overwrite rule (decision 12) in each branch;
+   - role gates on every function, `RECOVERY_ROLE` can revoke `GUARDIAN_ROLE` and nothing else;
+   - ids are never reused, the 65th attester reverts.
+2. `CredentialRule.t.sol`:
+   - accept and each reject in the table above, for every kind;
+   - an enforcement burn and a `FORCED` move against `NONE`, `BLOCKED`, `LAPSED` and killed-attester senders;
+   - exit-only holder: can send, burn and redeem, cannot receive;
+   - each mask on its own (`requireAll`, `requireAny`, `forbidAny`), the attester bitmap, an unset policy (receivers rejected, senders unaffected);
+   - `setPolicy` only by the token's `DEFAULT_ADMIN_ROLE`, and a fake token cannot read or change another token's policy;
+   - zero amounts are checked;
+   - `*_TokenCallsAreStatic` and view-ness, the same guard the other rules have;
+   - fuzz over kind, operator and status.
+3. Integration, real hooks and the real rule set, three tokens (`IntentToken`, `Gated4626Vault`, `Gated7540Vault`):
+   - `canTransfer`, `isUserAllowed` and the state-changing call agree for each outcome and each kind, with the documented burner exception;
+   - 7540: a lapsed controller can claim a redemption payout, `rejectRedeemRequest` to a lapsed controller reverts and `recoverRedeemRequest` to an eligible account works, the escrow vault is credentialed with `INFRA`, `recoverClaimable` needs an eligible `to`;
+   - the existing `IdentityRule` over the registry behaves as it does over `MockIdentityRegistry`;
+   - the rule in a real `RuleSetIntegration` order with lockup, window and the two cap rules.
+4. Invariants (stateful fuzz): `issuedAt` never decreases for an address; a record read as `ACTIVE` never has `validUntil` in the past; an address with `guardianBlock` never reads anything but `BLOCKED` until a timelock path clears it.
+5. Halmos: a lapsed record never resolves to `ACTIVE`; the signed path cannot lower `issuedAt` or clear a block. Kept only if it runs on this path as the existing properties do.
+6. `ContractSizes.t.sol` gets both contracts.
+7. Mutation checks on both contracts in a scratch copy (never the shared tree): drop the expiry test, drop the block check, drop the `issuedAt` test, make the burner exemption unconditional, skip zero amounts, swap sender and receiver. Each must be caught.
+
+### Gas
+
+Measured with the harness in `docs/superpowers/specs/fund-gas-bench/` on the real contracts: an ordinary transfer, a mint and a vault claim, once with `IdentityRule` over the registry and once with `CredentialRule`, plus the cost of `set`, `register` and `setStatus`. Decision 17 sets the stop line. The numbers go into the "as built" record.
+
+### Deployment (C-2)
+
+- `Components`: deploys `CredentialRegistry(deployer, guardian)` and `CredentialRule(registry)`, and no longer takes `identityRegistry` as a parameter. The key `identityRule` becomes `credentialRule` here, in `Tokens`, `roles.ts` and the tests that name it.
+- Council step 1 attests `CredentialRule` as RULE with the others. The council reads `rule.REGISTRY()`, the registry's code, its admin and its attester list first: the rule's codehash covers the registry's address and not the registry's code. The registry is reviewed, not attested, like `Fund` and `ProxyDeployer`.
+- `RULE_ORDER`: `credentialRule` first for all three tokens, where `identityRule` was.
+- `Activate`: `addAttester` for the demo KYC attester (new parameter `kycAttester`), `setPolicy` for each token while the deployer is still its admin (`requireAll = KYC`, `attesters` = that attester, which matches today's identity-only behaviour), grant `RECOVERY_ROLE` to the recovery timelock, grant `DEFAULT_ADMIN_ROLE` to the main timelock, deployer renounces.
+- `assertHandedOver` gains: the registry's admin is the timelock, its recovery role is the recovery timelock, the guardian holds `GUARDIAN_ROLE`, the deployer holds nothing, and every token's policy is the intended one.
+- Runbook (README and `docs/governance-and-deployment.md`): the council check above; how an attester is onboarded and rotated; never remove `CredentialRule` from a token's hook without replacing it, because a hook with no identity rule admits anyone.
+
+### TypeScript (C-2)
+
+`fixtures.ts` replaces the `identity.write.set` calls with a helper that has the demo attester write a credential for the holders, the recovery account and the 7540 escrow vault (with `INFRA`). The tests that use the old registry in `governance.test.ts`, `deployment.test.ts`, `parity.test.ts`, `dvp.test.ts`, `fund.test.ts` and `vaults.test.ts` keep their assertions. A new `test/nodejs/credentials.test.ts`: a real EIP-712 credential signed with viem and submitted by a third party; expiry through the real clock helper; a lapsed holder exits and cannot receive; a guardian block, and its reversal through the recovery timelock after the delay; `canTransfer` parity from the TypeScript side; event decoding. The existing tests must pass unchanged apart from the identity set-up.
+
+### Docs (C-2)
+
+- `docs/`: `architecture.md` (contracts table and diagrams), `roles.md` (registry roles, who holds them after `Activate`, what the guardian can do to it), `transfer-checks.md` (a `CredentialRule` section and a row in the per-kind table), `governance-and-deployment.md`, and "Checked against" in `docs/README.md`. Every edited sentence is verified against the code, and a fresh agent checks the diff afterwards.
+- README: contracts list, rule order, deviations from the brief, the runbook.
+- Proposed brief edits, which need your OK because the brief is the standing instruction file: §3 layout gets `contracts/identity/`, and §6 gets `CredentialRule` in the rule list and a line on the registry. `SECURITY.md` gets the attester trust assumption.
+
+### Checkpoints and gates
+
+- **C-1:** `Quals`, the two interfaces, the two reason codes, `CredentialRegistry`, `CredentialRule`, all Solidity tests above, the mutation run, the gas measurement, the freeze and size tests. Stop for review.
+- **C-2:** Ignition, `credentials.test.ts`, the fixture changes, the docs. Stop for review.
+- **Gates at each:** `npx hardhat test` in both runners with the summary line pasted, `npm run lint:sol`, `npm run fmt:check`, `tsc`, `slither .`, `npm run aderyn`, `npm run validate:upgrades`, the Halmos run, the isolated profile, and `npm run verify:reproducible` (the manifest grows from 16 to 18: `CredentialRule` under ATTESTED, `CredentialRegistry` under DEPLOYED). The 16 existing entries must be byte-identical to the base commit.
+- **Attestation impact:** new `CredentialRule` (RULE) and `CredentialRegistry` (reviewed, not attested). Unchanged: every current attested contract.
+
+### Risks
+
+1. Attesters are the trust root. A compromised attester can credential any wallet for every token that trusts it. The limits are the per-attester allowed qualifications, the per-token attester bitmap, and the guardian's kill. There is no on-chain proof of the KYC itself.
+2. The rule's codehash does not cover the registry's code (assessment A6). The council check and the runbook carry it. A registry attestation kind is a later option and needs an interface change.
+3. The meaning of each qualification bit is legal. A wrongly defined bit is a misclassification. Counsel reviews `Quals` before any bank relies on it.
+4. Public flags. Even a status bit and a country can identify a customer under bank secrecy rules. The registry stores no personal data, but on a public chain the pattern is visible. Deployment choice, not a contract fix.
+5. Exit-only lets a lapsed holder sell to an eligible buyer. A bank that wants a lapsed holder frozen uses `setStatus(BLOCKED)`.
+6. One record per address (C1): a second provider for the same wallet needs the overwrite rule, and the earlier attester's view is lost.
+7. A compromised guardian can block every address. The recovery timelock removes it after its delay, the same class of risk as a guardian that pauses.
+8. The enforcement-burn exemption lets a `BURNER_ROLE` holder burn from an unregistered address. Today it can already burn from any verified holder, so the extra reach is small, but it is new.
+9. Adding an attester or changing a policy waits for the timelock delay once the deployer has handed over.
+10. Holder caps still count addresses (C7).
+11. The gas figure is an estimate until C-1 measures it.
+
+### Not in this plan
+
+Entity ids and omnibus handling, the follow-on rules (`SupplyCapRule`, `IssuanceSwitchRule`, `JurisdictionRule`, `HolderLimitRule`, each a small plan of its own), every track B item, an ERC-7943 adapter, an adapter that reads ONCHAINID or EAS into the registry, zero-knowledge proofs, evidence or hash storage, a cap on validity, a registry attestation kind, appeals or dispute handling, and any change to `IdentityRule`.
+
+### Track B, on the same pieces (noted 2026-10-23, not planned or approved)
+
+The owner's direction: Cancun and signatures are not a concern, and the aim is code that is easy to reuse. I checked the token: `mint`, `burn`, `forcedTransfer` and `setFrozen` are gated only by a role, and a contract can hold a role (the two executors already hold `EXECUTOR_ROLE`). So a tokenised deposit needs no change to `PolicyGatedERC20Upgradeable`. Policy goes in rules. Privileged workflow goes in contracts that hold the token's existing roles. The one token-level item is a thin template.
+
+| Need (assessment 4.3) | Where it goes | Touches the base? |
+|---|---|---|
+| D1 decimals | A thin template `DepositToken`: `IntentToken` plus a `decimals` initializer argument. About 40 lines | No. A new template |
+| D2 reference on mint and burn | A `MintController` holds `MINTER_ROLE` and `BURNER_ROLE`, requires a `ref` and emits it | No |
+| D3 case reference on freeze and forced transfer | An `EnforcementController` holds `AGENT_ROLE`, requires a case id and emits it | No |
+| D4 role split | The controllers: a freezer role and a clawback role on the controller, which is the only holder of `AGENT_ROLE` on the token. It also forwards `LockupRule.setLockup`, which reads `AGENT_ROLE` on the token | No |
+| D5 supply cap | `SupplyCapRule` on `MINT` | No |
+| D6 issuance switch | `IssuanceSwitchRule` on `MINT` and `BURN` | No |
+| D9 ERC-7943 | Open. It adds functions to the token, so it is the one item here that would touch it | Only if chosen |
+| Scoped mandates instead of locks | Signed intents already name an executor, a deadline and a start time, and `DvPExecutor` settles without escrow | No |
+
+Limits to know before choosing this. The reference lives in the controller's event and is tied to the token's `Transfer` or `ForcedTransfer` by the transaction. The hook's `ctx.ref` stays zero for mint, burn and forced moves, so a rule cannot read it; if a rule must, that is a base change. The plain `mint` and `forcedTransfer` stay callable by whoever still holds the roles, so a controller only binds if it is the sole holder, which `assertHandedOver` can pin. The controllers are new trust points and need their own tests, audit and attestation review.
+
+### C-1 as built (2026-10-23, awaiting review)
+
+Contracts, Solidity tests, the freeze and size pins and the reproducibility manifest. No Ignition, no TypeScript test, no docs (C-2). Branch `credential-layer`, cut from `24b7798`, in the worktree `/Users/address0/dev/gated-token-stack-credential`. Nothing is committed.
+
+**New code.**
+- `contracts/interfaces/Quals.sol`, `ICredentialRegistry.sol`, `ICredentialRule.sol`.
+- `contracts/identity/CredentialRegistry.sol` (409 lines, 11,082 bytes deployed) and `contracts/hooks/rules/CredentialRule.sol` (141 lines, 3,275 bytes). The limit is 24,576.
+- `contracts/test/MockERC1271Wallet.sol`, a contract account for the ERC-1271 attester tests.
+- Tests next to the code: `CredentialRegistry.t.sol`, `CredentialRule.t.sol`, `CredentialRuleIntegration.t.sol`, `CredentialRuleVaults.t.sol`, and `contracts/test/halmos/CredentialRegistryHalmos.t.sol`.
+- Changed: `Errors.sol` (`CREDENTIAL_EXPIRED`, `RECEIVER_NOT_ELIGIBLE` appended), `InterfaceFreeze.t.sol`, `ContractSizes.t.sol`, `scripts/verify-reproducible.ts` (two manifest entries).
+
+**Differences from the plan.** Each is my call, and you can overrule any of them.
+1. The signed `Credential` carries the attester id (six fields in the EIP-712 type). ERC-1271 cannot recover a signer, so the registry must be told whose account to ask.
+2. `profileOf` tests for a block before it tests for `NONE`. The plan listed `NONE` first. An address the guardian blocked before it had any record reads `BLOCKED`, so "a guardian block always reads BLOCKED" has no exception.
+3. Killed attesters are a `uint64` mask in the registry, not a flag in each attester's slot, so one read serves both parties of a movement. `attesterAt` still returns `killed`.
+4. `blockSubject`, `clearGuardianBlock`, `killAttester` and `reviveAttester` do nothing, and emit nothing, when they change nothing. A guardian script can be repeated safely.
+5. `setStatus(ACTIVE)` needs a `validUntil` strictly in the future, as `set` does. A record still reads `ACTIVE` through its last second but cannot be restored in that second.
+
+**Tests, red first (rule 5).** Against stubs (every registry function reverting, the rule approving everything): 15 passing, 120 failing. The 15 are what a stub can satisfy: accept cases for an approve-all rule, and plain `AccessControl` behaviour. My first stubs failed every `setUp`, which showed 21 failing contracts and 0 passing and hid the count, so I made them permissive enough for `setUp` to run.
+
+**Green.** 170 new Solidity tests: `CredentialRegistry.t.sol` 93 (including three stateful invariants at 256 runs, and a test that the handler reaches both a write and a rejection), `CredentialRule.t.sol` 42, `CredentialRuleIntegration.t.sol` 24, `CredentialRuleVaults.t.sol` 10 (seven on the 7540 vault, three on the 4626 vault), and one more in `InterfaceFreeze.t.sol` for the `Quals` bits. Fuzz tests use `bound`; no Solidity test uses `vm.assume`. The integration tests use the real token, hook, registry and rule, and compare `canTransfer`, `canExecute` and `isUserAllowed` with the real call for each standing.
+
+**Gates, on the final tree.**
+- `npx hardhat test`: **962 passing (877 Solidity, 85 TypeScript)**, 0 failing. The baseline at `24b7798`, run from a clean export, is 792 (707, 85). Isolated profile: 877 passing.
+- `forge fmt --check`, `solhint --max-warnings 0` and `tsc` clean. Aderyn 0 findings. upgrades-core 3 of 3 (the new contracts are not upgradeable).
+- Slither: **0 results** (379 contracts, 97 detectors). The first run found 6: four `incorrect-equality` on comparisons of the status enum, two `unused-return` on a tuple that is only partly used. Neither is a defect. I added inline suppressions with the reason on the line above, in the style of the other rules, and changed nothing else.
+- Halmos: five new properties pass (one is a control), and the 13 existing ones still pass. Planted bugs: Halmos gives counterexamples for three of the four I tried; the fourth (a direct write that stores `issuedAt` as zero) is caught by the invariant and the unit tests, not by Halmos. The first version of the stale-credential property was vacuous: every path reverted because of the overwrite rule, not because of the staleness. The control property exposed it, and both now use one attester.
+- `verify:reproducible`: 18 contracts identical across the two production builds, the default profile and forge. The 16 existing contracts have runtime and creation code identical to the build of `24b7798` (compared artifact by artifact). The manifest grew from 16 to 18.
+
+**Mutation run.** 56 mutants (34 on the registry, 22 on the rule), run in three scratch copies: 56 killed, none survived. 23 were killed by exactly one test, which are the sharp boundaries (the lapse second, the 65th attester, each role gate). The invariants alone catch four of the registry mutants. One of them, a write that drops the guardian block, escaped until the handler kept its own record of the blocks, because the invariant had been reading the flag the mutant deletes. The list is fixed and not exhaustive.
+
+**Gas** (forge `--isolate`, 21,000 intrinsic included, ordinary movement between existing holders, same token and hook, a throwaway bench in scratch):
+
+| Rule set | transfer | mint | burn |
+|---|---|---|---|
+| A: `IdentityRule` over a mock registry | 73,499 | 86,779 | 73,285 |
+| B: `IdentityRule` over `CredentialRegistry` | 78,023 | 90,041 | 76,547 |
+| C: `CredentialRule` | 81,626 | 93,196 | 76,828 |
+
+C over A: +8,127 on a transfer, +6,417 on a mint, +3,543 on a burn. Decision 17 expected +11,000 to +15,000 and set the stop line at +20,000, so the plan did not stop. Registry writes: `set` 58,203 (new address) and 41,138 (rewrite), `setStatus` 35,430, `blockSubject` 32,430. The signed `register` was not measured.
+
+**For the review.**
+- Revoking a signed credential that nobody has submitted yet: `setStatus` needs a record, so the attester cannot touch it directly. It can write a record and block it (which raises `issuedAt` past the credential's), or the guardian can block the address. `validUntil` bounds the exposure either way.
+- Under the plain `IdentityRule` over this registry, a lapsed or exit-only holder cannot send (tested). Exit-only behaviour exists only with `CredentialRule`.
+- `register` is open to anyone, by design: the holder or a relayer pays the gas.
+- The new contracts use no transient storage, so they do not depend on the Cancun decision.
+- Next, C-2: Ignition (`Components`, `Tokens`, `roles.ts`, `Activate`), the TypeScript fixtures and `credentials.test.ts`, the docs, and the brief edits you must approve.
 
 ## Open questions for the owner
 1. DvP: decisions D1 to D8 are recorded in the DvP section (D8: Option B; D6 revised for the `IntentExecutor` refusal). I-1, E-1, E-2 and the refusal are built and wait for your review.
 2. Nothing on `fund-layer` is pushed, and the DvP section is not committed. Push, or open a pull request, only when you say. The branch carries PR #2's commit `d3574df` until PR #2 merges.
+3. Credential layer (track A): C-1 is built on branch `credential-layer` and waits for your review (see "C-1 as built"); nothing is committed. C-2 is not started. Decisions 1 to 6 and 10 adopt the assessment's defaults. Please confirm or change 11 to 17, which came up while planning (11: the recovery timelock can also reverse a guardian block; 12: the rule for one attester overwriting another; 14: the demo deployment swaps `IdentityRule` for `CredentialRule`; 17: the gas stop line). Decision 7 (Cancun and signatures) is closed: accepted. Decisions 8 and 9 (fast upgrade path, ERC-7943) are open and do not block track A. Track B is noted as legos around an unchanged token; it is not planned.

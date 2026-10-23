@@ -22,6 +22,7 @@ const ATTESTED = {
   IdentityRule: "hooks/rules",
   HolderRestrictionRule: "hooks/rules",
   MinPositionRule: "hooks/rules",
+  CredentialRule: "hooks/rules",
   SettlementWindowRule: "hooks/rules",
   MaxHoldersRule: "hooks/rules",
   FundHoldersRule: "hooks/rules",
@@ -32,6 +33,7 @@ const ATTESTED = {
 } as const;
 const DEPLOYED = {
   PolicyRegistry: "governance",
+  CredentialRegistry: "identity",
   GovernanceTimelock: "governance",
   IntentExecutor: "intents",
   DvPExecutor: "intents",
