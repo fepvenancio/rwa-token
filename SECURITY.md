@@ -91,10 +91,11 @@ Further limits recorded during review:
   (`considerationToken`, `considerationAmount`). The token hashes both fields into the digest the holder signs and reads
   them only to reject an intent that states a consideration without naming an executor
   (`CONSIDERATION_NEEDS_EXECUTOR`). Only the executor the intent names can enforce the payment, if its code does.
-  `DvPExecutor` does. `IntentExecutor` moves one token and forwards the intent, so a consideration stated for an intent
-  that names it is only a record, and the shares move without payment
-  (`test_WhenTheIntentNamesTheIntentExecutor_ItSettlesTheTransferAloneWhateverItStates`). Whether `IntentExecutor`
-  should refuse such an intent is an open decision (PLAN.md, "Validation of an outside review").
+  `DvPExecutor` does. `IntentExecutor` moves one token and cannot enforce a payment, so it refuses an intent that
+  states one, naming it or not, with `IntentExecutor_ConsiderationNotSupported(index)` before the token is called
+  (`test_WhenTheIntentNamesTheIntentExecutorAndStatesAPayment_ItIsRefusedAndNothingMoves`). Without that, a signer who
+  read a payment in the message and did not check which contract the `executor` field names would see the shares
+  move without it. The token's `canExecute` does not see this refusal: it belongs to the executor.
 - **What the DvP executor trusts, and what it does not** ([`docs/flows-dvp.md`](docs/flows-dvp.md)). An operator chooses
   which signed legs to pair, when to submit, and the token addresses, and cannot redirect value: each party's signature
   covers the other party, the amounts, both tokens and the executor, the mirror check ties the two together, and for an
@@ -214,6 +215,7 @@ Each row is a bug deliberately planted, the run that caught it, then restored fr
 |---|---|---|
 | Halmos (proxied `IntentToken`) | nonce not consumed; cancel not recorded; frozen check skipped; burn not releasing frozen | the matching symbolic property, each |
 | Executor | batch made best-effort | 3 tests |
+| `IntentExecutor` refusal of a stated consideration (2026-10-23) | `execute` never refuses; the check ignores the amount, or the token, or needs both; `executeBatch` never refuses, or names the wrong position; `execute` refuses only after calling the token | 2 to 7 tests each |
 | `DvPExecutor` (2026-10-23) | pause, role or reentrancy guard dropped on either entry point; each of the seven mirror conditions dropped; the two legs swapped; each of the five authorization conditions dropped, and the bare-hash nonce; the executor's or the seller's cash check dropped, and the seller's balance read before the pull; the securities leg never run; the seller never paid; the pre-flight legs swapped, either window edge moved, the pause ignored | 1 to 18 tests each. Halmos catches the dropped mirror conditions, the dropped securities leg, the dropped nonce, payer, value and token conditions, and the dropped executor cash check. Two weaknesses in the first tests showed up and were fixed: a reentrancy test that passed with the guard removed (`vm.expectRevert` does not compare the data of a low-level call), and a gated-path guard with no test |
 | DvP deployment (2026-10-23) | `Activate` skips the DvP executor's EXECUTOR_ROLE on the intent token, its OPERATOR_ROLE or its RECOVERY_ROLE, or its hand-over; grants the operator key EXECUTOR_ROLE on the intent token; gives the DvP operator role to the minter | the post-deploy check, which pins the DvP executor's roles and the set of EXECUTOR_ROLE holders (the deployment tests fail). Dropping the check of stray EXECUTOR_ROLE holders is caught by the governance test that grants one |
 | Intent revision (2026-10-23) | consideration check dropped, or applied to the amount only, or to the token only; executor comparison dropped; `validAfter` check dropped, or made exclusive; signature dropped from `canExecute`; executor check moved before the nonce check; a field left out of the hash | 2 to 7 tests each. Dropping the consideration check or the executor comparison is also caught by the matching Halmos property (`check_considerationWithoutExecutorNeverExecutes`, `check_intentNamingAnotherExecutorNeverExecutes`). The order mutant first survived and `test_WhenTheNonceIsUsedAndTheExecutorIsWrong_NonceUsedWins` was added |

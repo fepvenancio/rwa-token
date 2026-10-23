@@ -24,7 +24,8 @@ IdentityRule, LockupRule, SettlementWindowRule, MaxHoldersRule   hook-agnostic, 
 Fund (one per fund, owned by the timelock)       its classes, investor count and per-investor class mask
 FundHoldersRule (one per fund)                   the rule in every class's hook that feeds the fund and enforces its cap
 PolicyRegistry (one per deployment, immutable)  codehash allowlist: HOOK / RULE / IMPLEMENTATION
-IntentExecutor (immutable)                       replaceable, role-gated submitter: execute + atomic executeBatch
+IntentExecutor (immutable)                       replaceable, role-gated submitter: execute + atomic executeBatch; refuses
+                                                 an intent that states a consideration (it cannot enforce a payment)
 DvPExecutor (immutable)                          role-gated: settles a share trade against cash, both legs or neither
 ```
 
@@ -56,7 +57,7 @@ The audit package (scope, suppressions, mutation results, findings an auditor sh
 | `UPGRADER_ROLE` | timelock | ≥ 7 days | upgrade, only to an implementation attested as `IMPLEMENTATION` |
 | `MINTER_ROLE` / `BURNER_ROLE` | issuer | none | mint, and burn (enforcement burns can take frozen tokens) |
 | `AGENT_ROLE` | issuer | none | `forcedTransfer` (clawback; bypasses pause and freeze, still policy-checked), `setFrozen`; on the 7540 vault, `recoverRedeemRequest` (escrow → verified recovery account) and `recoverClaimable` (claimable assets and shares → verified recovery account, even while paused or at a full cap) |
-| `EXECUTOR_ROLE` | `IntentExecutor` and `DvPExecutor` contracts | none | settle holder-signed intents that name no executor or name that executor; neither can alter them |
+| `EXECUTOR_ROLE` | `IntentExecutor` and `DvPExecutor` contracts | none | settle holder-signed intents that name no executor or name that executor. `IntentExecutor` settles only intents that state no consideration; `DvPExecutor` settles trades. Neither can alter an intent |
 | `OPERATOR_ROLE` (executors) | bank / relayer keys | none | submit intents via `execute` / `executeBatch` (all-or-nothing), or trades via `executeDvPGated` / `executeDvP3009` (both legs or neither) |
 | `GUARDIAN_ROLE` (executors) | multisig | none | pause an executor only; the timelock unpauses |
 | `ATTESTER_ROLE` (registry) | security council | none | attest / revoke codehashes |

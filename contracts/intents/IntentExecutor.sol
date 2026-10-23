@@ -14,7 +14,9 @@ import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
  *         their EXECUTOR_ROLE; operators (bank / relayer keys) hold OPERATOR_ROLE here
  * @dev Immutable, not a proxy: replacing it means deploying a new executor and moving the token's EXECUTOR_ROLE.
  *      Forward-only: the token remains the single source of truth for signature, nonce, window, executor binding,
- *      freeze, pause and policy checks, so nothing is checked twice. The executor holds no funds and no state of its own
+ *      freeze, pause and policy checks, so nothing is checked twice. The executor holds no funds and no state of its own.
+ *      The one thing it checks itself is that an intent states no consideration: it moves one token and cannot enforce
+ *      a payment, so it refuses an intent that states one rather than let the shares move without it
  */
 contract IntentExecutor is AccessControl, Pausable, IIntentExecutor, IIntentExecutorBatch {
   /// @notice Role allowed to submit intents
@@ -47,13 +49,15 @@ contract IntentExecutor is AccessControl, Pausable, IIntentExecutor, IIntentExec
 
   /**
    * @inheritdoc IIntentExecutor
-   * @dev Only OPERATOR_ROLE, and only while not paused. The token's revert data bubbles up unchanged
+   * @dev Only OPERATOR_ROLE, and only while not paused. Reverts with `IntentExecutor_ConsiderationNotSupported(0)` before
+   *      calling the token if the intent states a consideration. Otherwise the token's revert data bubbles up unchanged
    */
   function execute(
     address _token,
     ITransferIntent.TransferIntent calldata _intent,
     bytes calldata _sig
   ) external onlyRole(OPERATOR_ROLE) whenNotPaused returns (bytes32 _intentHash) {
+    if (_statesConsideration(_intent)) revert IntentExecutor_ConsiderationNotSupported(0);
     _intentHash = ITransferIntent(_token).executeTransfer(_intent, _sig);
   }
 
@@ -70,6 +74,7 @@ contract IntentExecutor is AccessControl, Pausable, IIntentExecutor, IIntentExec
     // Batches are atomic by design: the first failing intent reverts the batch with its index.
     // aderyn-ignore-next-line(require-revert-in-loop)
     for (uint256 _i; _i < _length; ++_i) {
+      if (_statesConsideration(_intents[_i])) revert IntentExecutor_ConsiderationNotSupported(_i);
       // Any failure reverts the whole batch, naming the failing index and carrying the token's reason.
       try ITransferIntent(_token).executeTransfer(_intents[_i], _sigs[_i]) returns (bytes32 _intentHash) {
         _intentHashes[_i] = _intentHash;
@@ -120,5 +125,16 @@ contract IntentExecutor is AccessControl, Pausable, IIntentExecutor, IIntentExec
   ) public view override returns (bool _supported) {
     _supported = _interfaceId == type(IIntentExecutor).interfaceId
       || _interfaceId == type(IIntentExecutorBatch).interfaceId || super.supportsInterface(_interfaceId);
+  }
+
+  /**
+   * @notice Whether an intent states a consideration, which is a non-zero token or a non-zero amount
+   * @param _intent The intent
+   * @return _states True if it states one
+   */
+  function _statesConsideration(
+    ITransferIntent.TransferIntent calldata _intent
+  ) private pure returns (bool _states) {
+    _states = _intent.considerationToken != address(0) || _intent.considerationAmount != 0;
   }
 }

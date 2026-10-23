@@ -45,8 +45,8 @@ contract IntentExecutorUnitTest is Helpers {
       ref: keccak256(abi.encode('ref', _seed)),
       executor: address(uint160(0x3000 + _seed)),
       validAfter: _seed,
-      considerationToken: address(uint160(0x4000 + _seed)),
-      considerationAmount: _seed + 2
+      considerationToken: address(0),
+      considerationAmount: 0
     });
   }
 
@@ -143,9 +143,83 @@ contract IntentExecutorUnit_Execute is IntentExecutorUnitTest {
     vm.prank(_operator);
     _executor.execute(_token, _intent(0), _sig(0));
   }
+
+  function _refusedWhenItStates(
+    address _considerationToken,
+    uint256 _considerationAmount
+  ) internal {
+    ITransferIntent.TransferIntent memory _i = _intent(0);
+    _i.considerationToken = _considerationToken;
+    _i.considerationAmount = _considerationAmount;
+    vm.expectCall(_token, abi.encodeWithSelector(ITransferIntent.executeTransfer.selector), 0);
+    vm.expectRevert(abi.encodeWithSelector(IIntentExecutorBatch.IntentExecutor_ConsiderationNotSupported.selector, 0));
+    vm.prank(_operator);
+    _executor.execute(_token, _i, _sig(0));
+  }
+
+  function test_WhenTheIntentStatesOnlyAConsiderationToken_ItRevertsAndNeverCallsTheToken() external {
+    _refusedWhenItStates(makeAddr('cashToken'), 0);
+  }
+
+  function test_WhenTheIntentStatesOnlyAConsiderationAmount_ItRevertsAndNeverCallsTheToken() external {
+    _refusedWhenItStates(address(0), 1);
+  }
+
+  function test_WhenTheIntentStatesBoth_ItRevertsAndNeverCallsTheToken() external {
+    _refusedWhenItStates(makeAddr('cashToken'), 500e6);
+  }
+
+  function test_WhenAnyConsiderationIsStated_ItNeverCallsTheToken(
+    address _considerationToken,
+    uint256 _considerationAmount
+  ) external {
+    if (_considerationToken == address(0) && _considerationAmount == 0) _considerationAmount = 1;
+    _refusedWhenItStates(_considerationToken, _considerationAmount);
+  }
+
+  function test_WhenTheIntentStatesNoConsideration_ItStillForwardsEveryOtherField(
+    uint8 _seed,
+    bytes32 _hash
+  ) external {
+    // The helper intent names an executor and a `validAfter`: only the consideration is refused.
+    ITransferIntent.TransferIntent memory _i = _intent(_seed);
+    assertTrue(_i.executor != address(0) && _i.considerationToken == address(0) && _i.considerationAmount == 0);
+    _settles(_seed, _hash);
+    vm.prank(_operator);
+    assertEq(_executor.execute(_token, _i, _sig(_seed)), _hash);
+  }
+
+  function test_WhenTheCallerIsNotOperatorAndTheIntentStatesAConsideration_TheRoleCheckComesFirst() external {
+    ITransferIntent.TransferIntent memory _i = _intent(0);
+    _i.considerationAmount = 1;
+    vm.expectRevert(_unauthorized(_stranger, _executor.OPERATOR_ROLE()));
+    vm.prank(_stranger);
+    _executor.execute(_token, _i, _sig(0));
+  }
 }
 
 contract IntentExecutorUnit_ExecuteBatch is IntentExecutorUnitTest {
+  function test_WhenAnIntentStatesAConsideration_TheBatchRevertsWithItsIndex(
+    uint256 _length,
+    uint256 _at,
+    bool _tokenNotAmount
+  ) external {
+    _length = bound(_length, 1, 8);
+    _at = bound(_at, 0, _length - 1);
+    (ITransferIntent.TransferIntent[] memory _intents, bytes[] memory _sigs) = _batch(_length);
+    if (_tokenNotAmount) _intents[_at].considerationToken = makeAddr('cashToken');
+    else _intents[_at].considerationAmount = 1;
+    // The intents before it may or may not be forwarded before the refusal; either way the batch is undone.
+    for (uint256 _i; _i < _at; ++_i) {
+      vm.mockCall(
+        _token, abi.encodeCall(ITransferIntent.executeTransfer, (_intents[_i], _sigs[_i])), abi.encode(bytes32(_i))
+      );
+    }
+    vm.expectRevert(abi.encodeWithSelector(IIntentExecutorBatch.IntentExecutor_ConsiderationNotSupported.selector, _at));
+    vm.prank(_operator);
+    _executor.executeBatch(_token, _intents, _sigs);
+  }
+
   function test_WhenCallerIsNotOperator_ItReverts() external {
     (ITransferIntent.TransferIntent[] memory _intents, bytes[] memory _sigs) = _batch(1);
     vm.expectRevert(_unauthorized(_stranger, _executor.OPERATOR_ROLE()));
@@ -314,11 +388,9 @@ contract IntentExecutorIntegration_Execute is IntentExecutorIntegrationTest {
     assertEq(_token.balanceOf(_bob), 50 ether);
   }
 
-  function test_WhenTheIntentNamesTheIntentExecutor_ItSettlesTheTransferAloneWhateverItStates() external {
-    // A stated consideration is a record here: the executor moves one token and forwards the intent, so the shares
-    // move and nothing else does.
+  function test_WhenTheIntentNamesTheIntentExecutorAndStatesNoPayment_ItSettlesAndTheEventNamesIt() external {
     (ITransferIntent.TransferIntent memory _i, bytes memory _sig) =
-      _signedIntentFor(_bob, 5 ether, keccak256('n'), address(_intentExecutor), makeAddr('cashToken'), 500e6);
+      _signedIntentFor(_bob, 5 ether, keccak256('n'), address(_intentExecutor), address(0), 0);
 
     vm.expectEmit(address(_token));
     emit ITransferIntent.IntentExecuted(_token.intentHash(_i), _alice, _bob, 5 ether, address(_intentExecutor), _i.ref);
@@ -327,12 +399,36 @@ contract IntentExecutorIntegration_Execute is IntentExecutorIntegrationTest {
     assertEq(_token.balanceOf(_bob), 5 ether);
   }
 
-  /// @dev The leg of a trade cannot be run alone: an intent that names the DvP executor, and states the payment it is
-  ///      for, is refused by the plain executor, however it is submitted
-  function test_WhenTheIntentNamesAnotherExecutor_TheIntentExecutorCannotRunIt() external {
+  /// @dev This executor moves one token and cannot enforce a payment, so an intent that states one is refused even when
+  ///      it names this executor: the signer would otherwise read a payment in the message and see the shares move
+  ///      without it
+  function test_WhenTheIntentNamesTheIntentExecutorAndStatesAPayment_ItIsRefusedAndNothingMoves() external {
+    (ITransferIntent.TransferIntent memory _i, bytes memory _sig) =
+      _signedIntentFor(_bob, 5 ether, keccak256('n'), address(_intentExecutor), makeAddr('cashToken'), 500e6);
+
+    vm.expectRevert(abi.encodeWithSelector(IIntentExecutorBatch.IntentExecutor_ConsiderationNotSupported.selector, 0));
+    vm.prank(_operator);
+    _intentExecutor.execute(address(_token), _i, _sig);
+
+    // In a batch, one such intent undoes the lot and names its position.
+    ITransferIntent.TransferIntent[] memory _intents = new ITransferIntent.TransferIntent[](2);
+    bytes[] memory _sigs = new bytes[](2);
+    (_intents[0], _sigs[0]) = _signedIntentFor(_bob, 1 ether, keccak256('n0'), address(0), address(0), 0);
+    (_intents[1], _sigs[1]) = (_i, _sig);
+    vm.expectRevert(abi.encodeWithSelector(IIntentExecutorBatch.IntentExecutor_ConsiderationNotSupported.selector, 1));
+    vm.prank(_operator);
+    _intentExecutor.executeBatch(address(_token), _intents, _sigs);
+
+    assertEq(_token.balanceOf(_bob), 0);
+    assertFalse(_token.nonceUsed(_alice, keccak256('n')));
+    assertFalse(_token.nonceUsed(_alice, keccak256('n0')));
+  }
+
+  /// @dev An intent that names another executor is refused by the token when this executor submits it
+  function test_WhenTheIntentNamesAnotherExecutor_TheTokenRefusesItFromTheIntentExecutor() external {
     address _dvp = makeAddr('dvpExecutor');
     (ITransferIntent.TransferIntent memory _i, bytes memory _sig) =
-      _signedIntentFor(_bob, 5 ether, keccak256('n'), _dvp, makeAddr('cashToken'), 500e6);
+      _signedIntentFor(_bob, 5 ether, keccak256('n'), _dvp, address(0), 0);
 
     vm.expectRevert(_rejected(Reasons.WRONG_EXECUTOR));
     vm.prank(_operator);
@@ -361,11 +457,36 @@ contract IntentExecutorIntegration_Execute is IntentExecutorIntegrationTest {
     assertEq(_token.balanceOf(_bob), 5 ether);
   }
 
+  /// @dev The leg of a trade cannot be run alone, at either layer: an intent that names the DvP executor and states the
+  ///      payment it is for is refused by this executor before it reaches the token, and by the token if any other
+  ///      executor holding the role submits it. Only the executor it names can run it
+  function test_WhenTheIntentNamesTheDvpExecutorAndStatesAPayment_NoOtherExecutorCanRunIt() external {
+    address _dvp = makeAddr('dvpExecutor');
+    (ITransferIntent.TransferIntent memory _i, bytes memory _sig) =
+      _signedIntentFor(_bob, 5 ether, keccak256('n'), _dvp, makeAddr('cashToken'), 500e6);
+
+    vm.expectRevert(abi.encodeWithSelector(IIntentExecutorBatch.IntentExecutor_ConsiderationNotSupported.selector, 0));
+    vm.prank(_operator);
+    _intentExecutor.execute(address(_token), _i, _sig);
+
+    vm.expectRevert(_rejected(Reasons.WRONG_EXECUTOR));
+    vm.prank(_executor); // another holder of EXECUTOR_ROLE, submitting straight to the token
+    _token.executeTransfer(_i, _sig);
+    assertEq(_token.balanceOf(_bob), 0);
+
+    bytes32 _executorRole = _token.EXECUTOR_ROLE();
+    vm.prank(_admin);
+    _token.grantRole(_executorRole, _dvp);
+    vm.prank(_dvp);
+    _token.executeTransfer(_i, _sig);
+    assertEq(_token.balanceOf(_bob), 5 ether);
+  }
+
   function test_WhenTheIntentStatesAPaymentButNamesNoExecutor_NoExecutorCanRunIt() external {
     (ITransferIntent.TransferIntent memory _i, bytes memory _sig) =
       _signedIntentFor(_bob, 5 ether, keccak256('n'), address(0), makeAddr('cashToken'), 500e6);
 
-    vm.expectRevert(_rejected(Reasons.CONSIDERATION_NEEDS_EXECUTOR));
+    vm.expectRevert(abi.encodeWithSelector(IIntentExecutorBatch.IntentExecutor_ConsiderationNotSupported.selector, 0));
     vm.prank(_operator);
     _intentExecutor.execute(address(_token), _i, _sig);
 

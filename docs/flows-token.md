@@ -138,11 +138,11 @@ Checks in `executeTransfer`, in this order. Step 1 reverts with `AccessControlUn
 9. The movement goes through `_update` as `EXECUTED`: pause, frozen balance, then the hook. With the standard rules that means `IdentityRule` on both parties, `LockupRule` on the sender, `SettlementWindowRule` (the window must be open), `MaxHoldersRule`, and `FundHoldersRule`.
 10. `IntentExecuted(intentHash, from, to, amount, executor, ref)` is emitted. `executor` is the account that called the token, so it is the `IntentExecutor` contract when the call came through it.
 
-An intent can be bound to an executor, and it can state what its signer is to receive for it. The token enforces the binding, and that a stated consideration comes with a named executor. It does not enforce the payment: it never reads `considerationToken` or `considerationAmount` beyond that check. An executor that moves the other leg, and that the intent names, is what makes the payment happen. `IntentExecutor` does not move another leg, so an intent that names it and states a consideration is a record of the terms, not a settlement. `DvPExecutor` is the executor that does enforce a payment ([flows-dvp.md](flows-dvp.md)).
+An intent can be bound to an executor, and it can state what its signer is to receive for it. The token enforces the binding, and that a stated consideration comes with a named executor. It does not enforce the payment: it never reads `considerationToken` or `considerationAmount` beyond that check. An executor that moves the other leg, and that the intent names, is what makes the payment happen. `IntentExecutor` does not move another leg, so it refuses any intent that states a consideration, whoever the intent names, with `IntentExecutor_ConsiderationNotSupported(index)` before the token is called: otherwise the shares would move without the payment the signer read in the message. `DvPExecutor` is the executor that does enforce a payment ([flows-dvp.md](flows-dvp.md)). The token's own `canExecute` does not see this refusal, because it is the executor's check, not the token's.
 
 A revert anywhere undoes the nonce write. An intent rejected for being outside the settlement window can be submitted again when the window opens, until its deadline.
 
-The executor passes the intent to the token unchanged. It holds no funds and keeps no intent or nonce state. It stores only its roles and its pause flag. It has `OPERATOR_ROLE` for callers and a `GUARDIAN_ROLE` that can pause it, in which case `execute` reverts with OpenZeppelin's `EnforcedPause`.
+The executor passes the intent to the token unchanged, after one check of its own: the intent must state no consideration (a zero `considerationToken` and a zero `considerationAmount`). It holds no funds and keeps no intent or nonce state. It stores only its roles and its pause flag. It has `OPERATOR_ROLE` for callers and a `GUARDIAN_ROLE` that can pause it, in which case `execute` reverts with OpenZeppelin's `EnforcedPause`.
 
 Code: `IntentSettledUpgradeable.executeTransfer`, `canExecute`, `intentHash`, `_intentPreflight`; `IntentExecutor.execute`.
 
@@ -159,6 +159,7 @@ sequenceDiagram
   Ex->>Ex: onlyRole(OPERATOR_ROLE), whenNotPaused
   Ex->>Ex: lengths differ? IntentExecutor_LengthMismatch
   loop each intent in order
+    Ex->>Ex: intent i states a consideration? IntentExecutor_ConsiderationNotSupported(i)
     Ex->>T: executeTransfer(intent i, sig i)
     alt it succeeds
       T-->>Ex: intentHash i

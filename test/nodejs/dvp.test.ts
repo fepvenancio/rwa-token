@@ -183,24 +183,33 @@ describe("DvP: a share trade against cash, settled in one transaction", async fu
     assert.equal(await s.fund.read.holderCount(), 3n);
   });
 
-  it("an intent that names the DvP executor cannot be settled by the intent executor", async function () {
+  it("an intent that names the DvP executor cannot be settled by the intent executor, at either layer", async function () {
     const { s, cash } = await networkHelpers.loadFixture(funded);
     const { alice, bob } = s.holders;
     const operator = s.wallets.operator.account;
-    const bound = await signIntent(s, alice, {
+    const abi = [...s.executor.abi, ...s.token.abi] as Abi;
+
+    // Naming the DvP executor and stating no payment: the intent executor forwards it, and the token refuses it.
+    const bound = await signIntent(s, alice, { to: bob.account.address, amount: 1n, executor: s.dvpExecutor.address });
+    const byToken = await revertOf(s.executor.write.execute([s.token.address, bound.intent, bound.sig], { account: operator }), abi);
+    assert.deepEqual(byToken, { errorName: "PolicyGated_TransferRejected", args: [REASONS.WRONG_EXECUTOR] });
+
+    // Stating the payment it is for: the intent executor refuses it before it reaches the token, because it cannot
+    // enforce a payment, whoever the intent names.
+    const leg = await signIntent(s, alice, {
       to: bob.account.address,
       amount: 1n,
       executor: s.dvpExecutor.address,
       considerationToken: cash.address,
       considerationAmount: 1n,
     });
-    const refused = await revertOf(s.executor.write.execute([s.token.address, bound.intent, bound.sig], { account: operator }), s.token.abi as Abi);
-    assert.deepEqual(refused, { errorName: "PolicyGated_TransferRejected", args: [REASONS.WRONG_EXECUTOR] });
+    const byExecutor = await revertOf(s.executor.write.execute([s.token.address, leg.intent, leg.sig], { account: operator }), abi);
+    assert.deepEqual(byExecutor, { errorName: "IntentExecutor_ConsiderationNotSupported", args: [0n] });
 
-    // Naming no executor while stating a payment is refused by every executor.
+    // Naming no executor while stating a payment is refused the same way.
     const unbound = await signIntent(s, alice, { to: bob.account.address, amount: 1n, considerationToken: cash.address, considerationAmount: 1n });
-    const noExecutor = await revertOf(s.executor.write.execute([s.token.address, unbound.intent, unbound.sig], { account: operator }), s.token.abi as Abi);
-    assert.deepEqual(noExecutor, { errorName: "PolicyGated_TransferRejected", args: [REASONS.CONSIDERATION_NEEDS_EXECUTOR] });
+    const noExecutor = await revertOf(s.executor.write.execute([s.token.address, unbound.intent, unbound.sig], { account: operator }), abi);
+    assert.deepEqual(noExecutor, { errorName: "IntentExecutor_ConsiderationNotSupported", args: [0n] });
     assert.equal(await s.token.read.balanceOf([bob.account.address]), 0n);
   });
 

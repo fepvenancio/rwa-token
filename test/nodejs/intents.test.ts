@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { network } from "hardhat";
-import { decodeErrorResult, hashTypedData, parseEther, parseEventLogs, verifyTypedData } from "viem";
+import { decodeErrorResult, hashTypedData, parseEther, parseEventLogs, verifyTypedData, type Abi } from "viem";
 
 import { deployStack, INTENT_TYPES, REASONS, revertOf, signIntent, type Intent, type Stack } from "./fixtures.js";
 
@@ -64,7 +64,7 @@ describe("intents: EIP-712 signing and executor settlement", async function () {
     await viem.assertions.revertWithCustomErrorWithArgs(execute(s, intent, sig), s.token, "PolicyGated_TransferRejected", [REASONS.BAD_SIGNATURE]);
   });
 
-  it("an intent that names the executor, and states what the signer is to receive, signs and settles with all ten fields", async function () {
+  it("an intent with all ten fields set hashes alike in the wallet and on chain, and the intent executor refuses the payment it states", async function () {
     const s = await networkHelpers.loadFixture(funded);
     const { alice, bob, carol } = s.holders;
     // `carol` stands in for the cash token's address: the token never reads it.
@@ -77,6 +77,20 @@ describe("intents: EIP-712 signing and executor settlement", async function () {
     });
     const offChain = hashTypedData({ domain, types: INTENT_TYPES, primaryType: "TransferIntent", message: intent });
     assert.equal(await s.token.read.intentHash([intent]), offChain, "the wallet and the chain hash all ten fields alike");
+    // The token's pre-flight knows nothing of the intent executor's own refusal, which comes first.
+    assert.deepEqual(await s.token.read.canExecute([intent, sig], { account: s.executor.address }), [true, REASONS.TRANSFER_OK]);
+
+    const refused = await revertOf(execute(s, intent, sig), s.executor.abi as Abi);
+    assert.deepEqual(refused, { errorName: "IntentExecutor_ConsiderationNotSupported", args: [0n] });
+    assert.equal(await s.token.read.balanceOf([bob.account.address]), 0n, "the shares did not move without the payment");
+    assert.equal(await s.token.read.nonceUsed([alice.account.address, intent.nonce]), false);
+  });
+
+  it("an intent that names the intent executor and states no payment settles, and the event names the executor", async function () {
+    const s = await networkHelpers.loadFixture(funded);
+    const { alice, bob } = s.holders;
+    const { intent, sig, domain } = await signIntent(s, alice, { to: bob.account.address, amount: 5n, executor: s.executor.address });
+    const offChain = hashTypedData({ domain, types: INTENT_TYPES, primaryType: "TransferIntent", message: intent });
     assert.deepEqual(await s.token.read.canExecute([intent, sig], { account: s.executor.address }), [true, REASONS.TRANSFER_OK]);
 
     await viem.assertions.emitWithArgs(execute(s, intent, sig), s.token, "IntentExecuted", [
@@ -88,6 +102,23 @@ describe("intents: EIP-712 signing and executor settlement", async function () {
       intent.ref,
     ]);
     assert.equal(await s.token.read.balanceOf([bob.account.address]), 5n);
+  });
+
+  it("a batch with one intent that states a payment names its position and settles nothing", async function () {
+    const s = await networkHelpers.loadFixture(funded);
+    const { alice, bob, carol } = s.holders;
+    const plain = await signIntent(s, alice, { to: bob.account.address, amount: 3n });
+    const paying = await signIntent(s, alice, { to: bob.account.address, amount: 4n, considerationToken: carol.account.address, considerationAmount: 1n });
+    const refused = await revertOf(
+      s.executor.simulate.executeBatch(
+        [s.token.address, [plain.intent, paying.intent], [plain.sig, paying.sig]],
+        { account: s.wallets.operator.account.address },
+      ),
+      s.executor.abi as Abi,
+    );
+    assert.deepEqual(refused, { errorName: "IntentExecutor_ConsiderationNotSupported", args: [1n] });
+    assert.equal(await s.token.read.balanceOf([bob.account.address]), 0n);
+    assert.equal(await s.token.read.nonceUsed([alice.account.address, plain.intent.nonce]), false);
   });
 
   it("an intent that names another executor is refused by the real executor, and pre-flight says so from each address", async function () {
@@ -104,7 +135,7 @@ describe("intents: EIP-712 signing and executor settlement", async function () {
     assert.equal(await s.token.read.balanceOf([bob.account.address]), 0n);
   });
 
-  it("a stated consideration with no executor is refused by every executor", async function () {
+  it("a stated consideration with no executor is refused: by the token's pre-flight, and by the intent executor before it reaches the token", async function () {
     const s = await networkHelpers.loadFixture(funded);
     const { alice, bob, carol } = s.holders;
     const { intent, sig } = await signIntent(s, alice, {
@@ -115,7 +146,8 @@ describe("intents: EIP-712 signing and executor settlement", async function () {
     });
 
     assert.deepEqual(await s.token.read.canExecute([intent, sig], { account: s.executor.address }), [false, REASONS.CONSIDERATION_NEEDS_EXECUTOR]);
-    await viem.assertions.revertWithCustomErrorWithArgs(execute(s, intent, sig), s.token, "PolicyGated_TransferRejected", [REASONS.CONSIDERATION_NEEDS_EXECUTOR]);
+    const refused = await revertOf(execute(s, intent, sig), s.executor.abi as Abi);
+    assert.deepEqual(refused, { errorName: "IntentExecutor_ConsiderationNotSupported", args: [0n] });
     assert.equal(await s.token.read.balanceOf([bob.account.address]), 0n);
   });
 

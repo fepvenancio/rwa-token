@@ -117,6 +117,8 @@ The operator chooses which signed legs to pair, when to submit, and the token ad
 - Gated form: the seller's signature covers the buyer, the shares, the cash token, the price and the executor. The buyer's covers the seller, the price, the security token, the shares and the executor. The mirror requires the two to agree, and each signature is valid only on its own token's domain.
 - ERC-3009 form: the seller's signature covers the same terms, and the buyer's nonce commits to the whole securities intent and to the security token's address. The payout goes to the intent's `from`.
 
+A leg that states a payment cannot be run alone, at either layer: `IntentExecutor` refuses any intent that states a consideration (`IntentExecutor_ConsiderationNotSupported`) before the token is called, and the token refuses it from any other executor but the one it names (`WRONG_EXECUTOR`), or from any executor if it names none (`CONSIDERATION_NEEDS_EXECUTOR`).
+
 An operator that never submits a trade cannot take anything. There is no on-chain allowlist of tokens: a party who signs a trade that names a counterfeit token loses to it.
 
 ## Policy and the fund layer
