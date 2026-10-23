@@ -1777,6 +1777,207 @@ Gates on the final tree: `npx hardhat test` **792 passing (707 Solidity, 85 Type
 
 Docs updated: flows-token (the executor paragraph and the batch diagram), transfer-checks, flows-dvp, architecture, roles, the README, SECURITY.md (the consideration bullet and a mutation row), the brief's §1 and §5. Not changed: `IIntentExecutor`'s ERC-165 id (errors are not part of it) and `InterfaceFreeze.t.sol`, which pins no error selectors. Nothing is committed or pushed.
 
+## Review items, built before the first deployment (plan 2026-10-23; decisions made, S0 built, waits for review)
+
+On 2026-10-23 the owner pasted a merged outside assessment and then said: "I prefer to have the code ready from the gate than waiting to do fixes X months after... if one institutions uses this seriously the gas costs are unecessary". The first version of this section proposed eleven decisions. The owner answered them the same day with changes, and added an S0 for the interfaces. The numbers below are the owner's answer; they differ from the first version's. A second answer settled the one open point of the first reply: `IPolicyHook` keeps its shape, with `checkSend` and `checkReceive` added and `ref` and `deadline` moved from fields into `extra`. The brief's rule 4 is satisfied: the owner's RD3 is the explicit instruction to reopen `contracts/interfaces/`, to be re-frozen after S0.
+
+### The assessment, checked against HEAD `7536ec2`
+
+| Claim | Result | Evidence |
+|---|---|---|
+| ERC-7943 differs from our interface | True | The standard is Final (created 2025-06-10). Fungible id `0x3edbb4c4` is the XOR of the six selectors (recomputed with `cast sig`). We differ in names (`setFrozen`, `getFrozen`), in `canTransfer` returning `(bool, bytes32)`, in having no `canSend`/`canReceive` and no `bool` returns, and in `setFrozen` reverting above the balance (Final: "MUST allow freezing more assets than those held"). Our `ForcedTransfer` event also has an `agent` argument; Final's has three |
+| `AttestKind.IMPLEMENTATION` is not tied to a template | True, reproduced | `_authorizeUpgrade` checks only the attestation. A probe upgraded an `IntentToken` proxy to the `Gated4626Vault` implementation and it was accepted: balances survive, `decimals()` goes 18 to 6, `asset()` is 0, `totalAssets()` and `deposit` revert, plain transfers still work. Needs `UPGRADER_ROLE` (the timelock), so a governance mistake, not an attack |
+| Dropping `FundHoldersRule` from a registered class's hook un-caps it silently | True, reproduced, already documented | A probe: `setRules` without the rule on a registered class is accepted; at a full cap of 3 a fourth investor then received tokens and `fund.holderCount()` stayed 3. Documented in the fund section above and in `governance-and-deployment.md`; the runbook forbids it |
+| No `unregisterClass` | True | `Fund` has `registerClass` only |
+| The hook codehash is per token | True, documented | `TOKEN`, `ADMIN` and `REGISTRY` are immutables, so each class needs its own deployed hook and its own council attestation |
+| No address-level freeze | Partly | `setFrozen` is read only for the sender, so inflows and mints to a frozen holder pass. But `IdentityRule` rejects a de-verified sender (all kinds except MINT and FORCED) and a de-verified receiver (all kinds except BURN), so de-verifying in the identity registry blocks an address both ways. The registry is external, no role in this repo writes to it, and no document presents de-verification as the freeze route |
+| Pause blocks mint and burn | True, documented | `_check` lets only FORCED through, and FORCED to `address(0)` is reserved. A burn by `BURNER_ROLE` from a de-verified holder is also refused by `IdentityRule` (`SENDER_NOT_VERIFIED`), paused or not. The enforcement route is `forcedTransfer` to the treasury, then a burn after an unpause, which takes the timelock delay or the recovery timelock's |
+| Dust griefing | True, accepted as L-1 | `MinPositionRule` is planned and not built. The 4626 route needs a verified empty receiver and 1 wei |
+| No batch primitives, no recovery address, no jurisdiction rule, whole-balance lockup | True | |
+| ERC-7540 `maxDeposit` can overstate when controller and receiver differ | True, protected | `maxDeposit` checks the controller; the hook checks the receiver at the mint |
+| "A thin ERC-7943 adapter would do" | Wrong | Freezing above the balance, the return types and the event shape cannot be done from outside the token. They touch the base. The Docs section above deferred exact conformance until the ERC was Final, and it now is |
+
+Checked after the owner's answer: the ERC-3643 reference token (`Token.sol` in the ERC-3643 repository, main) puts `whenNotPaused` on `transfer` and `transferFrom` only; `mint`, `burn` and `forcedTransfer` carry `onlyAgent` alone, so its agents can mint and burn while paused. Its `setAddressFrozen` blocks `transfer` and `transferFrom` in both directions, but mint, burn and `forcedTransfer` ignore the flag. Not checked: whether the ERC-3643 text (as opposed to that token) says anything about pause, and whether it declares an ERC-165 id.
+
+### Measured baseline
+
+An ordinary `transfer` of 0.1 token between two existing holders on `IntentToken`, every touched account cold (`vm.cool`), probe in a scratch copy, so the numbers move by a few hundred gas between runs:
+
+| Rules installed, in order | Gas | Step |
+|---|---|---|
+| `IdentityRule` | 36,962 | |
+| + `LockupRule` | 43,825 | +6,863 |
+| + `MaxHoldersRule` | 69,198 | +25,373 |
+| + `FundHoldersRule` | 91,082 | +21,884 |
+
+By reading the code (not traced), the four-rule transfer calls back into the proxied token seven times: `balanceOf` five times (`MaxHoldersRule.check` once, and `MaxHoldersRule.after_` and `FundHoldersRule.after_` twice each) and `policyHook` twice (`onlyHook` in each `after_`).
+
+One more share class today: `new ComplianceHook` with four rules costs 880,631 gas (3,316 bytes of runtime code), plus 29,144 gas for the council's `attest`, plus one council review of that hook.
+
+Deployed sizes against the 24,576-byte limit, today and with `MulticallUpgradeable` added to the base (spike in a scratch copy, compiled):
+
+| Contract | Today | Headroom | With Multicall | Headroom |
+|---|---|---|---|---|
+| `IntentToken` | 15,574 | 9,002 | 16,194 | 8,382 |
+| `Gated4626Vault` | 16,253 | 8,323 | 16,859 | 7,717 |
+| `Gated7540Vault` | 21,546 | 3,030 | 22,152 | **2,424** |
+
+Multicall costs about 610 bytes in each template. Everything else the base gains has to fit in the 2,424 bytes the 7540 vault has left.
+
+### Decisions (the owner's, 2026-10-23)
+
+| # | Decision | As decided | What I add or check |
+|---|---|---|---|
+| RD1 | Hook topology | **Shared.** One `ComplianceHook` per deployment, one codehash for the council to attest. State is keyed by token (`rules(token)`, `afterMask[token]`, `MAX_RULES` per token). The per-token admin comes from the token itself, `IAccessControl(token).hasRole(DEFAULT_ADMIN_ROLE, msg.sender)`, as the rules already do, so the hook has no `ADMIN` or `TOKEN` immutable. `setRules(token, rules)` also accepts `msg.sender == token`, so the token's initialiser installs the hook and the initial rule set in one call; until then `NO_RULES` fails closed. `ProxyDeployer` loses the `TOKEN()` binding check, passes `initialRules` in the init data and checks `hook.rules(proxy)` equals them afterwards. `afterTransfer` requires `msg.sender == ctx.token`. `onlyHook` in the rules is unchanged. The post-deploy check pins `rules(token)` to `RULE_ORDER` as now | The `msg.sender == token` clause is what makes the chicken-and-egg work: during the proxy's construction the token has no code yet, so the hook could not ask it `hasRole`. It is safe: a contract can only set the rules of its own address, and every rule is still attested. Confirmed by the owner: the token's `_setHook` and `ProxyDeployer` require `hook.REGISTRY()` equal to the token's registry, because a shared hook built on another registry would vet rules against the wrong list. The token initialisers (`IntentToken`, both vaults) gain an `initialRules` argument |
+| RD2 | Balances in `extra` | **Do it.** `extra` is ours (rule 14). Pre-move `abi.encode(uint256 fromBalance, uint256 toBalance)`, zero for the zero side; for EXECUTED the layout appends `bytes32 ref, uint256 deadline`. `check` reads `extra`; `after_` derives the post-move balances from `amount` (`to + amount`, `from - amount`). The layout is documented in the policy interface's NatSpec. It is built by the same code in `_canTransfer` and `canExecute`, so parity holds | Same context for `check` and `after_`, so the base reads the two balances once per movement and the rules make no callbacks into the token. The two counting rules already return early on a self-transfer and a zero amount. `abi.decode` of the first two words ignores the EXECUTED tail |
+| RD3 | ERC-7943 Final | **The token face only.** `IPolicyGated` takes 7943's names and return types: `setFrozenTokens` (above the balance), `getFrozenTokens`, `forcedTransfer` returns `bool`, `canTransfer` returns `bool`, `canSend`, `canReceive`. `supportsInterface(0x3edbb4c4)`. The reasoned pre-flight moves to a second name, `canTransferWithReason`. Policy rejections keep `PolicyGated_TransferRejected(bytes32)`; the token's own frozen check uses `ERC7943InsufficientUnfrozenBalance`. `canSend` and `canReceive` come from the policy's account-level checks. `IPolicyHook` keeps its shape with two edits: `checkSend` and `checkReceive` are added (also to `IComplianceRule`, with a default of `TRANSFER_OK` in `BaseRule`), and `ref` and `deadline` leave the context as fields and ride in `extra` for EXECUTED, which removes two transient slots. `_releaseFrozen` unfreezes only the frozen part of what moves, with `Frozen` before `Transfer`. Brief rule 7 is amended: policy rejections revert `PolicyGated_TransferRejected(bytes32)`, the token's own frozen check reverts `ERC7943InsufficientUnfrozenBalance` | The second name returns `(bool allowed, bytes32 reason)`, as the old `canTransfer` did. `isUserAllowed` goes: it is today a zero-amount mint probe, which `canReceive` replaces. The `ForcedTransfer` event becomes Final's three-argument event, with a second event `ForcedTransferBy(from, to, amount, agent)` so the agent is not lost. |
+| RD4 | Address freeze | **Fold in** as `HolderRestrictionRule`, replacing `LockupRule`. Packed `uint64 unlockTime` plus `bool frozen` per (token, holder): one storage read. The freeze is in `checkSend` and `checkReceive` (account-level, both directions, as ERC-3643's `setAddressFrozen`); the lockup stays in the transfer check because it depends on the kind (an enforcement burn is exempt). `AGENT_ROLE` sets both. FORCED ignores the freeze on `from`; the receiver is still identity-checked | Mint to a frozen account is refused here (`checkReceive`); the ERC-3643 reference token allows it. Also refused: a burn, by a holder or by `BURNER_ROLE`, from a frozen account, so the enforcement route stays `forcedTransfer` to a quarantine account, as RD9 says. Confirmed by the owner: the freeze on `to` applies to FORCED and to MINT; the reference token checks neither. The docs say a quarantine wallet is never address-frozen (use a lockup), otherwise enforcement into it fails |
+| RD5 | `MaxHoldersRule` on fund classes | **Leave out.** The investor count that matters for a fund is fund-wide. The rule stays available for a class with its own regulatory limit, and the docs say so. It also removes the per-class seed and exempt-holder ceremony for the escrow vault | `RULE_ORDER` loses it for `intent`, `fund` and `asyncFund`, since the deployment registers all three as classes. The measured step was 25,373 gas |
+| RD6 | Template check | **Yes.** `templateId()` constant per template, compared in `_authorizeUpgrade` next to the attestation. `AttestKind` stays | The id is not versioned: `keccak256('IntentToken')`, `'Gated4626Vault'`, `'Gated7540Vault'`, so a bug-fix implementation of the same template stays upgradeable |
+| RD7 | `MinPositionRule` | **Yes, zero means off.** The post-move balance of each non-zero side must be zero or at least the minimum, so no dust is left behind on either side. FORCED exempt; a holder's burn is checked. Ordered right after the identity rule and before the holder rules, so the counts only ever see real positions. This closes L-1 | Exempt, confirmed by the owner: the token itself (the 7540 escrow, without which a redeem request below the minimum would be refused) and accounts the token's admin lists. A new reason `BELOW_MIN_POSITION` |
+| RD8 | Batching | **No bespoke batch functions; add `MulticallUpgradeable`.** One function, every role-gated call gets atomic batching, `_msgSender()` is preserved through the delegatecall to self | Measured at about 610 bytes (above). OpenZeppelin's `multicall` is not payable, so no ETH can enter. The size is the risk: shared hook plumbing, the 7943 face, `templateId` and the policy checks must fit in 2,424 bytes in the 7540 vault. Measured after S2. If over, the lever is `via-ir` pinned in both toolchains, as the owner decided, not moving functions out of the vault. It needs the same setting in Hardhat and forge (the reproducibility gate compares them) and a clean run of Slither, Aderyn and Halmos. `optimizer.runs` is 200 in both (`hardhat.config.ts`, `foundry.toml`); lowering it changes no code but costs gas on every call |
+| RD9 | Pause | **Docs only, no `forcedBurn`.** Incident path: `forcedTransfer(from, quarantine)` during the pause, then `burn(quarantine)` after the unpause. The docs say plainly that this differs from ERC-3643, which lets agents burn while paused | Verified above, for the ERC-3643 reference token. The docs will say "the ERC-3643 reference token". Our pause also blocks the issuer's mint, which that token does not |
+| RD10 | Fund integrity | **`Fund.isClassIntact(token)`, no `unregisterClass`.** Intact means registered and the installed rule listed in `hook.rules(token)`. Add `firstBrokenClass()` so the monitor and the post-deploy check make one call | `firstBrokenClass()` returns the first registered class that is not intact, or the zero address |
+| RD11 | Order | **S0 to S5** below. The owner's S0 is the specification, the interface edits and the re-pinned `InterfaceFreeze.t.sol`, in one commit with the tree green, then a re-freeze | S0 is built in the additive form: see "S0 as built" for why the edits to the existing frozen interfaces move to the steps that implement them |
+
+The first estimate of the gas result is the owner's: the 91k four-rule transfer should land around 65 to 70k with RD2 and RD5, before `MinPositionRule`. By arithmetic RD5 alone gives about 65.7k (91,082 minus 25,373). To be re-measured after S3, with the probe above.
+
+### Decided: the policy interface
+
+`IPolicyHook` keeps its shape (`beforeTransfer`, `afterTransfer`, `wantsAfter`, `policyHook()` on the token) with two edits, both landing in S1:
+
+- `checkSend(address token, address account)` and `checkReceive(address token, address account)`, each returning a reason code, on `IPolicyHook` and on `IComplianceRule`; `BaseRule` returns `TRANSFER_OK` by default. They serve `canSend` and `canReceive` and nothing else: `check(ctx)` already applies the same account-level decision to a movement, per kind, so the hook still makes one call per rule per movement. A rule's `check` and its `checkSend` and `checkReceive` must agree, and a test pins that.
+- `TransferContext` loses `ref` and `deadline` as fields: `{token, from, to, id, amount, operator, kind, extra}`. No contract reads them; the base builds them and tests set them. For EXECUTED they ride in `extra` after the balances.
+
+The draft ERC in `~/dev/urwa-policy` is not adopted by this stack; RD2 puts balances in `extra` for every kind, which that draft does not allow, so its amendment stays an S5 item.
+
+### Assumptions, say if wrong
+
+1. The demo rule order becomes: `intent`: identity, min position, holder restriction, settlement window, fund holders. `fund` and `asyncFund`: identity, min position, holder restriction, fund holders.
+2. The rule setters (`setLockup`, `setFrozen`, and the cap and exemption setters that stay) are batched by OpenZeppelin's `Multicall` on the rule, which preserves the sender, not by array functions, for the reason RD8 gives. S3 decides whether it fits.
+
+### S0: the interface specification
+
+Text only, no NatSpec (it lands with the code, as rule 16 requires). Parameter names carry the project's underscore; the ERC-165 ids do not depend on names.
+
+```solidity
+// contracts/interfaces/IERC7943Fungible.sol (new): the Final text
+interface IERC7943Fungible is IERC165 {
+  event ForcedTransfer(address indexed from, address indexed to, uint256 amount);
+  event Frozen(address indexed account, uint256 amount);
+  error ERC7943CannotSend(address account);
+  error ERC7943CannotReceive(address account);
+  error ERC7943CannotTransfer(address from, address to, uint256 amount);
+  error ERC7943InsufficientUnfrozenBalance(address account, uint256 amount, uint256 unfrozen);
+  function forcedTransfer(address from, address to, uint256 amount) external returns (bool result);
+  function setFrozenTokens(address account, uint256 amount) external returns (bool result);
+  function canSend(address account) external view returns (bool allowed);
+  function canReceive(address account) external view returns (bool allowed);
+  function getFrozenTokens(address account) external view returns (uint256 amount);
+  function canTransfer(address from, address to, uint256 amount) external view returns (bool allowed);
+} // id 0x3edbb4c4
+
+// contracts/interfaces/IPolicyGated.sol: is IERC7943Fungible
+//   removed: setFrozen, getFrozen, isUserAllowed, canTransfer(bool, bytes32), ForcedTransfer with an agent,
+//            Frozen (now inherited), PolicyGated_FrozenExceedsBalance
+//   added:   canTransferWithReason(from, to, amount) returns (bool allowed, bytes32 reason)
+//            event ForcedTransferBy(address indexed from, address indexed to, uint256 amount, address indexed agent)
+//            error PolicyGated_HookRegistryMismatch(address hookRegistry, address tokenRegistry)   // _setHook and init
+//   kept:    mint, burn, pause, unpause, setPolicyHook, registry, PolicyHookChanged, PolicyGated_TransferRejected
+//            policyHook() stays
+
+// contracts/interfaces/ITemplated.sol (new)
+interface ITemplated {
+  error Templated_WrongTemplate(address newImplementation, bytes32 expected, bytes32 actual);
+  function templateId() external pure returns (bytes32 id);
+}
+
+// contracts/interfaces/IComplianceHook.sol: shared
+//   removed: ADMIN(), TOKEN(), the constructor's token and initialRules, RuleSetChanged(bytes32[])
+//   setRules(address token, IComplianceRule[] calldata rules)   // token admin, or msg.sender == token
+//   rules(address token) returns (IComplianceRule[] memory)
+//   ruleCount(address token) returns (uint256)
+//   event RuleSetChanged(address indexed token, bytes32[] ruleIds)
+//   errors: ComplianceHook_NotTokenAdmin(address token, address caller)
+//   kept: MAX_RULES, REGISTRY(), the 16-rule cap, per-rule attestation, NO_RULES fail-closed
+
+// contracts/interfaces/IFund.sol: added
+//   isClassIntact(address token) returns (bool)
+//   firstBrokenClass() returns (address token)        // zero address when every class is intact
+
+// contracts/interfaces/IHolderRestrictionRule.sol (new; replaces ILockupRule)
+//   setLockup(address token, address holder, uint256 unlockTime)      // token AGENT_ROLE
+//   setFrozen(address token, address holder, bool frozen)             // token AGENT_ROLE
+//   unlockTime(address token, address holder) returns (uint256)
+//   isFrozen(address token, address holder) returns (bool)
+//   events LockupSet(token, holder, unlockTime), HolderFrozenSet(token, holder, frozen)
+
+// contracts/interfaces/IMinPositionRule.sol (new)
+//   setMinPosition(address token, uint256 amount)                     // token DEFAULT_ADMIN_ROLE; zero is off
+//   setExempt(address token, address account, bool exempt)            // token DEFAULT_ADMIN_ROLE
+//   minPosition(address token) returns (uint256), isExempt(address token, address account) returns (bool)
+//   events MinPositionSet, ExemptSet
+
+// contracts/interfaces/Errors.sol: appended reasons
+//   BELOW_MIN_POSITION, SENDER_FROZEN, RECEIVER_FROZEN
+
+// TransferContext.extra, pre-move, for every kind:
+//   abi.encode(uint256 fromBalance, uint256 toBalance)   // zero for address(0)
+
+// contracts/interfaces/IPolicyHook.sol and IComplianceRule.sol: the two edits of "Decided: the policy interface"
+//   TransferContext { address token; address from; address to; uint256 id; uint256 amount; address operator;
+//                     TransferKind kind; bytes extra; }          // ref and deadline removed
+//   function checkSend(address token, address account) external view returns (bytes32 reason)     // both interfaces
+//   function checkReceive(address token, address account) external view returns (bytes32 reason)  // both interfaces
+//   BaseRule: both default to TRANSFER_OK
+```
+
+The initialisers of `IntentToken`, `Gated4626Vault` and `Gated7540Vault` gain an `initialRules` argument. `IPolicyRegistry`, `ITransferIntent`, `IIntentExecutor`, `IIntentExecutorBatch`, `IDvPExecutor` and `IERC3009` do not change.
+
+### The other designs, as decided
+
+**Template ids (RD6).** `_authorizeUpgrade` keeps the attestation check and then requires `ITemplated(newImpl).templateId() == templateId()`. An implementation without the function reverts the call, so it is refused. Tests first: each template to another template's implementation refused, to a new implementation of its own accepted, an implementation without `templateId` refused.
+
+**Frozen amounts above the balance (RD3).** `_check` already treats the unfrozen amount as zero when `frozen > balance`. `_releaseFrozen` follows the standard: it lowers the frozen amount by exactly what the action needs, so with a balance of 10, a frozen amount of 100 and a forced transfer of 10, the frozen amount becomes 90 (today it becomes 0). The `frozen <= balance` invariant test and the Halmos frozen properties are rewritten around `unfrozen = balance - min(frozen, balance)`.
+
+**Fund integrity (RD10).** The post-deploy check calls `firstBrokenClass()`. It cannot prevent a drop; nothing in the hook can know about the fund. The docs name the call as the monitor.
+
+**Gas candidates (R7, each measured alone before it is kept).** The five `balanceOf` callbacks go with RD2. Packing the rule count and the after mask into one word saves one cold read. Storing the rule list as the code of a data contract replaces one cold read per rule with one `EXTCODECOPY`, worth it only if the probe shows a clear gain at four rules, because each `setRules` then deploys a data contract. A candidate is kept when it saves about 2,000 gas per transfer or per class and the code stays simple. Results go into the docs as measured numbers; tests do not assert gas.
+
+### Build order
+
+Each step: tests first with the red run shown, implementation, both runners, Slither, Aderyn and Halmos where touched, the gas probe re-run, then stop for review. Commits only on the owner's order, files staged by name.
+
+| Step | Content |
+|---|---|
+| S0 | This section, the new interface files, the appended reasons and their pins (built, see below). The breaking edits to the existing frozen interfaces land with the step that implements them. Re-freeze on approval |
+| S1 | The shared hook and the context with balances; the rules' balance reads move to the context (the existing rules, so the tree stays green); `ProxyDeployer` and the initialisers take `initialRules` |
+| S2 | The base: ERC-7943 face, `_releaseFrozen`, `MulticallUpgradeable`, `templateId`. **Size gate** on the 7540 vault |
+| S3 | The rules: `HolderRestrictionRule`, `MinPositionRule`; `MaxHoldersRule` and `FundHoldersRule` adapted to the context. Gas probe re-run |
+| S4 | The fund views; the Ignition modules and fixtures (shared hook deployment, the new `RULE_ORDER`, the post-deploy checks) |
+| S5 | Docs, `SECURITY.md`, `README.md`, the brief (`CLAUDE.md` §1, §4, §5, §6 and the rule list), the pause runbook, the amendment to the draft ERC for RD2, `InterfaceFreeze` re-pinned, reproducibility |
+
+### What this changes in frozen files
+
+By step: S1 `IPolicyHook`, `IComplianceRule`, `IComplianceHook` and the semantics of `TransferContext.extra`; S2 `IPolicyGated` and the ERC-165 id of every template; S4 `IFund`. New files, built in S0: `IERC7943Fungible`, `ITemplated`, `IHolderRestrictionRule`, `IMinPositionRule`, and three appended reason codes in `Errors.sol`. `ILockupRule` goes in S3. Every implementation, hook and rule codehash changes, which is free before the first deployment. `InterfaceFreeze.t.sol` is re-pinned in each step's commit.
+
+### S0 as built (2026-10-23, working tree, not committed)
+
+The owner's S0 was: the specification, the interface edits and the re-pinned `InterfaceFreeze.t.sol`, one commit, tree green. All of it cannot be one green commit. Changing `IPolicyGated`, `IPolicyHook`, `IComplianceRule` and `IComplianceHook` breaks every contract and test that implements or calls them (`TransferContext` alone appears in 23 contract and test files, and the shared hook is a rewrite of `ComplianceHook`). Making that compile would pull S1 and S2 into S0. So S0 is built in the additive form, which stays green:
+
+- The specification above, final.
+- Four new interface files: `IERC7943Fungible` (the Final text), `ITemplated`, `IHolderRestrictionRule`, `IMinPositionRule`, with full NatSpec.
+- Three appended reasons in `Errors.sol`: `BELOW_MIN_POSITION`, `SENDER_FROZEN`, `RECEIVER_FROZEN`.
+- `InterfaceFreeze.t.sol` pins the four ids (`0x3edbb4c4`, `0x7aa77f29`, `0x3abb7c85`, `0x44ac9195`, computed with `cast sig`; the first is the standard's own and `type(IERC7943Fungible).interfaceId` reproduced it), the event topics and the three reasons.
+
+Tests first: the pins were added before the files and the run failed to compile (`HHE902`, the import of `IERC7943Fungible.sol` could not be resolved), then passed once the files existed. `forge fmt --check` and `solhint` are clean. Both runners: 792 passing (707 Solidity, 85 TypeScript), unchanged, since the pins live in existing tests.
+
+"Re-freeze" then means: the specification here is frozen for S1 to S5, and the new interface files are frozen by their pins. Each existing interface changes in one commit together with the code that implements it and its new pin.
+
+### Not in this plan
+
+A `JurisdictionRule`, amount-level lockups, an ERC-3643 read adapter, ERC-1066 style reason codes, a recovery address for identity re-keying. The assessment calls them secondary, and none of them changes what the items above build.
+
 ## Open questions for the owner
 1. DvP: decisions D1 to D8 are recorded in the DvP section (D8: Option B; D6 revised for the `IntentExecutor` refusal). I-1, E-1, E-2 and the refusal are built and wait for your review.
 2. Nothing on `fund-layer` is pushed, and the DvP section is not committed. Push, or open a pull request, only when you say. The branch carries PR #2's commit `d3574df` until PR #2 merges.

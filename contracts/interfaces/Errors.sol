@@ -48,5 +48,11 @@ library Reasons {
   bytes32 internal constant CONSIDERATION_NEEDS_EXECUTOR = keccak256('CONSIDERATION_NEEDS_EXECUTOR');
   /// @notice The two legs of a DvP trade do not describe the same trade: parties, amounts, tokens or nonce disagree
   bytes32 internal constant LEGS_DO_NOT_MATCH = keccak256('LEGS_DO_NOT_MATCH');
+  /// @notice The movement would leave an account holding a balance above zero and below the token's minimum position
+  bytes32 internal constant BELOW_MIN_POSITION = keccak256('BELOW_MIN_POSITION');
+  /// @notice The sender is frozen on this token
+  bytes32 internal constant SENDER_FROZEN = keccak256('SENDER_FROZEN');
+  /// @notice The receiver is frozen on this token
+  bytes32 internal constant RECEIVER_FROZEN = keccak256('RECEIVER_FROZEN');
 }
 // solhint-enable private-vars-leading-underscore

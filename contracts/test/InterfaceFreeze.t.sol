@@ -13,22 +13,26 @@ import {IERC7540Deposit} from 'interfaces/IERC7540Deposit.sol';
 import {IERC7540Operator} from 'interfaces/IERC7540Operator.sol';
 import {IERC7540Redeem} from 'interfaces/IERC7540Redeem.sol';
 import {IERC7575} from 'interfaces/IERC7575.sol';
+import {IERC7943Fungible} from 'interfaces/IERC7943Fungible.sol';
 import {IFund} from 'interfaces/IFund.sol';
 import {IFundHoldersRule} from 'interfaces/IFundHoldersRule.sol';
 import {IGated4626Vault} from 'interfaces/IGated4626Vault.sol';
 import {IGated7540Vault} from 'interfaces/IGated7540Vault.sol';
 import {IGovernanceTimelock} from 'interfaces/IGovernanceTimelock.sol';
+import {IHolderRestrictionRule} from 'interfaces/IHolderRestrictionRule.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IIdentityRule} from 'interfaces/IIdentityRule.sol';
 import {IIntentExecutor} from 'interfaces/IIntentExecutor.sol';
 import {IIntentExecutorBatch} from 'interfaces/IIntentExecutorBatch.sol';
 import {ILockupRule} from 'interfaces/ILockupRule.sol';
 import {IMaxHoldersRule} from 'interfaces/IMaxHoldersRule.sol';
+import {IMinPositionRule} from 'interfaces/IMinPositionRule.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {IProxyDeployer} from 'interfaces/IProxyDeployer.sol';
 import {ISettlementWindowRule} from 'interfaces/ISettlementWindowRule.sol';
+import {ITemplated} from 'interfaces/ITemplated.sol';
 import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
 
 /**
@@ -79,6 +83,12 @@ contract InterfaceFreezeTest is Test {
     // subset of ERC-3009 that the executor calls; its id is the XOR of those two selectors, not a standard id
     assertEq(type(IDvPExecutor).interfaceId, bytes4(0xe68774e8), 'IDvPExecutor');
     assertEq(type(IERC3009).interfaceId, bytes4(0x61fdaa61), 'IERC3009');
+    // Added in S0 of the review items (2026-10-23), ids computed from the signatures with `cast sig`.
+    // `IERC7943Fungible` is the Final text of ERC-7943, so its id is the standard's own value
+    assertEq(type(IERC7943Fungible).interfaceId, bytes4(0x3edbb4c4), 'IERC7943Fungible');
+    assertEq(type(ITemplated).interfaceId, bytes4(0x7aa77f29), 'ITemplated');
+    assertEq(type(IHolderRestrictionRule).interfaceId, bytes4(0x3abb7c85), 'IHolderRestrictionRule');
+    assertEq(type(IMinPositionRule).interfaceId, bytes4(0x44ac9195), 'IMinPositionRule');
   }
 
   function test_WhenInterfacesCompile_TheirEventTopicsArePinned() external pure {
@@ -152,6 +162,26 @@ contract InterfaceFreezeTest is Test {
     assertEq(IFund.HolderClassesUpdated.selector, 0x020767ac8d9f815f24bcaa5228933945b8766fe5dff7fe83d918163bcfd787fa);
     // Added in the DvP executor (E-1, 2026-10-23), topic computed with `cast keccak`
     assertEq(IDvPExecutor.DvPSettled.selector, 0xf86f6efd1a86b116715d573898aa1ed9745de3ea96e91eb7d0eb96b775182845);
+    // Added in S0 of the review items (2026-10-23), topics computed with `cast keccak`. ERC-7943's `Frozen` has the
+    // signature of ours, so its topic is the one pinned above; its three-argument `ForcedTransfer` is a new topic
+    assertEq(IERC7943Fungible.Frozen.selector, 0x68e0d8c112165d0949ce87205b719ed7d98c7401866c34a159f7c67c6f5620e7);
+    assertEq(
+      IERC7943Fungible.ForcedTransfer.selector, 0x7b3ce50c216d2ccf9919c6b9f1bfb33f0350a33010f188750b4af38e00448138
+    );
+    assertEq(
+      IHolderRestrictionRule.LockupSet.selector, 0xd3de67b8116f1abe42856d12f29c6dd6798dc57c837e1d2083e129b58d2e323a
+    );
+    assertEq(
+      IHolderRestrictionRule.HolderFrozenSet.selector,
+      0x833d9460c464a61e1259eee77549545d4e1483cf3d029bbdb8abcb44828d66ea
+    );
+    assertEq(
+      IMinPositionRule.MinPositionSet.selector, 0x21af437ac0dfb7856224d1ee482b5a1a9955b346e2052abcc0da07d488917720
+    );
+    assertEq(
+      IMinPositionRule.MinPositionExemptionSet.selector,
+      0x938633e92689b6d84f33389b7d3f4f49175261a456e19fcbf4e423f8d095fc07
+    );
   }
 
   function test_WhenReasonsCompile_TheirValuesArePinned() external pure {
@@ -176,5 +206,9 @@ contract InterfaceFreezeTest is Test {
     assertEq(Reasons.CONSIDERATION_NEEDS_EXECUTOR, keccak256('CONSIDERATION_NEEDS_EXECUTOR'));
     // Appended in the DvP executor (2026-10-23)
     assertEq(Reasons.LEGS_DO_NOT_MATCH, keccak256('LEGS_DO_NOT_MATCH'));
+    // Appended in S0 of the review items (2026-10-23)
+    assertEq(Reasons.BELOW_MIN_POSITION, keccak256('BELOW_MIN_POSITION'));
+    assertEq(Reasons.SENDER_FROZEN, keccak256('SENDER_FROZEN'));
+    assertEq(Reasons.RECEIVER_FROZEN, keccak256('RECEIVER_FROZEN'));
   }
 }
