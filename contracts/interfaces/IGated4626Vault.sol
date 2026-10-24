@@ -10,11 +10,14 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
  * @notice ERC-4626 vault whose shares are a policy-gated token. Deposits and mints arrive at the hook as MINT to the
  *         receiver; withdrawals and redemptions as BURN from the owner, with the caller as operator. The asset leg is
  *         an ordinary ERC-20 transfer and is not hooked
- * @dev `max*` express the gating: `maxDeposit` / `maxMint` are 0 when paused or when `canReceive(receiver)` is false (the
- *      account-level question: identity, freeze, holder cap); `maxRedeem` is the unfrozen balance, or 0 when paused or
- *      when a burn of nothing from `owner` would be rejected (identity, freeze, lockup). Neither probe depends on an
- *      amount, so a minimum position does not read as a block: a deposit or redemption that would leave dust reverts
- *      when it executes. `maxWithdraw` is `convertToAssets(maxRedeem, Floor)`. `preview*` stay pure conversions. Share
+ * @dev `max*` express the gating: `maxDeposit` / `maxMint` are 0 when paused or when a mint of a very large amount to
+ *      `receiver` would be rejected (identity, freeze, the holder caps); `maxRedeem` is the unfrozen balance, or 0 when
+ *      paused or when a burn of nothing from `owner` would be rejected (identity, freeze, lockup). The mint probe is above
+ *      any minimum position up to `type(uint128).max` and the burn probe is empty, so such a minimum does not read as a
+ *      block: a deposit or
+ *      redemption that would leave dust reverts when it executes. A rule that bounded the size of a position (a supply
+ *      cap, a maximum balance) would refuse the mint probe and zero `maxDeposit` and `maxMint`.
+ *      `maxWithdraw` is `convertToAssets(maxRedeem, Floor)`. `preview*` stay pure conversions. Share
  *      supply moves only through deposits and redemptions: the issuer `mint` / `burn` primitives revert
  */
 interface IGated4626Vault {

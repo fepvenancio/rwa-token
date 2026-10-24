@@ -113,8 +113,6 @@ contract Gated7540VaultUnitTest is Helpers {
     bytes32 _reason
   ) internal {
     vm.mockCall(_hook, abi.encodeWithSelector(IPolicyHook.beforeTransfer.selector), abi.encode(_reason));
-    // The `max*` and eligibility probes ask the account-level question, so the stub answers it the same way.
-    vm.mockCall(_hook, abi.encodeWithSelector(IPolicyHook.checkReceive.selector), abi.encode(_reason));
   }
 
   function _requestDeposit(

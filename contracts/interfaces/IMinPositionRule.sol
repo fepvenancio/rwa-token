@@ -15,8 +15,8 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
  *      pending redemptions) and the accounts the token's admin lists are exempt too. The post-move balances are derived
  *      from the balances in `TransferContext.extra` and the amount, so the rule makes no call back into the token. State
  *      is keyed by token and authorised live by the token's own DEFAULT_ADMIN_ROLE. The rule has no account-level
- *      opinion (`checkSend` and `checkReceive` accept): a minimum depends on the amount, so integrators that ask whether
- *      an account can take part at all, as the vaults' `max*` do, are not told "no" because a single wei would be dust
+ *      opinion (`checkSend` and `checkReceive` accept): a minimum depends on the amount. The vaults' `maxDeposit` and
+ *      `maxMint` probe a mint above any minimum up to `type(uint128).max`, so they are not told "no" because a single wei would be dust
  */
 interface IMinPositionRule is IComplianceRule {
   /*///////////////////////////////////////////////////////////////

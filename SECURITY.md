@@ -148,18 +148,20 @@ Further limits recorded during review:
   the timelock and shows the cost (`fund.test.ts`, `FundIntegration_Integrity`).
 - **Account-level answers are not movement answers.** `canSend` and `canReceive` take no amount and no kind. `canSend` is
   false for an address-frozen (`HolderRestrictionRule`) or a locked holder, although `forcedTransfer` still passes the rules for both and an enforcement burn
-  passes for a locked one. `canReceive` is false for an address-frozen account and, at a full holder cap, for an account that is not
-  yet a holder, although a transfer that empties its sender can still admit a new holder at the cap. The vaults' `maxDeposit` and `maxMint`
-  and the 7540 request and claim checks rest on `canReceive`, and `maxRedeem` on a zero-amount burn, so none of them reads a
-  minimum position as a block.
+  passes for a locked one. `canReceive` is false for an unverified or address-frozen account and for a token that is not a fund class; the holder
+  caps are not in it (ERC-7943 keeps quantitative rules out), so a new holder at a full cap reads true and the cap refuses
+  the movement. The vaults' `maxDeposit` and `maxMint` and the 7540 request and deposit-claim checks probe a mint of a very large
+  amount (`type(uint128).max`), and `maxRedeem` and the 7540 redemption claims a burn of nothing, so none of them reads a
+  minimum position up to `type(uint128).max` as a block.
+  A rule that bounded the size of a position (a supply cap, a maximum balance) would refuse the mint probe and zero
+  `maxDeposit` and `maxMint`; none of the shipped rules does.
 - **A pause blocks mint and burn as well.** Only FORCED movements pass: `forcedTransfer`, and the 7540 vault's `recoverRedeemRequest` and `recoverClaimable`. Enforcement during a pause is `forcedTransfer`
   to a quarantine account (identity-verified, never address-frozen: the freeze on a receiver applies to FORCED), and the
   burn waits for the unpause. The ERC-3643 reference token differs: its agents can mint, burn and force while paused
   (checked 2026-10-23; the ERC-3643 text itself was not checked).
-- **Two known departures from ERC-7943's text** (see the README's deviations): `canReceive` is cap-aware, so it can say
-  false for an account that `canTransfer` still admits by the net-zero exception, and an amount above the balance reverts
-  with the standard's unfrozen-balance error and makes `canTransfer` false, where the standard leaves a balance shortfall
-  to the base token. An integrator that relies on the standard's wording should not assume either.
+- **One known departure from ERC-7943's text** (see the README's deviations): an amount above the balance reverts with the
+  standard's unfrozen-balance error and makes `canTransfer` false, where the standard leaves a balance shortfall to the
+  base token. An integrator that relies on the standard's wording should not assume it.
 - **A `BURNER_ROLE` holder's own burns are enforcement burns.** The rules ask the operator, not the intent: a burner who
   redeems its own shares through a vault passes its own lockup and minimum (a probe showed a locked holder redeeming in
   full). It does not pass its own frozen tokens (the vault's `maxRedeem` stops at the unfrozen balance) or its own address
@@ -289,7 +291,8 @@ Each row is a bug deliberately planted, the run that caught it, then restored fr
 | Base (2026-10-24, review item S2) | the release takes the whole amount from the frozen amount; it forgets to emit `Frozen`; a zero unfrozen balance rejects a zero amount; an enforcement burn, or a forced transfer, no longer exempt from the frozen check; the template check dropped; `canSend` ignores pause; `canReceive` asks about sending; `setFrozenTokens` refuses above the balance; the unfrozen shortfall reverts as a policy rejection; `forcedTransfer` drops `ForcedTransferBy`, or returns false; `supportsInterface` forgets the standard's id; `canTransfer` ignores the unfrozen amount | 14 of 14, each by at least one test. Before the final fixes two real gaps showed: a pre-flight whose sender held `BURNER_ROLE` could report an amount above the balance as allowed, and a hook returning `INSUFFICIENT_UNFROZEN` for a mint was relabelled with the standard's error and a zero account; each got a test first |
 | `HolderRestrictionRule`, `MinPositionRule` (2026-10-24, S3) | freeze or lockup ignored, on the sender or the receiver; FORCED, or the enforcement burner, no longer exempt; the lockup boundary moved; `checkSend` or `checkReceive` always accepting; the agent or admin check dropped; the two settings overwriting each other; the 64-bit range check dropped; the minimum compared with `<=` on either side; the token itself, a listed account or an enforcement burn no longer exempt; self-moves and zero amounts judged | 23 of 24 by a test; the 24th, dropping the `min == 0` early return, is an equivalent mutant (the checks after it accept at 0; it only saves gas) |
 | Halmos, `MinPositionRule` (2026-10-24, S3) | the receiver or sender comparison weakened; the remainder guard dropped; FORCED not exempt; the amount guard dropped | 5 of 5, each by a symbolic property (the exact decision for a transfer, never reverting for any kind, FORCED never rejected) |
-| Vault probes, account answers (2026-10-24, S3) | `maxDeposit` or `maxRedeem` probing an amount again; the cap compared with `<=`, the exemption, the existing holder, the investor or the class itself ignored in `checkReceive`; pause or no hook ignored in the account answer; the 7540 request or claim check asking the sender side | 12 of 12. The no-hook case survived at first, because no test could build a token without a hook; a test now clears the hook slot |
+| Vault probes, account answers (2026-10-24, S3; the cap and mint-probe parts are superseded by the next row) | `maxDeposit` or `maxRedeem` probing an amount again; the cap compared with `<=`, the exemption, the existing holder, the investor or the class itself ignored in `checkReceive`; pause or no hook ignored in the account answer; the 7540 request or claim check asking the sender side | 12 of 12. The no-hook case survived at first, because no test could build a token without a hook; a test now clears the hook slot |
+| Mint probe, cap out of `checkReceive` (2026-10-24, finding 1) | the probe amount one wei or zero; `Gated4626Vault.maxDeposit` probing one wei; `maxMint` of the 4626 vault, and `requestDeposit`, `maxDeposit` or the deposit-claim check of the 7540 vault, ignoring the probe; `FundHoldersRule` or `MaxHoldersRule` answering the cap in `checkReceive` again; `canReceive` ignoring pause; the mint probe asking the sender side | 11 of 11 |
 | `Fund` views (2026-10-24, S4) | an unregistered token passing; the registration ignored; the first or the last class skipped; a failing hook or token counted as listed; the wrong comparison; the last broken class returned instead of the first | 8 of 8 |
 | `HolderRestrictionRule.checkSend` lockup (2026-10-24) | lock ignored; `<=` at the boundary; lock reported before the freeze; freeze ignored; `checkReceive` refusing a locked account; the comparison reversed | 6 of 6 |
 

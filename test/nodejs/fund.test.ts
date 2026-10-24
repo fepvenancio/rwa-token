@@ -139,6 +139,8 @@ describe("fund: investors counted across classes", async function () {
     // Token: pre-flight says MAX_HOLDERS and the mint reverts with that reason.
     assert.deepEqual(await s.token.read.canTransferWithReason([zeroAddress, d, 1n]), [false, REASONS.MAX_HOLDERS]);
     await viem.assertions.revertWithCustomErrorWithArgs(mintToken(s, dave), s.token, "PolicyGated_TransferRejected", [REASONS.MAX_HOLDERS]);
+    // The cap decides a movement, not an account: ERC-7943 keeps quantitative rules out of `canReceive`.
+    assert.equal(await s.token.read.canReceive([d]), true);
     // 4626: the gating-aware max is zero, and a deposit above it reverts.
     assert.equal(await s.vault4626.read.maxDeposit([d]), 0n);
     await viem.assertions.revertWithCustomError(deposit4626(s, dave), s.vault4626, "ERC4626ExceededMaxDeposit");

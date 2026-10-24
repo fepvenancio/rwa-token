@@ -601,9 +601,8 @@ contract MaxHoldersRuleUnit_After is MaxHoldersRuleUnitTest {
   }
 }
 
-/// @notice The account-level answers behind `canSend`, `canReceive` and the vaults' `max*`. The cap is about who may
-///         become a holder, which does not depend on the amount: an account without tokens cannot receive while the
-///         count is at the cap, as a mint to it would be refused. A sender is never capped
+/// @notice A holder cap is a rule about a movement, not about an account: ERC-7943 keeps quantitative rules out of
+///         `canSend` and `canReceive`, so the rule has no account-level opinion and `check` decides every movement
 contract MaxHoldersRuleUnit_AccountChecks is MaxHoldersRuleUnitTest {
   function test_WhenAskedAboutSending_ItAccepts() external {
     _cap(1);
@@ -611,64 +610,37 @@ contract MaxHoldersRuleUnit_AccountChecks is MaxHoldersRuleUnitTest {
     assertEq(_rule.checkSend(_token, _from), Reasons.TRANSFER_OK);
   }
 
-  /// @dev With room, nobody is asked about a balance: the cheap answer needs no call into the token
-  function test_WhenTheCountIsBelowTheCap_AnyAccountCanReceiveWithoutAskingTheToken() external {
-    _cap(3);
-    _seed(2);
-    vm.expectCall(_token, abi.encodeWithSelector(IERC20.balanceOf.selector), 0);
-    assertEq(_rule.checkReceive(_token, _to), Reasons.TRANSFER_OK);
-  }
-
-  function test_WhenTheCountIsAtTheCap_ANewAccountCannotReceiveButAHolderCan() external {
+  /// @dev At the cap a mint to a new account is refused by `check`, and the account answer still accepts
+  function test_WhenTheCountIsAtTheCap_ANewAccountIsStillAcceptedAtAccountLevel() external {
     _cap(3);
     _seed(3);
     _bal(_to, 0);
-    assertEq(_rule.checkReceive(_token, _to), Reasons.MAX_HOLDERS);
-    _bal(_to, 5);
+    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.MINT, address(0), _to, 1)), Reasons.MAX_HOLDERS);
     assertEq(_rule.checkReceive(_token, _to), Reasons.TRANSFER_OK);
   }
 
-  function test_WhenTheCountIsAboveALoweredCap_ANewAccountCannotReceiveButAHolderCan() external {
+  function test_WhenTheCountIsAboveALoweredCapOrTheCapIsZero_TheAccountIsStillAccepted() external {
     _cap(2);
     _seed(5);
     _bal(_to, 0);
-    assertEq(_rule.checkReceive(_token, _to), Reasons.MAX_HOLDERS);
-    _bal(_to, 1);
+    assertEq(_rule.checkReceive(_token, _to), Reasons.TRANSFER_OK);
+    _cap(0);
     assertEq(_rule.checkReceive(_token, _to), Reasons.TRANSFER_OK);
   }
 
-  function test_WhenTheCapIsZero_ANewAccountCannotReceive() external {
-    _bal(_to, 0);
-    assertEq(_rule.checkReceive(_token, _to), Reasons.MAX_HOLDERS);
-  }
-
-  /// @dev An exempt account never counts and never triggers the cap, as in `check`
-  function test_WhenTheCountIsAtTheCap_AnExemptAccountCanReceive() external {
-    _cap(3);
-    _seed(3);
-    _bal(_to, 0);
-    _exempt(_to, true);
-    assertEq(_rule.checkReceive(_token, _to), Reasons.TRANSFER_OK);
-  }
-
-  /// @dev The account answer is the decision `check` takes for a mint, which adds no sender and so frees no slot
-  function testFuzz_ForAMint_CheckReceiveAgreesWithCheck(
+  /// @dev The answer needs no state at all: it never asks the token for a balance and never reads the count
+  function testFuzz_WhateverTheCapAndTheCount_TheAccountIsAcceptedWithoutAskingTheToken(
     uint256 _capValue,
     uint256 _count,
-    uint256 _balance,
-    bool _isExempt
+    bool _isHolder
   ) external {
     _capValue = bound(_capValue, 0, 5);
     _count = bound(_count, 0, 6);
-    _balance = bound(_balance, 0, 2);
-    _bal(_to, _balance);
-    // Exempting a holder adjusts a live count, so it is done while the rule is out of the list; the seed sets the count.
-    _setActive(false);
-    _exempt(_to, _isExempt);
-    _setActive(true);
+    _bal(_to, _isHolder ? 1 : 0);
     _cap(_capValue);
     _seed(_count);
-    assertEq(_rule.checkReceive(_token, _to), _rule.check(_ctx(IPolicyHook.TransferKind.MINT, address(0), _to, 1)));
+    vm.expectCall(_token, abi.encodeWithSelector(IERC20.balanceOf.selector), 0);
+    assertEq(_rule.checkReceive(_token, _to), Reasons.TRANSFER_OK);
   }
 }
 

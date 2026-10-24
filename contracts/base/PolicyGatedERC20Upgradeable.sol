@@ -83,6 +83,10 @@ abstract contract PolicyGatedERC20Upgradeable is
   /// @notice Transient slot holding the announced `deadline`
   bytes32 private constant _DEADLINE_SLOT = keccak256('gated.transient.deadline');
 
+  /// @notice The amount of the mint a template's `max*` and eligibility checks probe: above any minimum position up to
+  ///         this value
+  uint256 internal constant _MINT_PROBE = type(uint128).max;
+
   /// @inheritdoc IPolicyGated
   function mint(
     address _to,
@@ -443,23 +447,19 @@ abstract contract PolicyGatedERC20Upgradeable is
   }
 
   /**
-   * @notice The account-level verdict behind `canSend` and `canReceive`, with the reason, for templates that ask whether
-   *         an account can take part at all (e.g. vault `max*`)
-   * @dev PAUSED while paused and NO_HOOK without a hook; otherwise the hook's `checkSend` or `checkReceive` for this
-   *      token. It does not depend on an amount, so a rule that limits the size of a position cannot read it as a block.
-   *      Never reverts of its own: a reverting hook or rule, which attested ones do not, would revert it
-   * @param _account The account
-   * @param _sending True to ask about sending, false about receiving
-   * @return _reason TRANSFER_OK, or the reason the account cannot
+   * @notice The pre-flight of a mint to `_receiver`, for templates' `max*` and eligibility checks
+   * @dev The amount is `_MINT_PROBE`: it is not zero, so a rule that caps holders sees a new holder, and it is above
+   *      any minimum position up to `type(uint128).max`, so such a minimum does not read as a block (one wei would; a
+   *      minimum set above that would refuse the probe). A rule that bounds the size of a position, such as a supply
+   *      cap or a maximum balance, would refuse it and zero the `max*` that use it. The operator is the caller, as in
+   *      `_canTransfer`
+   * @param _receiver The account that would receive the shares
+   * @return _reason TRANSFER_OK, or the reason a mint to `_receiver` would be rejected
    */
-  function _accountReason(
-    address _account,
-    bool _sending
+  function _mintProbe(
+    address _receiver
   ) internal view returns (bytes32 _reason) {
-    IPolicyHook _hook = _policyHook();
-    if (paused()) return Reasons.PAUSED;
-    if (address(_hook) == address(0)) return Reasons.NO_HOOK;
-    _reason = _sending ? _hook.checkSend(address(this), _account) : _hook.checkReceive(address(this), _account);
+    _reason = _canTransfer(address(0), _receiver, _MINT_PROBE);
   }
 
   /**
@@ -591,6 +591,8 @@ abstract contract PolicyGatedERC20Upgradeable is
 
   /**
    * @notice Whether the hook lets an account send, or receive, at all; the account-level question of ERC-7943
+   * @dev False while paused and when the token has no hook. Never reverts of its own: a reverting hook or rule, which
+   *      attested ones do not, would revert it
    * @param _account The account
    * @param _sending True to ask about sending, false about receiving
    * @return _allowed True if the account may
@@ -599,9 +601,12 @@ abstract contract PolicyGatedERC20Upgradeable is
     address _account,
     bool _sending
   ) private view returns (bool _allowed) {
+    IPolicyHook _hook = _policyHook();
+    if (paused() || address(_hook) == address(0)) return false;
+    bytes32 _reason = _sending ? _hook.checkSend(address(this), _account) : _hook.checkReceive(address(this), _account);
     // Compares a reason code with a constant, not a balance.
     // slither-disable-next-line incorrect-equality
-    _allowed = _accountReason(_account, _sending) == Reasons.TRANSFER_OK;
+    _allowed = _reason == Reasons.TRANSFER_OK;
   }
 
   /**

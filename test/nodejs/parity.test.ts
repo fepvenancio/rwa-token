@@ -195,9 +195,8 @@ describe("pre-flight parity matrix", async function () {
         const { alice, bob } = s.holders;
         const [ok, reason] = await s.vault4626.read.canTransferWithReason([zeroAddress, bob.account.address, 1n]);
         assert.equal(reasonName(reason), c.deposit);
-        assert.equal(await s.vault4626.read.canReceive([bob.account.address]), ok, "canReceive agrees with the mint probe");
         const max = await s.vault4626.read.maxDeposit([bob.account.address]);
-        assert.equal(max, ok ? maxUint256 : 0n, "maxDeposit agrees with canReceive");
+        assert.equal(max, ok ? maxUint256 : 0n, "maxDeposit agrees with the mint probe");
         await assertCallParity(
           "deposit",
           () => s.vault4626.simulate.deposit([1n, bob.account.address], { account: alice.account.address }),

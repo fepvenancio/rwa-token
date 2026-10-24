@@ -86,8 +86,12 @@ The audit package (scope, suppressions, mutation results, findings an auditor sh
   the standard's `ERC7943InsufficientUnfrozenBalance`; `transfer` never returns `false`.
 - **Pre-flight parity.** `canTransferWithReason`, `canTransfer` and `canExecute` run the same checks as the state-changing
   path. `canSend` and `canReceive` are the account-level questions (ERC-7943): `canSend` is false while paused, for an
-  address-frozen account and for a locked holder; `canReceive` is false while paused, for an address-frozen account and,
-  at a full holder cap, for an account that is not yet a holder.
+  unverified or address-frozen account and for a locked holder; `canReceive` is false while paused, for an unverified or
+  address-frozen account and for a token that is not a fund class. The holder caps are not in them: ERC-7943 says the
+  account questions must not encode quantitative rules (it names balance checks and amount limits), and we read a cap the
+  same way, so a cap decides a movement only. For a plain transfer through the shipped rules `canTransfer` is not true
+  while either answer is false, but not for every kind: an enforcement burn passes for a locked holder while `canSend`
+  says `LOCKED`. The vaults' `maxDeposit` and `maxMint` probe a mint of a very large amount instead.
 - **Pause.** A guardian pause blocks every balance movement except FORCED ones (`forcedTransfer`, and the 7540 vault's `recoverRedeemRequest` and `recoverClaimable`), so the issuer's mint and burn too. Enforcement
   during a pause is `forcedTransfer` to a quarantine account, and the burn waits for the unpause. This differs from the
   ERC-3643 reference token, whose agents can mint, burn and force while paused (checked 2026-10-23; see the governance page
@@ -265,15 +269,10 @@ The brief is in [`CLAUDE.md`](CLAUDE.md). Where the code intentionally differs, 
 - **Extra reason codes.** `NO_HOOK`, `NO_RULES` and `NOT_FUND_CLASS` are appended.
 - **Fund layer.** `Fund`, `FundHoldersRule`, `IFund` and `IFundHoldersRule` are not in the brief. [`PLAN.md`](PLAN.md)
   records the design and the proposed brief edits.
-- **Two known departures from ERC-7943's text** (checked against the Final text on 2026-10-24; [`PLAN.md`](PLAN.md) records
-  both with options, and neither is changed yet):
-  - `canReceive` answers the holder cap (`MaxHoldersRule`, `FundHoldersRule`): an account that is not yet a holder reads
-    false at a full cap. The standard says `canSend` and `canReceive` must not encode quantitative rules, and that
-    `canTransfer` must perform the `canReceive` check on the receiver; here a full-balance transfer to such an account
-    still passes `canTransfer` (the net-zero exception of the cap), so the two answers disagree.
-  - A plain transfer of more than the balance reverts with `ERC7943InsufficientUnfrozenBalance` and `canTransfer` returns
-    false for it. The standard says `canTransfer` must not fail on balance checks, and that the base standard's error
-    should be used when the amount exceeds the whole balance.
+- **One known departure from ERC-7943's text** (checked against the Final text on 2026-10-24; [`PLAN.md`](PLAN.md) records
+  it with options, and it is not changed yet): a plain transfer of more than the balance reverts with
+  `ERC7943InsufficientUnfrozenBalance` and `canTransfer` returns false for it. The standard says `canTransfer` must not
+  fail on balance checks, and that the base standard's error should be used when the amount exceeds the whole balance.
 - **`canTransferWithReason` scope.** It, and the boolean `canTransfer`, model holder-driven movements, with the operator
   set to `from`. A simulated burn respects frozen tokens, except that a sender holding `BURNER_ROLE` is bounded by its
   balance, as the write is. The enforcement paths `burn` and `forcedTransfer` release frozen tokens first.

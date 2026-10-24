@@ -143,19 +143,48 @@ contract RuleSetIntegration_MaxHolders is RuleSetIntegrationTest {
     _assertExecuteParity(_i, _sig, Reasons.MAX_HOLDERS);
   }
 
-  /// @dev The vaults' `max*` ask `canReceive`, so it must say what a mint to the account would say
-  function test_WhenTheCapIsFull_CanReceiveIsFalseForANewAccountAndTrueForAHolder() external {
+  /// @dev ERC-7943 keeps quantitative rules out of `canReceive`: the cap decides a movement, not an account. A new account
+  ///      at a full cap is eligible, a mint or a partial transfer to it is refused, and a full-balance transfer to it
+  ///      passes, so the cap does not make `canReceive` disagree with a transfer that passes
+  function test_WhenTheCapIsFull_CanReceiveStillAcceptsANewAccountAndTheMovementDecides() external {
     _fillToTheCap();
-    assertFalse(_token.canReceive(_carol));
-    assertTrue(_token.canReceive(_bob));
-    assertTrue(_token.canSend(_carol)); // the cap never stops a sender
-    (bool _mintOk,) = _token.canTransferWithReason(address(0), _carol, 1);
-    assertFalse(_mintOk);
-
-    _assertTransferParity(_bob, _treasury, 10 ether, Reasons.TRANSFER_OK); // bob leaves: a slot frees
     assertTrue(_token.canReceive(_carol));
-    (_mintOk,) = _token.canTransferWithReason(address(0), _carol, 1);
-    assertTrue(_mintOk);
+    assertTrue(_token.canSend(_carol));
+    (bool _mintOk, bytes32 _mintReason) = _token.canTransferWithReason(address(0), _carol, 1);
+    assertFalse(_mintOk);
+    assertEq(_mintReason, Reasons.MAX_HOLDERS);
+    assertFalse(_token.canTransfer(_alice, _carol, 1 ether)); // a partial move adds a holder
+    assertTrue(_token.canTransfer(_bob, _carol, 10 ether)); // net zero: bob leaves as carol joins
+    assertFalse(_token.canReceive(_eve)); // identity is an account question and still refuses
+  }
+
+  /// @dev ERC-7943 has `canTransfer` perform a `canSend` check on the sender and a `canReceive` check on the receiver.
+  ///      For a plain transfer here it is not true while either is false, whatever the cap, the freeze, the lockup or
+  ///      the identity says (one way only: the enforcement kinds are not driven)
+  function testFuzz_CanTransferNeverExceedsTheAccountQuestions(
+    bool _fillCap,
+    bool _bobSends,
+    bool _freezeSender,
+    bool _lockSender,
+    bool _freezeReceiver,
+    bool _unverifiedReceiver,
+    bool _wholeBalance
+  ) external {
+    if (_fillCap) _fillToTheCap();
+    address _sender = _bobSends ? _bob : _alice;
+    address _receiver = _unverifiedReceiver ? _eve : _carol;
+    vm.startPrank(_agent);
+    if (_freezeSender) _restrictionRule.setFrozen(address(_token), _sender, true);
+    if (_lockSender) _restrictionRule.setLockup(address(_token), _sender, block.timestamp + 1 days);
+    if (_freezeReceiver) _restrictionRule.setFrozen(address(_token), _receiver, true);
+    vm.stopPrank();
+
+    uint256 _balance = _token.balanceOf(_sender);
+    uint256 _amount = _wholeBalance && _balance > 0 ? _balance : (_balance > 1 ? 1 : 0);
+    if (_token.canTransfer(_sender, _receiver, _amount)) {
+      assertTrue(_token.canSend(_sender), 'canTransfer without canSend');
+      assertTrue(_token.canReceive(_receiver), 'canTransfer without canReceive');
+    }
   }
 
   function test_WhenTheCapIsFull_AFullBalanceMoveToANewHolderIsAllowed() external {

@@ -85,24 +85,24 @@ contract Gated4626Vault is ERC4626Upgradeable, PolicyGatedERC20Upgradeable, IGat
 
   /**
    * @inheritdoc ERC4626Upgradeable
-   * @dev 0 when paused or when `_receiver` could not receive shares at all (`canReceive`: identity, freeze, the holder
-   *      cap). It does not depend on an amount, so a minimum position does not read as a block
+   * @dev 0 when paused or when a mint of a very large amount to `_receiver` would be rejected (identity, freeze, the
+   *      holder caps). The amount is above any minimum position up to `type(uint128).max`, so such a minimum does not read as a block
    */
   function maxDeposit(
     address _receiver
   ) public view override returns (uint256 _maxAssets) {
-    if (_accountReason(_receiver, false) != Reasons.TRANSFER_OK) return 0;
+    if (_mintProbe(_receiver) != Reasons.TRANSFER_OK) return 0;
     _maxAssets = super.maxDeposit(_receiver);
   }
 
   /**
    * @inheritdoc ERC4626Upgradeable
-   * @dev 0 when paused or when `_receiver` could not receive shares at all, as `maxDeposit`
+   * @dev 0 when paused or when a mint to `_receiver` would be rejected, as `maxDeposit`
    */
   function maxMint(
     address _receiver
   ) public view override returns (uint256 _maxShares) {
-    if (_accountReason(_receiver, false) != Reasons.TRANSFER_OK) return 0;
+    if (_mintProbe(_receiver) != Reasons.TRANSFER_OK) return 0;
     _maxShares = super.maxMint(_receiver);
   }
 

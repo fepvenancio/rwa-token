@@ -677,10 +677,10 @@ contract FundHoldersRuleGate is Helpers {
   }
 }
 
-/// @notice The account-level answers behind `canSend`, `canReceive` and the vaults' `max*`. A class that is not the
-///         fund's, or a rule the fund has replaced, rejects every movement, so no account may send or receive. The cap
-///         is about who may become an investor, which does not depend on the amount: an account that is not yet an
-///         investor cannot receive while the fund is full, as a mint to it would be refused
+/// @notice The account-level answers behind `canSend` and `canReceive`. A class that is not the fund's, or a rule the
+///         fund has replaced, rejects every movement, so no account may send or receive. The investor cap is a rule about
+///         a movement, not about an account (ERC-7943 keeps quantitative rules out of the account questions), so the
+///         account answer accepts a new investor at a full fund and `check` decides the movement
 contract FundHoldersRuleUnit_AccountChecks is FundHoldersRuleUnitTest {
   function test_WhenTheTokenIsARegisteredClassWithThisRule_BothAccept() external {
     _admit(_to, 0, false, 2, 3);
@@ -688,51 +688,25 @@ contract FundHoldersRuleUnit_AccountChecks is FundHoldersRuleUnitTest {
     assertEq(_rule.checkReceive(_token, _to), Reasons.TRANSFER_OK);
   }
 
-  function test_WhenTheFundIsFull_ANewInvestorCannotReceiveButAnySenderCanSend() external {
+  /// @dev At a full fund `check` refuses a mint to a new investor, and the account answer still accepts
+  function test_WhenTheFundIsFull_ANewInvestorIsStillAcceptedAtAccountLevel() external {
     _admit(_to, 0, false, 3, 3);
-    assertEq(_rule.checkReceive(_token, _to), Reasons.MAX_HOLDERS);
+    assertEq(_check(IPolicyHook.TransferKind.MINT, address(0), _to, 1), Reasons.MAX_HOLDERS);
+    assertEq(_rule.checkReceive(_token, _to), Reasons.TRANSFER_OK);
     assertEq(_rule.checkSend(_token, _to), Reasons.TRANSFER_OK);
   }
 
-  function test_WhenTheFundIsAboveALoweredCap_ANewInvestorCannotReceive() external {
-    _admit(_to, 0, false, 5, 3);
-    assertEq(_rule.checkReceive(_token, _to), Reasons.MAX_HOLDERS);
-  }
-
-  function test_WhenTheFundHasRoom_ANewInvestorCanReceive() external {
-    _admit(_to, 0, false, 2, 3);
-    assertEq(_rule.checkReceive(_token, _to), Reasons.TRANSFER_OK);
-  }
-
-  function test_WhenTheCapIsZero_ANewInvestorCannotReceive() external {
-    _admit(_to, 0, false, 0, 0);
-    assertEq(_rule.checkReceive(_token, _to), Reasons.MAX_HOLDERS);
-  }
-
-  /// @dev Who is not a new investor is never capped: an investor in any class, an exempt account, the class itself
-  function test_WhenTheFundIsFull_AnExistingInvestorAnExemptAccountAndTheClassCanReceive() external {
-    _admit(_to, _OTHER_BIT, false, 3, 3);
-    assertEq(_rule.checkReceive(_token, _to), Reasons.TRANSFER_OK);
-    _admit(_to, _BIT, false, 3, 3);
-    assertEq(_rule.checkReceive(_token, _to), Reasons.TRANSFER_OK);
-    _admit(_to, 0, true, 3, 3);
-    assertEq(_rule.checkReceive(_token, _to), Reasons.TRANSFER_OK);
-    _admit(_token, 0, false, 3, 3);
-    assertEq(_rule.checkReceive(_token, _token), Reasons.TRANSFER_OK);
-  }
-
-  /// @dev The account answer is the decision `check` takes for a mint, which adds no sender and so frees no slot
-  function testFuzz_ForAMint_CheckReceiveAgreesWithCheck(
+  /// @dev The answer does not depend on the count, the cap, the investor's classes or an exemption
+  function testFuzz_WhateverTheFundHolds_ARegisteredClassAcceptsTheAccount(
     uint8 _heldSeed,
     bool _exempt,
     uint256 _count,
     uint256 _cap
   ) external {
     uint256 _held = bound(_heldSeed, 0, 2) == 0 ? 0 : (bound(_heldSeed, 0, 2) == 1 ? _BIT : _OTHER_BIT);
-    _count = bound(_count, 0, 6);
-    _cap = bound(_cap, 0, 5);
-    _admit(_to, _held, _exempt, _count, _cap);
-    assertEq(_rule.checkReceive(_token, _to), _check(IPolicyHook.TransferKind.MINT, address(0), _to, 1));
+    _admit(_to, _held, _exempt, bound(_count, 0, 6), bound(_cap, 0, 5));
+    assertEq(_rule.checkReceive(_token, _to), Reasons.TRANSFER_OK);
+    assertEq(_rule.checkSend(_token, _to), Reasons.TRANSFER_OK);
   }
 
   function test_WhenTheTokenIsNotAClass_BothReturnNotFundClass() external {

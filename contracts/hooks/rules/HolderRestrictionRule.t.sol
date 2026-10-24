@@ -437,8 +437,8 @@ contract HolderRestrictionRuleUnit_AccountChecks is HolderRestrictionRuleUnitTes
     assertEq(_rule.checkSend(_token, _holder), Reasons.LOCKED);
   }
 
-  /// @dev The one allowed gap between `check` and the account answer (see `IComplianceRule`): a locked holder cannot
-  ///      send, yet the kinds the lockup exempts still pass `check`
+  /// @dev The account answer and `check` agree for the kinds a rule does not exempt (see `IComplianceRule`): a locked
+  ///      holder cannot send, yet the kinds the lockup exempts still pass `check`
   function test_WhenTheAccountIsLocked_TheKindsTheLockupExemptsStillPassCheck() external {
     _lock(_holder, block.timestamp + 1 days);
     assertEq(_rule.checkSend(_token, _holder), Reasons.LOCKED);

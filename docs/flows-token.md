@@ -65,7 +65,7 @@ Checks with the standard rules: pause, then `amount <= balance - frozen` (zero w
 
 Reverts: an amount above the unfrozen balance, which includes an amount above the balance, reverts with `ERC7943InsufficientUnfrozenBalance(account, amount, unfrozen)`. Every rejection by the hook reverts with `PolicyGated_TransferRejected(reason)`.
 
-Before sending, an integrator can ask `canTransfer(from, to, amount)`, or `canTransferWithReason`, which also returns the reason code. Both run these checks without the write. `canSend(account)` and `canReceive(account)` ask the account-level question only ([architecture.md](architecture.md#account-level-questions)).
+Before sending, an integrator can ask `canTransfer(from, to, amount)`, or `canTransferWithReason`, which also returns the reason code. Both run these checks without the write. `canSend(account)` and `canReceive(account)` ask the account-level question only ([architecture.md](architecture.md#account-level-questions)). They carry no amount, so they do not see a holder cap or an investor cap: a full cap does not make `canReceive` false for a new account, and `canTransfer` shows whether the movement passes.
 
 Code: ERC-20 functions inherited from OpenZeppelin; `PolicyGatedERC20Upgradeable._update`, `canTransfer`, `canTransferWithReason`, `canSend`, `canReceive`.
 

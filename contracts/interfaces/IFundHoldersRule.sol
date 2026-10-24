@@ -14,8 +14,8 @@ import {IFund} from 'interfaces/IFund.sol';
  *      installed one, so a retired rule never says yes in a pre-flight while the write fails. Only a new investor is
  *      checked, net of a sender who leaves the fund, so a lowered cap never blocks existing investors. FORCED is exempt
  *      from the cap but still counted. A cap of 0 fails closed. The class itself and exempt accounts never count.
- *      `checkReceive` answers for the account as `check` answers for a mint: a new investor cannot receive while the fund
- *      is full, so `canReceive` and the vaults' `maxDeposit` say so
+ *      `checkSend` and `checkReceive` answer only `NOT_FUND_CLASS`: the cap is a rule about a movement, which ERC-7943
+ *      keeps out of the account questions, and belongs to `check`
  */
 interface IFundHoldersRule is IComplianceRule {
   /*///////////////////////////////////////////////////////////////
