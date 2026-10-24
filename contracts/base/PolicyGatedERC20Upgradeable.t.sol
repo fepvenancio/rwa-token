@@ -14,6 +14,8 @@ import {Vm} from 'forge-std/Vm.sol';
 
 import {Reasons} from 'interfaces/Errors.sol';
 
+import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
+import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
@@ -47,6 +49,7 @@ contract PolicyGatedUnitTest is Helpers {
     _registry = _mockContract('registry');
     _hook = _mockContract('hook');
     _attested(_hook, IPolicyRegistry.AttestKind.HOOK, true);
+    _hookNamesRegistry(_hook, _registry);
     _hookDecides(Reasons.TRANSFER_OK);
     vm.mockCall(_hook, abi.encodeCall(IPolicyHook.wantsAfter, ()), abi.encode(false));
 
@@ -71,7 +74,9 @@ contract PolicyGatedUnitTest is Helpers {
       address(
         new ERC1967Proxy(
           address(_impl),
-          abi.encodeCall(PolicyGatedHarness.initialize, ('Gated', 'GTD', _admin, _guardian, _registry, _initialHook))
+          abi.encodeCall(
+            PolicyGatedHarness.initialize, ('Gated', 'GTD', _admin, _guardian, _registry, _initialHook, _noRules())
+          )
         )
       )
     );
@@ -83,6 +88,18 @@ contract PolicyGatedUnitTest is Helpers {
     bool _isAttested
   ) internal {
     vm.mockCall(_registry, abi.encodeCall(IPolicyRegistry.isAttested, (_target, _kind)), abi.encode(_isAttested));
+  }
+
+  /// @dev A hook names the registry it vets rules against; the token requires it to be its own
+  function _hookNamesRegistry(
+    address _hookAddress,
+    address _namedRegistry
+  ) internal {
+    vm.mockCall(_hookAddress, abi.encodeCall(IComplianceHook.REGISTRY, ()), abi.encode(_namedRegistry));
+  }
+
+  function _noRules() internal pure returns (IComplianceRule[] memory _ruleSet) {
+    _ruleSet = new IComplianceRule[](0);
   }
 
   function _hookDecides(
@@ -106,10 +123,17 @@ contract PolicyGatedUnitTest is Helpers {
       amount: _amount,
       operator: _operator,
       kind: _kind,
-      ref: bytes32(0),
-      deadline: 0,
-      extra: ''
+      extra: _balances(_from, _to)
     });
+  }
+
+  /// @dev The `extra` the token builds for every kind: the balances before the move, zero for the zero address
+  function _balances(
+    address _from,
+    address _to
+  ) internal view returns (bytes memory _extra) {
+    _extra =
+      abi.encode(_from == address(0) ? 0 : _token.balanceOf(_from), _to == address(0) ? 0 : _token.balanceOf(_to));
   }
 
   function _unauthorized(
@@ -131,7 +155,8 @@ contract PolicyGatedUnit_Initialize is PolicyGatedUnitTest {
     PolicyGatedHarness _impl = new PolicyGatedHarness();
     vm.expectRevert(IPolicyGated.PolicyGated_ZeroAddress.selector);
     new ERC1967Proxy(
-      address(_impl), abi.encodeCall(PolicyGatedHarness.initialize, ('G', 'G', address(0), _guardian, _registry, _hook))
+      address(_impl),
+      abi.encodeCall(PolicyGatedHarness.initialize, ('G', 'G', address(0), _guardian, _registry, _hook, _noRules()))
     );
   }
 
@@ -139,7 +164,8 @@ contract PolicyGatedUnit_Initialize is PolicyGatedUnitTest {
     PolicyGatedHarness _impl = new PolicyGatedHarness();
     vm.expectRevert(IPolicyGated.PolicyGated_ZeroAddress.selector);
     new ERC1967Proxy(
-      address(_impl), abi.encodeCall(PolicyGatedHarness.initialize, ('G', 'G', _admin, address(0), _registry, _hook))
+      address(_impl),
+      abi.encodeCall(PolicyGatedHarness.initialize, ('G', 'G', _admin, address(0), _registry, _hook, _noRules()))
     );
   }
 
@@ -147,7 +173,8 @@ contract PolicyGatedUnit_Initialize is PolicyGatedUnitTest {
     PolicyGatedHarness _impl = new PolicyGatedHarness();
     vm.expectRevert(IPolicyGated.PolicyGated_ZeroAddress.selector);
     new ERC1967Proxy(
-      address(_impl), abi.encodeCall(PolicyGatedHarness.initialize, ('G', 'G', _admin, _guardian, address(0), _hook))
+      address(_impl),
+      abi.encodeCall(PolicyGatedHarness.initialize, ('G', 'G', _admin, _guardian, address(0), _hook, _noRules()))
     );
   }
 
@@ -156,7 +183,7 @@ contract PolicyGatedUnit_Initialize is PolicyGatedUnitTest {
     vm.expectRevert(IPolicyGated.PolicyGated_ZeroAddress.selector);
     new ERC1967Proxy(
       address(_impl),
-      abi.encodeCall(PolicyGatedHarness.initialize, ('G', 'G', _admin, _guardian, _registry, address(0)))
+      abi.encodeCall(PolicyGatedHarness.initialize, ('G', 'G', _admin, _guardian, _registry, address(0), _noRules()))
     );
   }
 
@@ -168,7 +195,8 @@ contract PolicyGatedUnit_Initialize is PolicyGatedUnitTest {
       abi.encodeWithSelector(IPolicyGated.PolicyGated_NotAttested.selector, _rogue, IPolicyRegistry.AttestKind.HOOK)
     );
     new ERC1967Proxy(
-      address(_impl), abi.encodeCall(PolicyGatedHarness.initialize, ('G', 'G', _admin, _guardian, _registry, _rogue))
+      address(_impl),
+      abi.encodeCall(PolicyGatedHarness.initialize, ('G', 'G', _admin, _guardian, _registry, _rogue, _noRules()))
     );
   }
 
@@ -181,13 +209,13 @@ contract PolicyGatedUnit_Initialize is PolicyGatedUnitTest {
 
   function test_WhenCalledTwice_ItReverts() external {
     vm.expectRevert(Initializable.InvalidInitialization.selector);
-    _token.initialize('G', 'G', _admin, _guardian, _registry, _hook);
+    _token.initialize('G', 'G', _admin, _guardian, _registry, _hook, _noRules());
   }
 
   function test_WhenCalledOnTheImplementation_ItReverts() external {
     PolicyGatedHarness _impl = new PolicyGatedHarness();
     vm.expectRevert(Initializable.InvalidInitialization.selector);
-    _impl.initialize('G', 'G', _admin, _guardian, _registry, _hook);
+    _impl.initialize('G', 'G', _admin, _guardian, _registry, _hook, _noRules());
   }
 }
 
@@ -543,6 +571,7 @@ contract PolicyGatedUnit_SetPolicyHook is PolicyGatedUnitTest {
   function test_WhenHookIsAttested_ItReplacesAndEmits() external {
     address _next = _mockContract('next');
     _attested(_next, IPolicyRegistry.AttestKind.HOOK, true);
+    _hookNamesRegistry(_next, _registry);
     vm.expectEmit(address(_token));
     emit IPolicyGated.PolicyHookChanged(_hook, _next);
     vm.prank(_admin);
@@ -917,5 +946,142 @@ contract PolicyGatedUnit_Recovery is PolicyGatedUnitTest {
     vm.expectRevert(_unauthorized(_stranger, _token.DEFAULT_ADMIN_ROLE()));
     vm.prank(_stranger);
     _token.unpause();
+  }
+}
+
+/// @notice The context the token builds is part of the hook interface: the balances before the move ride in `extra`
+contract PolicyGatedUnit_Context is PolicyGatedUnitTest {
+  function _expectBefore(
+    address _from,
+    address _to,
+    uint256 _amount,
+    address _operator,
+    IPolicyHook.TransferKind _kind,
+    bytes memory _extra
+  ) internal {
+    IPolicyHook.TransferContext memory _context = IPolicyHook.TransferContext({
+      token: address(_token),
+      from: _from,
+      to: _to,
+      id: 0,
+      amount: _amount,
+      operator: _operator,
+      kind: _kind,
+      extra: _extra
+    });
+    _mockAndExpect(_hook, abi.encodeCall(IPolicyHook.beforeTransfer, (_context)), abi.encode(Reasons.TRANSFER_OK));
+  }
+
+  function test_WhenTransferring_ExtraCarriesBothBalancesBeforeTheMove() external {
+    _expectBefore(_alice, _bob, 10 ether, _alice, IPolicyHook.TransferKind.TRANSFER, abi.encode(_INITIAL, uint256(0)));
+    vm.prank(_alice);
+    _token.transfer(_bob, 10 ether);
+  }
+
+  function test_WhenMinting_TheSenderBalanceIsZero() external {
+    _expectBefore(address(0), _alice, 5 ether, _minter, IPolicyHook.TransferKind.MINT, abi.encode(uint256(0), _INITIAL));
+    vm.prank(_minter);
+    _token.mint(_alice, 5 ether);
+  }
+
+  function test_WhenBurning_TheReceiverBalanceIsZero() external {
+    _expectBefore(_alice, address(0), 5 ether, _burner, IPolicyHook.TransferKind.BURN, abi.encode(_INITIAL, uint256(0)));
+    vm.prank(_burner);
+    _token.burn(_alice, 5 ether);
+  }
+
+  function test_WhenForced_ExtraHasNoRefOrDeadline() external {
+    _expectBefore(_alice, _bob, 3 ether, _agent, IPolicyHook.TransferKind.FORCED, abi.encode(_INITIAL, uint256(0)));
+    vm.prank(_agent);
+    _token.forcedTransfer(_alice, _bob, 3 ether);
+  }
+
+  /// @dev EXECUTED appends the intent's reference and deadline after the balances
+  function test_WhenExecuted_ExtraAppendsRefAndDeadline() external {
+    bytes32 _ref = keccak256('pacs.008');
+    uint256 _deadline = block.timestamp + 1 days;
+    _expectBefore(
+      _alice,
+      _bob,
+      2 ether,
+      address(this),
+      IPolicyHook.TransferKind.EXECUTED,
+      abi.encode(_INITIAL, uint256(0), _ref, _deadline)
+    );
+    _token.moveAs(_alice, _bob, 2 ether, IPolicyHook.TransferKind.EXECUTED, _ref, _deadline);
+  }
+
+  /// @dev The pre-flight builds the context with the same code, so it asks the hook the same question
+  function test_WhenPreflightRuns_ItBuildsTheSameContextAsTheWrite() external {
+    _expectBefore(_alice, _bob, 7 ether, _alice, IPolicyHook.TransferKind.TRANSFER, abi.encode(_INITIAL, uint256(0)));
+    (bool _ok,) = _token.canTransfer(_alice, _bob, 7 ether);
+    assertTrue(_ok);
+  }
+
+  /// @dev `afterTransfer` gets the context the check saw, so a rule derives the post-move balances from `amount`
+  function test_WhenTheHookWantsAfter_ItReceivesTheSameContext() external {
+    vm.mockCall(_hook, abi.encodeCall(IPolicyHook.wantsAfter, ()), abi.encode(true));
+    bytes memory _extra = abi.encode(_INITIAL, uint256(0));
+    IPolicyHook.TransferContext memory _context = IPolicyHook.TransferContext({
+      token: address(_token),
+      from: _alice,
+      to: _bob,
+      id: 0,
+      amount: 4 ether,
+      operator: _alice,
+      kind: IPolicyHook.TransferKind.TRANSFER,
+      extra: _extra
+    });
+    _mockAndExpect(_hook, abi.encodeCall(IPolicyHook.afterTransfer, (_context)), '');
+    vm.prank(_alice);
+    _token.transfer(_bob, 4 ether);
+  }
+}
+
+/// @notice A token only accepts a hook that vets rules against the token's own registry, and installs its initial rule
+///         set on the hook in the same call that installs the hook
+contract PolicyGatedUnit_SharedHook is PolicyGatedUnitTest {
+  function test_WhenTheHookNamesAnotherRegistry_SetPolicyHookReverts() external {
+    address _next = _mockContract('next');
+    address _otherRegistry = _mockContract('otherRegistry');
+    _attested(_next, IPolicyRegistry.AttestKind.HOOK, true);
+    _hookNamesRegistry(_next, _otherRegistry);
+    vm.expectRevert(
+      abi.encodeWithSelector(IPolicyGated.PolicyGated_HookRegistryMismatch.selector, _otherRegistry, _registry)
+    );
+    vm.prank(_admin);
+    _token.setPolicyHook(_next);
+  }
+
+  function test_WhenTheHookNamesAnotherRegistry_InitializeReverts() external {
+    address _next = _mockContract('next');
+    address _otherRegistry = _mockContract('otherRegistry');
+    _attested(_next, IPolicyRegistry.AttestKind.HOOK, true);
+    _hookNamesRegistry(_next, _otherRegistry);
+    PolicyGatedHarness _impl = new PolicyGatedHarness();
+    vm.expectRevert(
+      abi.encodeWithSelector(IPolicyGated.PolicyGated_HookRegistryMismatch.selector, _otherRegistry, _registry)
+    );
+    new ERC1967Proxy(
+      address(_impl),
+      abi.encodeCall(PolicyGatedHarness.initialize, ('G', 'G', _admin, _guardian, _registry, _next, _noRules()))
+    );
+  }
+
+  function test_WhenInitialRulesAreGiven_TheTokenInstallsThemOnTheHookItself() external {
+    IComplianceRule[] memory _ruleSet = new IComplianceRule[](1);
+    _ruleSet[0] = IComplianceRule(_mockContract('rule'));
+    vm.mockCall(_hook, abi.encodeWithSelector(IComplianceHook.setRules.selector), '');
+    vm.expectCall(_hook, abi.encodeWithSelector(IComplianceHook.setRules.selector), 1);
+    PolicyGatedHarness _impl = new PolicyGatedHarness();
+    new ERC1967Proxy(
+      address(_impl),
+      abi.encodeCall(PolicyGatedHarness.initialize, ('G', 'G', _admin, _guardian, _registry, _hook, _ruleSet))
+    );
+  }
+
+  function test_WhenNoInitialRulesAreGiven_TheTokenLeavesTheHookAlone() external {
+    vm.expectCall(_hook, abi.encodeWithSelector(IComplianceHook.setRules.selector), 0);
+    _deploy(_hook);
   }
 }

@@ -53,8 +53,8 @@ contract RuleSetIntegrationTest is IntentTokenIntegrationTest {
     _ruleSet[1] = _lockupRule;
     _ruleSet[2] = _windowRule;
     _ruleSet[3] = _maxHoldersRule;
-    // Same admin, registry and token as the attested hook, so the same attested codehash.
-    _token.setPolicyHook(address(new ComplianceHook(_admin, _registry, address(_token), _ruleSet)));
+    // The shared hook is already installed; the token's admin replaces the token's rule set on it.
+    _hook.setRules(address(_token), _ruleSet);
     vm.stopPrank();
   }
 

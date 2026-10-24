@@ -51,7 +51,7 @@ contract FundIntegrationTest is Test {
   IntentToken internal _token;
   Gated4626Vault internal _vault4626;
   Gated7540Vault internal _vault7540;
-  ComplianceHook[3] internal _hooks;
+  ComplianceHook internal _hook;
 
   address internal _guardian = makeAddr('guardian');
   address internal _minter = makeAddr('minter');
@@ -83,6 +83,8 @@ contract FundIntegrationTest is Test {
     _registry.attest(address(_fundRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
     _fund.setRule(address(_fundRule));
     _fund.setHolderCap(3);
+    _hook = new ComplianceHook(_registry);
+    _registry.attest(address(_hook).codehash, IPolicyRegistry.AttestKind.HOOK, '');
 
     _deployToken();
     _deploy4626();
@@ -100,37 +102,34 @@ contract FundIntegrationTest is Test {
     _list[3] = _last;
   }
 
-  /// @dev Deployment order: implementation, hook bound to the predicted proxy, attestations, proxy
-  function _hookAndAttest(
-    string memory _symbol,
-    address _impl,
-    uint256 _slot
-  ) internal returns (address _predicted) {
-    _predicted = _deployer.predict(_symbol, _impl);
-    _hooks[_slot] = new ComplianceHook(address(this), _registry, _predicted, _rules(_fundRule));
-    _registry.attest(address(_hooks[_slot]).codehash, IPolicyRegistry.AttestKind.HOOK, '');
+  /// @dev Deployment order: the shared hook is attested once in `setUp`; each class attests its implementation, then
+  ///      the proxy comes up with the hook and its rules
+  function _attestImplementation(
+    address _impl
+  ) internal {
     _registry.attest(_impl.codehash, IPolicyRegistry.AttestKind.IMPLEMENTATION, '');
   }
 
   function _deployToken() internal {
     address _impl = address(new IntentToken());
-    _hookAndAttest('gINT', _impl, 0);
+    _attestImplementation(_impl);
     _token = IntentToken(
       _deployer.deploy(
         'gINT',
         _impl,
         abi.encodeCall(
           IntentToken.initialize,
-          ('Class Token', 'gINT', address(this), _guardian, address(_registry), address(_hooks[0]))
+          ('Class Token', 'gINT', address(this), _guardian, address(_registry), address(_hook), _rules(_fundRule))
         ),
-        address(_hooks[0])
+        address(_hook),
+        _rules(_fundRule)
       )
     );
   }
 
   function _deploy4626() internal {
     address _impl = address(new Gated4626Vault());
-    _hookAndAttest('g4626', _impl, 1);
+    _attestImplementation(_impl);
     _vault4626 = Gated4626Vault(
       _deployer.deploy(
         'g4626',
@@ -144,17 +143,19 @@ contract FundIntegrationTest is Test {
             address(this),
             _guardian,
             address(_registry),
-            address(_hooks[1])
+            address(_hook),
+            _rules(_fundRule)
           )
         ),
-        address(_hooks[1])
+        address(_hook),
+        _rules(_fundRule)
       )
     );
   }
 
   function _deploy7540() internal {
     address _impl = address(new Gated7540Vault());
-    _hookAndAttest('g7540', _impl, 2);
+    _attestImplementation(_impl);
     _vault7540 = Gated7540Vault(
       _deployer.deploy(
         'g7540',
@@ -168,11 +169,13 @@ contract FundIntegrationTest is Test {
             address(this),
             _guardian,
             address(_registry),
-            address(_hooks[2]),
+            address(_hook),
+            _rules(_fundRule),
             _custody
           )
         ),
-        address(_hooks[2])
+        address(_hook),
+        _rules(_fundRule)
       )
     );
   }
@@ -436,18 +439,17 @@ contract FundIntegration_Registration is FundIntegrationTest {
   /// @dev A fourth class whose hook lists the fund rule, deployed but not registered
   function _deployUnregistered() internal {
     address _impl = address(new IntentToken());
-    address _predicted = _deployer.predict('gOTH', _impl);
-    ComplianceHook _hook = new ComplianceHook(address(this), _registry, _predicted, _rules(_fundRule));
-    _registry.attest(address(_hook).codehash, IPolicyRegistry.AttestKind.HOOK, '');
-    _registry.attest(_impl.codehash, IPolicyRegistry.AttestKind.IMPLEMENTATION, '');
+    _attestImplementation(_impl);
     _other = IntentToken(
       _deployer.deploy(
         'gOTH',
         _impl,
         abi.encodeCall(
-          IntentToken.initialize, ('Other', 'gOTH', address(this), _guardian, address(_registry), address(_hook))
+          IntentToken.initialize,
+          ('Other', 'gOTH', address(this), _guardian, address(_registry), address(_hook), _rules(_fundRule))
         ),
-        address(_hook)
+        address(_hook),
+        _rules(_fundRule)
       )
     );
     _other.grantRole(_other.MINTER_ROLE(), _minter);
@@ -479,11 +481,10 @@ contract FundIntegration_Registration is FundIntegrationTest {
     IComplianceRule[] memory _without = new IComplianceRule[](2);
     _without[0] = _identityRule;
     _without[1] = _maxHoldersRule;
-    ComplianceHook _hook = ComplianceHook(IPolicyGated(address(_other)).policyHook());
-    _hook.setRules(_without);
+    _hook.setRules(address(_other), _without);
     vm.prank(_minter);
     _other.mint(_alice, 1 ether);
-    _hook.setRules(_rules(_fundRule));
+    _hook.setRules(address(_other), _rules(_fundRule));
 
     vm.expectRevert(abi.encodeWithSelector(IFund.Fund_ClassHasSupply.selector, address(_other), 1 ether));
     _fund.registerClass(address(_other));
@@ -494,7 +495,7 @@ contract FundIntegration_Registration is FundIntegrationTest {
     IComplianceRule[] memory _without = new IComplianceRule[](2);
     _without[0] = _identityRule;
     _without[1] = _maxHoldersRule;
-    ComplianceHook(IPolicyGated(address(_other)).policyHook()).setRules(_without);
+    _hook.setRules(address(_other), _without);
 
     vm.expectRevert(abi.encodeWithSelector(IFund.Fund_RuleNotListed.selector, address(_other), address(_fundRule)));
     _fund.registerClass(address(_other));
@@ -606,14 +607,15 @@ contract FundIntegration_Replacement is FundIntegrationTest {
     _mintToken(_bob, 1 ether);
     assertEq(_fund.holderCount(), 2);
 
-    // A twin hook: same admin, registry and token, so the attested codehash matches. Different rule order.
+    // A twin hook: same registry, so the attested codehash matches. Different rule order.
     IComplianceRule[] memory _reordered = new IComplianceRule[](4);
     _reordered[0] = _fundRule;
     _reordered[1] = _identityRule;
     _reordered[2] = _lockupRule;
     _reordered[3] = _maxHoldersRule;
-    ComplianceHook _twin = new ComplianceHook(address(this), _registry, address(_token), _reordered);
-    assertEq(address(_twin).codehash, address(_hooks[0]).codehash);
+    ComplianceHook _twin = new ComplianceHook(_registry);
+    assertEq(address(_twin).codehash, address(_hook).codehash);
+    _twin.setRules(address(_token), _reordered);
     _token.setPolicyHook(address(_twin));
     assertEq(_fund.holderCount(), 2);
 
@@ -646,9 +648,9 @@ contract FundIntegration_Replacement is FundIntegrationTest {
     assertFalse(_token.isUserAllowed(_alice));
     assertEq(_fund.holderCount(), 2);
 
-    for (uint256 _i; _i < 3; ++_i) {
-      _hooks[_i].setRules(_rules(_next));
-    }
+    _hook.setRules(address(_token), _rules(_next));
+    _hook.setRules(address(_vault4626), _rules(_next));
+    _hook.setRules(address(_vault7540), _rules(_next));
     _mintToken(_carol, 1 ether);
     assertEq(_fund.holderCount(), 3);
     _assertTransferParity(_alice, _bob, 0.5 ether, Reasons.TRANSFER_OK);
@@ -666,9 +668,7 @@ contract FundIntegration_Replacement is FundIntegrationTest {
       amount: 1 ether,
       operator: _minter,
       kind: IPolicyHook.TransferKind.MINT,
-      ref: bytes32(0),
-      deadline: 0,
-      extra: ''
+      extra: abi.encode(uint256(0), IERC20(_tokenAddress).balanceOf(_receiver))
     });
   }
 }

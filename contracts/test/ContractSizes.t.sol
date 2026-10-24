@@ -3,7 +3,6 @@ pragma solidity ^0.8.28;
 
 import {Test} from 'forge-std/Test.sol';
 
-import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IFund} from 'interfaces/IFund.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
@@ -43,10 +42,7 @@ contract ContractSizesTest is Test {
     _assertFits('Gated4626Vault', address(new Gated4626Vault()));
     _assertFits('Gated7540Vault', address(new Gated7540Vault()));
     _assertFits('PolicyRegistry', _registry);
-    _assertFits(
-      'ComplianceHook',
-      address(new ComplianceHook(address(this), IPolicyRegistry(_registry), address(this), new IComplianceRule[](0)))
-    );
+    _assertFits('ComplianceHook', address(new ComplianceHook(IPolicyRegistry(_registry))));
     _assertFits('IntentExecutor', address(new IntentExecutor(address(this), address(this))));
     _assertFits('DvPExecutor', address(new DvPExecutor(address(this), address(this))));
     _assertFits('LockupRule', address(new LockupRule()));

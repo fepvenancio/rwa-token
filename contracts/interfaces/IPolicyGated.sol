@@ -58,6 +58,13 @@ interface IPolicyGated {
   error PolicyGated_NotAttested(address _target, IPolicyRegistry.AttestKind _kind);
 
   /**
+   * @notice Thrown when installing a hook that vets rules against a different registry than the token's own
+   * @param _hookRegistry The registry the hook names
+   * @param _tokenRegistry The token's registry
+   */
+  error PolicyGated_HookRegistryMismatch(address _hookRegistry, address _tokenRegistry);
+
+  /**
    * @notice Thrown when a balance movement is rejected by the token's mechanical checks or by the policy hook
    * @param _reason A reason code from `Reasons`
    */

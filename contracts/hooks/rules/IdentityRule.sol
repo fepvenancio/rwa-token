@@ -45,6 +45,22 @@ contract IdentityRule is BaseRule, IIdentityRule {
   }
 
   /// @inheritdoc IComplianceRule
+  function checkReceive(
+    address,
+    address _account
+  ) external view override(BaseRule, IComplianceRule) returns (bytes32 _reason) {
+    _reason = IDENTITY.isVerified(_account) ? Reasons.TRANSFER_OK : Reasons.RECEIVER_NOT_VERIFIED;
+  }
+
+  /// @inheritdoc IComplianceRule
+  function checkSend(
+    address,
+    address _account
+  ) external view override(BaseRule, IComplianceRule) returns (bytes32 _reason) {
+    _reason = IDENTITY.isVerified(_account) ? Reasons.TRANSFER_OK : Reasons.SENDER_NOT_VERIFIED;
+  }
+
+  /// @inheritdoc IComplianceRule
   function ruleId() external pure returns (bytes32 _ruleId) {
     _ruleId = keccak256('IdentityRule.v1');
   }

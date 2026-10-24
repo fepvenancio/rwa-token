@@ -688,24 +688,23 @@ contract DvPExecutorIntegrationTest is RuleSetIntegrationTest {
     _usdc.mint(_buyer, 1000e6);
   }
 
-  /// @dev A second token, bound to its own identity-only hook, deployed as the first one is
+  /// @dev A second token on the same shared hook, with an identity-only rule set, deployed as the first one is
   function _deployCashToken() internal {
     IntentToken _cashImpl = new IntentToken();
     vm.prank(_attester);
     _registry.attest(address(_cashImpl).codehash, IPolicyRegistry.AttestKind.IMPLEMENTATION, '');
     ProxyDeployer _proxyDeployer = new ProxyDeployer(address(this));
-    address _predicted = _proxyDeployer.predict('GUSD', address(_cashImpl));
-    ComplianceHook _cashHook = new ComplianceHook(_admin, _registry, _predicted, _one(_identityRule));
-    vm.prank(_attester);
-    _registry.attest(address(_cashHook).codehash, IPolicyRegistry.AttestKind.HOOK, '');
+    IComplianceRule[] memory _cashRules = _one(_identityRule);
     _cashToken = IntentToken(
       _proxyDeployer.deploy(
         'GUSD',
         address(_cashImpl),
         abi.encodeCall(
-          IntentToken.initialize, ('Gated USD', 'GUSD', _admin, _guardian, address(_registry), address(_cashHook))
+          IntentToken.initialize,
+          ('Gated USD', 'GUSD', _admin, _guardian, address(_registry), address(_hook), _cashRules)
         ),
-        address(_cashHook)
+        address(_hook),
+        _cashRules
       )
     );
   }
@@ -1393,20 +1392,18 @@ contract DvPExecutorFundIntegrationTest is FundIntegrationTest {
 
   function _deployCashToken() internal {
     address _cashImpl = address(new IntentToken());
-    address _predicted = _deployer.predict('GUSD', _cashImpl);
     IComplianceRule[] memory _list = new IComplianceRule[](1);
     _list[0] = _identityRule;
-    ComplianceHook _cashHook = new ComplianceHook(address(this), _registry, _predicted, _list);
-    _registry.attest(address(_cashHook).codehash, IPolicyRegistry.AttestKind.HOOK, '');
     _cashToken = IntentToken(
       _deployer.deploy(
         'GUSD',
         _cashImpl,
         abi.encodeCall(
           IntentToken.initialize,
-          ('Gated USD', 'GUSD', address(this), _guardian, address(_registry), address(_cashHook))
+          ('Gated USD', 'GUSD', address(this), _guardian, address(_registry), address(_hook), _list)
         ),
-        address(_cashHook)
+        address(_hook),
+        _list
       )
     );
   }
@@ -1474,20 +1471,19 @@ contract DvPExecutorFundIntegration_TwoClasses is DvPExecutorFundIntegrationTest
   function setUp() public override {
     super.setUp();
     address _impl = address(new IntentToken());
-    address _predicted = _deployer.predict('gCLS2', _impl);
     IComplianceRule[] memory _list = new IComplianceRule[](2);
     _list[0] = _identityRule;
     _list[1] = _fundRule;
-    ComplianceHook _hook = new ComplianceHook(address(this), _registry, _predicted, _list);
-    _registry.attest(address(_hook).codehash, IPolicyRegistry.AttestKind.HOOK, '');
     _classTwo = IntentToken(
       _deployer.deploy(
         'gCLS2',
         _impl,
         abi.encodeCall(
-          IntentToken.initialize, ('Class Two', 'gCLS2', address(this), _guardian, address(_registry), address(_hook))
+          IntentToken.initialize,
+          ('Class Two', 'gCLS2', address(this), _guardian, address(_registry), address(_hook), _list)
         ),
-        address(_hook)
+        address(_hook),
+        _list
       )
     );
     _fund.registerClass(address(_classTwo));

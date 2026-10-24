@@ -8,6 +8,7 @@ import {Initializable} from '@openzeppelin/contracts/proxy/utils/Initializable.s
 import {IERC20Metadata} from '@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol';
 
 import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
+import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {IProxyDeployer} from 'interfaces/IProxyDeployer.sol';
@@ -26,6 +27,7 @@ contract ProxyDeployerUnitTest is Helpers {
   address internal _registry;
   address internal _hook;
   address internal _otherHook;
+  IComplianceRule[] internal _rules;
 
   function setUp() public virtual {
     _deployer = new ProxyDeployer(_owner);
@@ -34,21 +36,39 @@ contract ProxyDeployerUnitTest is Helpers {
     _hook = _mockContract('hook');
     _otherHook = _mockContract('otherHook');
     vm.mockCall(_registry, abi.encodeWithSelector(IPolicyRegistry.isAttested.selector), abi.encode(true));
-    _bindHook(_hook, _deployer.predict('INT', address(_impl)));
+    _rules.push(IComplianceRule(_mockContract('ruleA')));
+    _rules.push(IComplianceRule(_mockContract('ruleB')));
+    _hookNamesRegistry(_hook, _registry);
+    _hookNamesRegistry(_otherHook, _registry);
+    vm.mockCall(_otherHook, abi.encodeWithSelector(IComplianceHook.setRules.selector), '');
+    _hookHolds(_hook, _deployer.predict('INT', address(_impl)), _rules);
   }
 
-  function _bindHook(
+  /// @dev The hook names the registry it vets rules against; the token requires it to be its own
+  function _hookNamesRegistry(
     address _target,
-    address _token
+    address _named
   ) internal {
-    vm.mockCall(_target, abi.encodeCall(IComplianceHook.TOKEN, ()), abi.encode(_token));
+    vm.mockCall(_target, abi.encodeCall(IComplianceHook.REGISTRY, ()), abi.encode(_named));
+  }
+
+  /// @dev What the hook reports as the token's rules, and the hook accepting the token's own `setRules`
+  function _hookHolds(
+    address _target,
+    address _token,
+    IComplianceRule[] memory _held
+  ) internal {
+    vm.mockCall(_target, abi.encodeCall(IComplianceHook.rules, (_token)), abi.encode(_held));
+    vm.mockCall(_target, abi.encodeWithSelector(IComplianceHook.setRules.selector), '');
   }
 
   function _init(
     string memory _symbol,
     address _withHook
   ) internal view returns (bytes memory _data) {
-    _data = abi.encodeCall(IntentToken.initialize, ('Intent Token', _symbol, _admin, _guardian, _registry, _withHook));
+    _data = abi.encodeCall(
+      IntentToken.initialize, ('Intent Token', _symbol, _admin, _guardian, _registry, _withHook, _rules)
+    );
   }
 
   function _deploy(
@@ -57,7 +77,7 @@ contract ProxyDeployerUnitTest is Helpers {
     address _checkedHook
   ) internal returns (address _proxy) {
     vm.prank(_owner);
-    _proxy = _deployer.deploy(_symbol, address(_impl), _data, _checkedHook);
+    _proxy = _deployer.deploy(_symbol, address(_impl), _data, _checkedHook, _rules);
   }
 }
 
@@ -88,7 +108,7 @@ contract ProxyDeployerUnit_Predict is ProxyDeployerUnitTest {
 }
 
 contract ProxyDeployerUnit_Deploy is ProxyDeployerUnitTest {
-  function test_WhenTheHookIsBoundToThePrediction_ItDeploysAndInitialisesThere() external {
+  function test_WhenTheTokenComesUpWithTheHookAndTheRules_ItDeploysAndInitialisesThere() external {
     address _predicted = _deployer.predict('INT', address(_impl));
     vm.expectEmit(address(_deployer));
     emit IProxyDeployer.ProxyDeployed(keccak256('INT'), _predicted, address(_impl), _hook);
@@ -105,7 +125,7 @@ contract ProxyDeployerUnit_Deploy is ProxyDeployerUnitTest {
   function test_WhenInitialisedInTheSameTransaction_NoOneCanInitialiseItAgain() external {
     address _proxy = _deploy('INT', _init('INT', _hook), _hook);
     vm.expectRevert(Initializable.InvalidInitialization.selector);
-    IntentToken(_proxy).initialize('Evil', 'INT', makeAddr('attacker'), _guardian, _registry, _hook);
+    IntentToken(_proxy).initialize('Evil', 'INT', makeAddr('attacker'), _guardian, _registry, _hook, _rules);
   }
 
   function test_WhenTheCallerIsNotTheOwner_ItReverts(
@@ -114,28 +134,54 @@ contract ProxyDeployerUnit_Deploy is ProxyDeployerUnitTest {
     if (_caller == _owner) _caller = address(uint160(_owner) ^ 1); // remap rather than vm.assume
     vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, _caller));
     vm.prank(_caller);
-    _deployer.deploy('INT', address(_impl), _init('INT', _hook), _hook);
+    _deployer.deploy('INT', address(_impl), _init('INT', _hook), _hook, _rules);
   }
 
-  function test_WhenTheHookIsBoundElsewhere_ItRevertsBeforeCreatingTheProxy() external {
+  /// @dev The token installs its initial rules on the hook itself, in the init call, as its own address
+  function test_WhenInitialising_TheTokenInstallsItsRulesOnTheHookAsItself() external {
     address _predicted = _deployer.predict('INT', address(_impl));
-    address _elsewhere = makeAddr('elsewhere');
-    _bindHook(_hook, _elsewhere);
-    vm.expectRevert(
-      abi.encodeWithSelector(IProxyDeployer.ProxyDeployer_HookTokenMismatch.selector, _hook, _elsewhere, _predicted)
-    );
+    vm.expectCall(_hook, abi.encodeCall(IComplianceHook.setRules, (_predicted, _rules)));
+    _deploy('INT', _init('INT', _hook), _hook);
+  }
+
+  /// @dev The hook must end up holding exactly the reviewed rules for the new token, or the deploy reverts
+  function test_WhenTheHookHoldsOtherRules_ItRevertsAndNothingIsDeployed() external {
+    address _predicted = _deployer.predict('INT', address(_impl));
+    IComplianceRule[] memory _other = new IComplianceRule[](2);
+    _other[0] = _rules[1];
+    _other[1] = _rules[0];
+    _hookHolds(_hook, _predicted, _other);
+    vm.expectRevert(abi.encodeWithSelector(IProxyDeployer.ProxyDeployer_RulesMismatch.selector, _hook, _predicted));
     _deploy('INT', _init('INT', _hook), _hook);
     assertEq(_predicted.code.length, 0);
+    assertFalse(_deployer.saltUsed(keccak256('INT')));
   }
 
-  /// @dev A mis-bound hook must not strand the symbol: the salt stays free and the corrected deploy lands
-  function test_WhenTheHookWasBoundElsewhere_TheSaltStaysFreeForTheCorrectHook() external {
+  function test_WhenTheHookHoldsFewerRules_ItReverts() external {
     address _predicted = _deployer.predict('INT', address(_impl));
-    _bindHook(_otherHook, makeAddr('elsewhere'));
+    _hookHolds(_hook, _predicted, new IComplianceRule[](0));
+    vm.expectRevert(abi.encodeWithSelector(IProxyDeployer.ProxyDeployer_RulesMismatch.selector, _hook, _predicted));
+    _deploy('INT', _init('INT', _hook), _hook);
+  }
+
+  function test_WhenTheHookHoldsMoreRules_ItReverts() external {
+    address _predicted = _deployer.predict('INT', address(_impl));
+    IComplianceRule[] memory _more = new IComplianceRule[](3);
+    _more[0] = _rules[0];
+    _more[1] = _rules[1];
+    _more[2] = IComplianceRule(_mockContract('ruleC'));
+    _hookHolds(_hook, _predicted, _more);
+    vm.expectRevert(abi.encodeWithSelector(IProxyDeployer.ProxyDeployer_RulesMismatch.selector, _hook, _predicted));
+    _deploy('INT', _init('INT', _hook), _hook);
+  }
+
+  /// @dev A hook that vets against another registry is refused by the token's initialiser; the salt stays free
+  function test_WhenTheHookNamesAnotherRegistry_TheSaltStaysFreeForTheCorrectHook() external {
+    address _predicted = _deployer.predict('INT', address(_impl));
+    address _otherRegistry = makeAddr('otherRegistry');
+    _hookNamesRegistry(_otherHook, _otherRegistry);
     vm.expectRevert(
-      abi.encodeWithSelector(
-        IProxyDeployer.ProxyDeployer_HookTokenMismatch.selector, _otherHook, makeAddr('elsewhere'), _predicted
-      )
+      abi.encodeWithSelector(IPolicyGated.PolicyGated_HookRegistryMismatch.selector, _otherRegistry, _registry)
     );
     _deploy('INT', _init('INT', _otherHook), _otherHook);
     assertFalse(_deployer.saltUsed(keccak256('INT')));
@@ -147,10 +193,10 @@ contract ProxyDeployerUnit_Deploy is ProxyDeployerUnitTest {
   function test_WhenTheSymbolWasUsed_ItRevertsEvenWithAnotherImplementation() external {
     _deploy('INT', _init('INT', _hook), _hook);
     IntentToken _otherImpl = new IntentToken();
-    _bindHook(_otherHook, _deployer.predict('INT', address(_otherImpl)));
+    _hookHolds(_otherHook, _deployer.predict('INT', address(_otherImpl)), _rules);
     vm.expectRevert(abi.encodeWithSelector(IProxyDeployer.ProxyDeployer_SaltUsed.selector, keccak256('INT')));
     vm.prank(_owner);
-    _deployer.deploy('INT', address(_otherImpl), _init('INT', _otherHook), _otherHook);
+    _deployer.deploy('INT', address(_otherImpl), _init('INT', _otherHook), _otherHook, _rules);
   }
 
   function test_WhenTheInitDataInstallsAnotherHook_ItReverts() external {
@@ -199,7 +245,7 @@ contract ProxyDeployerUnit_Deploy is ProxyDeployerUnitTest {
 
     address _predicted = _deployer.predict('INT', address(_impl)); // read first, never inside the pranked call
     vm.prank(_timelock);
-    assertEq(_deployer.deploy('INT', address(_impl), _init('INT', _hook), _hook), _predicted);
+    assertEq(_deployer.deploy('INT', address(_impl), _init('INT', _hook), _hook, _rules), _predicted);
   }
 
   function test_ItReportsTheSymbolItWasKeyedOn() external {

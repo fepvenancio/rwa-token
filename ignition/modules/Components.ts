@@ -1,12 +1,14 @@
 import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
 
 /**
- * Stage 1 of 3. Everything that does not depend on a token address:
+ * Stage 1 of 2. Everything that does not depend on a token address:
  *
  * - The recovery timelock (plain OZ TimelockController, governance as proposer and executor) and the main timelock
  *   (`GovernanceTimelock`: proposer and executor are the governance multisig only; the recovery timelock may revoke
  *   CANCELLER_ROLE there and nothing else). The deployer is the admin of both only until `Activate` finishes.
- * - The registry, administered by the timelock from the start.
+ * - The registry, administered by the timelock from the start, and the one shared `ComplianceHook` that every token
+ *   uses. Its only immutable is the registry, so the council attests one codehash for the whole deployment, and each
+ *   token's rules are installed by the token itself when `Activate` initialises it.
  * - The shared rules, one implementation per template, the `ProxyDeployer`, the intent executor and the DvP executor
  *   (both administered by the deployer until `Activate` hands them over). Neither executor is attested: neither is a
  *   hook, a rule or an implementation, and each token authorises it by granting it EXECUTOR_ROLE.
@@ -14,7 +16,7 @@ import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
  *   rule's codehash covers the fund's address and not the fund's code, so the council reads the fund's code and its
  *   owner before attesting the rule.
  *
- * Next: the council attests the rules and implementations (council step 1), then `Tokens`.
+ * Next: the council attests the rules, the hook and the implementations (the council step), then `Activate`.
  */
 export default buildModule("Components", (m) => {
   const deployer = m.getAccount(0);
@@ -31,6 +33,7 @@ export default buildModule("Components", (m) => {
   });
   const timelock = m.contract("GovernanceTimelock", [minDelay, [governance], [governance], deployer, recoveryTimelock]);
   const registry = m.contract("PolicyRegistry", [timelock, council]);
+  const hook = m.contract("ComplianceHook", [registry]);
 
   const identityRule = m.contract("IdentityRule", [identityRegistry]);
   const lockupRule = m.contract("LockupRule");
@@ -53,6 +56,7 @@ export default buildModule("Components", (m) => {
     timelock,
     recoveryTimelock,
     registry,
+    hook,
     identityRule,
     lockupRule,
     windowRule,

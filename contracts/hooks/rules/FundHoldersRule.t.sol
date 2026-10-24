@@ -66,11 +66,14 @@ contract FundHoldersRuleUnitTest is Helpers {
     _admit(_to, 0, false, _count, _cap);
   }
 
+  /// @dev The balance an account holds before the movement, which the token puts in `extra`
+  mapping(address _account => uint256 _amount) internal _pre;
+
   function _bal(
     address _account,
     uint256 _amount
   ) internal {
-    vm.mockCall(_token, abi.encodeCall(IERC20.balanceOf, (_account)), abi.encode(_amount));
+    _pre[_account] = _amount;
   }
 
   function _ctx(
@@ -87,9 +90,7 @@ contract FundHoldersRuleUnitTest is Helpers {
       amount: _amount,
       operator: _sender,
       kind: _kind,
-      ref: bytes32(0),
-      deadline: 0,
-      extra: ''
+      extra: abi.encode(_pre[_sender], _pre[_receiver])
     });
   }
 
@@ -355,40 +356,40 @@ contract FundHoldersRuleUnit_After is FundHoldersRuleUnitTest {
   }
 
   function test_WhenAMintGivesTheReceiverItsFirstBalance_ItJoins() external {
-    _bal(_to, 5);
+    _bal(_to, 0);
     _expectJoin(_to, 1);
     _after(_ctx(IPolicyHook.TransferKind.MINT, address(0), _to, 5));
   }
 
   function test_WhenAMintAddsToAnExistingBalance_NothingIsRecorded() external {
-    _bal(_to, 9);
+    _bal(_to, 4);
     _expectJoin(_to, 0);
     _after(_ctx(IPolicyHook.TransferKind.MINT, address(0), _to, 5));
   }
 
   function test_WhenABurnEmptiesTheSender_ItLeaves() external {
-    _bal(_from, 0);
+    _bal(_from, 5);
     _expectLeave(_from, 1);
     _after(_ctx(IPolicyHook.TransferKind.BURN, _from, address(0), 5));
   }
 
   function test_WhenABurnLeavesABalance_NothingIsRecorded() external {
-    _bal(_from, 1);
+    _bal(_from, 6);
     _expectLeave(_from, 0);
     _after(_ctx(IPolicyHook.TransferKind.BURN, _from, address(0), 5));
   }
 
   function test_WhenATransferMovesAWholeBalanceToANewHolder_BothSidesAreRecorded() external {
-    _bal(_to, 5);
-    _bal(_from, 0);
+    _bal(_to, 0);
+    _bal(_from, 5);
     _expectJoin(_to, 1);
     _expectLeave(_from, 1);
     _after(_ctx(IPolicyHook.TransferKind.TRANSFER, _from, _to, 5));
   }
 
   function test_WhenATransferIsBetweenExistingHoldersWhoStayHolders_NothingIsRecorded() external {
-    _bal(_to, 8);
-    _bal(_from, 3);
+    _bal(_to, 3);
+    _bal(_from, 8);
     _expectJoin(_to, 0);
     _expectLeave(_from, 0);
     _after(_ctx(IPolicyHook.TransferKind.TRANSFER, _from, _to, 5));
@@ -410,15 +411,15 @@ contract FundHoldersRuleUnit_After is FundHoldersRuleUnitTest {
   }
 
   function test_WhenTheReceiverIsTheClassItself_TheFundIsStillToldAndIgnoresIt() external {
-    _bal(_token, 5);
-    _bal(_from, 1);
+    _bal(_token, 0);
+    _bal(_from, 6);
     vm.mockCall(_fund, abi.encodeCall(IFund.join, (_token, _token)), '');
     vm.expectCall(_fund, abi.encodeCall(IFund.join, (_token, _token)), 1);
     _after(_ctx(IPolicyHook.TransferKind.TRANSFER, _from, _token, 5));
   }
 
   function test_WhenTheFundRejectsTheToken_TheMovementReverts() external {
-    _bal(_to, 5);
+    _bal(_to, 0);
     vm.mockCallRevert(
       _fund, abi.encodeCall(IFund.join, (_token, _to)), abi.encodeWithSelector(IFund.Fund_NotAClass.selector, _token)
     );
@@ -427,7 +428,8 @@ contract FundHoldersRuleUnit_After is FundHoldersRuleUnitTest {
   }
 }
 
-/// @notice A class token whose `balanceOf` writes. Its `policyHook` does not, so `onlyHook` passes and the balance reads run
+/// @notice A class token whose `balanceOf` writes. Its `policyHook` does not, so `onlyHook` passes; the rule reads the
+///         balances from the context, so `balanceOf` must never be reached
 contract FundHoldersRuleStatefulBalanceToken {
   address public immutable HOOK;
   uint256 public writes;
@@ -499,27 +501,32 @@ contract FundHoldersRuleUnit_TokenAndFundCallsAreStatic is FundHoldersRuleUnitTe
     _writingRule.check(_ctx(IPolicyHook.TransferKind.TRANSFER, _from, _to, 10));
   }
 
-  function test_WhenTheTokenTriesToWriteDuringTheSenderBalanceRead_CheckReverts() external {
+  /// @dev The balances come in the context, so the rule never calls `balanceOf`; a token that writes there is not reached
+  function test_WhenTheTokenWouldWriteOnABalanceRead_CheckNeverReadsIt() external {
     FundHoldersRuleFundWritingOnSender _quiet = new FundHoldersRuleFundWritingOnSender(_from, false);
     FundHoldersRule _quietRule = new FundHoldersRule(IFund(address(_quiet)));
     FundHoldersRuleStatefulBalanceToken _stateful = new FundHoldersRuleStatefulBalanceToken(_hook);
+    _bal(_from, 10);
     IPolicyHook.TransferContext memory _context = _ctx(IPolicyHook.TransferKind.TRANSFER, _from, _to, 10);
     _context.token = address(_stateful);
-    vm.expectRevert(bytes('')); // a write inside a STATICCALL reverts with empty data, bubbled by the rule
-    _quietRule.check(_context);
+    assertEq(_quietRule.check(_context), Reasons.TRANSFER_OK, 'net zero, decided from the context');
+    assertEq(_stateful.writes(), 0);
   }
 
-  function test_WhenTheTokenTriesToWriteDuringTheBalanceReadsInAfter_AfterReverts() external {
-    // The token passes `onlyHook` (its `policyHook` does not write), so the balance read is the call under test.
+  function test_WhenTheTokenWouldWriteOnABalanceRead_AfterNeverReadsIt() external {
+    // The token passes `onlyHook` (its `policyHook` does not write); `balanceOf` is never called.
     FundHoldersRuleStatefulBalanceToken _stateful = new FundHoldersRuleStatefulBalanceToken(_hook);
+    _bal(_to, 0);
     IPolicyHook.TransferContext memory _context = _ctx(IPolicyHook.TransferKind.MINT, address(0), _to, 10);
     _context.token = address(_stateful);
+    vm.mockCall(_fund, abi.encodeCall(IFund.join, (address(_stateful), _to)), '');
+    vm.expectCall(_fund, abi.encodeCall(IFund.join, (address(_stateful), _to)), 1);
     vm.prank(_hook);
-    vm.expectRevert(bytes('')); // a write inside a STATICCALL reverts with empty data, bubbled by the rule
     _rule.after_(_context);
+    assertEq(_stateful.writes(), 0);
   }
 
-  function test_WhenTheTokenTriesToWriteDuringTheBalanceReadsOrHookLookup_AfterReverts() external {
+  function test_WhenTheTokenTriesToWriteDuringTheHookLookup_AfterReverts() external {
     MockStatefulToken _stateful = new MockStatefulToken();
     IPolicyHook.TransferContext memory _context = _ctx(IPolicyHook.TransferKind.MINT, address(0), _to, 1);
     _context.token = address(_stateful);
@@ -600,13 +607,12 @@ contract FundHoldersRuleGate is Helpers {
     vm.mockCall(_realClass, abi.encodeCall(IERC20.totalSupply, ()), abi.encode(0));
     IComplianceRule[] memory _list = new IComplianceRule[](1);
     _list[0] = _rule;
-    vm.mockCall(_realHook, abi.encodeCall(IComplianceHook.rules, ()), abi.encode(_list));
+    vm.mockCall(_realHook, abi.encodeWithSelector(IComplianceHook.rules.selector), abi.encode(_list));
     _fund.registerClass(_realClass);
 
     // A token nobody registered, whose "hook" is the attacker.
     _fake = _mockContract('fake');
     vm.mockCall(_fake, abi.encodeCall(IPolicyGated.policyHook, ()), abi.encode(_attacker));
-    vm.mockCall(_fake, abi.encodeCall(IERC20.balanceOf, (_alice)), abi.encode(7));
   }
 
   function _ctx(
@@ -621,9 +627,7 @@ contract FundHoldersRuleGate is Helpers {
       amount: 7,
       operator: _attacker,
       kind: IPolicyHook.TransferKind.MINT,
-      ref: bytes32(0),
-      deadline: 0,
-      extra: ''
+      extra: abi.encode(uint256(0), uint256(0))
     });
   }
 
@@ -661,7 +665,6 @@ contract FundHoldersRuleGate is Helpers {
   }
 
   function test_WhenTheRealHookReportsAMovementOfTheRealClass_TheFundRecordsIt() external {
-    vm.mockCall(_realClass, abi.encodeCall(IERC20.balanceOf, (_alice)), abi.encode(7));
     vm.prank(_realHook);
     _rule.after_(_ctx(_realClass, _alice));
     assertEq(_fund.holderCount(), 1);

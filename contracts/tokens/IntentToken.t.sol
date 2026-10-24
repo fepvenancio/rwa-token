@@ -58,9 +58,10 @@ contract IntentTokenIntegrationTest is Test {
   }
 
   /**
-   * @dev Production order. Registry → implementation → rules → attest rules → hook with its initial rules (bound to the
-   *      predicted proxy) → attest hook and implementation → proxy. Rules are hook-agnostic, so they can be deployed
-   *      first and shared across tokens. The token is live with its policy at deploy; the timelock only governs changes
+   * @dev Production order. Registry → implementation → rules → attest rules → one shared hook → attest hook and
+   *      implementation → proxy, initialised with the hook and its rules. Rules and the hook are token-agnostic, so they
+   *      are deployed and attested once and shared across tokens. The token is live with its policy at deploy; the
+   *      timelock only governs changes
    */
   function _deployStack(
     bool _withRules
@@ -76,7 +77,8 @@ contract IntentTokenIntegrationTest is Test {
     // CREATE2 through ProxyDeployer, as in production: the address does not depend on this contract's nonce.
     ProxyDeployer _proxyDeployer = new ProxyDeployer(address(this));
     address _predictedProxy = _proxyDeployer.predict('GNOTE', address(_impl));
-    _hook = new ComplianceHook(_admin, _registry, _predictedProxy, _withRules ? _one(_identityRule) : _none());
+    _hook = new ComplianceHook(_registry);
+    IComplianceRule[] memory _initialRules = _withRules ? _one(_identityRule) : _none();
 
     vm.startPrank(_attester);
     _registry.attest(address(_hook).codehash, IPolicyRegistry.AttestKind.HOOK, 'ipfs://hook-review');
@@ -89,9 +91,11 @@ contract IntentTokenIntegrationTest is Test {
           'GNOTE',
           address(_impl),
           abi.encodeCall(
-            IntentToken.initialize, ('Gated Note', 'GNOTE', _admin, _guardian, address(_registry), address(_hook))
+            IntentToken.initialize,
+            ('Gated Note', 'GNOTE', _admin, _guardian, address(_registry), address(_hook), _initialRules)
           ),
-          address(_hook)
+          address(_hook),
+          _initialRules
         )
       )
     );
@@ -102,7 +106,7 @@ contract IntentTokenIntegrationTest is Test {
     IComplianceRule[] memory _ruleSet
   ) internal {
     vm.prank(_admin);
-    _hook.setRules(_ruleSet);
+    _hook.setRules(address(_token), _ruleSet);
   }
 
   function _grantRoles() internal {
@@ -168,8 +172,8 @@ contract IntentTokenIntegrationTest is Test {
 
 contract IntentTokenIntegration_Deployment is IntentTokenIntegrationTest {
   function test_WhenDeployed_ThePolicyIsAlreadyInstalled() external view {
-    assertEq(_hook.ruleCount(), 1);
-    assertEq(address(_hook.rules()[0]), address(_identityRule));
+    assertEq(_hook.ruleCount(address(_token)), 1);
+    assertEq(address(_hook.rules(address(_token))[0]), address(_identityRule));
     (bool _ok, bytes32 _reason) = _token.canTransfer(_alice, _eve, 1);
     assertFalse(_ok);
     assertEq(_reason, Reasons.RECEIVER_NOT_VERIFIED);
@@ -184,9 +188,9 @@ contract IntentTokenIntegration_Deployment is IntentTokenIntegrationTest {
     _token.mint(_eve, 1);
   }
 
-  /// @dev Regression: a clone of the attested hook with an attacker as admin was itself attested
-  function test_WhenAHookCloneHasAnotherAdmin_ItIsNotAttested() external {
-    ComplianceHook _clone = new ComplianceHook(makeAddr('attacker'), _registry, address(_token), _none());
+  /// @dev A hook that vets rules against another registry has another codehash, so it is not the attested one
+  function test_WhenAHookNamesAnotherRegistry_ItIsNotAttested() external {
+    ComplianceHook _clone = new ComplianceHook(IPolicyRegistry(makeAddr('otherRegistry')));
     assertFalse(_registry.isAttested(address(_clone), IPolicyRegistry.AttestKind.HOOK));
     vm.expectRevert(
       abi.encodeWithSelector(
@@ -198,7 +202,7 @@ contract IntentTokenIntegration_Deployment is IntentTokenIntegrationTest {
   }
 
   function test_WhenAnIdenticalHookIsInstalled_ItIsAccepted() external {
-    ComplianceHook _twin = new ComplianceHook(_admin, _registry, address(_token), _one(_identityRule));
+    ComplianceHook _twin = new ComplianceHook(_registry);
     vm.prank(_admin);
     _token.setPolicyHook(address(_twin));
     assertEq(_token.policyHook(), address(_twin));

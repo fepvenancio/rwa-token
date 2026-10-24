@@ -9,6 +9,7 @@ import {Math} from '@openzeppelin/contracts/utils/math/Math.sol';
 
 import {Reasons} from 'interfaces/Errors.sol';
 
+import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IERC7540Deposit} from 'interfaces/IERC7540Deposit.sol';
 import {IERC7540Operator} from 'interfaces/IERC7540Operator.sol';
 import {IERC7540Redeem} from 'interfaces/IERC7540Redeem.sol';
@@ -104,12 +105,13 @@ contract Gated7540Vault is
   /// @inheritdoc IGated7540Vault
   function initialize(
     IERC20 _asset,
-    string calldata _name,
-    string calldata _symbol,
+    string memory _name,
+    string memory _symbol,
     address _admin,
     address _guardian,
     address _registry,
     address _hook,
+    IComplianceRule[] memory _initialRules,
     address _custody
   ) external initializer {
     if (_custody == address(0)) revert Gated7540Vault_ZeroAddress();
@@ -119,13 +121,18 @@ contract Gated7540Vault is
     __ERC20Permit_init(_name);
     __AccessControl_init();
     __Pausable_init();
-    __PolicyGatedERC20_init_unchained(_admin, _guardian, _registry, _hook);
+    __PolicyGatedERC20_init_unchained(_admin, _guardian, _registry, _hook, _initialRules);
+    // The call above installs the rules on the hook, which the registry attested and which cannot re-enter
+    // `initialize` (the `initializer` modifier) or use a role: only the admin and the guardian hold one yet. What
+    // follows is the vault's own initial state, which the hook never reads.
+    // slither-disable-start reentrancy-benign,reentrancy-events
     Gated7540Storage storage $ = _getGated7540Storage();
     $.custody = _custody;
     // 10 ** decimals() is one whole share; decimals() is read at runtime, so there is no literal to hoist.
     // aderyn-ignore-next-line(literal-instead-of-constant)
     $.lastPrice = 10 ** decimals();
     emit CustodyChanged(address(0), _custody);
+    // slither-disable-end reentrancy-benign,reentrancy-events
   }
 
   /// @inheritdoc IERC7540Deposit

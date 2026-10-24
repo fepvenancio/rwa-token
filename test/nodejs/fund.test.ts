@@ -188,23 +188,21 @@ describe("fund: investors counted across classes", async function () {
     const s = await networkHelpers.loadFixture(funded);
     const implementation = s.implementations.token.address;
     const predicted = await s.proxyDeployer.read.predict(["NEWF", implementation]);
-    const hook = await viem.deployContract("ComplianceHook", [
-      s.timelock.address,
-      s.registry.address,
-      predicted,
-      [s.rules.identityRule.address, s.rules.fundHoldersRule.address],
-    ]);
-    const code = await s.publicClient.getCode({ address: hook.address });
-    await s.registry.write.attest([keccak256(code!), ATTEST.HOOK, "ipfs://hook-review"], { account: s.wallets.attester.account });
+    // The shared hook is already attested; the new class only names its rules.
+    const rules = [s.rules.identityRule.address, s.rules.fundHoldersRule.address];
     const initData = encodeFunctionData({
       abi: s.token.abi,
       functionName: "initialize",
-      args: ["New Class", "NEWF", s.timelock.address, s.wallets.guardian.account.address, s.registry.address, hook.address],
+      args: ["New Class", "NEWF", s.timelock.address, s.wallets.guardian.account.address, s.registry.address, s.hook.address, rules],
     });
     const deploy = await schedule(
       s,
       s.proxyDeployer.address,
-      encodeFunctionData({ abi: s.proxyDeployer.abi, functionName: "deploy", args: ["NEWF", implementation, initData, hook.address] }),
+      encodeFunctionData({
+        abi: s.proxyDeployer.abi,
+        functionName: "deploy",
+        args: ["NEWF", implementation, initData, s.hook.address, rules],
+      }),
     );
     await networkHelpers.time.increase(deploy.delay);
     await deploy.execute();
@@ -239,11 +237,11 @@ describe("fund: investors counted across classes", async function () {
     /** The ordered rule list each demo hook should have once `next` replaces the fund rule. */
     const ruleListWith = (s: Stack, key: keyof typeof RULE_ORDER, next: Address) =>
       RULE_ORDER[key].map((name) => (name === "fundHoldersRule" ? next : s.rules[name].address));
-    const setRulesCalls = (s: Stack, next: Address) =>
+    const classes = (s: Stack) =>
       [
-        { hook: s.hooks.token, key: "intent" },
-        { hook: s.hooks.vault4626, key: "fund" },
-        { hook: s.hooks.vault7540, key: "asyncFund" },
+        { token: s.token, key: "intent" },
+        { token: s.vault4626, key: "fund" },
+        { token: s.vault7540, key: "asyncFund" },
       ] as const;
 
     it("one timelock batch swaps the rule in the fund and in every class's hook, and the count survives", async function () {
@@ -258,9 +256,13 @@ describe("fund: investors counted across classes", async function () {
 
       const calls = [
         { target: s.fund.address, data: encodeFunctionData({ abi: s.fund.abi, functionName: "setRule", args: [next.address] }) },
-        ...setRulesCalls(s, next.address).map(({ hook, key }) => ({
-          target: hook.address,
-          data: encodeFunctionData({ abi: hook.abi, functionName: "setRules", args: [ruleListWith(s, key, next.address)] }),
+        ...classes(s).map(({ token, key }) => ({
+          target: s.hook.address,
+          data: encodeFunctionData({
+            abi: s.hook.abi,
+            functionName: "setRules",
+            args: [token.address, ruleListWith(s, key, next.address)],
+          }),
         })),
       ];
       const batch = await scheduleBatch(s, calls);

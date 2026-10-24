@@ -12,6 +12,7 @@ import {Test} from 'forge-std/Test.sol';
 
 import {Reasons} from 'interfaces/Errors.sol';
 
+import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IGated4626Vault} from 'interfaces/IGated4626Vault.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
@@ -50,6 +51,7 @@ contract Gated4626VaultUnitTest is Helpers {
     vm.mockCall(
       _registry, abi.encodeCall(IPolicyRegistry.isAttested, (_hook, IPolicyRegistry.AttestKind.HOOK)), abi.encode(true)
     );
+    vm.mockCall(_hook, abi.encodeCall(IComplianceHook.REGISTRY, ()), abi.encode(_registry));
     _hookDecides(Reasons.TRANSFER_OK);
     vm.mockCall(_hook, abi.encodeCall(IPolicyHook.wantsAfter, ()), abi.encode(false));
 
@@ -60,7 +62,16 @@ contract Gated4626VaultUnitTest is Helpers {
           address(_impl),
           abi.encodeCall(
             Gated4626Vault.initialize,
-            (IERC20(address(_asset)), 'Gated Fund', 'gFUND', _admin, _guardian, _registry, _hook)
+            (
+              IERC20(address(_asset)),
+              'Gated Fund',
+              'gFUND',
+              _admin,
+              _guardian,
+              _registry,
+              _hook,
+              new IComplianceRule[](0)
+            )
           )
         )
       )
@@ -110,9 +121,9 @@ contract Gated4626VaultUnitTest is Helpers {
       amount: _amount,
       operator: _operator,
       kind: _kind,
-      ref: bytes32(0),
-      deadline: 0,
-      extra: ''
+      extra: abi.encode(
+        _from == address(0) ? 0 : _vault.balanceOf(_from), _to == address(0) ? 0 : _vault.balanceOf(_to)
+      )
     });
   }
 }
@@ -128,13 +139,13 @@ contract Gated4626VaultUnit_Initialize is Gated4626VaultUnitTest {
 
   function test_WhenCalledTwice_ItReverts() external {
     vm.expectRevert(Initializable.InvalidInitialization.selector);
-    _vault.initialize(IERC20(address(_asset)), 'X', 'X', _admin, _guardian, _registry, _hook);
+    _vault.initialize(IERC20(address(_asset)), 'X', 'X', _admin, _guardian, _registry, _hook, new IComplianceRule[](0));
   }
 
   function test_WhenCalledOnTheImplementation_ItReverts() external {
     Gated4626Vault _impl = new Gated4626Vault();
     vm.expectRevert(Initializable.InvalidInitialization.selector);
-    _impl.initialize(IERC20(address(_asset)), 'X', 'X', _admin, _guardian, _registry, _hook);
+    _impl.initialize(IERC20(address(_asset)), 'X', 'X', _admin, _guardian, _registry, _hook, new IComplianceRule[](0));
   }
 }
 
@@ -379,8 +390,7 @@ contract Gated4626VaultIntegrationTest is Test {
     _rules[2] = _maxHoldersRule;
     // CREATE2 through ProxyDeployer, as in production: the address does not depend on this contract's nonce.
     ProxyDeployer _proxyDeployer = new ProxyDeployer(address(this));
-    address _predictedProxy = _proxyDeployer.predict('gFUND', address(_impl));
-    ComplianceHook _hook = new ComplianceHook(address(this), _registry, _predictedProxy, _rules);
+    ComplianceHook _hook = new ComplianceHook(_registry);
     _registry.attest(address(_hook).codehash, IPolicyRegistry.AttestKind.HOOK, '');
     _registry.attest(address(_impl).codehash, IPolicyRegistry.AttestKind.IMPLEMENTATION, '');
     _vault = Gated4626Vault(
@@ -397,10 +407,12 @@ contract Gated4626VaultIntegrationTest is Test {
               address(this),
               _guardian,
               address(_registry),
-              address(_hook)
+              address(_hook),
+              _rules
             )
           ),
-          address(_hook)
+          address(_hook),
+          _rules
         )
       )
     );

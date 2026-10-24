@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+
 import {IntentSettledUpgradeable} from 'contracts/mixins/IntentSettledUpgradeable.sol';
 
 /**
@@ -25,7 +27,8 @@ contract IntentToken is IntentSettledUpgradeable {
    * @param _admin The timelock. Holds DEFAULT_ADMIN_ROLE and grants every other role
    * @param _guardian The guardian multisig. Can pause and, through the timelock's CANCELLER_ROLE, veto; nothing else
    * @param _registry The policy registry, fixed after initialization
-   * @param _hook The initial policy hook; must be attested as HOOK
+   * @param _hook The initial policy hook; must be attested as HOOK and name the same registry
+   * @param _initialRules The rule set installed on the hook for this token in the same call; empty installs none
    */
   function initialize(
     string calldata _name,
@@ -33,9 +36,10 @@ contract IntentToken is IntentSettledUpgradeable {
     address _admin,
     address _guardian,
     address _registry,
-    address _hook
+    address _hook,
+    IComplianceRule[] calldata _initialRules
   ) external initializer {
-    __PolicyGatedERC20_init(_name, _symbol, _admin, _guardian, _registry, _hook);
+    __PolicyGatedERC20_init(_name, _symbol, _admin, _guardian, _registry, _hook, _initialRules);
     __IntentSettled_init();
   }
 }

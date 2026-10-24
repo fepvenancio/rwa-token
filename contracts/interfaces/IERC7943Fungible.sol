@@ -39,12 +39,16 @@ interface IERC7943Fungible is IERC165 {
    * @notice General revert for an account that may not send
    * @param _account The sender
    */
+  // Declared by the ERC-7943 interface text, whose errors are optional (MAY); the token rejects with `PolicyGated_TransferRejected`.
+  // aderyn-ignore-next-line(unused-error)
   error ERC7943CannotSend(address _account);
 
   /**
    * @notice General revert for an account that may not receive
    * @param _account The receiver
    */
+  // Declared by the ERC-7943 interface text, whose errors are optional (MAY); the token rejects with `PolicyGated_TransferRejected`.
+  // aderyn-ignore-next-line(unused-error)
   error ERC7943CannotReceive(address _account);
 
   /**
@@ -53,6 +57,8 @@ interface IERC7943Fungible is IERC165 {
    * @param _to The receiver
    * @param _amount The amount
    */
+  // Declared by the ERC-7943 interface text, whose errors are optional (MAY); the token rejects with `PolicyGated_TransferRejected`.
+  // aderyn-ignore-next-line(unused-error)
   error ERC7943CannotTransfer(address _from, address _to, uint256 _amount);
 
   /**
@@ -61,6 +67,8 @@ interface IERC7943Fungible is IERC165 {
    * @param _amount The amount requested
    * @param _unfrozen The unfrozen balance, the balance minus the frozen amount, zero when the frozen amount is larger
    */
+  // Thrown by the base's frozen-balance check from S2 of the review items plan; unused until then.
+  // aderyn-ignore-next-line(unused-error)
   error ERC7943InsufficientUnfrozenBalance(address _account, uint256 _amount, uint256 _unfrozen);
 
   /*///////////////////////////////////////////////////////////////

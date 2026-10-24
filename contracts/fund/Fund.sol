@@ -307,7 +307,7 @@ contract Fund is Ownable, ERC165, IFund {
     address _token,
     address _candidate
   ) internal view returns (bool _listed) {
-    IComplianceRule[] memory _list = IComplianceHook(IPolicyGated(_token).policyHook()).rules();
+    IComplianceRule[] memory _list = IComplianceHook(IPolicyGated(_token).policyHook()).rules(_token);
     uint256 _length = _list.length;
     for (uint256 _i; _i < _length; ++_i) {
       if (address(_list[_i]) == _candidate) return true;

@@ -56,9 +56,7 @@ contract IdentityRuleUnitTest is Helpers {
       amount: 1,
       operator: _sender,
       kind: _kind,
-      ref: bytes32(0),
-      deadline: 0,
-      extra: ''
+      extra: abi.encode(uint256(0), uint256(0))
     });
   }
 
@@ -211,5 +209,39 @@ contract IdentityRuleUnit_ForcedMint is IdentityRuleUnitTest {
   function test_WhenAnEnforcementMintGoesToAnUnverifiedAccount_ItIsRejected() external {
     _verified(_to, false);
     assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.FORCED, address(0), _to)), Reasons.RECEIVER_NOT_VERIFIED);
+  }
+}
+
+/// @notice The account-level answers `canSend` and `canReceive` are built from: the same identity decision `check` makes
+///         for a movement, without an amount or a counterparty
+contract IdentityRuleUnit_AccountChecks is IdentityRuleUnitTest {
+  function test_WhenTheAccountIsVerified_BothChecksAccept() external {
+    _verified(_from, true);
+    assertEq(_rule.checkSend(_token, _from), Reasons.TRANSFER_OK);
+    assertEq(_rule.checkReceive(_token, _from), Reasons.TRANSFER_OK);
+  }
+
+  function test_WhenTheAccountIsNotVerified_SendReturnsSenderNotVerified() external {
+    _verified(_from, false);
+    assertEq(_rule.checkSend(_token, _from), Reasons.SENDER_NOT_VERIFIED);
+  }
+
+  function test_WhenTheAccountIsNotVerified_ReceiveReturnsReceiverNotVerified() external {
+    _verified(_from, false);
+    assertEq(_rule.checkReceive(_token, _from), Reasons.RECEIVER_NOT_VERIFIED);
+  }
+
+  /// @dev The account checks agree with `check` for every kind that does not exempt the side
+  function testFuzz_WhenAnAccountIsNotVerified_CheckAgreesWithTheAccountChecks(
+    uint8 _seed,
+    bool _senderVerified,
+    bool _receiverVerified
+  ) external {
+    IPolicyHook.TransferKind _kind = _holderKind(_seed);
+    _verified(_from, _senderVerified);
+    _verified(_to, _receiverVerified);
+    bytes32 _expected = _rule.checkSend(_token, _from);
+    if (_expected == Reasons.TRANSFER_OK) _expected = _rule.checkReceive(_token, _to);
+    assertEq(_rule.check(_ctx(_kind, _from, _to)), _expected);
   }
 }

@@ -57,26 +57,23 @@ contract MaxHoldersRule is BaseRule, IMaxHoldersRule {
 
   /**
    * @inheritdoc IComplianceRule
-   * @dev Uses post-transfer balances. Checked arithmetic: with a wrong count, an exit below zero reverts
+   * @dev Reads the balances before the move from `_ctx.extra` and derives the ones after from `amount`. Checked
+   *      arithmetic: with a wrong count, an exit below zero reverts
    */
   function after_(
     IPolicyHook.TransferContext calldata _ctx
   ) external override(BaseRule, IComplianceRule) onlyHook(_ctx) {
     if (_ctx.amount == 0 || _ctx.from == _ctx.to) return;
-    IERC20 _token = IERC20(_ctx.token);
+    (uint256 _fromBalance, uint256 _toBalance) = abi.decode(_ctx.extra, (uint256, uint256));
     uint256 _count = _counts[_ctx.token];
     uint256 _newCount = _count;
-    // Exact equalities are the holder definition (post-move balance == amount <=> was 0). They are read inside the
-    // token's guarded _update, where only the token moves balances.
+    // Exact equalities are the holder definition: the receiver was not a holder if its balance before the move was 0,
+    // and the sender leaves if the move takes its whole balance (balance after == 0).
     // slither-disable-start incorrect-equality
-    // View interface: compiled to STATICCALL, so the token cannot change any state (test: *_TokenCallsAreStatic).
-    // aderyn-ignore-next-line(reentrancy-state-change)
-    if (_ctx.to != address(0) && !_exempts[_ctx.token][_ctx.to] && _token.balanceOf(_ctx.to) == _ctx.amount) {
+    if (_ctx.to != address(0) && !_exempts[_ctx.token][_ctx.to] && _toBalance == 0) {
       _newCount += 1;
     }
-    // View interface: compiled to STATICCALL, as above.
-    // aderyn-ignore-next-line(reentrancy-state-change)
-    if (_ctx.from != address(0) && !_exempts[_ctx.token][_ctx.from] && _token.balanceOf(_ctx.from) == 0) {
+    if (_ctx.from != address(0) && !_exempts[_ctx.token][_ctx.from] && _fromBalance == _ctx.amount) {
       _newCount -= 1;
     }
     // slither-disable-end incorrect-equality
@@ -178,7 +175,7 @@ contract MaxHoldersRule is BaseRule, IMaxHoldersRule {
 
   /**
    * @inheritdoc IComplianceRule
-   * @dev Uses pre-transfer balances
+   * @dev Uses the balances before the move, from `_ctx.extra`
    */
   function check(
     IPolicyHook.TransferContext calldata _ctx
@@ -186,16 +183,15 @@ contract MaxHoldersRule is BaseRule, IMaxHoldersRule {
     if (_ctx.amount == 0 || _ctx.from == _ctx.to || _ctx.to == address(0)) return Reasons.TRANSFER_OK;
     // An exempt receiver never adds a holder (e.g. an empty escrow vault at a full cap).
     if (_exempts[_ctx.token][_ctx.to]) return Reasons.TRANSFER_OK;
-    IERC20 _token = IERC20(_ctx.token);
+    (uint256 _fromBalance, uint256 _toBalance) = abi.decode(_ctx.extra, (uint256, uint256));
     // An existing holder never adds to the count, so a lowered cap never blocks it.
-    if (_token.balanceOf(_ctx.to) > 0) return Reasons.TRANSFER_OK;
+    if (_toBalance > 0) return Reasons.TRANSFER_OK;
     // FORCED is exempt from the cap (it is still counted in after_).
     if (_ctx.kind == IPolicyHook.TransferKind.FORCED) return Reasons.TRANSFER_OK;
     // An exempt sender was never counted, so emptying it frees no slot. The exact equality is the definition of
     // "sender leaves" (balance == amount); see after_.
     // slither-disable-start incorrect-equality
-    bool _senderLeaves =
-      _ctx.from != address(0) && !_exempts[_ctx.token][_ctx.from] && _token.balanceOf(_ctx.from) == _ctx.amount;
+    bool _senderLeaves = _ctx.from != address(0) && !_exempts[_ctx.token][_ctx.from] && _fromBalance == _ctx.amount;
     // slither-disable-end incorrect-equality
     uint256 _cap = _caps[_ctx.token];
     if (_cap == 0 || _counts[_ctx.token] + (_senderLeaves ? 0 : 1) > _cap) return Reasons.MAX_HOLDERS;
@@ -257,7 +253,7 @@ contract MaxHoldersRule is BaseRule, IMaxHoldersRule {
 
   /**
    * @notice Whether a rule is in the rule list of the token's current hook
-   * @dev Reverts if the hook has no `rules()`
+   * @dev Reverts if the hook has no `rules(token)`
    * @param _token The token
    * @param _rule The rule
    * @return _listed True if listed
@@ -266,7 +262,7 @@ contract MaxHoldersRule is BaseRule, IMaxHoldersRule {
     address _token,
     address _rule
   ) internal view returns (bool _listed) {
-    IComplianceRule[] memory _rules = IComplianceHook(IPolicyGated(_token).policyHook()).rules();
+    IComplianceRule[] memory _rules = IComplianceHook(IPolicyGated(_token).policyHook()).rules(_token);
     uint256 _length = _rules.length;
     for (uint256 _i; _i < _length; ++_i) {
       if (address(_rules[_i]) == _rule) return true;

@@ -83,7 +83,7 @@ contract FundUnitTest is Helpers {
   ) internal {
     IComplianceRule[] memory _list = new IComplianceRule[](1);
     _list[0] = IComplianceRule(_listed);
-    vm.mockCall(_hook, abi.encodeCall(IComplianceHook.rules, ()), abi.encode(_list));
+    vm.mockCall(_hook, abi.encodeWithSelector(IComplianceHook.rules.selector), abi.encode(_list));
   }
 
   /// @dev Sets the rule once, then registers a new class
@@ -361,7 +361,9 @@ contract FundUnit_RegisterClass is FundUnitTest {
     _list[0] = IComplianceRule(makeAddr('first'));
     _list[1] = IComplianceRule(_rule);
     _list[2] = IComplianceRule(makeAddr('last'));
-    vm.mockCall(IPolicyGated(_token).policyHook(), abi.encodeCall(IComplianceHook.rules, ()), abi.encode(_list));
+    vm.mockCall(
+      IPolicyGated(_token).policyHook(), abi.encodeWithSelector(IComplianceHook.rules.selector), abi.encode(_list)
+    );
     vm.prank(_owner);
     _fund.registerClass(_token);
     assertEq(_fund.classIndexOf(_token), 1);
@@ -762,7 +764,7 @@ contract FundStatefulClass {
   }
 }
 
-/// @notice A hook stub whose `rules()` lists one rule and writes when asked to
+/// @notice A hook stub whose `rules(token)` lists one rule and writes when asked to
 contract FundStatefulHook {
   address public immutable RULE;
   bool public immutable WRITES;
@@ -776,7 +778,9 @@ contract FundStatefulHook {
     WRITES = _writes;
   }
 
-  function rules() external returns (IComplianceRule[] memory _list) {
+  function rules(
+    address
+  ) external returns (IComplianceRule[] memory _list) {
     if (WRITES) ++writes;
     _list = new IComplianceRule[](1);
     _list[0] = IComplianceRule(RULE);

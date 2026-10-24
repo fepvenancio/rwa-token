@@ -20,16 +20,15 @@ import {
 import Activate from "../../ignition/modules/Activate.js";
 import Components from "../../ignition/modules/Components.js";
 import { ROLES, RULE_ORDER } from "../../ignition/modules/roles.js";
-import Tokens from "../../ignition/modules/Tokens.js";
 
 /**
  * Runs the production deployment: the three Ignition modules, which are where deployment order lives (Phase 6 Q2),
  * with this file playing the parties Ignition cannot sign for:
  *
- *   Components → council attests rules + implementations → Tokens → council attests hooks → Activate
+ *   Components → council attests rules, the hook and implementations → Activate
  *   → identity provider verifies holders and the 7540 escrow vault → hand-over check.
  *
- * Each stage gets the previous stages' addresses as parameters, as a live deployment does between council steps
+ * Each stage gets the previous stage's addresses as parameters, as a live deployment does between council steps
  * (Ignition is also ephemeral per `deploy` call on the in-process network, so stages cannot share a journal here).
  */
 
@@ -78,8 +77,8 @@ export async function deployStack(connection: NetworkConnection) {
 }
 
 /**
- * Stages 1–2 and both council steps. Returns `Activate`'s parameters and a function that runs stage 3 with them and
- * finishes the deployment, so a test can run stage 3 on tampered parameters and inspect what was left behind.
+ * Stage 1 and the council step. Returns `Activate`'s parameters and a function that runs stage 2 with them and
+ * finishes the deployment, so a test can run stage 2 on tampered parameters and inspect what was left behind.
  */
 export async function deployUntilActivate(connection: NetworkConnection) {
   const { viem, networkHelpers, ignition } = connection;
@@ -125,6 +124,7 @@ export async function deployUntilActivate(connection: NetworkConnection) {
     timelock,
     recoveryTimelock,
     registry,
+    hook,
     identityRule,
     lockupRule,
     windowRule,
@@ -134,25 +134,26 @@ export async function deployUntilActivate(connection: NetworkConnection) {
     proxyDeployer,
     executor,
     dvpExecutor,
-  } =
-    components;
+  } = components;
   const attest = async (target: Address, kind: number, uri: string) => {
     const code = await publicClient.getCode({ address: target });
     await registry.write.attest([keccak256(code!), kind, uri], { account: attester.account });
   };
 
-  // Council step 1.
+  // Council step: the rules, the one shared hook and the implementations.
   for (const rule of [identityRule, lockupRule, windowRule, maxHoldersRule, fundHoldersRule]) {
     await attest(rule.address, ATTEST.RULE, `ipfs://rule-review/${rule.address}`);
   }
+  await attest(hook.address, ATTEST.HOOK, `ipfs://hook-review/${hook.address}`);
   for (const impl of [components.intentImpl, components.fundImpl, components.asyncFundImpl]) {
     await attest(impl.address, ATTEST.IMPLEMENTATION, `ipfs://impl-review/${impl.address}`);
   }
 
-  const addresses = {
+  const parameters = {
     timelock: timelock.address,
     registry: registry.address,
     proxyDeployer: proxyDeployer.address,
+    hook: hook.address,
     identityRule: identityRule.address,
     lockupRule: lockupRule.address,
     windowRule: windowRule.address,
@@ -161,16 +162,6 @@ export async function deployUntilActivate(connection: NetworkConnection) {
     intentImpl: components.intentImpl.address,
     fundImpl: components.fundImpl.address,
     asyncFundImpl: components.asyncFundImpl.address,
-  };
-  const hooks = await ignition.deploy(Tokens, { parameters: { Tokens: addresses } });
-
-  // Council step 2.
-  for (const hook of Object.values(hooks)) {
-    await attest(hook.address, ATTEST.HOOK, `ipfs://hook-review/${hook.address}`);
-  }
-
-  const parameters = {
-    ...addresses,
     executor: executor.address,
     dvpExecutor: dvpExecutor.address,
     guardian: address(guardian),
@@ -178,9 +169,6 @@ export async function deployUntilActivate(connection: NetworkConnection) {
     recoveryTimelock: recoveryTimelock.address,
     asset: asset.address,
     custody: address(custody),
-    intentHook: hooks.intentHook.address,
-    fundHook: hooks.fundHook.address,
-    asyncFundHook: hooks.asyncFundHook.address,
     minter: address(minter),
     burner: address(burner),
     agent: address(agent),
@@ -221,7 +209,7 @@ export async function deployUntilActivate(connection: NetworkConnection) {
       vault7540,
       executor,
       dvpExecutor,
-      hooks: { token: hooks.intentHook, vault4626: hooks.fundHook, vault7540: hooks.asyncFundHook },
+      hook,
       implementations: {
         token: components.intentImpl,
         vault4626: components.fundImpl,
@@ -231,7 +219,7 @@ export async function deployUntilActivate(connection: NetworkConnection) {
     await assertHandedOver(stack);
     return stack;
   };
-  return { activate, parameters, components, hooks, wallets: { deployer, agent, operator, governance, guardian } };
+  return { activate, parameters, components, wallets: { deployer, agent, operator, governance, guardian } };
 }
 
 export type Stack = Awaited<ReturnType<typeof deployStack>>;
@@ -243,8 +231,8 @@ export type Stack = Awaited<ReturnType<typeof deployStack>>;
  * - the DvP executor's operator is the stack's operator and its guardian the stack's guardian, and EXECUTOR_ROLE on the
  *   intent token is held by the intent executor and the DvP executor and by no account the stack knows about;
  * - UPGRADER_ROLE is held by the timelock and nobody else that the stack knows about;
- * - every token runs the hook the council reviewed, bound to it, administered by the timelock, with the intended
- *   ordered rule list (`RULE_ORDER`); rules have no access control of their own;
+ * - every token runs the one shared hook the council reviewed, which names the stack's registry and holds the intended
+ *   ordered rule list for that token (`RULE_ORDER`); rules have no access control of their own;
  * - the guardian can cancel timelock operations but cannot propose or execute them;
  * - `ProxyDeployer` is owned by the timelock, so no token can be placed outside governance;
  * - the fund is owned by the timelock, runs the attested rule that points back at it, has the intended cap, and holds
@@ -324,21 +312,20 @@ export async function assertHandedOver(s: Omit<Stack, "holders" | "identity" | "
     assert.equal(await t.read.hasRole([ROLES.UPGRADER, timelock]), true, `timelock lacks UPGRADER_ROLE on ${t.address}`);
     for (const account of known) assert.equal(await t.read.hasRole([ROLES.UPGRADER, account]), false, `${account} can upgrade`);
   }
-  // `s.hooks` are the hooks the council reviewed (stage 2). A twin with the same immutables shares their attested
-  // codehash whatever its rules, so check the token runs that exact hook and that its rule list is the intended one.
+  // `s.hook` is the hook the council reviewed. A second instance on the same registry shares its attested codehash, so
+  // check each token runs that exact instance and that the token's rule list on it is the intended one.
+  assert.ok(isAddressEqual(await s.hook.read.REGISTRY(), s.registry.address), `hook ${s.hook.address} names another registry`);
   const bound = [
-    [s.hooks.token, s.token, RULE_ORDER.intent],
-    [s.hooks.vault4626, s.vault4626, RULE_ORDER.fund],
-    [s.hooks.vault7540, s.vault7540, RULE_ORDER.asyncFund],
+    [s.token, RULE_ORDER.intent],
+    [s.vault4626, RULE_ORDER.fund],
+    [s.vault7540, RULE_ORDER.asyncFund],
   ] as const;
-  for (const [hook, t, order] of bound) {
-    assert.ok(isAddressEqual(await hook.read.TOKEN(), t.address), `hook ${hook.address} bound elsewhere`);
-    assert.ok(isAddressEqual(await t.read.policyHook(), hook.address), `token ${t.address} runs another hook`);
-    assert.ok(isAddressEqual(await hook.read.ADMIN(), timelock), `hook ${hook.address} admin`);
+  for (const [t, order] of bound) {
+    assert.ok(isAddressEqual(await t.read.policyHook(), s.hook.address), `token ${t.address} runs another hook`);
     const expected = order.map((name) => s.rules[name].address);
-    const actual = await hook.read.rules();
-    assert.equal(actual.length, expected.length, `hook ${hook.address} rule count`);
-    actual.forEach((rule, i) => assert.ok(isAddressEqual(rule, expected[i]), `hook ${hook.address} rule ${i}`));
+    const actual = await s.hook.read.rules([t.address]);
+    assert.equal(actual.length, expected.length, `token ${t.address} rule count`);
+    actual.forEach((rule, i) => assert.ok(isAddressEqual(rule, expected[i]), `token ${t.address} rule ${i}`));
   }
   for (const rule of Object.values(s.rules)) {
     const names = (rule.abi as Abi).flatMap((item) => (item.type === "function" ? [item.name] : []));
@@ -566,9 +553,10 @@ export async function sign3009Trade(
 }
 
 /**
- * A gated cash token for tests: an `IntentToken` behind a fresh `ProxyDeployer`, with the stack's identity rule as its
- * only rule, administered by the deployer (a live deployment would use the timelock), with the DvP executor holding
- * EXECUTOR_ROLE. The council attests its hook and implementation as it would for any token.
+ * A gated cash token for tests: an `IntentToken` behind a fresh `ProxyDeployer`, on the stack's shared hook with the
+ * stack's identity rule as its only rule, administered by the deployer (a live deployment would use the timelock), with
+ * the DvP executor holding EXECUTOR_ROLE. The council attests its implementation as it would for any token; the hook
+ * is the one already attested.
  */
 export async function deployGatedCashToken(connection: NetworkConnection, s: Stack) {
   const { viem } = connection;
@@ -582,14 +570,13 @@ export async function deployGatedCashToken(connection: NetworkConnection, s: Sta
   const proxyDeployer = await viem.deployContract("ProxyDeployer", [deployer]);
   const symbol = "gUSD";
   const predicted = await proxyDeployer.read.predict([symbol, implementation.address]);
-  const hook = await viem.deployContract("ComplianceHook", [s.timelock.address, s.registry.address, predicted, [s.rules.identityRule.address]]);
-  await attest(hook.address, ATTEST.HOOK);
+  const rules = [s.rules.identityRule.address];
   const data = encodeFunctionData({
     abi: implementation.abi,
     functionName: "initialize",
-    args: ["Gated USD", symbol, deployer, s.wallets.guardian.account.address, s.registry.address, hook.address],
+    args: ["Gated USD", symbol, deployer, s.wallets.guardian.account.address, s.registry.address, s.hook.address, rules],
   });
-  await proxyDeployer.write.deploy([symbol, implementation.address, data, hook.address]);
+  await proxyDeployer.write.deploy([symbol, implementation.address, data, s.hook.address, rules]);
   const token = await viem.getContractAt("IntentToken", predicted);
   await token.write.grantRole([ROLES.EXECUTOR, s.dvpExecutor.address]);
   await token.write.grantRole([ROLES.MINTER, s.wallets.minter.account.address]);

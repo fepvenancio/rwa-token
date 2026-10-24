@@ -1974,6 +1974,40 @@ Tests first: the pins were added before the files and the run failed to compile 
 
 "Re-freeze" then means: the specification here is frozen for S1 to S5, and the new interface files are frozen by their pins. Each existing interface changes in one commit together with the code that implements it and its new pin.
 
+### S1 as built (2026-10-24, working tree, not committed)
+
+One shared `ComplianceHook` and the balances in the context. What changed:
+
+- **Hook.** `ComplianceHook(registry)` is the only constructor argument. State is per token: a mapping to a struct holding the rules by position and one word with the rule count and the after mask. `setRules(token, rules)` is allowed to the token itself or to whoever holds `DEFAULT_ADMIN_ROLE` on it, asked live (a token with no code is refused); `afterTransfer` requires `msg.sender == ctx.token`; `wantsAfter()` answers for `msg.sender`; `rules(token)`, `ruleCount(token)`, `checkSend` and `checkReceive` (first rejection wins, `NO_RULES` for a token with none). `RuleSetChanged(token, ruleIds)`.
+- **Token.** The initialisers of `IntentToken` and both vaults take `initialRules`. The base's init installs the hook, then calls `setRules(address(this), initialRules)` on it (skipped for an empty list). `_setHook` also requires `hook.REGISTRY()` to equal the token's registry (`PolicyGated_HookRegistryMismatch`).
+- **Context.** `TransferContext` is `{token, from, to, id, amount, operator, kind, extra}`. `extra` is `abi.encode(fromBalance, toBalance)` before the move for every kind, with `bytes32 ref, uint256 deadline` appended for EXECUTED. It is built in `_context`, which the write and every pre-flight share, so parity holds by construction. `afterTransfer` gets the same context.
+- **Rules.** `IPolicyHook` and `IComplianceRule` gained `checkSend` and `checkReceive` (`BaseRule` returns `TRANSFER_OK`; `IdentityRule` answers them from the registry). `MaxHoldersRule` and `FundHoldersRule` read the balances from `extra` and make no call into the token except the `policyHook` lookup in `onlyHook`. `Fund._hookListsRule` and `MaxHoldersRule._isListed` read `rules(token)`.
+- **Deployer.** `ProxyDeployer.deploy(symbol, implementation, initData, hook, expectedRules)` no longer checks a binding; it checks that the token installed `hook` and that `hook.rules(proxy)` equals `expectedRules`, in order (`ProxyDeployer_RulesMismatch`).
+- **Deployment.** The `Tokens` stage is gone. `Components` deploys the hook; the council attests rules, hook and implementations in one step; `Activate` takes `hook` and the five rule addresses, passes each token its `RULE_ORDER` list in the init data, and the hand-over check pins `hook.rules(token)` to `RULE_ORDER`. Consequence for the owner to weigh: there is no longer a council read of each token's rule list between the deploy of the hook and the token coming up, because the list is installed when the token is initialised. What stops a wrong list is the attestation of every rule, `ProxyDeployer`'s equality check and the post-deploy check, all before any role is granted.
+- **Pins.** `InterfaceFreeze.t.sol` re-pinned, ids computed with `cast sig` from the compiled interfaces: `IPolicyHook` `0x4f7b9fbb` (was `0xb7723023`), `IComplianceRule` `0x837a7ec1` (was `0x93d5c2be`), `IComplianceHook` `0xa8f3d563` (was `0x2604e338`), `IProxyDeployer` `0xcedb15bb` (was `0x886d8cd8`), `IGated4626Vault` `0x6208cbc1` (was `0xb008690c`), `IGated7540Vault` `0x8f0b8793` (was `0x75f5b0db`); `RuleSetChanged` topic `0x052ffefc...d820`.
+
+Two statements of the plan that the build did not bear out. The two transient slots do not go: `executeTransfer` has to hand the kind, the reference and the deadline to `_update`, which OpenZeppelin fixes at three arguments, so they still travel through transient storage; what changed is that the reference and the deadline land in `extra` instead of in struct fields. And the vault initialisers take the rules, and for the 7540 vault the name and symbol, as `memory`, because the extra calldata array put them over the stack limit.
+
+Tests first, red run shown: the new `ComplianceHook.t.sol` and the new base tests (`PolicyGatedUnit_Context`, `PolicyGatedUnit_SharedHook`) failed to compile against the old code (wrong argument counts, `setRules(address, ...)`, `checkSend`, the ten-field context, `PolicyGated_HookRegistryMismatch`), then passed. New or rewritten: the hook suite (per-token isolation, the token and admin authorisation, the cap per token, `afterTransfer` for the context token only, `wantsAfter` for the caller, account checks), the context layout for each kind and its parity with the pre-flight, the registry check and the initial rules, `ProxyDeployer`'s rules check, the identity account checks, and the TypeScript deployment tests (a twin hook, an unattested hook, an unattested rule). The tests that mocked `balanceOf` for the counting rules now put the balances before the move in the context, and the two "token tries to write during the balance read" tests became "the rule never reads it".
+
+Gates on the working tree: Solidity runner 737 passing (was 707), Node runner 85 passing, `forge fmt --check`, `solhint --max-warnings 0`, `tsc --noEmit`, `validate:upgrades` (3 of 3), Aderyn 0 findings, Halmos 13 of 13 (the fund suite's hook stub needed `rules(address)`), reproducibility (16 contracts identical, `TokenProxy` matches `ProxyDeployer`), Slither 0 results (it first reported two benign findings in the 7540 initialiser, a reentrancy through the `setRules` call before the vault's own initial state; suppressed inline with the reason, since the hook is attested and `initialize` cannot be re-entered). Aderyn needed inline suppressions: the narrowings in the hook (bounded by `MAX_RULES`), and the errors that S0's interfaces declare before anything throws them. The S0 commit on its own did not pass the Aderyn gate for that reason; these suppressions come off as S2 and S3 use the errors.
+
+Measured, same probe and method as the baseline (transfer of 0.1 token between two holders, every touched account cold, scratch copy):
+
+| Rules installed, in order | Before | After S1 |
+|---|---|---|
+| `IdentityRule` | 36,962 | 35,661 |
+| + `LockupRule` | 43,825 | 42,523 |
+| + `MaxHoldersRule` | 69,198 | 62,977 |
+| + `FundHoldersRule` | 91,082 | 81,804 |
+| identity, lockup, fund (no per-class cap, RD5's set) | n/a | 63,389 |
+
+The four-rule transfer fell 9,278 gas (10%): the balance callbacks that RD2 removes, and one cold storage read fewer from packing the count with the mask. With RD5's set, which S4 puts in the deployment, a transfer costs 63,389, which is 27,693 (30%) below the old four-rule figure. That is above the 57,000 to 59,000 the decision estimated: RD2 saved most of its estimate on `MaxHoldersRule`, which RD5 then removes, so the two overlap. One more class: the shared hook is deployed once (852,213 gas, 4,078 bytes), and a class costs `setRules` for four rules inside its initialiser, 152,941 gas, with no deployment, no attestation and no council review of a new hook; it was 880,631 plus 29,144 and a review.
+
+Sizes (deployed bytes, headroom to 24,576): `IntentToken` 16,287 (8,289), `Gated4626Vault` 16,949 (7,627), `Gated7540Vault` 22,010 (2,566; was 3,030), `ComplianceHook` 4,078. The 7540 vault now has 2,566 bytes for what S2 adds: `MulticallUpgradeable` measured at about 610, plus the ERC-7943 face and `templateId`. That is tight; the `via-ir` fallback of RD8 is a real possibility.
+
+The docs, `README.md`, `SECURITY.md` and `CLAUDE.md` still describe a hook per token and the `Tokens` stage; the plan puts them in S5.
+
 ### Not in this plan
 
 A `JurisdictionRule`, amount-level lockups, an ERC-3643 read adapter, ERC-1066 style reason codes, a recovery address for identity re-keying. The assessment calls them secondary, and none of them changes what the items above build.

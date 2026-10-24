@@ -1,10 +1,12 @@
 import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
 
-import { ROLES, TOKENS } from "./roles.js";
+import { ROLES, RULE_ORDER, TOKENS } from "./roles.js";
 
 /**
- * Stage 3 of 3. Deploys each token through `ProxyDeployer`, which reverts before creating the proxy unless the hook is
- * bound to it, so every later step (configuration, roles, hand-over) runs only for correctly bound tokens. Then:
+ * Stage 2 of 2. Deploys each token through `ProxyDeployer` with the shared hook and the token's rules (`RULE_ORDER`) in
+ * its init data. The token installs the rules on the hook itself, and `ProxyDeployer` reverts unless the hook ends up
+ * holding exactly those rules for it, so every later step (configuration, roles, hand-over) runs only for tokens that
+ * came up as intended. Then:
  *
  * 1. Configure while the deployer is the tokens' admin: settlement window, holder caps, the 7540 escrow exemption.
  *    The fund is configured the same way while the deployer owns it: install its rule, set its cap, then register the
@@ -26,7 +28,15 @@ export default buildModule("Activate", (m) => {
   const timelockAddress = p("timelock");
   const guardian = p("guardian");
   const registry = p("registry");
+  const hook = p("hook");
   const asset = p("asset");
+  const rules = {
+    identityRule: p("identityRule"),
+    lockupRule: p("lockupRule"),
+    windowRule: p("windowRule"),
+    maxHoldersRule: p("maxHoldersRule"),
+    fundHoldersRule: p("fundHoldersRule"),
+  };
 
   const timelock = m.contractAt("GovernanceTimelock", timelockAddress);
   const recoveryTimelock = m.contractAt("TimelockController", p("recoveryTimelock"), { id: "recoveryTimelock" });
@@ -39,39 +49,47 @@ export default buildModule("Activate", (m) => {
   const fundContract = m.contractAt("Fund", p("fundContract"));
   const fundCap = m.getParameter<bigint>("fundHolderCap");
 
-  // Every token deploy; all configuration and roles wait for all of them, so one mis-bound hook grants nothing anywhere.
+  // Every token deploy; all configuration and roles wait for all of them, so one token that fails its checks grants
+  // nothing anywhere.
   const deploys: ReturnType<typeof m.call>[] = [];
 
-  /** Deploys one token; `initArgs` must carry the symbol and hook that `ProxyDeployer` checks. */
+  /** Deploys one token; `initArgs` must carry the symbol, the hook and the rules that `ProxyDeployer` checks. */
   const deployToken = <Name extends "IntentToken" | "Gated4626Vault" | "Gated7540Vault">(
     key: keyof typeof TOKENS,
     name: Name,
-    initArgs: (symbol: ReturnType<typeof p>, hook: ReturnType<typeof p>) => Parameters<typeof m.encodeFunctionCall>[2],
+    initArgs: (
+      symbol: ReturnType<typeof p>,
+      ruleList: ReturnType<typeof p>[],
+    ) => Parameters<typeof m.encodeFunctionCall>[2],
   ) => {
     const symbol = m.getParameter<string>(`${key}Symbol`, TOKENS[key].symbol);
-    const hook = p(`${key}Hook`);
+    const ruleList = RULE_ORDER[key].map((rule) => rules[rule]);
     const implementation = m.contractAt(name, p(`${key}Impl`), { id: `${key}_impl` });
-    const data = m.encodeFunctionCall(implementation, "initialize", initArgs(symbol, hook), { id: `${key}_init` });
-    const deployed = m.call(proxyDeployer, "deploy", [symbol, implementation, data, hook], { id: `${key}_deploy` });
+    const data = m.encodeFunctionCall(implementation, "initialize", initArgs(symbol, ruleList), { id: `${key}_init` });
+    const deployed = m.call(proxyDeployer, "deploy", [symbol, implementation, data, hook, ruleList], {
+      id: `${key}_deploy`,
+    });
     deploys.push(deployed);
     const proxy = m.readEventArgument(deployed, "ProxyDeployed", "_proxy", { id: `${key}_proxy` });
     return m.contractAt(name, proxy, { id: `${key}_token` });
   };
 
-  const base = (key: keyof typeof TOKENS, symbol: ReturnType<typeof p>, hook: ReturnType<typeof p>) => [
+  const base = (key: keyof typeof TOKENS, symbol: ReturnType<typeof p>, ruleList: ReturnType<typeof p>[]) => [
     m.getParameter<string>(`${key}Name`, TOKENS[key].name),
     symbol,
     deployer,
     guardian,
     registry,
     hook,
+    ruleList,
   ];
 
-  const intent = deployToken("intent", "IntentToken", (symbol, hook) => base("intent", symbol, hook));
-  const fund = deployToken("fund", "Gated4626Vault", (symbol, hook) => [asset, ...base("fund", symbol, hook)]);
-  const asyncFund = deployToken("asyncFund", "Gated7540Vault", (symbol, hook) => [
+  const intent = deployToken("intent", "IntentToken", (symbol, ruleList) => base("intent", symbol, ruleList));
+  const fund = deployToken("fund", "Gated4626Vault", (symbol, ruleList) => [asset, ...base("fund", symbol, ruleList)]);
+  // The 7540 initialiser takes the custody after the rules.
+  const asyncFund = deployToken("asyncFund", "Gated7540Vault", (symbol, ruleList) => [
     asset,
-    ...base("asyncFund", symbol, hook),
+    ...base("asyncFund", symbol, ruleList),
     p("custody"),
   ]);
   const tokens = { intent, fund, asyncFund };

@@ -46,15 +46,21 @@ interface IHolderRestrictionRule is IComplianceRule {
    * @param _token The token
    * @param _caller The unauthorized caller
    */
+  // Thrown by `HolderRestrictionRule`, built in S3 of the review items plan; unused until then.
+  // aderyn-ignore-next-line(unused-error)
   error HolderRestrictionRule_OnlyTokenAgent(address _token, address _caller);
 
   /// @notice Thrown when the holder is the zero address
+  // Thrown by `HolderRestrictionRule`, built in S3 of the review items plan; unused until then.
+  // aderyn-ignore-next-line(unused-error)
   error HolderRestrictionRule_ZeroAddress();
 
   /**
    * @notice Thrown when an unlock time does not fit the 64 bits it is stored in
    * @param _unlockTime The unlock time given
    */
+  // Thrown by `HolderRestrictionRule`, built in S3 of the review items plan; unused until then.
+  // aderyn-ignore-next-line(unused-error)
   error HolderRestrictionRule_UnlockTimeTooLarge(uint256 _unlockTime);
 
   /*///////////////////////////////////////////////////////////////

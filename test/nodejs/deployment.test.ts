@@ -10,7 +10,7 @@ import { deployStack, deployUntilActivate, HOLDER_CAP, REASONS } from "./fixture
 
 const IDVP_EXECUTOR_ID = "0xe68774e8";
 
-describe("deployment (Ignition: Components → council → Tokens → council → Activate)", async function () {
+describe("deployment (Ignition: Components → council → Activate)", async function () {
   const connection = await network.create();
   const { networkHelpers } = connection;
   const stack = () => deployStack(connection);
@@ -76,39 +76,26 @@ describe("deployment with a twin hook passed to Activate", async function () {
   const connection = await network.create();
   const stages = () => deployUntilActivate(connection);
 
-  it("a twin of the reviewed hook (same immutables, weaker rules) installs, and the post-deploy check rejects it", async function () {
+  it("a second hook on the same registry shares the attested codehash, so Activate completes, and the hand-over check refuses it", async function () {
     const { activate, parameters, components } = await connection.networkHelpers.loadFixture(stages);
-    const token = await components.proxyDeployer.read.predict([TOKENS.intent.symbol, components.intentImpl.address]);
-    // Same admin, registry and token as the reviewed hook, so the same codehash, already attested: only max-holders
-    // and the fund rule, which the fund needs in order to register the class.
-    const twin = await connection.viem.deployContract("ComplianceHook", [
-      components.timelock.address,
-      components.registry.address,
-      token,
-      [components.maxHoldersRule.address, components.fundHoldersRule.address],
-    ]);
+    // Its only immutable is the registry, so the council's attestation of the hook covers any instance on that registry.
+    const twin = await connection.viem.deployContract("ComplianceHook", [components.registry.address]);
     assert.equal(await components.registry.read.isAttested([twin.address, 1]), true, "the attestation covers the twin");
-    // ProxyDeployer checks the binding only, so Activate completes; the hand-over check is what refuses it.
-    await assert.rejects(activate({ ...parameters, intentHook: twin.address }), /runs another hook/);
+    // The tokens come up on the twin with the right rules, so ProxyDeployer is satisfied and Activate completes; the
+    // hand-over check is what insists on the instance the council reviewed.
+    await assert.rejects(activate({ ...parameters, hook: twin.address }), /runs another hook/);
   });
 
-  it("a twin without the fund rule never gets registered, so Activate stops before ownership or roles move", async function () {
-    const { activate, parameters, components, wallets } = await connection.networkHelpers.loadFixture(stages);
-    const token = await components.proxyDeployer.read.predict([TOKENS.intent.symbol, components.intentImpl.address]);
-    const twin = await connection.viem.deployContract("ComplianceHook", [
-      components.timelock.address,
-      components.registry.address,
-      token,
-      [components.maxHoldersRule.address],
-    ]);
-    await assert.rejects(activate({ ...parameters, intentHook: twin.address }), /Fund_RuleNotListed/);
-
-    // The fund stays with the deployer, empty, and no operational role was granted on the unregistered class.
-    assert.ok(isAddressEqual(await components.fundContract.read.owner(), wallets.deployer.account.address));
-    assert.equal(await components.fundContract.read.classCount(), 0n);
-    const intent = await connection.viem.getContractAt("IntentToken", token);
-    assert.equal(await intent.read.hasRole([ROLES.AGENT, wallets.agent.account.address]), false);
-    assert.equal(await intent.read.hasRole([ROLES.DEFAULT_ADMIN, components.timelock.address]), false);
+  it("a hook on another registry is not the attested one, and the token refuses it before anything is created", async function () {
+    const { activate, parameters, components } = await connection.networkHelpers.loadFixture(stages);
+    const other = await connection.viem.deployContract("ComplianceHook", [components.timelock.address]);
+    assert.equal(await components.registry.read.isAttested([other.address, 1]), false, "another registry, another codehash");
+    // The token's initialiser reverts with `PolicyGated_NotAttested(address,uint8)`, which bubbles up through
+    // `ProxyDeployer`, whose ABI does not name it: Ignition reports the selector.
+    await assert.rejects(activate({ ...parameters, hook: other.address }), /signature 0x78193cdc/);
+    const predicted = await components.proxyDeployer.read.predict([TOKENS.intent.symbol, components.intentImpl.address]);
+    const client = await connection.viem.getPublicClient();
+    assert.equal(await client.getCode({ address: predicted }), undefined, "no proxy was created");
   });
 });
 
@@ -123,12 +110,14 @@ describe("deployment with a tampered Activate", async function () {
     await assert.rejects(activate({ ...parameters, dvpExecutor: parameters.executor }), /deployer holds roles on/);
   });
 
-  it("a hook bound to another token stops Activate before any role is granted", async function () {
+  it("a rule the council did not attest stops Activate before any role is granted", async function () {
     const { activate, parameters, components, wallets } = await connection.networkHelpers.loadFixture(stages);
     const client = await connection.viem.getPublicClient();
-    // Swap two hooks: each is attested, but bound to the other token's address.
-    const tampered = { ...parameters, intentHook: parameters.fundHook, fundHook: parameters.intentHook };
-    await assert.rejects(activate(tampered), /ProxyDeployer_HookTokenMismatch/);
+    // The lockup rule's place in every token's rule list names a contract nobody attested as a rule.
+    const tampered = { ...parameters, lockupRule: parameters.asset };
+    // `ComplianceHook_NotAttested(address)` from the hook, through the token's initialiser and `ProxyDeployer`: Ignition
+    // reports the selector.
+    await assert.rejects(activate(tampered), /signature 0xebefa01e/);
 
     const pd = components.proxyDeployer;
     for (const [key, impl] of [
@@ -139,7 +128,7 @@ describe("deployment with a tampered Activate", async function () {
       assert.equal(await client.getCode({ address: predicted }), undefined, `${key}: no proxy was created`);
       assert.equal(await pd.read.saltUsed([keccak256(toHex(TOKENS[key].symbol))]), false);
     }
-    // The untampered token may be deployed in the same batch, but nothing after the deploy batch runs.
+    // The other token may be deployed in the same batch, but nothing after the deploy batch runs.
     const asyncFund = await pd.read.predict([TOKENS.asyncFund.symbol, components.asyncFundImpl.address]);
     if ((await client.getCode({ address: asyncFund })) !== undefined) {
       const vault = await connection.viem.getContractAt("Gated7540Vault", asyncFund);

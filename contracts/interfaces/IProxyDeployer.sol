@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+
 /**
  * @title IProxyDeployer
- * @notice Deployment-only helper that places each token proxy at an address fixed before its hook exists. The hook
- *         binds to that address in an immutable, so the council can compute the token address and attest the hook
- *         for exactly that token
+ * @notice Deployment-only helper that places each token proxy at an address the council can compute from the symbol and
+ *         the implementation alone, and checks that the token came up with the shared hook and exactly the reviewed
+ *         rule set
  * @dev CREATE2 with salt `keccak256(bytes(symbol))` over `TokenProxy(implementation, "")`: the address depends on
- *      this contract, the symbol and the implementation, never on the init data, which carries the hook. The proxy is
- *      initialised in the same transaction, so no one can initialise it first. Holds no roles and no funds. Ownership
- *      (OZ `Ownable`) gates `deploy`; after deployment it belongs to the timelock
+ *      this contract, the symbol and the implementation, never on the init data, which carries the hook and the initial
+ *      rules. The proxy is initialised in the same transaction, so no one can initialise it first. Holds no roles and no
+ *      funds. Ownership (OZ `Ownable`) gates `deploy`; after deployment it belongs to the timelock
  */
 interface IProxyDeployer {
   /*///////////////////////////////////////////////////////////////
@@ -21,7 +23,7 @@ interface IProxyDeployer {
    * @param _salt The CREATE2 salt, `keccak256(bytes(symbol))`
    * @param _proxy The token proxy
    * @param _implementation The implementation behind the proxy
-   * @param _hook The policy hook the token was initialised with, bound to `_proxy`
+   * @param _hook The shared policy hook the token was initialised with
    */
   event ProxyDeployed(bytes32 indexed _salt, address indexed _proxy, address indexed _implementation, address _hook);
 
@@ -30,12 +32,11 @@ interface IProxyDeployer {
   //////////////////////////////////////////////////////////////*/
 
   /**
-   * @notice Thrown when the hook is bound to another token than the proxy about to be deployed
+   * @notice Thrown when the hook does not hold exactly the expected rules for the new token after initialisation
    * @param _hook The hook
-   * @param _hookToken The token the hook is bound to
-   * @param _proxy The address the proxy will occupy
+   * @param _proxy The token proxy
    */
-  error ProxyDeployer_HookTokenMismatch(address _hook, address _hookToken, address _proxy);
+  error ProxyDeployer_RulesMismatch(address _hook, address _proxy);
 
   /**
    * @notice Thrown when the init data installed another hook than the one checked
@@ -63,19 +64,21 @@ interface IProxyDeployer {
 
   /**
    * @notice Deploys and initialises a token proxy at `predict(_symbol, _implementation)`
-   * @dev Only the owner, once per symbol; a reverted deploy leaves the symbol unused. Reverts before creating anything unless `_hook` is bound to the predicted
-   *      address, and after initialising unless the token installed `_hook` and reports `_symbol`
+   * @dev Only the owner, once per symbol; a reverted deploy leaves the symbol unused. Reverts after initialising unless
+   *      the token installed `_hook`, reports `_symbol`, and the hook holds exactly `_expectedRules` for it, in order
    * @param _symbol The token symbol; its hash is the salt
    * @param _implementation The attested implementation
-   * @param _initData The `initialize` call, which must pass `_hook` and `_symbol`
-   * @param _hook The attested hook, bound to the predicted address
+   * @param _initData The `initialize` call, which must pass `_hook`, `_symbol` and the initial rules
+   * @param _hook The attested shared hook
+   * @param _expectedRules The rules the token must have on the hook after initialisation
    * @return _proxy The token proxy
    */
   function deploy(
     string calldata _symbol,
     address _implementation,
     bytes calldata _initData,
-    address _hook
+    address _hook,
+    IComplianceRule[] calldata _expectedRules
   ) external returns (address _proxy);
 
   /**

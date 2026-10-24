@@ -42,9 +42,13 @@ import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
 contract InterfaceFreezeTest is Test {
   function test_WhenInterfacesCompile_TheirErc165IdsArePinned() external pure {
     assertEq(type(IPolicyGated).interfaceId, bytes4(0xf517b40d), 'IPolicyGated');
-    assertEq(type(IPolicyHook).interfaceId, bytes4(0xb7723023), 'IPolicyHook');
-    assertEq(type(IComplianceRule).interfaceId, bytes4(0x93d5c2be), 'IComplianceRule');
-    assertEq(type(IComplianceHook).interfaceId, bytes4(0x2604e338), 'IComplianceHook');
+    // Re-pinned in S1 of the review items (2026-10-24) on owner instruction (RD1 to RD3): `TransferContext` lost `ref` and
+    // `deadline`, `IPolicyHook` and `IComplianceRule` gained `checkSend` and `checkReceive`, and `IComplianceHook` became
+    // the shared hook (per-token `setRules`, `rules` and `ruleCount`; no `ADMIN` or `TOKEN`). Ids computed from the
+    // compiled interfaces' signatures with `cast sig` (were 0xb7723023, 0x93d5c2be and 0x2604e338)
+    assertEq(type(IPolicyHook).interfaceId, bytes4(0x4f7b9fbb), 'IPolicyHook');
+    assertEq(type(IComplianceRule).interfaceId, bytes4(0x837a7ec1), 'IComplianceRule');
+    assertEq(type(IComplianceHook).interfaceId, bytes4(0xa8f3d563), 'IComplianceHook');
     assertEq(type(IPolicyRegistry).interfaceId, bytes4(0x947f9fc8), 'IPolicyRegistry');
     // Re-pinned 2026-10-23 on owner instruction (intent revision I-1): `TransferIntent` gained executor, validAfter,
     // considerationToken and considerationAmount, and `canExecute` takes the signature. Ids computed from the
@@ -61,7 +65,8 @@ contract InterfaceFreezeTest is Test {
     // 0x0e091382)
     assertEq(type(IMaxHoldersRule).interfaceId, bytes4(0x360b3dad), 'IMaxHoldersRule');
     // Added in Phase 5a (2026-10-17)
-    assertEq(type(IGated4626Vault).interfaceId, bytes4(0xb008690c), 'IGated4626Vault');
+    // Re-pinned in S1 of the review items (2026-10-24): `initialize` takes the token's initial rules (was 0xb008690c)
+    assertEq(type(IGated4626Vault).interfaceId, bytes4(0x6208cbc1), 'IGated4626Vault');
     // Added in Phase 5b (2026-10-17). The four ERC-7540 / ERC-7575 ids are the standard's own values.
     assertEq(type(IERC7540Operator).interfaceId, bytes4(0xe3bc4e65), 'IERC7540Operator');
     assertEq(type(IERC7540Deposit).interfaceId, bytes4(0xce3bbe50), 'IERC7540Deposit');
@@ -69,11 +74,13 @@ contract InterfaceFreezeTest is Test {
     assertEq(type(IERC7575).interfaceId, bytes4(0x2f0a18c5), 'IERC7575');
     // Re-pinned 2026-10-17 on owner instruction: recoverRedeemRequest added (was 0x34aae296)
     // Re-pinned in v0.2.0 (2026-10-17): recoverClaimable added, the one post-freeze change (owner decision M-3)
-    assertEq(type(IGated7540Vault).interfaceId, bytes4(0x75f5b0db), 'IGated7540Vault');
+    // Re-pinned in S1 of the review items (2026-10-24): `initialize` takes the token's initial rules (was 0x75f5b0db)
+    assertEq(type(IGated7540Vault).interfaceId, bytes4(0x8f0b8793), 'IGated7540Vault');
     assertEq(type(IIdentityRule).interfaceId, bytes4(0x150c4aea), 'IIdentityRule');
     assertEq(type(IIdentityRegistry).interfaceId, bytes4(0xb9209e33), 'IIdentityRegistry');
     // Added in Phase 7 (2026-10-17), after ProxyDeployer moved to OZ Ownable
-    assertEq(type(IProxyDeployer).interfaceId, bytes4(0x886d8cd8), 'IProxyDeployer');
+    // Re-pinned in S1 of the review items (2026-10-24): `deploy` takes and checks the expected rules (was 0x886d8cd8)
+    assertEq(type(IProxyDeployer).interfaceId, bytes4(0xcedb15bb), 'IProxyDeployer');
     // Added in v0.2.0 (owner decision M-1)
     assertEq(type(IGovernanceTimelock).interfaceId, bytes4(0x31993a1c), 'IGovernanceTimelock');
     // Added in the fund layer (2026-10-22), ids computed from the signatures with `cast sig`
@@ -108,8 +115,10 @@ contract InterfaceFreezeTest is Test {
     assertEq(
       IPolicyRegistry.AttestationRevoked.selector, 0x59d1b98a5da8bbc1db92f7d8d2e21c3067da65edbe08f4ae23df11487ee4c8b0
     );
+    // Re-pinned in S1 of the review items (2026-10-24): the event names the token, `RuleSetChanged(address indexed,
+    // bytes32[])` (was 0x1a22bda7b05ed1fb294fe52899bc63d685e2b75bb9f93e1e840f5016038b3893)
     assertEq(
-      IComplianceHook.RuleSetChanged.selector, 0x1a22bda7b05ed1fb294fe52899bc63d685e2b75bb9f93e1e840f5016038b3893
+      IComplianceHook.RuleSetChanged.selector, 0x052ffefccfad2a8a01111e4860d2a689b1f4b6e9d3a42f3d03311bbad21ed820
     );
     // Added in Phase 4 (2026-10-16)
     assertEq(ILockupRule.LockupSet.selector, 0xd3de67b8116f1abe42856d12f29c6dd6798dc57c837e1d2083e129b58d2e323a);

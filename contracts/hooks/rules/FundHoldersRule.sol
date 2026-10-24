@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
-
 import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
@@ -45,16 +43,12 @@ contract FundHoldersRule is BaseRule, IFundHoldersRule {
     IPolicyHook.TransferContext calldata _ctx
   ) external override(BaseRule, IComplianceRule) onlyHook(_ctx) {
     if (_ctx.amount == 0 || _ctx.from == _ctx.to) return;
-    IERC20 _token = IERC20(_ctx.token);
-    // Exact equalities are the holder definition (post-move balance == amount <=> was 0). They are read inside the
-    // token's guarded _update, where only the token moves balances.
+    (uint256 _fromBalance, uint256 _toBalance) = abi.decode(_ctx.extra, (uint256, uint256));
+    // Exact equalities are the holder definition: the receiver holds the class only if its balance before the move
+    // was 0, and the sender leaves it if the move takes its whole balance (balance after == 0).
     // slither-disable-start incorrect-equality
-    // View interface: compiled to STATICCALL, so the token cannot change any state (test: *_CallsAreStatic).
-    // aderyn-ignore-next-line(reentrancy-state-change)
-    if (_ctx.to != address(0) && _token.balanceOf(_ctx.to) == _ctx.amount) FUND.join(_ctx.token, _ctx.to);
-    // View interface: compiled to STATICCALL, as above.
-    // aderyn-ignore-next-line(reentrancy-state-change)
-    if (_ctx.from != address(0) && _token.balanceOf(_ctx.from) == 0) FUND.leave(_ctx.token, _ctx.from);
+    if (_ctx.to != address(0) && _toBalance == 0) FUND.join(_ctx.token, _ctx.to);
+    if (_ctx.from != address(0) && _fromBalance == _ctx.amount) FUND.leave(_ctx.token, _ctx.from);
     // slither-disable-end incorrect-equality
   }
 
@@ -120,7 +114,8 @@ contract FundHoldersRule is BaseRule, IFundHoldersRule {
     (, uint256 _fromHeld, bool _fromExempt,,,) = FUND.admission(_ctx.token, _ctx.from);
     if (_fromExempt || _fromHeld != 1 << (_index - 1)) return false;
     // The exact equality is the definition of "sender leaves" (balance == amount); see after_.
+    (uint256 _fromBalance,) = abi.decode(_ctx.extra, (uint256, uint256));
     // slither-disable-next-line incorrect-equality
-    _leaves = IERC20(_ctx.token).balanceOf(_ctx.from) == _ctx.amount;
+    _leaves = _fromBalance == _ctx.amount;
   }
 }

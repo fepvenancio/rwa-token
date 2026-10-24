@@ -13,6 +13,7 @@ import {Test} from 'forge-std/Test.sol';
 
 import {Reasons} from 'interfaces/Errors.sol';
 
+import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IERC7540Deposit} from 'interfaces/IERC7540Deposit.sol';
 import {IERC7540Operator} from 'interfaces/IERC7540Operator.sol';
@@ -59,6 +60,7 @@ contract Gated7540VaultUnitTest is Helpers {
     vm.mockCall(
       _registry, abi.encodeCall(IPolicyRegistry.isAttested, (_hook, IPolicyRegistry.AttestKind.HOOK)), abi.encode(true)
     );
+    vm.mockCall(_hook, abi.encodeCall(IComplianceHook.REGISTRY, ()), abi.encode(_registry));
     _hookDecides(Reasons.TRANSFER_OK);
     vm.mockCall(_hook, abi.encodeCall(IPolicyHook.wantsAfter, ()), abi.encode(false));
 
@@ -69,7 +71,17 @@ contract Gated7540VaultUnitTest is Helpers {
           address(_impl),
           abi.encodeCall(
             Gated7540Vault.initialize,
-            (IERC20(address(_asset)), 'Gated Async Fund', 'gASYNC', _admin, _guardian, _registry, _hook, _custody)
+            (
+              IERC20(address(_asset)),
+              'Gated Async Fund',
+              'gASYNC',
+              _admin,
+              _guardian,
+              _registry,
+              _hook,
+              new IComplianceRule[](0),
+              _custody
+            )
           )
         )
       )
@@ -158,9 +170,9 @@ contract Gated7540VaultUnitTest is Helpers {
       amount: _amount,
       operator: _operator,
       kind: _kind,
-      ref: bytes32(0),
-      deadline: 0,
-      extra: ''
+      extra: abi.encode(
+        _from == address(0) ? 0 : _vault.balanceOf(_from), _to == address(0) ? 0 : _vault.balanceOf(_to)
+      )
     });
   }
 
@@ -183,7 +195,9 @@ contract Gated7540VaultUnit_Initialize is Gated7540VaultUnitTest {
 
   function test_WhenCalledTwice_ItReverts() external {
     vm.expectRevert(Initializable.InvalidInitialization.selector);
-    _vault.initialize(IERC20(address(_asset)), 'X', 'X', _admin, _guardian, _registry, _hook, _custody);
+    _vault.initialize(
+      IERC20(address(_asset)), 'X', 'X', _admin, _guardian, _registry, _hook, new IComplianceRule[](0), _custody
+    );
   }
 
   function test_WhenCustodyIsZero_ItReverts() external {
@@ -192,7 +206,8 @@ contract Gated7540VaultUnit_Initialize is Gated7540VaultUnitTest {
     new ERC1967Proxy(
       address(_impl),
       abi.encodeCall(
-        Gated7540Vault.initialize, (IERC20(address(_asset)), 'X', 'X', _admin, _guardian, _registry, _hook, address(0))
+        Gated7540Vault.initialize,
+        (IERC20(address(_asset)), 'X', 'X', _admin, _guardian, _registry, _hook, new IComplianceRule[](0), address(0))
       )
     );
   }
@@ -1117,8 +1132,7 @@ contract Gated7540VaultIntegrationTest is Test {
     _rules[2] = _maxHoldersRule;
     // CREATE2 through ProxyDeployer, as in production: the address does not depend on this contract's nonce.
     ProxyDeployer _proxyDeployer = new ProxyDeployer(address(this));
-    address _predictedProxy = _proxyDeployer.predict('gASYNC', address(_impl));
-    ComplianceHook _hook = new ComplianceHook(address(this), _registry, _predictedProxy, _rules);
+    ComplianceHook _hook = new ComplianceHook(_registry);
     _registry.attest(address(_hook).codehash, IPolicyRegistry.AttestKind.HOOK, '');
     _registry.attest(address(_impl).codehash, IPolicyRegistry.AttestKind.IMPLEMENTATION, '');
     _vault = Gated7540Vault(
@@ -1136,10 +1150,12 @@ contract Gated7540VaultIntegrationTest is Test {
               _guardian,
               address(_registry),
               address(_hook),
+              _rules,
               _custody
             )
           ),
-          address(_hook)
+          address(_hook),
+          _rules
         )
       )
     );
@@ -1872,7 +1888,7 @@ contract Gated7540VaultIntegration_HolderRuleColdStart is Gated7540VaultIntegrat
 
     MaxHoldersRule _replacement = new MaxHoldersRule(); // same code, so already attested
     ComplianceHook _hook = ComplianceHook(_vault.policyHook());
-    IComplianceRule[] memory _rules = _hook.rules();
+    IComplianceRule[] memory _rules = _hook.rules(address(_vault));
     _rules[2] = _replacement;
     address[] memory _holders = new address[](3);
     _holders[0] = _alice;
@@ -1888,7 +1904,7 @@ contract Gated7540VaultIntegration_HolderRuleColdStart is Gated7540VaultIntegrat
     _replacement.setCap(address(_vault), 2);
     _replacement.setExemptHolder(address(_vault), address(_vault), true);
     _replacement.seedHolderCountFromHolders(address(_vault), _holders);
-    _hook.setRules(_rules);
+    _hook.setRules(address(_vault), _rules);
 
     assertEq(_replacement.holderCount(address(_vault)), 2);
     assertEq(_replacement.holderCount(address(_vault)), _maxHoldersRule.holderCount(address(_vault)));

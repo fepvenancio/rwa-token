@@ -6,6 +6,7 @@ import {Test} from 'forge-std/Test.sol';
 
 import {Reasons} from 'interfaces/Errors.sol';
 
+import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
@@ -24,6 +25,15 @@ contract HalmosAcceptAllRegistry {
 
 /// @notice Hook stub that approves every movement, so only the token's own checks are under test
 contract HalmosAcceptAllHook {
+  /// @dev The registry the token requires a hook to name as its own
+  address public immutable REGISTRY;
+
+  constructor(
+    address _registry
+  ) {
+    REGISTRY = _registry;
+  }
+
   function beforeTransfer(
     IPolicyHook.TransferContext calldata
   ) external pure returns (bytes32 _reason) {
@@ -58,13 +68,22 @@ contract IntentTokenHalmos is Test {
 
   function setUp() public {
     IntentToken _impl = new IntentToken();
+    address _registry = address(new HalmosAcceptAllRegistry());
     _token = IntentToken(
       address(
         new ERC1967Proxy(
           address(_impl),
           abi.encodeCall(
             IntentToken.initialize,
-            ('Gated', 'GTD', _admin, _admin, address(new HalmosAcceptAllRegistry()), address(new HalmosAcceptAllHook()))
+            (
+              'Gated',
+              'GTD',
+              _admin,
+              _admin,
+              _registry,
+              address(new HalmosAcceptAllHook(_registry)),
+              new IComplianceRule[](0)
+            )
           )
         )
       )

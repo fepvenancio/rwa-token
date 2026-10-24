@@ -14,6 +14,8 @@ import {TransientSlot} from '@openzeppelin/contracts/utils/TransientSlot.sol';
 
 import {Reasons} from 'interfaces/Errors.sol';
 
+import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
+import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
@@ -215,7 +217,8 @@ abstract contract PolicyGatedERC20Upgradeable is
    * @param _admin The timelock, granted DEFAULT_ADMIN_ROLE
    * @param _guardian The guardian multisig, granted GUARDIAN_ROLE
    * @param _registry The policy registry
-   * @param _hook The initial policy hook; must be attested as HOOK
+   * @param _hook The initial policy hook; must be attested as HOOK and name the same registry
+   * @param _initialRules The rule set installed on the hook for this token in the same call; empty installs none
    */
   // solhint-disable-next-line style-guide-casing
   function __PolicyGatedERC20_init(
@@ -224,13 +227,14 @@ abstract contract PolicyGatedERC20Upgradeable is
     address _admin,
     address _guardian,
     address _registry,
-    address _hook
+    address _hook,
+    IComplianceRule[] memory _initialRules
   ) internal onlyInitializing {
     __ERC20_init(_name, _symbol);
     __ERC20Permit_init(_name);
     __AccessControl_init();
     __Pausable_init();
-    __PolicyGatedERC20_init_unchained(_admin, _guardian, _registry, _hook);
+    __PolicyGatedERC20_init_unchained(_admin, _guardian, _registry, _hook, _initialRules);
   }
 
   /**
@@ -238,14 +242,16 @@ abstract contract PolicyGatedERC20Upgradeable is
    * @param _admin The timelock, granted DEFAULT_ADMIN_ROLE
    * @param _guardian The guardian multisig, granted GUARDIAN_ROLE
    * @param _registry The policy registry
-   * @param _hook The initial policy hook; must be attested as HOOK
+   * @param _hook The initial policy hook; must be attested as HOOK and name the same registry
+   * @param _initialRules The rule set installed on the hook for this token in the same call; empty installs none
    */
   // solhint-disable-next-line style-guide-casing
   function __PolicyGatedERC20_init_unchained(
     address _admin,
     address _guardian,
     address _registry,
-    address _hook
+    address _hook,
+    IComplianceRule[] memory _initialRules
   ) internal onlyInitializing {
     if (_admin == address(0) || _guardian == address(0) || _registry == address(0)) revert PolicyGated_ZeroAddress();
     _getPolicyGatedStorage().registry = IPolicyRegistry(_registry);
@@ -256,6 +262,9 @@ abstract contract PolicyGatedERC20Upgradeable is
     // aderyn-ignore-next-line(unchecked-return)
     _grantRole(GUARDIAN_ROLE, _guardian);
     _setHook(_hook);
+    // A shared hook accepts the rules of a token from the token itself, so the token is live with its policy as soon as
+    // it is initialised. Nothing to install means the hook's own state stands: no rules, every movement rejected.
+    if (_initialRules.length != 0) IComplianceHook(_hook).setRules(address(this), _initialRules);
   }
 
   /**
@@ -428,6 +437,10 @@ abstract contract PolicyGatedERC20Upgradeable is
     bytes32 _ref,
     uint256 _deadline
   ) internal view returns (IPolicyHook.TransferContext memory _ctx) {
+    // The balances before the move, so rules never call back into the token. Zero for the zero address, which holds
+    // nothing. EXECUTED continues with the intent's reference and deadline.
+    uint256 _fromBalance = _from == address(0) ? 0 : balanceOf(_from);
+    uint256 _toBalance = _to == address(0) ? 0 : balanceOf(_to);
     _ctx = IPolicyHook.TransferContext({
       token: address(this),
       from: _from,
@@ -436,9 +449,9 @@ abstract contract PolicyGatedERC20Upgradeable is
       amount: _amount,
       operator: _operator,
       kind: _kind,
-      ref: _ref,
-      deadline: _deadline,
-      extra: ''
+      extra: _kind == IPolicyHook.TransferKind.EXECUTED
+        ? abi.encode(_fromBalance, _toBalance, _ref, _deadline)
+        : abi.encode(_fromBalance, _toBalance)
     });
   }
 
@@ -468,6 +481,11 @@ abstract contract PolicyGatedERC20Upgradeable is
     PolicyGatedStorage storage $ = _getPolicyGatedStorage();
     if (!$.registry.isAttested(_newHook, IPolicyRegistry.AttestKind.HOOK)) {
       revert PolicyGated_NotAttested(_newHook, IPolicyRegistry.AttestKind.HOOK);
+    }
+    // A hook shared by several tokens vets their rules against its own registry, so it must be the token's.
+    address _hookRegistry = address(IComplianceHook(_newHook).REGISTRY());
+    if (_hookRegistry != address($.registry)) {
+      revert PolicyGated_HookRegistryMismatch(_hookRegistry, address($.registry));
     }
     address _oldHook = address($.hook);
     $.hook = IPolicyHook(_newHook);

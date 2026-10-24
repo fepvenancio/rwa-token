@@ -56,14 +56,19 @@ contract MaxHoldersRuleUnitTest is Helpers {
   ) internal {
     IComplianceRule[] memory _list = new IComplianceRule[](_active ? 1 : 0);
     if (_active) _list[0] = _rule;
-    vm.mockCall(_hook, abi.encodeCall(IComplianceHook.rules, ()), abi.encode(_list));
+    vm.mockCall(_hook, abi.encodeWithSelector(IComplianceHook.rules.selector), abi.encode(_list));
   }
 
+  /// @dev The balance each account holds before the movement, which the token puts in `extra`
+  mapping(address _account => uint256 _amount) internal _pre;
+
+  /// @dev Sets what the token reports for an account (the admin functions read it) and what `extra` carries
   function _bal(
     address _account,
     uint256 _amount
   ) internal {
     vm.mockCall(_token, abi.encodeCall(IERC20.balanceOf, (_account)), abi.encode(_amount));
+    _pre[_account] = _amount;
   }
 
   function _cap(
@@ -100,9 +105,7 @@ contract MaxHoldersRuleUnitTest is Helpers {
       amount: _amount,
       operator: _sender,
       kind: _kind,
-      ref: bytes32(0),
-      deadline: 0,
-      extra: ''
+      extra: abi.encode(_pre[_sender], _pre[_receiver])
     });
   }
 
@@ -289,7 +292,7 @@ contract MaxHoldersRuleUnit_Seeding is MaxHoldersRuleUnitTest {
     address _previous = _mockContract('previousRule');
     IComplianceRule[] memory _ruleList = new IComplianceRule[](1);
     _ruleList[0] = IComplianceRule(_previous);
-    vm.mockCall(_hook, abi.encodeCall(IComplianceHook.rules, ()), abi.encode(_ruleList));
+    vm.mockCall(_hook, abi.encodeWithSelector(IComplianceHook.rules.selector), abi.encode(_ruleList));
     vm.mockCall(_previous, abi.encodeCall(IMaxHoldersRule.holderCount, (_token)), abi.encode(uint256(42)));
     vm.expectCall(_previous, abi.encodeCall(IMaxHoldersRule.holderCount, (_token)), 1);
     vm.expectEmit(address(_rule));
@@ -392,8 +395,8 @@ contract MaxHoldersRuleUnit_Exemptions is MaxHoldersRuleUnitTest {
     _bal(_to, 0);
     _exempt(_to, true); // empty, so no count adjustment
     _seed(1);
-    _bal(_from, 0);
-    _bal(_to, 4);
+    _bal(_from, 4);
+    _bal(_to, 0);
     _after(_ctx(IPolicyHook.TransferKind.TRANSFER, _from, _to, 4));
     assertEq(_rule.holderCount(_token), 0);
   }
@@ -403,7 +406,6 @@ contract MaxHoldersRuleUnit_Exemptions is MaxHoldersRuleUnitTest {
     _seed(2);
     _bal(_from, 3);
     _exempt(_from, true); // holds a balance, so the count drops to 1
-    _bal(_from, 0);
     _after(_ctx(IPolicyHook.TransferKind.BURN, _from, address(0), 3));
     assertEq(_rule.holderCount(_token), 1);
   }
@@ -418,10 +420,9 @@ contract MaxHoldersRuleUnit_FakeToken is MaxHoldersRuleUnitTest {
     address _attacker = makeAddr('attacker');
     vm.mockCall(_fakeToken, abi.encodeCall(IAccessControl.hasRole, (_ADMIN_ROLE, _attacker)), abi.encode(true));
     vm.mockCall(_fakeToken, abi.encodeCall(IPolicyGated.policyHook, ()), abi.encode(_attacker));
-    vm.mockCall(_fakeToken, abi.encodeCall(IERC20.balanceOf, (_to)), abi.encode(uint256(1)));
     // The attacker's "hook" lists no rules, so the seed is accepted for the fake token's key.
     vm.etch(_attacker, hex'01');
-    vm.mockCall(_attacker, abi.encodeCall(IComplianceHook.rules, ()), abi.encode(new IComplianceRule[](0)));
+    vm.mockCall(_attacker, abi.encodeWithSelector(IComplianceHook.rules.selector), abi.encode(new IComplianceRule[](0)));
 
     vm.startPrank(_attacker);
     _rule.setCap(_fakeToken, type(uint256).max);
@@ -540,7 +541,7 @@ contract MaxHoldersRuleUnit_After is MaxHoldersRuleUnitTest {
     uint256 _amount
   ) external {
     _amount = bound(_amount, 1, type(uint128).max);
-    _bal(_to, _amount);
+    _bal(_to, 0);
     vm.expectEmit(address(_rule));
     emit IMaxHoldersRule.HolderCountUpdated(_token, 1);
     _after(_ctx(IPolicyHook.TransferKind.MINT, address(0), _to, _amount));
@@ -549,8 +550,8 @@ contract MaxHoldersRuleUnit_After is MaxHoldersRuleUnitTest {
 
   function test_WhenAFullBalanceMovesToANewHolder_TheCountIsUnchangedAndSilent() external {
     _seed(2);
-    _bal(_to, 7);
-    _bal(_from, 0);
+    _bal(_to, 0);
+    _bal(_from, 7);
     vm.recordLogs();
     _after(_ctx(IPolicyHook.TransferKind.TRANSFER, _from, _to, 7));
     assertEq(_rule.holderCount(_token), 2);
@@ -560,15 +561,15 @@ contract MaxHoldersRuleUnit_After is MaxHoldersRuleUnitTest {
 
   function test_WhenAPartialAmountMovesToAnExistingHolder_TheCountIsUnchanged() external {
     _seed(2);
-    _bal(_to, 12);
-    _bal(_from, 3);
+    _bal(_to, 5);
+    _bal(_from, 10);
     _after(_ctx(IPolicyHook.TransferKind.EXECUTED, _from, _to, 7));
     assertEq(_rule.holderCount(_token), 2);
   }
 
   function test_WhenAHolderBurnsEverything_ItLeaves() external {
     _seed(2);
-    _bal(_from, 0);
+    _bal(_from, 5);
     _after(_ctx(IPolicyHook.TransferKind.BURN, _from, address(0), 5));
     assertEq(_rule.holderCount(_token), 1);
   }
@@ -577,8 +578,8 @@ contract MaxHoldersRuleUnit_After is MaxHoldersRuleUnitTest {
   function test_WhenForcedToANewHolderAboveTheCap_ItIsStillCounted() external {
     _cap(2);
     _seed(2);
-    _bal(_to, 4);
-    _bal(_from, 6);
+    _bal(_to, 0);
+    _bal(_from, 10);
     _after(_ctx(IPolicyHook.TransferKind.FORCED, _from, _to, 4));
     assertEq(_rule.holderCount(_token), 3);
   }
@@ -593,7 +594,7 @@ contract MaxHoldersRuleUnit_After is MaxHoldersRuleUnitTest {
 
   /// @dev An active rule with an unseeded count fails closed instead of drifting
   function test_WhenTheCountIsUnseededAndAHolderLeaves_ItReverts() external {
-    _bal(_from, 0);
+    _bal(_from, 5);
     vm.expectRevert(stdError.arithmeticError);
     vm.prank(_hook);
     _rule.after_(_ctx(IPolicyHook.TransferKind.BURN, _from, address(0), 5));
@@ -728,8 +729,7 @@ contract MaxHoldersRuleInvariantTest is Test {
     _rules[0] = _rule;
     // CREATE2 through ProxyDeployer, as in production: the address does not depend on this contract's nonce.
     ProxyDeployer _proxyDeployer = new ProxyDeployer(address(this));
-    address _predictedProxy = _proxyDeployer.predict('CAP', address(_impl));
-    ComplianceHook _hook = new ComplianceHook(address(this), _registry, _predictedProxy, _rules);
+    ComplianceHook _hook = new ComplianceHook(_registry);
     _registry.attest(address(_hook).codehash, IPolicyRegistry.AttestKind.HOOK, '');
     _registry.attest(address(_impl).codehash, IPolicyRegistry.AttestKind.IMPLEMENTATION, '');
     _token = IntentToken(
@@ -738,9 +738,11 @@ contract MaxHoldersRuleInvariantTest is Test {
           'CAP',
           address(_impl),
           abi.encodeCall(
-            IntentToken.initialize, ('Capped', 'CAP', address(this), address(this), address(_registry), address(_hook))
+            IntentToken.initialize,
+            ('Capped', 'CAP', address(this), address(this), address(_registry), address(_hook), _rules)
           ),
-          address(_hook)
+          address(_hook),
+          _rules
         )
       )
     );
@@ -790,7 +792,7 @@ contract MaxHoldersRuleUnit_TokenCallsAreStatic is MaxHoldersRuleUnitTest {
     vm.stopPrank();
   }
 
-  function test_WhenTheTokenTriesToWriteDuringTheHookOrBalanceRead_AfterReverts() external {
+  function test_WhenTheTokenTriesToWriteDuringTheHookLookup_AfterReverts() external {
     MockStatefulToken _stateful = new MockStatefulToken();
     IPolicyHook.TransferContext memory _ctxStateful = _ctx(IPolicyHook.TransferKind.MINT, address(0), _to, 1);
     _ctxStateful.token = address(_stateful);
@@ -812,7 +814,7 @@ contract MaxHoldersRuleUnit_ForcedMint is MaxHoldersRuleUnitTest {
   function test_WhenAnEnforcementMintCreatesAHolder_TheCountGoesUp() external {
     _cap(2);
     _seed(2);
-    _bal(_to, 5); // post-mint balance == amount: a new holder
+    _bal(_to, 0); // a receiver with nothing before the mint: a new holder
     vm.prank(_hook);
     _rule.after_(_ctx(IPolicyHook.TransferKind.FORCED, address(0), _to, 5));
     assertEq(_rule.holderCount(_token), 3);
@@ -868,7 +870,7 @@ contract MaxHoldersRuleIntegrationTest is IntentTokenIntegrationTest {
     vm.startPrank(_admin);
     _maxHoldersRule.setCap(address(_token), 3);
     _maxHoldersRule.seedHolderCount(address(_token), 2);
-    _hook.setRules(_ruleSetWith(_maxHoldersRule));
+    _hook.setRules(address(_token), _ruleSetWith(_maxHoldersRule));
     vm.stopPrank();
   }
 }
@@ -883,7 +885,7 @@ contract MaxHoldersRuleIntegration_Seeding is MaxHoldersRuleIntegrationTest {
     vm.startPrank(_admin);
     _maxHoldersRule.setCap(address(_token), 3);
     _maxHoldersRule.seedHolderCount(address(_token), _count);
-    _hook.setRules(_ruleSetWith(_maxHoldersRule));
+    _hook.setRules(address(_token), _ruleSetWith(_maxHoldersRule));
     vm.stopPrank();
     assertEq(_maxHoldersRule.holderCount(address(_token)), 2); // three accounts hold the token
 
@@ -921,7 +923,7 @@ contract MaxHoldersRuleIntegration_Seeding is MaxHoldersRuleIntegrationTest {
     vm.startPrank(_admin);
     _maxHoldersRule.setCap(address(_token), 3);
     _maxHoldersRule.seedHolderCountFromHolders(address(_token), _holders);
-    _hook.setRules(_ruleSetWith(_maxHoldersRule));
+    _hook.setRules(address(_token), _ruleSetWith(_maxHoldersRule));
     vm.stopPrank();
     assertEq(_maxHoldersRule.holderCount(address(_token)), 3);
 
@@ -942,7 +944,7 @@ contract MaxHoldersRuleIntegration_Seeding is MaxHoldersRuleIntegrationTest {
     vm.startPrank(_admin);
     _replacement.setCap(address(_token), 3);
     _replacement.seedHolderCountFromRule(address(_token), _maxHoldersRule);
-    _hook.setRules(_ruleSetWith(_replacement));
+    _hook.setRules(address(_token), _ruleSetWith(_replacement));
     vm.stopPrank();
     assertEq(_replacement.holderCount(address(_token)), 3);
 
@@ -962,7 +964,7 @@ contract MaxHoldersRuleIntegration_Seeding is MaxHoldersRuleIntegrationTest {
       abi.encodeWithSelector(IComplianceHook.ComplianceHook_DuplicateRule.selector, address(_replacement))
     );
     vm.prank(_admin);
-    _hook.setRules(_ruleSet);
+    _hook.setRules(address(_token), _ruleSet);
   }
 
   function test_WhenTheRuleIsInTheTokensList_EverySeedReverts() external {
@@ -983,7 +985,7 @@ contract MaxHoldersRuleIntegration_Seeding is MaxHoldersRuleIntegrationTest {
     vm.startPrank(_admin);
     _maxHoldersRule.setCap(address(_token), 3);
     _maxHoldersRule.seedHolderCount(address(_token), 0); // two accounts hold the token
-    _hook.setRules(_ruleSetWith(_maxHoldersRule));
+    _hook.setRules(address(_token), _ruleSetWith(_maxHoldersRule));
     vm.stopPrank();
 
     vm.expectRevert(stdError.arithmeticError);

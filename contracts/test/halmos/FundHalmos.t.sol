@@ -45,7 +45,7 @@ contract FundHalmosClass {
   }
 }
 
-/// @notice A hook stub whose rule list is the installed rule
+/// @notice A hook stub whose rule list, for any token, is the installed rule
 contract FundHalmosHook {
   address public immutable RULE;
 
@@ -55,7 +55,9 @@ contract FundHalmosHook {
     RULE = _rule;
   }
 
-  function rules() external view returns (IComplianceRule[] memory _list) {
+  function rules(
+    address
+  ) external view returns (IComplianceRule[] memory _list) {
     _list = new IComplianceRule[](1);
     _list[0] = IComplianceRule(RULE);
   }

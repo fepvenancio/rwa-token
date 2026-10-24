@@ -7,6 +7,8 @@ import {ERC1967Proxy} from '@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 
 import {Reasons} from 'interfaces/Errors.sol';
 
+import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
+import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
@@ -43,6 +45,7 @@ contract IntentSettledUnitTest is Helpers {
     vm.mockCall(
       _registry, abi.encodeCall(IPolicyRegistry.isAttested, (_hook, IPolicyRegistry.AttestKind.HOOK)), abi.encode(true)
     );
+    vm.mockCall(_hook, abi.encodeCall(IComplianceHook.REGISTRY, ()), abi.encode(_registry));
     _hookDecides(Reasons.TRANSFER_OK);
     vm.mockCall(_hook, abi.encodeCall(IPolicyHook.wantsAfter, ()), abi.encode(false));
 
@@ -50,7 +53,10 @@ contract IntentSettledUnitTest is Helpers {
     _token = IntentToken(
       address(
         new ERC1967Proxy(
-          address(_impl), abi.encodeCall(IntentToken.initialize, (_NAME, 'GNOTE', _admin, _guardian, _registry, _hook))
+          address(_impl),
+          abi.encodeCall(
+            IntentToken.initialize, (_NAME, 'GNOTE', _admin, _guardian, _registry, _hook, new IComplianceRule[](0))
+          )
         )
       )
     );
@@ -245,9 +251,7 @@ contract IntentSettledUnit_ExecuteTransfer is IntentSettledUnitTest {
       amount: _amount,
       operator: _executor,
       kind: IPolicyHook.TransferKind.EXECUTED,
-      ref: _i.ref,
-      deadline: _i.deadline,
-      extra: ''
+      extra: abi.encode(_token.balanceOf(_alice), _token.balanceOf(_bob), _i.ref, _i.deadline)
     });
     vm.expectCall(_hook, abi.encodeCall(IPolicyHook.beforeTransfer, (_ctx)));
     vm.expectEmit(address(_token));
@@ -272,9 +276,7 @@ contract IntentSettledUnit_ExecuteTransfer is IntentSettledUnitTest {
       amount: 1,
       operator: _bob,
       kind: IPolicyHook.TransferKind.TRANSFER,
-      ref: bytes32(0),
-      deadline: 0,
-      extra: ''
+      extra: abi.encode(_token.balanceOf(_bob), _token.balanceOf(_alice))
     });
     vm.expectCall(_hook, abi.encodeCall(IPolicyHook.beforeTransfer, (_plain)));
     vm.prank(_bob);
@@ -528,9 +530,7 @@ contract IntentSettledUnit_Consideration is IntentSettledUnitTest {
       amount: 10,
       operator: _executor,
       kind: IPolicyHook.TransferKind.EXECUTED,
-      ref: _i.ref,
-      deadline: _i.deadline,
-      extra: ''
+      extra: abi.encode(_token.balanceOf(_alice), _token.balanceOf(_bob), _i.ref, _i.deadline)
     });
     vm.expectCall(_hook, abi.encodeCall(IPolicyHook.beforeTransfer, (_ctx)));
     vm.expectEmit(address(_token));

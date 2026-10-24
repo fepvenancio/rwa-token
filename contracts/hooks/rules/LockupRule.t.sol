@@ -64,9 +64,7 @@ contract LockupRuleUnitTest is Helpers {
       amount: 1,
       operator: _holder,
       kind: _kind,
-      ref: bytes32(0),
-      deadline: 0,
-      extra: ''
+      extra: abi.encode(uint256(0), uint256(0))
     });
   }
 
@@ -222,5 +220,14 @@ contract LockupRuleUnit_ForcedMint is LockupRuleUnitTest {
     IPolicyHook.TransferContext memory _context = _ctx(IPolicyHook.TransferKind.FORCED);
     _context.from = address(0);
     assertEq(_rule.check(_context), Reasons.TRANSFER_OK);
+  }
+}
+
+/// @notice A lockup depends on the kind of movement, so the rule has no account-level opinion
+contract LockupRuleUnit_AccountChecks is LockupRuleUnitTest {
+  function test_WhenAskedAtAccountLevel_ItAccepts() external {
+    _lock(_holder, block.timestamp + 1 days);
+    assertEq(_rule.checkSend(_token, _holder), Reasons.TRANSFER_OK);
+    assertEq(_rule.checkReceive(_token, _holder), Reasons.TRANSFER_OK);
   }
 }
