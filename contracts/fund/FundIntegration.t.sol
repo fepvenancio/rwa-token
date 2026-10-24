@@ -648,9 +648,16 @@ contract FundIntegration_Replacement is FundIntegrationTest {
     assertFalse(_token.canReceive(_alice));
     assertEq(_fund.holderCount(), 2);
 
+    // The monitor sees the window too: every class is broken until its hook lists the new rule, one at a time.
+    assertFalse(_fund.isClassIntact(address(_token)));
+    assertEq(_fund.firstBrokenClass(), address(_token));
     _hook.setRules(address(_token), _rules(_next));
+    assertTrue(_fund.isClassIntact(address(_token)));
+    assertEq(_fund.firstBrokenClass(), address(_vault4626));
     _hook.setRules(address(_vault4626), _rules(_next));
+    assertEq(_fund.firstBrokenClass(), address(_vault7540));
     _hook.setRules(address(_vault7540), _rules(_next));
+    assertEq(_fund.firstBrokenClass(), address(0));
     _mintToken(_carol, 1 ether);
     assertEq(_fund.holderCount(), 3);
     _assertTransferParity(_alice, _bob, 0.5 ether, Reasons.TRANSFER_OK);
@@ -670,5 +677,44 @@ contract FundIntegration_Replacement is FundIntegrationTest {
       kind: IPolicyHook.TransferKind.MINT,
       extra: abi.encode(uint256(0), IERC20(_tokenAddress).balanceOf(_receiver))
     });
+  }
+}
+
+/// @notice The monitor against a real hook and real classes (PLAN: RD10, `Fund.isClassIntact` and `firstBrokenClass`)
+contract FundIntegration_Integrity is FundIntegrationTest {
+  function test_WhenTheStackIsDeployed_EveryClassIsIntact() external view {
+    assertTrue(_fund.isClassIntact(address(_token)));
+    assertTrue(_fund.isClassIntact(address(_vault4626)));
+    assertTrue(_fund.isClassIntact(address(_vault7540)));
+    assertEq(_fund.firstBrokenClass(), address(0));
+  }
+
+  /// @dev The hazard the runbook forbids: a rule list without the fund rule is accepted by the hook, and the class is
+  ///      un-capped. Nothing in the hook can know; the fund can say so
+  function test_WhenAClassDropsTheFundRule_ItIsUncappedAndTheMonitorNamesIt() external {
+    IComplianceRule[] memory _without = new IComplianceRule[](3);
+    _without[0] = _identityRule;
+    _without[1] = _restrictionRule;
+    _without[2] = _maxHoldersRule;
+    _hook.setRules(address(_vault4626), _without);
+
+    assertFalse(_fund.isClassIntact(address(_vault4626)));
+    assertTrue(_fund.isClassIntact(address(_token)));
+    assertEq(_fund.firstBrokenClass(), address(_vault4626));
+
+    _hook.setRules(address(_vault4626), _rules(_fundRule));
+    assertTrue(_fund.isClassIntact(address(_vault4626)));
+    assertEq(_fund.firstBrokenClass(), address(0));
+  }
+
+  /// @dev A hook swap that keeps the rules keeps the class intact, and a swap to a hook without them breaks it
+  function test_WhenTheHookIsReplacedWithoutTheRule_TheClassIsBroken() external {
+    ComplianceHook _twin = new ComplianceHook(_registry);
+    IComplianceRule[] memory _without = new IComplianceRule[](1);
+    _without[0] = _identityRule;
+    _twin.setRules(address(_token), _without);
+    _token.setPolicyHook(address(_twin));
+    assertFalse(_fund.isClassIntact(address(_token)));
+    assertEq(_fund.firstBrokenClass(), address(_token));
   }
 }

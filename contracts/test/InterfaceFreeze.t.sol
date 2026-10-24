@@ -87,7 +87,8 @@ contract InterfaceFreezeTest is Test {
     // Added in v0.2.0 (owner decision M-1)
     assertEq(type(IGovernanceTimelock).interfaceId, bytes4(0x31993a1c), 'IGovernanceTimelock');
     // Added in the fund layer (2026-10-22), ids computed from the signatures with `cast sig`
-    assertEq(type(IFund).interfaceId, bytes4(0x44c4a64f), 'IFund');
+    // Re-pinned in S4 of the review items (2026-10-24): `isClassIntact` and `firstBrokenClass` (was 0x44c4a64f)
+    assertEq(type(IFund).interfaceId, bytes4(0x2d89d7d8), 'IFund');
     assertEq(type(IFundHoldersRule).interfaceId, bytes4(0x5c275a39), 'IFundHoldersRule');
     // Added in the DvP executor (E-1, 2026-10-23), ids computed from the signatures with `cast sig`. `IERC3009` is the
     // subset of ERC-3009 that the executor calls; its id is the XOR of those two selectors, not a standard id

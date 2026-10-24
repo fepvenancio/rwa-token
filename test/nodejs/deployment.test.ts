@@ -3,10 +3,20 @@ import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 
 import hre, { network } from "hardhat";
-import { concatHex, encodeAbiParameters, getContractAddress, isAddressEqual, keccak256, toHex, zeroAddress } from "viem";
+import {
+  concatHex,
+  encodeAbiParameters,
+  getAddress,
+  getContractAddress,
+  isAddressEqual,
+  keccak256,
+  parseEther,
+  toHex,
+  zeroAddress,
+} from "viem";
 
 import { ROLES, TOKENS } from "../../ignition/modules/roles.js";
-import { deployStack, deployUntilActivate, HOLDER_CAP, REASONS } from "./fixtures.js";
+import { deployStack, deployUntilActivate, REASONS } from "./fixtures.js";
 
 const IDVP_EXECUTOR_ID = "0xe68774e8";
 
@@ -19,12 +29,29 @@ describe("deployment (Ignition: Components → council → Activate)", async fun
     const s = await networkHelpers.loadFixture(stack);
     for (const t of [s.token, s.vault4626, s.vault7540]) {
       assert.ok(isAddressEqual(await t.read.registry(), s.registry.address));
-      assert.equal(await s.rules.maxHoldersRule.read.capOf([t.address]), HOLDER_CAP);
     }
     // Live from deploy: the identity rule already gates the first mint.
     const [ok, reason] = await s.token.read.canTransferWithReason([zeroAddress, s.holders.eve.account.address, 1n]);
     assert.equal(ok, false);
     assert.equal(reason, REASONS.RECEIVER_NOT_VERIFIED);
+  });
+
+  /** RD5 and the assumptions of the review items: the order is the owner's, written out here, not read from the module. */
+  it("lists each token's rules in the decided order, with the minimum off and no per-class holder cap", async function () {
+    const s = await networkHelpers.loadFixture(stack);
+    const r = s.rules;
+    const classRules = [r.identityRule, r.minPositionRule, r.holderRestrictionRule, r.fundHoldersRule];
+    const cases = [
+      [s.token, [r.identityRule, r.minPositionRule, r.holderRestrictionRule, r.windowRule, r.fundHoldersRule]],
+      [s.vault4626, classRules],
+      [s.vault7540, classRules],
+    ] as const;
+    for (const [t, expected] of cases) {
+      const listed = (await s.hook.read.rules([t.address])).map((rule) => getAddress(rule));
+      assert.deepEqual(listed, expected.map((rule) => getAddress(rule.address)));
+      assert.ok(!listed.includes(getAddress(r.maxHoldersRule.address)), "a per-class holder cap is not part of the demo");
+      assert.equal(await r.minPositionRule.read.minPosition([t.address]), 0n, "the minimum is off unless the deployment sets one");
+    }
   });
 
   it("wires the DvP executor: roles, ERC-165, EXECUTOR_ROLE on the intent token, and nothing paused", async function () {
@@ -96,6 +123,36 @@ describe("deployment with a twin hook passed to Activate", async function () {
     const predicted = await components.proxyDeployer.read.predict([TOKENS.intent.symbol, components.intentImpl.address]);
     const client = await connection.viem.getPublicClient();
     assert.equal(await client.getCode({ address: predicted }), undefined, "no proxy was created");
+  });
+});
+
+describe("deployment that sets minimum positions", async function () {
+  const connection = await network.create();
+  const stages = () => deployUntilActivate(connection);
+
+  it("sets each token's minimum before the hand-over, and the deployed intent token enforces it", async function () {
+    const { activate, parameters } = await connection.networkHelpers.loadFixture(stages);
+    const s = await activate({ ...parameters, intentMinPosition: parseEther("10"), fundMinPosition: 5n, asyncFundMinPosition: 7n });
+    const min = s.rules.minPositionRule;
+    assert.equal(await min.read.minPosition([s.token.address]), parseEther("10"));
+    assert.equal(await min.read.minPosition([s.vault4626.address]), 5n);
+    assert.equal(await min.read.minPosition([s.vault7540.address]), 7n);
+    // The 7540 escrow is the token itself, exempt without being listed.
+    assert.equal(await min.read.isExempt([s.vault7540.address, s.vault7540.address]), true);
+
+    const [alice, bob] = [s.holders.alice.account.address, s.holders.bob.account.address];
+    await s.token.write.mint([alice, parseEther("100")], { account: s.wallets.minter.account });
+    assert.deepEqual(await s.token.read.canTransferWithReason([alice, bob, 1n]), [false, REASONS.BELOW_MIN_POSITION]);
+    await connection.viem.assertions.revertWithCustomErrorWithArgs(
+      s.token.write.transfer([bob, 1n], { account: s.holders.alice.account }),
+      s.token,
+      "PolicyGated_TransferRejected",
+      [REASONS.BELOW_MIN_POSITION],
+    );
+    // The account-level answers do not read a minimum as a block.
+    assert.equal(await s.token.read.canReceive([bob]), true);
+    await s.token.write.transfer([bob, parseEther("10")], { account: s.holders.alice.account });
+    assert.equal(await s.token.read.balanceOf([bob]), parseEther("10"));
   });
 });
 

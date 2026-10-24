@@ -8,8 +8,10 @@ import { ROLES, RULE_ORDER, TOKENS } from "./roles.js";
  * holding exactly those rules for it, so every later step (configuration, roles, hand-over) runs only for tokens that
  * came up as intended. Then:
  *
- * 1. Configure while the deployer is the tokens' admin: settlement window, holder caps, the 7540 escrow exemption.
- *    The fund is configured the same way while the deployer owns it: install its rule, set its cap, then register the
+ * 1. Configure while the deployer is the tokens' admin: the settlement window and each token's minimum position (the
+ *    `*MinPosition` parameters, 0 by default, which switches the rule off). There is no per-class holder cap and no
+ *    escrow exemption to set: the fund counts investors across classes, and the 7540 vault is the token itself, which
+ *    neither the fund rule nor the minimum counts. The fund is configured the same way while the deployer owns it: install its rule, set its cap, then register the
  *    three tokens as classes one after another, so class numbers 1 to 3 are intent, fund, asyncFund. Until a class is
  *    registered every movement on it is rejected, so no balance exists before it is.
  * 2. Grant the operational roles, after the registrations; UPGRADER_ROLE goes to the timelock only; the guardian becomes a timelock canceller;
@@ -32,9 +34,9 @@ export default buildModule("Activate", (m) => {
   const asset = p("asset");
   const rules = {
     identityRule: p("identityRule"),
+    minPositionRule: p("minPositionRule"),
     holderRestrictionRule: p("holderRestrictionRule"),
     windowRule: p("windowRule"),
-    maxHoldersRule: p("maxHoldersRule"),
     fundHoldersRule: p("fundHoldersRule"),
   };
 
@@ -44,8 +46,7 @@ export default buildModule("Activate", (m) => {
   const executor = m.contractAt("IntentExecutor", p("executor"));
   const dvpExecutor = m.contractAt("DvPExecutor", p("dvpExecutor"));
   const windowRule = m.contractAt("SettlementWindowRule", p("windowRule"));
-  const maxHoldersRule = m.contractAt("MaxHoldersRule", p("maxHoldersRule"));
-  const cap = m.getParameter<bigint>("holderCap");
+  const minPositionRule = m.contractAt("MinPositionRule", p("minPositionRule"));
   const fundContract = m.contractAt("Fund", p("fundContract"));
   const fundCap = m.getParameter<bigint>("fundHolderCap");
 
@@ -103,9 +104,11 @@ export default buildModule("Activate", (m) => {
       { after: deploys },
     ),
     ...Object.entries(tokens).map(([key, token]) =>
-      m.call(maxHoldersRule, "setCap", [token, cap], { id: `${key}_cap`, after: deploys }),
+      m.call(minPositionRule, "setMinPosition", [token, m.getParameter<bigint>(`${key}MinPosition`, 0n)], {
+        id: `${key}_min`,
+        after: deploys,
+      }),
     ),
-    m.call(maxHoldersRule, "setExemptHolder", [asyncFund, asyncFund, true], { after: deploys }),
   ];
 
   // The fund: rule and cap first, then each class in turn (a chain, so the numbering never depends on scheduling).

@@ -204,6 +204,22 @@ contract Fund is Ownable, ERC165, IFund {
   }
 
   /// @inheritdoc IFund
+  function isClassIntact(
+    address _token
+  ) external view returns (bool _intact) {
+    _intact = _classIndex[_token] != 0 && _listsInstalledRule(_token);
+  }
+
+  /// @inheritdoc IFund
+  function firstBrokenClass() external view returns (address _token) {
+    uint256 _length = _classes.length;
+    for (uint256 _i; _i < _length; ++_i) {
+      address _class = _classes[_i];
+      if (!_listsInstalledRule(_class)) return _class;
+    }
+  }
+
+  /// @inheritdoc IFund
   function holderCount() external view returns (uint256 _count) {
     _count = _investors.count;
   }
@@ -312,5 +328,30 @@ contract Fund is Ownable, ERC165, IFund {
     for (uint256 _i; _i < _length; ++_i) {
       if (address(_list[_i]) == _candidate) return true;
     }
+  }
+
+  /**
+   * @notice Whether the token's current hook lists the installed rule, answering false where `_hookListsRule` reverts
+   * @dev For the monitor's views, which must not revert on the thing they watch: a token that cannot name its hook, or a
+   *      hook that cannot list its rules, lists nothing. Hooks are attested, so a hook that answers with malformed data is
+   *      not a case this covers
+   * @param _token The class token
+   * @return _listed True if the hook lists the installed rule
+   */
+  function _listsInstalledRule(
+    address _token
+  ) internal view returns (bool _listed) {
+    address _installed = _investors.rule;
+    // A failing token or hook is a broken class, not an error: the empty catch blocks answer false.
+    // aderyn-ignore-next-line(empty-block)
+    try IPolicyGated(_token).policyHook() returns (address _hook) {
+      // aderyn-ignore-next-line(empty-block)
+      try IComplianceHook(_hook).rules(_token) returns (IComplianceRule[] memory _list) {
+        uint256 _length = _list.length;
+        for (uint256 _i; _i < _length; ++_i) {
+          if (address(_list[_i]) == _installed) return true;
+        }
+      } catch {}
+    } catch {}
   }
 }

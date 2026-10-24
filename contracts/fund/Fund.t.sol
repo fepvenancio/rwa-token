@@ -915,3 +915,150 @@ contract FundUnit_Model is FundUnitTest {
     assertEq(_fund.holderCap(), 7, 'cap');
   }
 }
+
+/// @notice The monitor's views: a class is intact when it is registered and its hook still lists the fund's rule
+contract FundUnit_ClassIntegrity is FundUnitTest {
+  address internal _otherRule = makeAddr('otherRule');
+
+  function _hookOf(
+    address _token
+  ) internal view returns (address _hook) {
+    _hook = IPolicyGated(_token).policyHook();
+  }
+
+  /// @dev Replaces the rule list the class's hook reports
+  function _break(
+    address _token
+  ) internal {
+    _hookLists(_hookOf(_token), _otherRule);
+  }
+
+  function test_WhenTheTokenIsNotAClass_ItIsNotIntact() external {
+    _setRule();
+    address _unregistered = _newClass('unregistered'); // passes every check, but is never registered
+    assertFalse(_fund.isClassIntact(_unregistered));
+    assertFalse(_fund.isClassIntact(address(0)));
+  }
+
+  function test_WhenTheHookListsTheInstalledRule_TheClassIsIntact() external {
+    address _token = _registered('alpha');
+    assertTrue(_fund.isClassIntact(_token));
+  }
+
+  function test_WhenTheHookListsTheRuleAmongOthers_TheClassIsIntact() external {
+    address _token = _registered('alpha');
+    IComplianceRule[] memory _list = new IComplianceRule[](3);
+    _list[0] = IComplianceRule(_otherRule);
+    _list[1] = IComplianceRule(_rule);
+    _list[2] = IComplianceRule(makeAddr('another'));
+    vm.mockCall(_hookOf(_token), abi.encodeWithSelector(IComplianceHook.rules.selector), abi.encode(_list));
+    assertTrue(_fund.isClassIntact(_token));
+  }
+
+  /// @dev The documented hazard: dropping the fund rule from a registered class un-caps it silently
+  function test_WhenTheHookNoLongerListsTheRule_TheClassIsNotIntact() external {
+    address _token = _registered('alpha');
+    _break(_token);
+    assertFalse(_fund.isClassIntact(_token));
+  }
+
+  function test_WhenTheHookListsNothing_TheClassIsNotIntact() external {
+    address _token = _registered('alpha');
+    vm.mockCall(
+      _hookOf(_token), abi.encodeWithSelector(IComplianceHook.rules.selector), abi.encode(new IComplianceRule[](0))
+    );
+    assertFalse(_fund.isClassIntact(_token));
+  }
+
+  /// @dev Replacing the rule breaks every class whose hook lists only the old one, until the hook lists the new one
+  function test_WhenTheRuleIsReplaced_EveryClassIsBrokenUntilItsHookListsTheNewOne() external {
+    address _first = _registered('alpha');
+    address _second = _registered('beta');
+    _attest(_otherRule, true);
+    vm.prank(_owner);
+    _fund.setRule(_otherRule);
+    assertFalse(_fund.isClassIntact(_first));
+    assertFalse(_fund.isClassIntact(_second));
+
+    _hookLists(_hookOf(_first), _otherRule);
+    assertTrue(_fund.isClassIntact(_first));
+    assertFalse(_fund.isClassIntact(_second));
+    _hookLists(_hookOf(_second), _otherRule);
+    assertTrue(_fund.isClassIntact(_second));
+  }
+
+  /// @dev A monitor that reverts on the very thing it watches is no monitor: a hook that cannot answer is a broken class
+  function test_WhenTheHookReverts_TheClassIsNotIntactAndTheViewDoesNotRevert() external {
+    address _token = _registered('alpha');
+    vm.mockCallRevert(_hookOf(_token), abi.encodeWithSelector(IComplianceHook.rules.selector), 'no rules');
+    assertFalse(_fund.isClassIntact(_token));
+    assertEq(_fund.firstBrokenClass(), _token);
+  }
+
+  function test_WhenTheTokenCannotNameItsHook_TheClassIsNotIntactAndTheViewDoesNotRevert() external {
+    address _token = _registered('alpha');
+    vm.mockCallRevert(_token, abi.encodeCall(IPolicyGated.policyHook, ()), 'no hook');
+    assertFalse(_fund.isClassIntact(_token));
+    assertEq(_fund.firstBrokenClass(), _token);
+  }
+
+  function test_WhenThereAreNoClasses_FirstBrokenClassIsZero() external view {
+    assertEq(_fund.firstBrokenClass(), address(0));
+  }
+
+  function test_WhenEveryClassIsIntact_FirstBrokenClassIsZero() external {
+    _registered('alpha');
+    _registered('beta');
+    _registered('gamma');
+    assertEq(_fund.firstBrokenClass(), address(0));
+  }
+
+  /// @dev In registration order, not in address order
+  function test_WhenSeveralClassesAreBroken_TheFirstRegisteredIsReturned() external {
+    address _first = _registered('alpha');
+    address _second = _registered('beta');
+    address _third = _registered('gamma');
+    _break(_third);
+    assertEq(_fund.firstBrokenClass(), _third);
+    _break(_second);
+    assertEq(_fund.firstBrokenClass(), _second);
+    _break(_first);
+    assertEq(_fund.firstBrokenClass(), _first);
+
+    _hookLists(_hookOf(_first), _rule);
+    assertEq(_fund.firstBrokenClass(), _second);
+  }
+
+  /// @dev The whole decision as a property: the lowest broken class number, or none
+  function testFuzz_WhenAnySubsetIsBroken_TheLowestRegisteredBrokenClassIsReturned(
+    uint256 _count,
+    uint256 _mask
+  ) external {
+    _count = bound(_count, 1, 12);
+    address[] memory _tokens = new address[](_count);
+    for (uint256 _i; _i < _count; ++_i) {
+      _tokens[_i] = _registered(string.concat('class', vm.toString(_i)));
+    }
+    address _expected;
+    for (uint256 _i = _count; _i > 0; --_i) {
+      if (_mask >> (_i - 1) & 1 == 1) {
+        _break(_tokens[_i - 1]);
+        _expected = _tokens[_i - 1];
+      }
+    }
+    assertEq(_fund.firstBrokenClass(), _expected);
+    for (uint256 _i; _i < _count; ++_i) {
+      assertEq(_fund.isClassIntact(_tokens[_i]), _mask >> _i & 1 == 0);
+    }
+  }
+
+  function test_WhenCalledWithStaticcall_NothingIsWritten() external {
+    address _token = _registered('alpha');
+    (bool _ok, bytes memory _out) = address(_fund).staticcall(abi.encodeCall(IFund.isClassIntact, (_token)));
+    assertTrue(_ok);
+    assertTrue(abi.decode(_out, (bool)));
+    (_ok, _out) = address(_fund).staticcall(abi.encodeCall(IFund.firstBrokenClass, ()));
+    assertTrue(_ok);
+    assertEq(abi.decode(_out, (address)), address(0));
+  }
+}

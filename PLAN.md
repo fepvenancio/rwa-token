@@ -1777,7 +1777,7 @@ Gates on the final tree: `npx hardhat test` **792 passing (707 Solidity, 85 Type
 
 Docs updated: flows-token (the executor paragraph and the batch diagram), transfer-checks, flows-dvp, architecture, roles, the README, SECURITY.md (the consideration bullet and a mutation row), the brief's §1 and §5. Not changed: `IIntentExecutor`'s ERC-165 id (errors are not part of it) and `InterfaceFreeze.t.sol`, which pins no error selectors. Nothing is committed or pushed.
 
-## Review items, built before the first deployment (plan 2026-10-23; decisions made; S0 to S2 committed, S3 built and waits for review)
+## Review items, built before the first deployment (plan 2026-10-23; decisions made; S0 to S3 committed, S4 built and waits for review)
 
 On 2026-10-23 the owner pasted a merged outside assessment and then said: "I prefer to have the code ready from the gate than waiting to do fixes X months after... if one institutions uses this seriously the gas costs are unecessary". The first version of this section proposed eleven decisions. The owner answered them the same day with changes, and added an S0 for the interfaces. The numbers below are the owner's answer; they differ from the first version's. A second answer settled the one open point of the first reply: `IPolicyHook` keeps its shape, with `checkSend` and `checkReceive` added and `ref` and `deadline` moved from fields into `extra`. The brief's rule 4 is satisfied: the owner's RD3 is the explicit instruction to reopen `contracts/interfaces/`, to be re-frozen after S0.
 
@@ -1954,7 +1954,7 @@ Each step: tests first with the red run shown, implementation, both runners, Sli
 | S1 | The shared hook and the context with balances; the rules' balance reads move to the context (the existing rules, so the tree stays green); `ProxyDeployer` and the initialisers take `initialRules` |
 | S2 | The base: ERC-7943 face, `_releaseFrozen`, `MulticallUpgradeable`, `templateId`. **Size gate** on the 7540 vault |
 | S3 | The rules: `HolderRestrictionRule`, `MinPositionRule`; `MaxHoldersRule` and `FundHoldersRule` adapted to the context. Gas probe re-run (built, see "S3 as built"; the two counting rules had read the context since S1, so their S3 change is the cap answer in `checkReceive`) |
-| S4 | The fund views; the Ignition modules and fixtures (shared hook deployment, the new `RULE_ORDER`, the post-deploy checks) |
+| S4 | The fund views; the Ignition modules and fixtures (shared hook deployment, the new `RULE_ORDER`, the post-deploy checks) (built, see "S4 as built"; the shared hook deployment had landed in S1) |
 | S5 | Docs, `SECURITY.md`, `README.md`, the brief (`CLAUDE.md` §1, §4, §5, §6 and the rule list), the pause runbook, the amendment to the draft ERC for RD2, `InterfaceFreeze` re-pinned, reproducibility |
 
 ### What this changes in frozen files
@@ -2050,7 +2050,7 @@ Gas, same probe: the four-rule transfer is 82,020 (S1: 81,804, so +216, the `_ch
 
 Found while validating, fixed in S2: the pre-flight gap above, and a flaw the fuzzer found afterwards: a hook returning `INSUFFICIENT_UNFROZEN` for a mint was relabelled with the standard's error and a zero account. The token now confirms a real shortfall before using the standard's error.
 
-### S3 as built (2026-10-24, working tree, not committed)
+### S3 as built (2026-10-24, committed `58fdb7b`)
 
 The two rules, and one change to the vaults and the counting rules that the minimum forced. What changed:
 
@@ -2092,6 +2092,54 @@ The demo class set of the assumptions (identity, minimum, restriction, fund) cos
 1. **The probes.** The change above (`canReceive` for the mint side, cap-aware counting rules, a zero-amount burn probe). It touches the vaults, which the plan listed for S5 at most, and reverses my S2 position on `canReceive`. The alternatives are above.
 2. **Where `MinPositionRule` is listed (S4).** In all three demo classes as assumption 1 says (+10.7k a transfer with the minimum on, 9.2k when off), or only in the classes that set a minimum. A token's list is its own, so this is a deployment choice, not a code one.
 3. **The Credential layer plan** (the other session) does not mention `checkSend` or `checkReceive`. `BaseRule` answers OK to both, so `canSend`, `canReceive` and the vaults' `max*` would say yes to an account that `CredentialRule` refuses in `check`. The rule has to override them, without an amount.
+
+### S4 as built (2026-10-24, working tree, not committed)
+
+The fund's monitor, the rule lists of the demo deployment and the post-deploy check. What changed:
+
+- **`Fund.isClassIntact(token)` and `Fund.firstBrokenClass()`** (RD10). A class is intact when it is registered and its hook still lists the fund's installed rule. `firstBrokenClass()` returns the first class that is not, in registration order, or the zero address; it loops over at most 32 classes. Neither reverts: a token that cannot name its hook, or a hook that cannot list its rules, is a broken class (try/catch around both calls), so the call that says which class is broken cannot be stopped by the broken class. The views cover the three ways a class stops being capped or starts failing closed: the fund rule dropped from a class's list (the runbook's forbidden step, reproduced in `FundIntegration_Integrity` and in a timelock test), the rule replaced in the fund while the lists still name the old one (every class is broken until its hook lists the new rule, and the monitor walks down the classes as each is fixed), and a hook swap to a hook that does not list it. They prevent none of it: nothing in the hook can know about the fund. `IFund` is re-pinned, `0x44c4a64f` to `0x2d89d7d8`; no event changed.
+- **The demo rule lists** (RD5 and assumption 1). Intent token: identity, minimum position, holder restriction, settlement window, fund holders. Both vaults: identity, minimum position, holder restriction, fund holders. No `MaxHoldersRule` on any class. `deployment.test.ts` writes the order out; it does not read it from the module.
+- **Ignition.** `Components` deploys `MinPositionRule`. `MaxHoldersRule` is still deployed and attested, and listed on no token, so governance can add it to a class that has a limit of its own without another council step; it is one line to drop. `Activate` takes `intentMinPosition`, `fundMinPosition` and `asyncFundMinPosition` (0 by default, which switches the rule off) and sets each before the hand-over. The per-class cap and the escrow exemption are gone from `Activate` and from the fixture's parameters (`holderCap`, `maxHoldersRule`): the 7540 vault is the token itself, which neither the fund rule nor the minimum counts.
+- **Post-deploy check** (`assertHandedOver`, the one the runbook prescribes). It still pins each hook's list. It now also asserts that every class is intact and that `firstBrokenClass()` is the zero address.
+- **Tests first, red runs shown.** The Solidity run failed to compile against a `Fund` without the views; with the views in, the Node run still failed on Ignition (the fixture could not build: no `minPositionRule`), which took nearly every stack test with it. Solidity runner 906 passing (was 890), Node runner 95 (was 92): the decided order, a deployment that sets minimums and enforces one, and the dropped rule through the timelock.
+- **Mutation checks.** Eight planted bugs in the new `Fund` views (an unregistered token passing, the registration ignored, the first or last class skipped, a failing hook or token counted as listed, the wrong comparison, the last broken class returned instead of the first): all eight fail a test.
+
+Gates on the working tree: `forge fmt --check`, `solhint --max-warnings 0`, `tsc --noEmit`, `validate:upgrades` (3 of 3), Aderyn 0 (the empty `catch` blocks carry inline suppressions with their reason), Halmos 16 of 16, reproducibility (17 contracts), Slither 0 results (377 contracts, 97 detectors).
+
+**Gas, measured as whole transactions on the deployed stack.** A new probe, not in the repo: the stack is deployed through Ignition, an ordinary transfer of a tenth of a token between two holders is sent as a real transaction, and `gasUsed` is read from the receipt (21,000 of intrinsic gas included). The same probe ran on four commits, each in a copy of its own tree, on Hardhat's in-process node. This is not comparable to the inside-the-token-frame table in S3 (which leaves out the intrinsic gas and the proxy).
+
+| Deployed stack | Intent token transfer | 4626 share transfer |
+|---|---|---|
+| Before the review items (`7536ec2`) | 144,700 | 138,001 |
+| S2 (`6709889`) | 135,463 | 128,526 |
+| S3 (`58fdb7b`) | 138,890 | 131,953 |
+| S4 (working tree) | 127,204 | 120,290 |
+
+S4 is 17,496 gas (12.1%) below the stack before the review items for the intent token and 17,711 (12.8%) for the 4626 share, while it adds the address freeze, the minimum position (off) and the account-level answers. The steps agree with the S3 probe: S3 added 3,427 to each (the receiver's word); S4 removes `MaxHoldersRule` (about 20,900) and adds `MinPositionRule` (9,208 even when off), a net of 11,700 less. S0 to S2 together are 9,237 below the start (the balance callbacks moved into the context). What would save most now is a deployment choice: a token that wants no minimum can leave `MinPositionRule` out of its list (9,208 a transfer).
+
+Sizes: `Fund` 6,012 bytes (limit 24,576).
+
+**The outside review of S2 and S3, checked against the code.** It was mostly praise; the claims that carry weight:
+
+| Claim | Result |
+|---|---|
+| The two S2 fixes work as described: the enforcement-burn bound in `_availableToMove` and `_check`, and `ERC7943InsufficientUnfrozenBalance` only on a real shortfall in `_update` | True, and the code is as quoted. One note: the "previously" state existed in the S2 working tree only; no commit ever held it |
+| `HolderRestrictionRule` reads one word for the sender and answers the freeze and the lockup from it; the role is asked only for a burn while a lockup runs | True (`vm.load` pin at `HolderRestrictionRule.t.sol:209`) |
+| `MinPositionRule` cannot overflow or underflow, and asks for the exemption and the role only once a position would breach | True |
+| "Backed by 16/16 Halmos symbolic proofs" | Overstated. 16 is the whole suite; three properties are about `MinPositionRule`. `HolderRestrictionRule` has none: it has no arithmetic beyond its checked 64-bit cast |
+| "Formally verified across all 5 `TransferKind`s" | Partly. Never reverting is proven for all five kinds. The exact decision is proven for TRANSFER, with balances constrained so the sums fit; MINT, BURN and EXECUTED rest on unit and fuzz tests |
+| 23 of 24 mutants killed | True; the 24th is equivalent |
+| `canSend` is true during a lockup while every holder-driven move is refused with `LOCKED` | True, and by design (RD4 puts the lockup in `check` only). It is what an integrator reading `canSend` gets wrong, so it is decision 4 |
+| `Gated4626Vault.maxRedeem` probes zero "because" the lockup sits in `check(BURN)` | The conclusion is right, the reason is half of it. The zero amount is for the minimum (one share leaves dust); that the probe is a burn and not `canSend` is for the lockup |
+| `CredentialRule` must answer `checkSend` and `checkReceive`: sender `ACTIVE`, `EXIT_ONLY` or `LAPSED`, `NONE` and `BLOCKED` refused with `SENDER_NOT_VERIFIED`; receiver eligible | Matches the Credential plan's table. The receiver's reasons are three, not one: `RECEIVER_NOT_VERIFIED`, `CREDENTIAL_EXPIRED`, `RECEIVER_NOT_ELIGIBLE` |
+| Reference `IHolderRestrictionRule.sol#L13` | It is line 12 |
+
+**Decisions for you.**
+
+1. **`MinPositionRule` in all three classes, off by default** (assumption 1), costing 9,208 a transfer. The alternative is to list it only on the classes that will set a minimum; a class can be given the rule later through `setRules` (a timelock operation), so leaving it out is reversible.
+2. **`MaxHoldersRule` deployed and attested but unlisted.** It spends one deployment and one attestation to save a council step later. Dropping it from `Components` and the council step is one line each.
+3. **`Activate` sets the minimums.** The alternative is to set none at deployment and leave it to the timelock (seven days). The default of 0 means a deployment that sets nothing behaves as before.
+4. **`canSend` and the lockup.** Today a locked holder reads `canSend` true and every movement of theirs is refused. The freeze already sets the precedent for the fix: it is in `checkSend` although FORCED passes it. Putting the lockup in `checkSend` as well (the holder's word is already read, so no new read) makes `canSend` say `LOCKED` for exactly the movements `check` refuses; FORCED and the enforcement burn stay exempt in `check`. It contradicts RD4's sentence that the lockup stays in the transfer check, which is why I have not done it. I recommend it: one line and a test, and it makes the standard's account question truthful during a lockup.
 
 ### Not in this plan
 

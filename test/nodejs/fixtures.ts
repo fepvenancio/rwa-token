@@ -68,7 +68,6 @@ export const MONDAY = 1_791_763_200n + 260n * 7n * 86_400n;
 export const MONDAY_10AM = MONDAY + 10n * 3_600n;
 export const WINDOW_OPEN = 9 * 3_600;
 export const WINDOW_CLOSE = 17 * 3_600;
-export const HOLDER_CAP = 3n;
 /** The fund-wide investor cap, one number for the three demo classes. */
 export const FUND_HOLDER_CAP = 3n;
 
@@ -129,6 +128,7 @@ export async function deployUntilActivate(connection: NetworkConnection) {
     registry,
     hook,
     identityRule,
+    minPositionRule,
     holderRestrictionRule,
     windowRule,
     maxHoldersRule,
@@ -144,7 +144,7 @@ export async function deployUntilActivate(connection: NetworkConnection) {
   };
 
   // Council step: the rules, the one shared hook and the implementations.
-  for (const rule of [identityRule, holderRestrictionRule, windowRule, maxHoldersRule, fundHoldersRule]) {
+  for (const rule of [identityRule, minPositionRule, holderRestrictionRule, windowRule, maxHoldersRule, fundHoldersRule]) {
     await attest(rule.address, ATTEST.RULE, `ipfs://rule-review/${rule.address}`);
   }
   await attest(hook.address, ATTEST.HOOK, `ipfs://hook-review/${hook.address}`);
@@ -158,9 +158,9 @@ export async function deployUntilActivate(connection: NetworkConnection) {
     proxyDeployer: proxyDeployer.address,
     hook: hook.address,
     identityRule: identityRule.address,
+    minPositionRule: minPositionRule.address,
     holderRestrictionRule: holderRestrictionRule.address,
     windowRule: windowRule.address,
-    maxHoldersRule: maxHoldersRule.address,
     fundHoldersRule: fundHoldersRule.address,
     intentImpl: components.intentImpl.address,
     fundImpl: components.fundImpl.address,
@@ -177,7 +177,10 @@ export async function deployUntilActivate(connection: NetworkConnection) {
     agent: address(agent),
     operator: address(operator),
     fulfiller: address(fulfiller),
-    holderCap: HOLDER_CAP,
+    // The minimum position of each token; 0 switches the rule off, as in every deployment that sets none.
+    intentMinPosition: 0n,
+    fundMinPosition: 0n,
+    asyncFundMinPosition: 0n,
     fundContract: fundContract.address,
     fundHolderCap: FUND_HOLDER_CAP,
     windowOpen: WINDOW_OPEN,
@@ -203,7 +206,7 @@ export async function deployUntilActivate(connection: NetworkConnection) {
       recoveryTimelock,
       registry,
       identity,
-      rules: { identityRule, holderRestrictionRule, windowRule, maxHoldersRule, fundHoldersRule },
+      rules: { identityRule, minPositionRule, holderRestrictionRule, windowRule, maxHoldersRule, fundHoldersRule },
       fund: fundContract,
       proxyDeployer,
       asset,
@@ -239,7 +242,8 @@ export type Stack = Awaited<ReturnType<typeof deployStack>>;
  * - the guardian can cancel timelock operations but cannot propose or execute them;
  * - `ProxyDeployer` is owned by the timelock, so no token can be placed outside governance;
  * - the fund is owned by the timelock, runs the attested rule that points back at it, has the intended cap, and holds
- *   the three tokens as its classes, in that order;
+ *   the three tokens as its classes, in that order, each intact (its hook lists the fund's rule: `firstBrokenClass()`
+ *   is the zero address);
  * - the recovery timelock holds exactly RECOVERY_ROLE on each token, both executors and the main timelock (nothing
  *   else, nowhere else), has no cancellers, and the guardian holds nothing on it.
  */
@@ -344,7 +348,9 @@ export async function assertHandedOver(s: Omit<Stack, "holders" | "identity" | "
   assert.equal(await s.fund.read.classCount(), BigInt(classes.length), "class count");
   for (const [i, t] of classes.entries()) {
     assert.ok(isAddressEqual(await s.fund.read.classAt([BigInt(i + 1)]), t.address), `class ${i + 1} is not ${t.address}`);
+    assert.equal(await s.fund.read.isClassIntact([t.address]), true, `class ${i + 1} no longer lists the fund's rule`);
   }
+  assert.ok(isAddressEqual(await s.fund.read.firstBrokenClass(), zeroAddress), "the fund has a broken class");
   const guardian = s.wallets.guardian.account.address;
   assert.equal(await s.timelock.read.hasRole([await s.timelock.read.CANCELLER_ROLE(), guardian]), true);
   assert.equal(await s.timelock.read.hasRole([await s.timelock.read.PROPOSER_ROLE(), guardian]), false);

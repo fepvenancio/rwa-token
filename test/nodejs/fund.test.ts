@@ -233,6 +233,28 @@ describe("fund: investors counted across classes", async function () {
     assert.equal(await s.fund.read.classCount(), 4n);
   });
 
+  it("a rule list without the fund rule, set through the timelock, un-caps the class and the monitor names it", async function () {
+    const s = await networkHelpers.loadFixture(funded);
+    // The hazard the runbook forbids: the hook accepts any attested list. Three investors fill the fund's cap.
+    for (const w of [s.holders.alice, s.holders.bob, s.holders.carol]) await mintToken(s, w);
+    assert.equal(await s.fund.read.holderCount(), FUND_HOLDER_CAP);
+    const without = RULE_ORDER.intent.filter((name) => name !== "fundHoldersRule").map((name) => s.rules[name].address);
+    const drop = await schedule(
+      s,
+      s.hook.address,
+      encodeFunctionData({ abi: s.hook.abi, functionName: "setRules", args: [s.token.address, without] }),
+    );
+    await networkHelpers.time.increase(drop.delay);
+    await drop.execute();
+
+    assert.equal(await s.fund.read.isClassIntact([s.token.address]), false);
+    assert.equal(await s.fund.read.isClassIntact([s.vault4626.address]), true);
+    assert.ok(isAddressEqual(await s.fund.read.firstBrokenClass(), s.token.address));
+    // What it costs: a fourth investor gets in at a full cap, and the fund's count does not know.
+    await mintToken(s, s.holders.dave);
+    assert.equal(await s.fund.read.holderCount(), FUND_HOLDER_CAP);
+  });
+
   describe("replacing the rule", function () {
     /** The ordered rule list each demo hook should have once `next` replaces the fund rule. */
     const ruleListWith = (s: Stack, key: keyof typeof RULE_ORDER, next: Address) =>
@@ -273,6 +295,7 @@ describe("fund: investors counted across classes", async function () {
 
       assert.ok(isAddressEqual(await s.fund.read.rule(), next.address));
       assert.equal(await s.fund.read.holderCount(), 2n);
+      assert.ok(isAddressEqual(await s.fund.read.firstBrokenClass(), zeroAddress), "one batch leaves every class intact");
       // The new rule records, and the old one no longer can.
       await mintToken(s, s.holders.carol);
       assert.equal(await s.fund.read.holderCount(), 3n);
@@ -298,6 +321,9 @@ describe("fund: investors counted across classes", async function () {
       const [alice, bob] = [s.holders.alice.account.address, s.holders.bob.account.address];
       assert.deepEqual(await s.token.read.canTransferWithReason([zeroAddress, carol, 1n]), [false, REASONS.NOT_FUND_CLASS]);
       assert.deepEqual(await s.token.read.canTransferWithReason([alice, bob, 1n]), [false, REASONS.NOT_FUND_CLASS]);
+      // The monitor says the same: every class lists a rule that is no longer the fund's, the first is named.
+      assert.equal(await s.fund.read.isClassIntact([s.token.address]), false);
+      assert.ok(isAddressEqual(await s.fund.read.firstBrokenClass(), s.token.address));
       await viem.assertions.revertWithCustomErrorWithArgs(mintToken(s, s.holders.carol), s.token, "PolicyGated_TransferRejected", [REASONS.NOT_FUND_CLASS]);
       await viem.assertions.revertWithCustomErrorWithArgs(
         s.token.write.transfer([bob, 1n], { account: s.holders.alice.account }),

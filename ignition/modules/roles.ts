@@ -24,12 +24,15 @@ export const TOKENS = {
 } as const;
 
 /**
- * Each token's ordered rule list (brief §6: Identity → HolderRestriction → SettlementWindow → MaxHolders; vaults have no EXECUTED
- * transfers to window), then the fund-wide `FundHoldersRule` last. `Tokens` builds the hooks from it and the post-deploy
- * check compares `hook.rules()` against it: a hook's attested codehash covers its immutables, not this list.
+ * Each token's ordered rule list: Identity, then MinPosition (so the rules after it only ever see real positions), then
+ * HolderRestriction, then the SettlementWindow for the intent token (vaults have no EXECUTED transfers to window), then
+ * the fund-wide `FundHoldersRule` last. There is no per-class `MaxHoldersRule`: the investor count that matters for a
+ * fund is fund-wide (review items, RD5). `Activate` passes each list through the token's init data and `ProxyDeployer`
+ * checks it; the post-deploy check compares `hook.rules()` against it, since a hook's attested codehash covers its
+ * immutables, not this list.
  */
 export const RULE_ORDER = {
-  intent: ["identityRule", "holderRestrictionRule", "windowRule", "maxHoldersRule", "fundHoldersRule"],
-  fund: ["identityRule", "holderRestrictionRule", "maxHoldersRule", "fundHoldersRule"],
-  asyncFund: ["identityRule", "holderRestrictionRule", "maxHoldersRule", "fundHoldersRule"],
+  intent: ["identityRule", "minPositionRule", "holderRestrictionRule", "windowRule", "fundHoldersRule"],
+  fund: ["identityRule", "minPositionRule", "holderRestrictionRule", "fundHoldersRule"],
+  asyncFund: ["identityRule", "minPositionRule", "holderRestrictionRule", "fundHoldersRule"],
 } as const satisfies Record<keyof typeof TOKENS, readonly string[]>;
