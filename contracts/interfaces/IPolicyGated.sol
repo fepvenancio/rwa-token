@@ -1,35 +1,31 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import {IERC7943Fungible} from 'interfaces/IERC7943Fungible.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 
 /**
  * @title IPolicyGated
  * @notice Enforcement core and integrator read path shared by every gated template. Every balance movement (transfer,
  *         executed intent, forced transfer, mint, burn) is decided by an external policy hook
- * @dev Function names follow the project brief. The token does not claim the ERC-7943 interface id, whose names and
- *      return types differ
+ * @dev Inherits the ERC-7943 Final fungible interface, whose id the token advertises: `forcedTransfer`,
+ *      `setFrozenTokens`, `getFrozenTokens`, `canSend`, `canReceive` and the boolean `canTransfer` are declared there.
+ *      This interface holds what the standard does not cover: issuance, pause, the hook pointer, and the reasoned
+ *      pre-flight
  */
-interface IPolicyGated {
+interface IPolicyGated is IERC7943Fungible {
   /*///////////////////////////////////////////////////////////////
                             EVENTS
   //////////////////////////////////////////////////////////////*/
 
   /**
-   * @notice Emitted when an agent forces a transfer
+   * @notice Emitted with the standard's `ForcedTransfer` when an agent forces a transfer, so the agent is not lost
    * @param _from The account the tokens were taken from
    * @param _to The account the tokens were sent to
    * @param _amount The amount moved
    * @param _agent The AGENT_ROLE account that forced the transfer
    */
-  event ForcedTransfer(address indexed _from, address indexed _to, uint256 _amount, address indexed _agent);
-
-  /**
-   * @notice Emitted when an account's frozen amount changes, including when an enforcement action releases it
-   * @param _user The account
-   * @param _amount The new absolute frozen amount
-   */
-  event Frozen(address indexed _user, uint256 _amount);
+  event ForcedTransferBy(address indexed _from, address indexed _to, uint256 _amount, address indexed _agent);
 
   /**
    * @notice Emitted when the policy hook is replaced
@@ -41,14 +37,6 @@ interface IPolicyGated {
   /*///////////////////////////////////////////////////////////////
                             ERRORS
   //////////////////////////////////////////////////////////////*/
-
-  /**
-   * @notice Thrown when freezing more than an account holds
-   * @param _user The account
-   * @param _amount The requested frozen amount
-   * @param _balance The account's balance
-   */
-  error PolicyGated_FrozenExceedsBalance(address _user, uint256 _amount, uint256 _balance);
 
   /**
    * @notice Thrown when installing a hook or implementation that is not attested for the required kind
@@ -65,7 +53,8 @@ interface IPolicyGated {
   error PolicyGated_HookRegistryMismatch(address _hookRegistry, address _tokenRegistry);
 
   /**
-   * @notice Thrown when a balance movement is rejected by the token's mechanical checks or by the policy hook
+   * @notice Thrown when a balance movement is rejected by the policy hook. An amount above the unfrozen balance reverts
+   *         with `ERC7943InsufficientUnfrozenBalance` instead
    * @param _reason A reason code from `Reasons`
    */
   error PolicyGated_TransferRejected(bytes32 _reason);
@@ -79,27 +68,14 @@ interface IPolicyGated {
 
   /**
    * @notice Burns tokens from an account
-   * @dev Only BURNER_ROLE. An enforcement action: no allowance is needed and frozen tokens can be burned, releasing
-   *      the frozen amount as needed. The hook still decides, with `from` set and `to` == address(0)
+   * @dev Only BURNER_ROLE. An enforcement action: no allowance is needed and frozen tokens can be burned, lowering the
+   *      frozen amount by the part of `_amount` that was frozen. The hook still decides, with `from` set and `to` ==
+   *      address(0)
    * @param _from The account to burn from
    * @param _amount The amount to burn
    */
   function burn(
     address _from,
-    uint256 _amount
-  ) external;
-
-  /**
-   * @notice Moves tokens between accounts without the holder's consent (clawback / recovery)
-   * @dev Only AGENT_ROLE. Bypasses pause and frozen balance, releasing the frozen amount as needed. The hook still
-   *      decides, with kind FORCED
-   * @param _from The account the tokens are taken from
-   * @param _to The account the tokens are sent to
-   * @param _amount The amount to move
-   */
-  function forcedTransfer(
-    address _from,
-    address _to,
     uint256 _amount
   ) external;
 
@@ -121,19 +97,9 @@ interface IPolicyGated {
   function pause() external;
 
   /**
-   * @notice Sets the absolute frozen amount for an account
-   * @dev Only AGENT_ROLE. The amount must not exceed the account's balance
-   * @param _user The account
-   * @param _amount The new frozen amount
-   */
-  function setFrozen(
-    address _user,
-    uint256 _amount
-  ) external;
-
-  /**
    * @notice Replaces the policy hook
-   * @dev Only DEFAULT_ADMIN_ROLE (timelock). `_newHook` must be attested as HOOK in the registry
+   * @dev Only DEFAULT_ADMIN_ROLE (timelock). `_newHook` must be attested as HOOK in the registry and name the token's
+   *      registry
    * @param _newHook The new hook
    */
   function setPolicyHook(
@@ -148,41 +114,23 @@ interface IPolicyGated {
   function unpause() external;
 
   /**
-   * @notice Pre-flight for a plain transfer by `_from`, a mint (`_from` == 0) or a burn (`_to` == 0)
+   * @notice Pre-flight for a plain transfer by `_from`, a mint (`_from` == 0) or a burn (`_to` == 0), with the reason
    * @dev Runs the same mechanical checks and hook call as the state-changing path, minus the write. The operator in
    *      the context is `_from`, or the caller for a mint. It models holder-driven movements only: a burn
    *      (`_to` == 0) is simulated as a holder or vault burn, so frozen tokens count against `_amount`. The enforcement
-   *      paths differ: `burn` and `forcedTransfer` release frozen tokens first, and `forcedTransfer` also bypasses pause
+   *      paths differ: `burn` and `forcedTransfer` release frozen tokens first, and `forcedTransfer` also bypasses pause.
+   *      The boolean `canTransfer` is this function's first value
    * @param _from The sender, or address(0) for a mint
    * @param _to The receiver, or address(0) for a burn
    * @param _amount The amount
    * @return _ok True if the movement would succeed
    * @return _reason The reason code; `Reasons.TRANSFER_OK` when `_ok`
    */
-  function canTransfer(
+  function canTransferWithReason(
     address _from,
     address _to,
     uint256 _amount
   ) external view returns (bool _ok, bytes32 _reason);
-
-  /**
-   * @notice The frozen amount of an account
-   * @param _user The account
-   * @return _amount The frozen amount
-   */
-  function getFrozen(
-    address _user
-  ) external view returns (uint256 _amount);
-
-  /**
-   * @notice Whether the policy hook would accept `_user` as a mint receiver; an identity-style check
-   * @dev Ignores pause and frozen balance
-   * @param _user The account
-   * @return _allowed True if accepted
-   */
-  function isUserAllowed(
-    address _user
-  ) external view returns (bool _allowed);
 
   /**
    * @notice The current policy hook

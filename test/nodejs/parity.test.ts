@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { network } from "hardhat";
-import { getAddress, maxUint256, parseEther, parseUnits, zeroAddress, type Abi, type Hex } from "viem";
+import { getAddress, maxUint256, parseEther, parseUnits, zeroAddress, type Abi, type Address, type Hex } from "viem";
 
 import { deployStack, MONDAY, reasonName, REASONS, revertOf, signIntent, type Stack } from "./fixtures.js";
 
@@ -85,8 +85,8 @@ const CONDITIONS: Condition[] = [
     setup: async (s) => {
       const alice = s.holders.alice.account.address;
       const agent = s.wallets.agent.account;
-      await s.token.write.setFrozen([alice, await s.token.read.balanceOf([alice])], { account: agent });
-      await s.vault4626.write.setFrozen([alice, await s.vault4626.read.balanceOf([alice])], { account: agent });
+      await s.token.write.setFrozenTokens([alice, await s.token.read.balanceOf([alice])], { account: agent });
+      await s.vault4626.write.setFrozenTokens([alice, await s.vault4626.read.balanceOf([alice])], { account: agent });
     },
     transfer: "INSUFFICIENT_UNFROZEN",
     intent: "INSUFFICIENT_UNFROZEN",
@@ -139,7 +139,14 @@ describe("pre-flight parity matrix", async function () {
     }
   }
 
-  const rejected = (reason: Hex) => ({ errorName: "PolicyGated_TransferRejected", args: [reason] });
+  /**
+   * What the write reverts with for a refused movement. A policy rejection carries its reason; the token's own
+   * frozen-balance check reverts with ERC-7943's error, which names the sender, the amount and the unfrozen balance.
+   */
+  const rejected = (reason: Hex, sender: Address, amount: bigint, unfrozen: bigint) =>
+    reason === REASONS.INSUFFICIENT_UNFROZEN
+      ? { errorName: "ERC7943InsufficientUnfrozenBalance", args: [getAddress(sender), amount, unfrozen] }
+      : { errorName: "PolicyGated_TransferRejected", args: [reason] };
 
   for (const c of CONDITIONS) {
     describe(c.name, function () {
@@ -153,7 +160,7 @@ describe("pre-flight parity matrix", async function () {
       it(`transfer → ${c.transfer}`, async function () {
         const s = await prepared();
         const { alice, bob } = s.holders;
-        const [ok, reason] = await s.token.read.canTransfer([alice.account.address, bob.account.address, 1n]);
+        const [ok, reason] = await s.token.read.canTransferWithReason([alice.account.address, bob.account.address, 1n]);
         assert.equal(reasonName(reason), c.transfer);
         assert.equal(ok, c.transfer === "TRANSFER_OK");
         await assertCallParity(
@@ -161,7 +168,7 @@ describe("pre-flight parity matrix", async function () {
           () => s.token.simulate.transfer([bob.account.address, 1n], { account: alice.account.address }),
           () => s.token.write.transfer([bob.account.address, 1n], { account: alice.account }),
           s.token.abi,
-          ok ? undefined : rejected(reason),
+          ok ? undefined : rejected(reason, alice.account.address, 1n, 0n),
         );
       });
 
@@ -179,14 +186,14 @@ describe("pre-flight parity matrix", async function () {
           () => s.executor.simulate.execute([s.token.address, intent, sig], { account: operator.address }),
           () => s.executor.write.execute([s.token.address, intent, sig], { account: operator }),
           [...s.executor.abi, ...s.token.abi],
-          ok ? undefined : rejected(reason),
+          ok ? undefined : rejected(reason, alice.account.address, 1n, 0n),
         );
       });
 
       it(`deposit → ${c.deposit}`, async function () {
         const s = await prepared();
         const { alice, bob } = s.holders;
-        const [ok, reason] = await s.vault4626.read.canTransfer([zeroAddress, bob.account.address, 1n]);
+        const [ok, reason] = await s.vault4626.read.canTransferWithReason([zeroAddress, bob.account.address, 1n]);
         assert.equal(reasonName(reason), c.deposit);
         const max = await s.vault4626.read.maxDeposit([bob.account.address]);
         assert.equal(max, ok ? maxUint256 : 0n, "maxDeposit agrees with canTransfer");
@@ -202,7 +209,7 @@ describe("pre-flight parity matrix", async function () {
       it(`redeem → ${c.redeem}`, async function () {
         const s = await prepared();
         const owner = s.holders.alice.account;
-        const [ok, reason] = await s.vault4626.read.canTransfer([owner.address, zeroAddress, 1n]);
+        const [ok, reason] = await s.vault4626.read.canTransferWithReason([owner.address, zeroAddress, 1n]);
         assert.equal(reasonName(reason), c.redeem);
         const max = await s.vault4626.read.maxRedeem([owner.address]);
         assert.equal(max > 0n, ok, "maxRedeem agrees with canTransfer");

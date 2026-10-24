@@ -9,9 +9,11 @@ import {Test} from 'forge-std/Test.sol';
 import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+import {IERC7943Fungible} from 'interfaces/IERC7943Fungible.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
+import {ITemplated} from 'interfaces/ITemplated.sol';
 import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
 
 import {ProxyDeployer} from 'contracts/deploy/ProxyDeployer.sol';
@@ -21,6 +23,8 @@ import {IdentityRule} from 'contracts/hooks/rules/IdentityRule.sol';
 import {MockIdentityRegistry} from 'contracts/test/MockIdentityRegistry.sol';
 import {MockReentrantRule} from 'contracts/test/MockReentrantRule.sol';
 import {IntentToken} from 'contracts/tokens/IntentToken.sol';
+import {Gated4626Vault} from 'contracts/vaults/Gated4626Vault.sol';
+import {Gated7540Vault} from 'contracts/vaults/Gated7540Vault.sol';
 
 /// @notice Integration: real registry, compliance hook and identity rule, wired in deployment order
 contract IntentTokenIntegrationTest is Test {
@@ -174,7 +178,7 @@ contract IntentTokenIntegration_Deployment is IntentTokenIntegrationTest {
   function test_WhenDeployed_ThePolicyIsAlreadyInstalled() external view {
     assertEq(_hook.ruleCount(address(_token)), 1);
     assertEq(address(_hook.rules(address(_token))[0]), address(_identityRule));
-    (bool _ok, bytes32 _reason) = _token.canTransfer(_alice, _eve, 1);
+    (bool _ok, bytes32 _reason) = _token.canTransferWithReason(_alice, _eve, 1);
     assertFalse(_ok);
     assertEq(_reason, Reasons.RECEIVER_NOT_VERIFIED);
   }
@@ -217,7 +221,7 @@ contract IntentTokenIntegration_Identity is IntentTokenIntegrationTest {
   }
 
   function test_WhenBothPartiesAreVerified_TheTransferSucceedsAndPreflightAgrees() external {
-    (bool _ok, bytes32 _reason) = _token.canTransfer(_alice, _bob, 10 ether);
+    (bool _ok, bytes32 _reason) = _token.canTransferWithReason(_alice, _bob, 10 ether);
     assertTrue(_ok);
     assertEq(_reason, Reasons.TRANSFER_OK);
     vm.prank(_alice);
@@ -226,7 +230,7 @@ contract IntentTokenIntegration_Identity is IntentTokenIntegrationTest {
   }
 
   function test_WhenTheReceiverIsUnverified_TheTransferFailsAndPreflightAgrees() external {
-    (bool _ok, bytes32 _reason) = _token.canTransfer(_alice, _eve, 1);
+    (bool _ok, bytes32 _reason) = _token.canTransferWithReason(_alice, _eve, 1);
     assertFalse(_ok);
     assertEq(_reason, Reasons.RECEIVER_NOT_VERIFIED);
     vm.expectRevert(_rejected(Reasons.RECEIVER_NOT_VERIFIED));
@@ -235,17 +239,67 @@ contract IntentTokenIntegration_Identity is IntentTokenIntegrationTest {
   }
 }
 
+/// @notice ERC-7943's account-level answers agree with the identity rule's, and `canTransfer` is never more generous
+contract IntentTokenIntegration_Erc7943 is IntentTokenIntegrationTest {
+  function test_WhenAnAccountIsVerified_CanSendAndCanReceiveAreTrue() external view {
+    assertTrue(_token.canSend(_alice));
+    assertTrue(_token.canReceive(_alice));
+    assertTrue(_token.canSend(_bob));
+    assertTrue(_token.canReceive(_bob));
+  }
+
+  function test_WhenAnAccountIsNotVerified_CanSendAndCanReceiveAreFalse() external view {
+    assertFalse(_token.canSend(_eve));
+    assertFalse(_token.canReceive(_eve));
+  }
+
+  function test_WhenAnAccountIsDeverified_BothTurnFalse() external {
+    _identity.set(_bob, false);
+    assertFalse(_token.canSend(_bob));
+    assertFalse(_token.canReceive(_bob));
+  }
+
+  /// @dev "canTransfer MUST check canSend on the sender and canReceive on the receiver": over every pair of the four
+  ///      accounts, a transfer of one unit is possible exactly when both sides pass and the sender holds it
+  function test_WhenAnyPairIsAsked_CanTransferIsCanSendAndCanReceiveAndTheBalance() external view {
+    address[4] memory _accounts = [_alice, _bob, _eve, _treasury];
+    for (uint256 _i; _i < 4; ++_i) {
+      for (uint256 _j; _j < 4; ++_j) {
+        bool _expected =
+          _token.canSend(_accounts[_i]) && _token.canReceive(_accounts[_j]) && _token.balanceOf(_accounts[_i]) >= 1;
+        assertEq(_token.canTransfer(_accounts[_i], _accounts[_j], 1), _expected);
+      }
+    }
+  }
+
+  function test_WhenQueried_ItAdvertisesTheStandardsId() external view {
+    assertTrue(_token.supportsInterface(0x3edbb4c4));
+    assertTrue(_token.supportsInterface(type(IERC7943Fungible).interfaceId));
+  }
+
+  function test_WhenAForcedTransferMovesFrozenTokens_FrozenComesBeforeTransferAndBothForcedEventsFollow() external {
+    vm.prank(_agent);
+    _token.setFrozenTokens(_alice, 1000 ether);
+    vm.expectEmit(address(_token));
+    emit IERC7943Fungible.Frozen(_alice, 0);
+    vm.expectEmit(address(_token));
+    emit IERC7943Fungible.ForcedTransfer(_alice, _treasury, 1000 ether);
+    vm.prank(_agent);
+    assertTrue(_token.forcedTransfer(_alice, _treasury, 1000 ether));
+  }
+}
+
 contract IntentTokenIntegration_Enforcement is IntentTokenIntegrationTest {
   /// @dev Regression: a frozen, de-verified holder's tokens could be neither clawed back nor burned
   function test_WhenAHolderIsDeverified_TheirTokensCanBeClawedBackThenBurned() external {
     vm.prank(_agent);
-    _token.setFrozen(_alice, 1000 ether);
+    _token.setFrozenTokens(_alice, 1000 ether);
     _identity.set(_alice, false);
 
     vm.prank(_agent);
     _token.forcedTransfer(_alice, _treasury, 1000 ether);
     assertEq(_token.balanceOf(_treasury), 1000 ether);
-    assertEq(_token.getFrozen(_alice), 0);
+    assertEq(_token.getFrozenTokens(_alice), 0);
 
     vm.prank(_burner);
     _token.burn(_treasury, 1000 ether);
@@ -315,7 +369,7 @@ contract IntentTokenIntegration_Intents is IntentTokenIntegrationTest {
 
   function test_WhenTheSenderIsFrozen_TheIntentFailsAndPreflightAgrees() external {
     vm.prank(_agent);
-    _token.setFrozen(_alice, 1000 ether);
+    _token.setFrozenTokens(_alice, 1000 ether);
     (ITransferIntent.TransferIntent memory _i, bytes memory _sig) = _signedIntent(_bob, 1, keccak256('n3'));
     (bool _ok, bytes32 _reason) = _token.canExecute(_i, _sig);
     assertFalse(_ok);
@@ -343,6 +397,40 @@ contract IntentTokenIntegration_Safety is IntentTokenIntegrationTest {
     IntentToken _next = new IntentToken();
     assertNotEq(address(_next).codehash, address(_impl).codehash);
     assertFalse(_registry.isAttested(address(_next), IPolicyRegistry.AttestKind.IMPLEMENTATION));
+  }
+
+  function test_WhenQueried_ItNamesItsTemplate() external view {
+    assertEq(_token.templateId(), keccak256('IntentToken'));
+  }
+
+  /// @dev The reproduction of the review finding: a vault implementation the council attested for vaults, offered to a
+  ///      token proxy, used to be accepted and left the token with the vault's code on its own storage
+  function test_WhenUpgradedToAVaultImplementationThatIsAttested_ItIsRefused() external {
+    address _vaultImpl = address(new Gated4626Vault());
+    vm.prank(_attester);
+    _registry.attest(_vaultImpl.codehash, IPolicyRegistry.AttestKind.IMPLEMENTATION, 'ipfs://vault-impl');
+    vm.expectRevert(
+      abi.encodeWithSelector(
+        ITemplated.Templated_WrongTemplate.selector, _vaultImpl, keccak256('IntentToken'), keccak256('Gated4626Vault')
+      )
+    );
+    vm.prank(_admin);
+    _token.upgradeToAndCall(_vaultImpl, '');
+    assertEq(_token.balanceOf(_alice), 1000 ether);
+    assertEq(_token.decimals(), 18);
+  }
+
+  function test_WhenUpgradedToAnAsyncVaultImplementationThatIsAttested_ItIsRefused() external {
+    address _vaultImpl = address(new Gated7540Vault());
+    vm.prank(_attester);
+    _registry.attest(_vaultImpl.codehash, IPolicyRegistry.AttestKind.IMPLEMENTATION, 'ipfs://vault-impl');
+    vm.expectRevert(
+      abi.encodeWithSelector(
+        ITemplated.Templated_WrongTemplate.selector, _vaultImpl, keccak256('IntentToken'), keccak256('Gated7540Vault')
+      )
+    );
+    vm.prank(_admin);
+    _token.upgradeToAndCall(_vaultImpl, '');
   }
 
   function test_WhenUpgradedToAnAttestedImplementation_StateIsPreserved() external {

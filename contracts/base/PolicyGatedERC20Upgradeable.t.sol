@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import {UUPSUpgradeable} from '@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol';
 import {IAccessControl} from '@openzeppelin/contracts/access/IAccessControl.sol';
 import {IERC20Errors} from '@openzeppelin/contracts/interfaces/draft-IERC6093.sol';
 import {ERC1967Proxy} from '@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol';
@@ -16,9 +17,11 @@ import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+import {IERC7943Fungible} from 'interfaces/IERC7943Fungible.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
+import {ITemplated} from 'interfaces/ITemplated.sol';
 
 import {Helpers} from 'contracts/test/Helpers.sol';
 import {PolicyGatedHarness} from 'contracts/test/PolicyGatedHarness.sol';
@@ -50,6 +53,7 @@ contract PolicyGatedUnitTest is Helpers {
     _hook = _mockContract('hook');
     _attested(_hook, IPolicyRegistry.AttestKind.HOOK, true);
     _hookNamesRegistry(_hook, _registry);
+    _hookAccountChecksDecide(Reasons.TRANSFER_OK, Reasons.TRANSFER_OK);
     _hookDecides(Reasons.TRANSFER_OK);
     vm.mockCall(_hook, abi.encodeCall(IPolicyHook.wantsAfter, ()), abi.encode(false));
 
@@ -96,6 +100,15 @@ contract PolicyGatedUnitTest is Helpers {
     address _namedRegistry
   ) internal {
     vm.mockCall(_hookAddress, abi.encodeCall(IComplianceHook.REGISTRY, ()), abi.encode(_namedRegistry));
+  }
+
+  /// @dev The hook's account-level answers, which `canSend` and `canReceive` are built from
+  function _hookAccountChecksDecide(
+    bytes32 _sendReason,
+    bytes32 _receiveReason
+  ) internal {
+    vm.mockCall(_hook, abi.encodeWithSelector(IPolicyHook.checkSend.selector), abi.encode(_sendReason));
+    vm.mockCall(_hook, abi.encodeWithSelector(IPolicyHook.checkReceive.selector), abi.encode(_receiveReason));
   }
 
   function _noRules() internal pure returns (IComplianceRule[] memory _ruleSet) {
@@ -290,12 +303,12 @@ contract PolicyGatedUnit_Burn is PolicyGatedUnitTest {
     _frozen = bound(_frozen, 1, _INITIAL);
     _amount = bound(_amount, _INITIAL - _frozen + 1, _INITIAL);
     vm.prank(_agent);
-    _token.setFrozen(_alice, _frozen);
+    _token.setFrozenTokens(_alice, _frozen);
 
     uint256 _remaining = _INITIAL - _amount;
     if (_remaining < _frozen) {
       vm.expectEmit(address(_token));
-      emit IPolicyGated.Frozen(_alice, _remaining);
+      emit IERC7943Fungible.Frozen(_alice, _remaining);
     }
     vm.expectEmit(address(_token));
     emit IERC20.Transfer(_alice, address(0), _amount);
@@ -303,7 +316,7 @@ contract PolicyGatedUnit_Burn is PolicyGatedUnitTest {
     _token.burn(_alice, _amount);
 
     assertEq(_token.balanceOf(_alice), _remaining);
-    assertLe(_token.getFrozen(_alice), _token.balanceOf(_alice));
+    assertLe(_token.getFrozenTokens(_alice), _token.balanceOf(_alice));
   }
 }
 
@@ -345,9 +358,11 @@ contract PolicyGatedUnit_ForcedTransfer is PolicyGatedUnitTest {
     vm.expectEmit(address(_token));
     emit IERC20.Transfer(_alice, _bob, _amount);
     vm.expectEmit(address(_token));
-    emit IPolicyGated.ForcedTransfer(_alice, _bob, _amount, _agent);
+    emit IERC7943Fungible.ForcedTransfer(_alice, _bob, _amount);
+    vm.expectEmit(address(_token));
+    emit IPolicyGated.ForcedTransferBy(_alice, _bob, _amount, _agent);
     vm.prank(_agent);
-    _token.forcedTransfer(_alice, _bob, _amount);
+    assertTrue(_token.forcedTransfer(_alice, _bob, _amount));
     assertEq(_token.balanceOf(_bob), _amount);
   }
 
@@ -358,15 +373,15 @@ contract PolicyGatedUnit_ForcedTransfer is PolicyGatedUnitTest {
     _frozen = bound(_frozen, 1, _INITIAL);
     _amount = bound(_amount, _INITIAL - _frozen + 1, _INITIAL);
     vm.prank(_agent);
-    _token.setFrozen(_alice, _frozen);
+    _token.setFrozenTokens(_alice, _frozen);
 
     vm.expectEmit(address(_token));
-    emit IPolicyGated.Frozen(_alice, _INITIAL - _amount);
+    emit IERC7943Fungible.Frozen(_alice, _INITIAL - _amount);
     vm.expectEmit(address(_token));
     emit IERC20.Transfer(_alice, _bob, _amount);
     vm.prank(_agent);
     _token.forcedTransfer(_alice, _bob, _amount);
-    assertEq(_token.getFrozen(_alice), _INITIAL - _amount);
+    assertEq(_token.getFrozenTokens(_alice), _INITIAL - _amount);
   }
 
   /// @dev A frozen amount that still fits in what remains is left alone: no write and no `Frozen` event
@@ -376,16 +391,16 @@ contract PolicyGatedUnit_ForcedTransfer is PolicyGatedUnitTest {
     _frozen = bound(_frozen, 1, _INITIAL - 1);
     uint256 _amount = _INITIAL - _frozen; // what remains equals the frozen amount
     vm.prank(_agent);
-    _token.setFrozen(_alice, _frozen);
+    _token.setFrozenTokens(_alice, _frozen);
 
     vm.recordLogs();
     vm.prank(_agent);
     _token.forcedTransfer(_alice, _bob, _amount);
     Vm.Log[] memory _logs = vm.getRecordedLogs();
     for (uint256 _i; _i < _logs.length; ++_i) {
-      assertNotEq(_logs[_i].topics[0], IPolicyGated.Frozen.selector, 'Frozen emitted');
+      assertNotEq(_logs[_i].topics[0], IERC7943Fungible.Frozen.selector, 'Frozen emitted');
     }
-    assertEq(_token.getFrozen(_alice), _frozen);
+    assertEq(_token.getFrozenTokens(_alice), _frozen);
   }
 
   function test_WhenPaused_ItStillMoves() external {
@@ -398,31 +413,39 @@ contract PolicyGatedUnit_ForcedTransfer is PolicyGatedUnitTest {
 
   function test_WhenHookRejects_ItRevertsAndKeepsFrozen() external {
     vm.prank(_agent);
-    _token.setFrozen(_alice, _INITIAL);
+    _token.setFrozenTokens(_alice, _INITIAL);
     _hookDecides(Reasons.RECEIVER_NOT_VERIFIED);
     vm.expectRevert(_rejected(Reasons.RECEIVER_NOT_VERIFIED));
     vm.prank(_agent);
     _token.forcedTransfer(_alice, _bob, _INITIAL);
-    assertEq(_token.getFrozen(_alice), _INITIAL);
+    assertEq(_token.getFrozenTokens(_alice), _INITIAL);
   }
 }
 
-contract PolicyGatedUnit_SetFrozen is PolicyGatedUnitTest {
+contract PolicyGatedUnit_SetFrozenTokens is PolicyGatedUnitTest {
   function test_WhenCallerIsNotAgent_ItReverts() external {
     vm.expectRevert(_unauthorized(_stranger, _token.AGENT_ROLE()));
     vm.prank(_stranger);
-    _token.setFrozen(_alice, 1);
+    _token.setFrozenTokens(_alice, 1);
   }
 
-  function test_WhenAmountExceedsBalance_ItReverts(
+  /// @dev ERC-7943 Final: "MUST allow freezing more assets than those held"
+  function test_WhenAmountExceedsBalance_ItIsAllowed(
     uint256 _amount
   ) external {
     _amount = bound(_amount, _INITIAL + 1, type(uint256).max);
-    vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGated.PolicyGated_FrozenExceedsBalance.selector, _alice, _amount, _INITIAL)
-    );
+    vm.expectEmit(address(_token));
+    emit IERC7943Fungible.Frozen(_alice, _amount);
     vm.prank(_agent);
-    _token.setFrozen(_alice, _amount);
+    assertTrue(_token.setFrozenTokens(_alice, _amount));
+    assertEq(_token.getFrozenTokens(_alice), _amount);
+  }
+
+  function test_WhenAnAccountHoldsNothing_ItCanStillBeFrozen() external {
+    vm.prank(_agent);
+    assertTrue(_token.setFrozenTokens(_bob, 5));
+    assertEq(_token.getFrozenTokens(_bob), 5);
+    assertEq(_token.balanceOf(_bob), 0);
   }
 
   function test_WhenValid_ItSetsAndEmits(
@@ -430,10 +453,97 @@ contract PolicyGatedUnit_SetFrozen is PolicyGatedUnitTest {
   ) external {
     _amount = bound(_amount, 0, _INITIAL);
     vm.expectEmit(address(_token));
-    emit IPolicyGated.Frozen(_alice, _amount);
+    emit IERC7943Fungible.Frozen(_alice, _amount);
     vm.prank(_agent);
-    _token.setFrozen(_alice, _amount);
-    assertEq(_token.getFrozen(_alice), _amount);
+    assertTrue(_token.setFrozenTokens(_alice, _amount));
+    assertEq(_token.getFrozenTokens(_alice), _amount);
+  }
+
+  /// @dev It overwrites, like `approve`
+  function test_WhenSetAgain_ItReplacesThePreviousAmount() external {
+    vm.startPrank(_agent);
+    _token.setFrozenTokens(_alice, 100);
+    _token.setFrozenTokens(_alice, 7);
+    vm.stopPrank();
+    assertEq(_token.getFrozenTokens(_alice), 7);
+  }
+}
+
+/// @notice What an enforcement action takes from the frozen amount: exactly the part of what moves that was frozen
+contract PolicyGatedUnit_ReleaseFrozen is PolicyGatedUnitTest {
+  /// @dev Balance 10, frozen 100, force 10: the unfrozen balance is 0, so all 10 come out of the frozen amount
+  function test_WhenFrozenExceedsTheBalance_ForcedTakesOnlyWhatMovesFromIt() external {
+    vm.prank(_burner);
+    _token.burn(_alice, _INITIAL - 10);
+    vm.prank(_agent);
+    _token.setFrozenTokens(_alice, 100);
+
+    vm.expectEmit(address(_token));
+    emit IERC7943Fungible.Frozen(_alice, 90);
+    vm.prank(_agent);
+    _token.forcedTransfer(_alice, _bob, 10);
+    assertEq(_token.getFrozenTokens(_alice), 90);
+    assertEq(_token.balanceOf(_alice), 0);
+  }
+
+  /// @dev Part of the amount is unfrozen balance and part is frozen: only the frozen part comes off
+  function test_WhenSomeOfTheAmountIsUnfrozen_OnlyTheRestIsReleased() external {
+    vm.prank(_burner);
+    _token.burn(_alice, _INITIAL - 10);
+    vm.prank(_agent);
+    _token.setFrozenTokens(_alice, 40); // balance 10: unfrozen 0
+    vm.prank(_minter);
+    _token.mint(_alice, 20); // balance 30: unfrozen 0, frozen 40 still above it
+    vm.prank(_agent);
+    _token.setFrozenTokens(_alice, 25); // unfrozen 5
+
+    vm.expectEmit(address(_token));
+    emit IERC7943Fungible.Frozen(_alice, 25 - 15); // forcing 20 takes 5 unfrozen and 15 frozen
+    vm.prank(_agent);
+    _token.forcedTransfer(_alice, _bob, 20);
+    assertEq(_token.getFrozenTokens(_alice), 10);
+    assertEq(_token.balanceOf(_alice), 10);
+  }
+
+  function test_WhenTheAmountIsWithinTheUnfrozenBalance_NothingIsReleased() external {
+    vm.prank(_agent);
+    _token.setFrozenTokens(_alice, 100);
+    vm.recordLogs();
+    vm.prank(_agent);
+    _token.forcedTransfer(_alice, _bob, 50);
+    Vm.Log[] memory _logs = vm.getRecordedLogs();
+    for (uint256 _i; _i < _logs.length; ++_i) {
+      assertNotEq(_logs[_i].topics[0], IERC7943Fungible.Frozen.selector, 'Frozen emitted');
+    }
+    assertEq(_token.getFrozenTokens(_alice), 100);
+  }
+
+  /// @dev "MUST emit a Frozen event before the underlying base token transfer event"
+  function test_WhenFrozenTokensMove_FrozenIsEmittedBeforeTransfer() external {
+    vm.prank(_agent);
+    _token.setFrozenTokens(_alice, _INITIAL);
+    vm.recordLogs();
+    vm.prank(_agent);
+    _token.forcedTransfer(_alice, _bob, 1);
+    Vm.Log[] memory _logs = vm.getRecordedLogs();
+    uint256 _frozenAt = type(uint256).max;
+    uint256 _transferAt = type(uint256).max;
+    for (uint256 _i; _i < _logs.length; ++_i) {
+      if (_logs[_i].topics[0] == IERC7943Fungible.Frozen.selector && _frozenAt == type(uint256).max) _frozenAt = _i;
+      if (_logs[_i].topics[0] == IERC20.Transfer.selector && _transferAt == type(uint256).max) _transferAt = _i;
+    }
+    assertLt(_frozenAt, _transferAt, 'Frozen must come before Transfer');
+  }
+
+  /// @dev An enforcement burn releases the same way
+  function test_WhenABurnerBurnsFrozenTokens_OnlyTheFrozenPartIsReleased() external {
+    vm.prank(_agent);
+    _token.setFrozenTokens(_alice, _INITIAL + 50);
+    vm.expectEmit(address(_token));
+    emit IERC7943Fungible.Frozen(_alice, 50); // nothing was unfrozen, so the whole burn comes out of the frozen amount
+    vm.prank(_burner);
+    _token.burn(_alice, _INITIAL);
+    assertEq(_token.getFrozenTokens(_alice), 50);
   }
 }
 
@@ -445,10 +555,35 @@ contract PolicyGatedUnit_Transfer is PolicyGatedUnitTest {
     _frozen = bound(_frozen, 1, _INITIAL);
     _amount = bound(_amount, _INITIAL - _frozen + 1, _INITIAL);
     vm.prank(_agent);
-    _token.setFrozen(_alice, _frozen);
-    vm.expectRevert(_rejected(Reasons.INSUFFICIENT_UNFROZEN));
+    _token.setFrozenTokens(_alice, _frozen);
+    vm.expectRevert(
+      abi.encodeWithSelector(
+        IERC7943Fungible.ERC7943InsufficientUnfrozenBalance.selector, _alice, _amount, _INITIAL - _frozen
+      )
+    );
     vm.prank(_alice);
     _token.transfer(_bob, _amount);
+  }
+
+  /// @dev A frozen amount above the balance leaves nothing unfrozen, and the error says so
+  function test_WhenFrozenExceedsTheBalance_NothingIsUnfrozen() external {
+    vm.prank(_agent);
+    _token.setFrozenTokens(_alice, _INITIAL * 2);
+    vm.expectRevert(abi.encodeWithSelector(IERC7943Fungible.ERC7943InsufficientUnfrozenBalance.selector, _alice, 1, 0));
+    vm.prank(_alice);
+    _token.transfer(_bob, 1);
+  }
+
+  /// @dev Only the token's own check may speak with the standard's error: a hook that returns the same reason code
+  ///      for a movement with no shortfall is a policy rejection like any other, with its reason
+  function test_WhenTheHookItselfReturnsInsufficientUnfrozen_ItIsAPolicyRejection() external {
+    _hookDecides(Reasons.INSUFFICIENT_UNFROZEN);
+    vm.expectRevert(_rejected(Reasons.INSUFFICIENT_UNFROZEN));
+    vm.prank(_alice);
+    _token.transfer(_bob, 1);
+    vm.expectRevert(_rejected(Reasons.INSUFFICIENT_UNFROZEN));
+    vm.prank(_minter);
+    _token.mint(_bob, 1);
   }
 
   function test_WhenAmountWithinUnfrozen_ItMovesWithATransferContext(
@@ -458,7 +593,7 @@ contract PolicyGatedUnit_Transfer is PolicyGatedUnitTest {
     _frozen = bound(_frozen, 0, _INITIAL);
     _amount = bound(_amount, 0, _INITIAL - _frozen);
     vm.prank(_agent);
-    _token.setFrozen(_alice, _frozen);
+    _token.setFrozenTokens(_alice, _frozen);
     vm.expectCall(
       _hook,
       abi.encodeCall(
@@ -588,7 +723,9 @@ contract PolicyGatedUnit_CanTransfer is PolicyGatedUnitTest {
       abi.encodeCall(IPolicyHook.beforeTransfer, (_ctx(_alice, _bob, 1, _alice, IPolicyHook.TransferKind.TRANSFER)))
     );
     vm.prank(_stranger);
-    (bool _ok, bytes32 _reason) = _token.canTransfer(_alice, _bob, 1);
+    assertTrue(_token.canTransfer(_alice, _bob, 1));
+    vm.prank(_stranger);
+    (bool _ok, bytes32 _reason) = _token.canTransferWithReason(_alice, _bob, 1);
     assertTrue(_ok);
     assertEq(_reason, Reasons.TRANSFER_OK);
   }
@@ -599,23 +736,72 @@ contract PolicyGatedUnit_CanTransfer is PolicyGatedUnitTest {
       abi.encodeCall(IPolicyHook.beforeTransfer, (_ctx(address(0), _bob, 1, _minter, IPolicyHook.TransferKind.MINT)))
     );
     vm.prank(_minter);
-    _token.canTransfer(address(0), _bob, 1);
+    _token.canTransferWithReason(address(0), _bob, 1);
   }
 
   function test_WhenPaused_ItReturnsPaused() external {
     vm.prank(_guardian);
     _token.pause();
-    (bool _ok, bytes32 _reason) = _token.canTransfer(_alice, _bob, 1);
+    assertFalse(_token.canTransfer(_alice, _bob, 1));
+    (bool _ok, bytes32 _reason) = _token.canTransferWithReason(_alice, _bob, 1);
     assertFalse(_ok);
     assertEq(_reason, Reasons.PAUSED);
   }
 
   function test_WhenFrozen_ItReturnsInsufficientUnfrozen() external {
     vm.prank(_agent);
-    _token.setFrozen(_alice, _INITIAL);
-    (bool _ok, bytes32 _reason) = _token.canTransfer(_alice, _bob, 1);
+    _token.setFrozenTokens(_alice, _INITIAL);
+    assertFalse(_token.canTransfer(_alice, _bob, 1));
+    (bool _ok, bytes32 _reason) = _token.canTransferWithReason(_alice, _bob, 1);
     assertFalse(_ok);
     assertEq(_reason, Reasons.INSUFFICIENT_UNFROZEN);
+  }
+
+  /// @dev "MUST validate that the amount does not exceed the unfrozen amount", the exact boundary
+  function test_WhenTheAmountIsTheUnfrozenBalance_ItIsAllowedAndOneMoreIsNot(
+    uint256 _frozen
+  ) external {
+    _frozen = bound(_frozen, 0, _INITIAL - 1);
+    vm.prank(_agent);
+    _token.setFrozenTokens(_alice, _frozen);
+    assertTrue(_token.canTransfer(_alice, _bob, _INITIAL - _frozen));
+    assertFalse(_token.canTransfer(_alice, _bob, _INITIAL - _frozen + 1));
+  }
+
+  /// @dev An enforcement burn (the operator holds BURNER_ROLE) may take frozen tokens, but never more than the balance:
+  ///      the pre-flight must say so, as the write does
+  function test_WhenABurnerAsksAboutBurningMoreThanItHolds_ItIsRefused() external {
+    bytes32 _burnerRole = _token.BURNER_ROLE(); // read first: an external call in the arguments would consume the prank
+    vm.prank(_admin);
+    _token.grantRole(_burnerRole, _alice);
+    (bool _ok, bytes32 _reason) = _token.canTransferWithReason(_alice, address(0), _INITIAL + 1);
+    assertFalse(_ok);
+    assertEq(_reason, Reasons.INSUFFICIENT_UNFROZEN);
+    assertFalse(_token.canTransfer(_alice, address(0), _INITIAL + 1));
+  }
+
+  function test_WhenABurnerAsksAboutBurningFrozenTokens_ItIsAllowedUpToTheBalance() external {
+    bytes32 _burnerRole = _token.BURNER_ROLE(); // read first: an external call in the arguments would consume the prank
+    vm.prank(_admin);
+    _token.grantRole(_burnerRole, _alice);
+    vm.prank(_agent);
+    _token.setFrozenTokens(_alice, _INITIAL);
+    assertTrue(_token.canTransfer(_alice, address(0), _INITIAL));
+    assertFalse(_token.canTransfer(_alice, address(0), _INITIAL + 1));
+  }
+
+  /// @dev A holder without the role is not exempt: frozen tokens count against its burn
+  function test_WhenAHolderAsksAboutBurningFrozenTokens_ItIsRefused() external {
+    vm.prank(_agent);
+    _token.setFrozenTokens(_alice, _INITIAL);
+    assertFalse(_token.canTransfer(_alice, address(0), 1));
+  }
+
+  function test_WhenFrozenExceedsTheBalance_NothingCanBeSent() external {
+    vm.prank(_agent);
+    _token.setFrozenTokens(_alice, _INITIAL + 1);
+    assertFalse(_token.canTransfer(_alice, _bob, 1));
+    assertTrue(_token.canTransfer(_alice, _bob, 0));
   }
 
   function test_WhenHookRejects_ItAgreesWithTransfer(
@@ -623,24 +809,87 @@ contract PolicyGatedUnit_CanTransfer is PolicyGatedUnitTest {
   ) external {
     if (_reason == Reasons.TRANSFER_OK) _reason = Reasons.LOCKED;
     _hookDecides(_reason);
-    (bool _ok, bytes32 _preflight) = _token.canTransfer(_alice, _bob, 1);
+    assertFalse(_token.canTransfer(_alice, _bob, 1));
+    (bool _ok, bytes32 _preflight) = _token.canTransferWithReason(_alice, _bob, 1);
     assertFalse(_ok);
     assertEq(_preflight, _reason);
     vm.expectRevert(_rejected(_reason));
     vm.prank(_alice);
     _token.transfer(_bob, 1);
   }
+
+  /// @dev The boolean is the reasoned answer's first value, for every reason
+  function testFuzz_ThePlainAnswerIsTheReasonedAnswersFlag(
+    bytes32 _reason
+  ) external {
+    _hookDecides(_reason);
+    (bool _ok,) = _token.canTransferWithReason(_alice, _bob, 1);
+    assertEq(_token.canTransfer(_alice, _bob, 1), _ok);
+    assertEq(_ok, _reason == Reasons.TRANSFER_OK);
+  }
 }
 
-contract PolicyGatedUnit_IsUserAllowed is PolicyGatedUnitTest {
-  function test_WhenHookAcceptsAMint_ItReturnsTrue() external view {
-    assertTrue(_token.isUserAllowed(_bob));
+/// @notice ERC-7943's account-level questions, answered from the hook's `checkSend` and `checkReceive`
+contract PolicyGatedUnit_CanSendAndCanReceive is PolicyGatedUnitTest {
+  function test_WhenTheHookAcceptsTheAccount_BothAreTrue() external view {
+    assertTrue(_token.canSend(_bob));
+    assertTrue(_token.canReceive(_bob));
   }
 
-  function test_WhenHookRejectsAMint_ItReturnsFalse() external {
-    _hookDecides(Reasons.RECEIVER_NOT_VERIFIED);
-    assertFalse(_token.isUserAllowed(_bob));
+  function test_WhenTheHookRejectsSending_OnlyCanSendIsFalse(
+    bytes32 _reason
+  ) external {
+    if (_reason == Reasons.TRANSFER_OK) _reason = Reasons.SENDER_NOT_VERIFIED;
+    _hookAccountChecksDecide(_reason, Reasons.TRANSFER_OK);
+    assertFalse(_token.canSend(_bob));
+    assertTrue(_token.canReceive(_bob));
   }
+
+  function test_WhenTheHookRejectsReceiving_OnlyCanReceiveIsFalse(
+    bytes32 _reason
+  ) external {
+    if (_reason == Reasons.TRANSFER_OK) _reason = Reasons.RECEIVER_NOT_VERIFIED;
+    _hookAccountChecksDecide(Reasons.TRANSFER_OK, _reason);
+    assertTrue(_token.canSend(_bob));
+    assertFalse(_token.canReceive(_bob));
+  }
+
+  function test_WhenAsked_ItAsksTheHookAboutThisTokenAndTheAccount() external {
+    vm.expectCall(_hook, abi.encodeCall(IPolicyHook.checkSend, (address(_token), _bob)));
+    vm.expectCall(_hook, abi.encodeCall(IPolicyHook.checkReceive, (address(_token), _bob)));
+    _token.canSend(_bob);
+    _token.canReceive(_bob);
+  }
+
+  /// @dev While paused nothing moves between holders, so neither side may be asked to
+  function test_WhenPaused_BothAreFalse() external {
+    vm.prank(_guardian);
+    _token.pause();
+    assertFalse(_token.canSend(_bob));
+    assertFalse(_token.canReceive(_bob));
+  }
+
+  /// @dev The answers do not depend on the caller or on any amount
+  function test_WhenAskedByAnyone_TheAnswerIsTheSame() external {
+    vm.prank(_stranger);
+    assertTrue(_token.canSend(_bob));
+    vm.prank(_minter);
+    assertTrue(_token.canReceive(_bob));
+  }
+}
+
+/// @dev Another template: a harness that reports another id
+contract PolicyGatedOtherTemplate is PolicyGatedHarness {
+  function templateId() public pure override returns (bytes32 _id) {
+    _id = keccak256('SomethingElse');
+  }
+}
+
+/// @dev An upgradeable contract that does not say which template it is
+contract PolicyGatedNoTemplate is UUPSUpgradeable {
+  function _authorizeUpgrade(
+    address
+  ) internal pure override {}
 }
 
 contract PolicyGatedUnit_Upgrade is PolicyGatedUnitTest {
@@ -673,6 +922,58 @@ contract PolicyGatedUnit_Upgrade is PolicyGatedUnitTest {
   }
 }
 
+/// @notice The attestation says the code was reviewed; the template id says what it is for, so a proxy cannot be moved
+///         onto another template's implementation
+contract PolicyGatedUnit_TemplateId is PolicyGatedUnitTest {
+  bytes32 internal constant _OTHER = keccak256('SomethingElse');
+
+  function test_WhenQueried_ItNamesTheTemplate() external view {
+    assertEq(_token.templateId(), keccak256('PolicyGatedHarness'));
+  }
+
+  function test_WhenTheImplementationIsAnotherTemplate_ItIsRefusedEvenIfAttested() external {
+    address _impl = address(new PolicyGatedOtherTemplate());
+    _attested(_impl, IPolicyRegistry.AttestKind.IMPLEMENTATION, true);
+    vm.expectRevert(
+      abi.encodeWithSelector(
+        ITemplated.Templated_WrongTemplate.selector, _impl, keccak256('PolicyGatedHarness'), _OTHER
+      )
+    );
+    vm.prank(_upgrader);
+    _token.upgradeToAndCall(_impl, '');
+    assertEq(_token.balanceOf(_alice), _INITIAL);
+  }
+
+  function test_WhenTheImplementationHasNoTemplateId_ItIsRefused() external {
+    address _impl = address(new PolicyGatedNoTemplate());
+    _attested(_impl, IPolicyRegistry.AttestKind.IMPLEMENTATION, true);
+    vm.expectRevert();
+    vm.prank(_upgrader);
+    _token.upgradeToAndCall(_impl, '');
+  }
+
+  function test_WhenTheImplementationIsTheSameTemplateAndAttested_ItUpgrades() external {
+    address _impl = address(new PolicyGatedHarness());
+    _attested(_impl, IPolicyRegistry.AttestKind.IMPLEMENTATION, true);
+    vm.prank(_upgrader);
+    _token.upgradeToAndCall(_impl, '');
+    assertEq(_token.templateId(), keccak256('PolicyGatedHarness'));
+  }
+
+  /// @dev An unattested implementation is refused on the attestation first, whatever template it claims
+  function test_WhenTheImplementationIsAnotherTemplateAndNotAttested_ItIsRefusedAsUnattested() external {
+    address _impl = address(new PolicyGatedOtherTemplate());
+    _attested(_impl, IPolicyRegistry.AttestKind.IMPLEMENTATION, false);
+    vm.expectRevert(
+      abi.encodeWithSelector(
+        IPolicyGated.PolicyGated_NotAttested.selector, _impl, IPolicyRegistry.AttestKind.IMPLEMENTATION
+      )
+    );
+    vm.prank(_upgrader);
+    _token.upgradeToAndCall(_impl, '');
+  }
+}
+
 contract PolicyGatedUnit_Permit is PolicyGatedUnitTest {
   function test_WhenSignedByTheOwner_ItSetsTheAllowance(
     uint256 _value
@@ -695,6 +996,9 @@ contract PolicyGatedUnit_Permit is PolicyGatedUnitTest {
 contract PolicyGatedUnit_SupportsInterface is PolicyGatedUnitTest {
   function test_WhenQueried_ItSupportsItsInterfaces() external view {
     assertTrue(_token.supportsInterface(type(IPolicyGated).interfaceId));
+    // ERC-7943 Final, fungible: the standard's own id, as a literal
+    assertTrue(_token.supportsInterface(0x3edbb4c4));
+    assertTrue(_token.supportsInterface(type(IERC7943Fungible).interfaceId));
     assertTrue(_token.supportsInterface(type(IERC20).interfaceId));
     assertTrue(_token.supportsInterface(type(IERC20Permit).interfaceId));
     assertTrue(_token.supportsInterface(type(IAccessControl).interfaceId));
@@ -762,7 +1066,9 @@ contract PolicyGatedHandler is Test {
     uint256 _amount
   ) external {
     address _account = _actor(_from);
-    uint256 _unfrozen = _token.balanceOf(_account) - _token.getFrozen(_account);
+    uint256 _balance = _token.balanceOf(_account);
+    uint256 _frozenAmount = _token.getFrozenTokens(_account);
+    uint256 _unfrozen = _balance > _frozenAmount ? _balance - _frozenAmount : 0;
     if (_unfrozen == 0) return;
     _amount = bound(_amount, 1, _unfrozen);
     vm.prank(_account);
@@ -784,15 +1090,16 @@ contract PolicyGatedHandler is Test {
     ++executed['forcedTransfer'];
   }
 
-  function setFrozen(
+  function setFrozenTokens(
     uint256 _user,
     uint256 _amount
   ) external {
     address _account = _actor(_user);
-    _amount = bound(_amount, 0, _token.balanceOf(_account));
+    // Up to twice the balance and a little more, so the frozen amount is often above what the account holds.
+    _amount = bound(_amount, 0, 2 * _token.balanceOf(_account) + 7);
     vm.prank(_agent);
-    _token.setFrozen(_account, _amount);
-    ++executed['setFrozen'];
+    _token.setFrozenTokens(_account, _amount);
+    ++executed['setFrozenTokens'];
   }
 
   function _actor(
@@ -823,17 +1130,23 @@ contract PolicyGatedInvariantTest is PolicyGatedUnitTest {
     assertEq(_sum, _token.totalSupply());
   }
 
-  function invariant_FrozenNeverExceedsBalance() external view {
+  /// @dev The unfrozen balance is what a transfer can move, to the unit, whether the frozen amount is above the balance
+  ///      or below it: ERC-7943's `canTransfer` and the token's own check agree on the boundary
+  function invariant_TheUnfrozenBalanceIsExactlyWhatCanBeSent() external view {
     address[3] memory _all = _handler.actors();
     for (uint256 _i; _i < 3; ++_i) {
-      assertLe(_token.getFrozen(_all[_i]), _token.balanceOf(_all[_i]));
+      uint256 _balance = _token.balanceOf(_all[_i]);
+      uint256 _frozenAmount = _token.getFrozenTokens(_all[_i]);
+      uint256 _unfrozen = _balance > _frozenAmount ? _balance - _frozenAmount : 0;
+      assertTrue(_token.canTransfer(_all[_i], _all[(_i + 1) % 3], _unfrozen));
+      assertFalse(_token.canTransfer(_all[_i], _all[(_i + 1) % 3], _unfrozen + 1));
     }
   }
 
   /// @dev Non-vacuity: every action must execute in every run (a consumed prank once made burn, forcedTransfer and
-  ///      setFrozen silent no-ops, so the frozen invariant never saw an enforcement action)
+  ///      setFrozenTokens silent no-ops, so the frozen invariant never saw an enforcement action)
   function afterInvariant() external view {
-    string[5] memory _actions = ['mint', 'burn', 'transfer', 'forcedTransfer', 'setFrozen'];
+    string[5] memory _actions = ['mint', 'burn', 'transfer', 'forcedTransfer', 'setFrozenTokens'];
     for (uint256 _i; _i < _actions.length; ++_i) {
       assertGt(_handler.executed(bytes32(bytes(_actions[_i]))), 0, _actions[_i]);
     }
@@ -1014,7 +1327,7 @@ contract PolicyGatedUnit_Context is PolicyGatedUnitTest {
   /// @dev The pre-flight builds the context with the same code, so it asks the hook the same question
   function test_WhenPreflightRuns_ItBuildsTheSameContextAsTheWrite() external {
     _expectBefore(_alice, _bob, 7 ether, _alice, IPolicyHook.TransferKind.TRANSFER, abi.encode(_INITIAL, uint256(0)));
-    (bool _ok,) = _token.canTransfer(_alice, _bob, 7 ether);
+    (bool _ok,) = _token.canTransferWithReason(_alice, _bob, 7 ether);
     assertTrue(_ok);
   }
 
@@ -1083,5 +1396,90 @@ contract PolicyGatedUnit_SharedHook is PolicyGatedUnitTest {
   function test_WhenNoInitialRulesAreGiven_TheTokenLeavesTheHookAlone() external {
     vm.expectCall(_hook, abi.encodeWithSelector(IComplianceHook.setRules.selector), 0);
     _deploy(_hook);
+  }
+}
+
+/// @notice `MulticallUpgradeable`: every call of the token can be batched atomically, and the sender is preserved
+contract PolicyGatedUnit_Multicall is PolicyGatedUnitTest {
+  function _calls2(
+    bytes memory _first,
+    bytes memory _second
+  ) internal pure returns (bytes[] memory _calls) {
+    _calls = new bytes[](2);
+    _calls[0] = _first;
+    _calls[1] = _second;
+  }
+
+  function test_WhenAMinterBatchesTwoMints_BothHappen() external {
+    bytes[] memory _calls = _calls2(abi.encodeCall(_token.mint, (_bob, 3)), abi.encodeCall(_token.mint, (_alice, 4)));
+    vm.prank(_minter);
+    _token.multicall(_calls);
+    assertEq(_token.balanceOf(_bob), 3);
+    assertEq(_token.balanceOf(_alice), _INITIAL + 4);
+  }
+
+  /// @dev The sender is the caller of `multicall`, so a role gate applies to each call inside it
+  function test_WhenAStrangerBatchesARoleGatedCall_ItReverts() external {
+    bytes[] memory _calls = _calls2(abi.encodeCall(_token.mint, (_bob, 3)), abi.encodeCall(_token.mint, (_bob, 4)));
+    vm.expectRevert(_unauthorized(_stranger, _token.MINTER_ROLE()));
+    vm.prank(_stranger);
+    _token.multicall(_calls);
+    assertEq(_token.balanceOf(_bob), 0);
+  }
+
+  /// @dev Atomic: a later call that fails undoes the earlier ones
+  function test_WhenALaterCallFails_TheEarlierOnesAreUndone() external {
+    bytes[] memory _calls = _calls2(abi.encodeCall(_token.mint, (_bob, 3)), abi.encodeCall(_token.burn, (_alice, 1)));
+    vm.expectRevert(_unauthorized(_minter, _token.BURNER_ROLE()));
+    vm.prank(_minter);
+    _token.multicall(_calls);
+    assertEq(_token.balanceOf(_bob), 0);
+    assertEq(_token.balanceOf(_alice), _INITIAL);
+  }
+
+  function test_WhenAHolderBatchesTransfers_TheHookSeesTheHolderAsOperator() external {
+    vm.expectCall(
+      _hook,
+      abi.encodeCall(IPolicyHook.beforeTransfer, (_ctx(_alice, _bob, 1, _alice, IPolicyHook.TransferKind.TRANSFER)))
+    );
+    bytes[] memory _calls =
+      _calls2(abi.encodeCall(_token.transfer, (_bob, 1)), abi.encodeCall(_token.transfer, (_bob, 2)));
+    vm.prank(_alice);
+    _token.multicall(_calls);
+    assertEq(_token.balanceOf(_bob), 3);
+  }
+
+  /// @dev The kind announced for a forced transfer is cleared before the next call of the batch
+  function test_WhenAForcedTransferIsFollowedByAPlainTransferInOneBatch_TheSecondIsPlain() external {
+    vm.startPrank(_admin);
+    _token.grantRole(_token.AGENT_ROLE(), _alice);
+    vm.stopPrank();
+    bytes[] memory _calls =
+      _calls2(abi.encodeCall(_token.forcedTransfer, (_alice, _bob, 10)), abi.encodeCall(_token.transfer, (_bob, 2)));
+    // The second movement reaches the hook as a plain transfer by alice, with the balances the first one left.
+    IPolicyHook.TransferContext memory _plain = _ctx(_alice, _bob, 2, _alice, IPolicyHook.TransferKind.TRANSFER);
+    _plain.extra = abi.encode(_INITIAL - 10, uint256(10));
+    vm.expectCall(_hook, abi.encodeCall(IPolicyHook.beforeTransfer, (_plain)));
+    vm.prank(_alice);
+    _token.multicall(_calls);
+    assertEq(_token.balanceOf(_bob), 12);
+  }
+
+  /// @dev It is not payable, so no value can enter through a batch
+  function test_WhenValueIsSent_ItReverts() external {
+    bytes[] memory _calls = new bytes[](0);
+    vm.deal(_alice, 1);
+    vm.prank(_alice);
+    (bool _ok,) = address(_token).call{value: 1}(abi.encodeCall(_token.multicall, (_calls)));
+    assertFalse(_ok);
+  }
+
+  /// @dev A batch cannot initialise the token again
+  function test_WhenABatchCallsInitialize_ItReverts() external {
+    bytes[] memory _calls = new bytes[](1);
+    _calls[0] = abi.encodeCall(_token.initialize, ('G', 'G', _admin, _guardian, _registry, _hook, _noRules()));
+    vm.expectRevert(Initializable.InvalidInitialization.selector);
+    vm.prank(_alice);
+    _token.multicall(_calls);
   }
 }

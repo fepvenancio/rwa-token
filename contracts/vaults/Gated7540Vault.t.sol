@@ -19,11 +19,13 @@ import {IERC7540Deposit} from 'interfaces/IERC7540Deposit.sol';
 import {IERC7540Operator} from 'interfaces/IERC7540Operator.sol';
 import {IERC7540Redeem} from 'interfaces/IERC7540Redeem.sol';
 import {IERC7575} from 'interfaces/IERC7575.sol';
+import {IERC7943Fungible} from 'interfaces/IERC7943Fungible.sol';
 import {IGated7540Vault} from 'interfaces/IGated7540Vault.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
+import {ITemplated} from 'interfaces/ITemplated.sol';
 
 import {ProxyDeployer} from 'contracts/deploy/ProxyDeployer.sol';
 import {PolicyRegistry} from 'contracts/governance/PolicyRegistry.sol';
@@ -34,6 +36,8 @@ import {MaxHoldersRule} from 'contracts/hooks/rules/MaxHoldersRule.sol';
 import {Helpers} from 'contracts/test/Helpers.sol';
 import {MockAsset} from 'contracts/test/MockAsset.sol';
 import {MockIdentityRegistry} from 'contracts/test/MockIdentityRegistry.sol';
+import {IntentToken} from 'contracts/tokens/IntentToken.sol';
+import {Gated4626Vault} from 'contracts/vaults/Gated4626Vault.sol';
 import {Gated7540Vault} from 'contracts/vaults/Gated7540Vault.sol';
 
 contract Gated7540VaultUnitTest is Helpers {
@@ -726,18 +730,18 @@ contract Gated7540VaultUnit_FrozenEscrow is Gated7540VaultUnitTest {
     _requestRedeem(_alice, 50);
     _requestRedeem(_bob, 30);
     vm.prank(_agent);
-    _vault.setFrozen(address(_vault), 80);
+    _vault.setFrozenTokens(address(_vault), 80);
   }
 
   /// @dev M-2: a reject is a plain TRANSFER, so a frozen escrow blocks it ("freeze means freeze"); recovery still works
   function test_WhenTheEscrowIsFrozen_ARejectIsRefused() external {
     _escrowTwoAndFreeze();
     vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.INSUFFICIENT_UNFROZEN)
+      abi.encodeWithSelector(IERC7943Fungible.ERC7943InsufficientUnfrozenBalance.selector, address(_vault), 50, 0)
     );
     vm.prank(_fulfiller);
     _vault.rejectRedeemRequest(_alice);
-    assertEq(_vault.getFrozen(address(_vault)), 80);
+    assertEq(_vault.getFrozenTokens(address(_vault)), 80);
     assertEq(_vault.pendingRedeemRequest(0, _alice), 50);
   }
 
@@ -745,7 +749,7 @@ contract Gated7540VaultUnit_FrozenEscrow is Gated7540VaultUnitTest {
     _escrowTwoAndFreeze();
     vm.prank(_agent);
     _vault.recoverRedeemRequest(_alice, _carolRecovery);
-    assertEq(_vault.getFrozen(address(_vault)), 30);
+    assertEq(_vault.getFrozenTokens(address(_vault)), 30);
     assertEq(_vault.balanceOf(address(_vault)), 30);
   }
 
@@ -1258,10 +1262,8 @@ contract Gated7540VaultIntegration_Escrow is Gated7540VaultIntegrationTest {
   function test_WhenSharesAreFrozen_TheyCannotBeEscrowed() external {
     _invest(_alice, 100);
     vm.prank(_agent);
-    _vault.setFrozen(_alice, 100);
-    vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.INSUFFICIENT_UNFROZEN)
-    );
+    _vault.setFrozenTokens(_alice, 100);
+    vm.expectRevert(abi.encodeWithSelector(IERC7943Fungible.ERC7943InsufficientUnfrozenBalance.selector, _alice, 1, 0));
     vm.prank(_alice);
     _vault.requestRedeem(1, _alice, _alice);
   }
@@ -1908,5 +1910,57 @@ contract Gated7540VaultIntegration_HolderRuleColdStart is Gated7540VaultIntegrat
 
     assertEq(_replacement.holderCount(address(_vault)), 2);
     assertEq(_replacement.holderCount(address(_vault)), _maxHoldersRule.holderCount(address(_vault)));
+  }
+}
+
+/// @notice A vault proxy cannot be moved onto another template's implementation, attested or not
+contract Gated7540VaultUnit_Template is Gated7540VaultUnitTest {
+  function _attestedImplementation(
+    address _impl
+  ) internal {
+    vm.mockCall(
+      _registry,
+      abi.encodeCall(IPolicyRegistry.isAttested, (_impl, IPolicyRegistry.AttestKind.IMPLEMENTATION)),
+      abi.encode(true)
+    );
+    vm.startPrank(_admin);
+    _vault.grantRole(_vault.UPGRADER_ROLE(), _admin);
+    vm.stopPrank();
+  }
+
+  function test_WhenQueried_ItNamesItsTemplate() external view {
+    assertEq(_vault.templateId(), keccak256('Gated7540Vault'));
+  }
+
+  function test_WhenUpgradedToTheTokenImplementation_ItIsRefused() external {
+    address _impl = address(new IntentToken());
+    _attestedImplementation(_impl);
+    vm.expectRevert(
+      abi.encodeWithSelector(
+        ITemplated.Templated_WrongTemplate.selector, _impl, keccak256('Gated7540Vault'), keccak256('IntentToken')
+      )
+    );
+    vm.prank(_admin);
+    _vault.upgradeToAndCall(_impl, '');
+  }
+
+  function test_WhenUpgradedToTheOtherVaultImplementation_ItIsRefused() external {
+    address _impl = address(new Gated4626Vault());
+    _attestedImplementation(_impl);
+    vm.expectRevert(
+      abi.encodeWithSelector(
+        ITemplated.Templated_WrongTemplate.selector, _impl, keccak256('Gated7540Vault'), keccak256('Gated4626Vault')
+      )
+    );
+    vm.prank(_admin);
+    _vault.upgradeToAndCall(_impl, '');
+  }
+
+  function test_WhenUpgradedToANewImplementationOfItself_ItUpgrades() external {
+    address _impl = address(new Gated7540Vault());
+    _attestedImplementation(_impl);
+    vm.prank(_admin);
+    _vault.upgradeToAndCall(_impl, '');
+    assertEq(_vault.templateId(), keccak256('Gated7540Vault'));
   }
 }

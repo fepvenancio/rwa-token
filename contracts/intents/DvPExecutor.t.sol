@@ -13,6 +13,7 @@ import {Reasons} from 'interfaces/Errors.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IDvPExecutor} from 'interfaces/IDvPExecutor.sol';
 import {IERC3009} from 'interfaces/IERC3009.sol';
+import {IERC7943Fungible} from 'interfaces/IERC7943Fungible.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
@@ -790,8 +791,34 @@ contract DvPExecutorIntegrationTest is RuleSetIntegrationTest {
       _dvp.canExecuteDvPGated(address(_token), address(_cashToken), _t.s, _t.sSig, _t.c, _t.cSig);
     assertEq(_reason, _expected, 'pre-flight reason');
     assertEq(_ok, _expected == Reasons.TRANSFER_OK);
-    if (_expected != Reasons.TRANSFER_OK) vm.expectRevert(_legFailed(_leg, _expected));
+    if (_expected == Reasons.INSUFFICIENT_UNFROZEN) {
+      // The token's own frozen-balance check reverts with the standard's error, not with a policy rejection.
+      vm.expectRevert(_unfrozenLegFailed(_t, _leg));
+    } else if (_expected != Reasons.TRANSFER_OK) {
+      vm.expectRevert(_legFailed(_leg, _expected));
+    }
     _runGated(_t);
+  }
+
+  /// @dev What a leg reverts with when its sender cannot cover the amount from the unfrozen balance
+  function _unfrozenLegFailed(
+    Trade memory _t,
+    IDvPExecutor.Leg _leg
+  ) internal view returns (bytes memory _revertData) {
+    IntentToken _legToken = _leg == IDvPExecutor.Leg.CASH ? _cashToken : _token;
+    ITransferIntent.TransferIntent memory _intent = _leg == IDvPExecutor.Leg.CASH ? _t.c : _t.s;
+    uint256 _balance = _legToken.balanceOf(_intent.from);
+    uint256 _frozen = _legToken.getFrozenTokens(_intent.from);
+    _revertData = abi.encodeWithSelector(
+      IDvPExecutor.DvPExecutor_LegFailed.selector,
+      _leg,
+      abi.encodeWithSelector(
+        IERC7943Fungible.ERC7943InsufficientUnfrozenBalance.selector,
+        _intent.from,
+        _intent.amount,
+        _balance > _frozen ? _balance - _frozen : 0
+      )
+    );
   }
 
   // ---- ERC-3009 helpers --------------------------------------------------------------------------------------------

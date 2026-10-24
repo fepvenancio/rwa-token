@@ -20,8 +20,6 @@ interface ITemplated {
    * @param _expected The template id of the proxy's current implementation
    * @param _actual The template id the target reports
    */
-  // Thrown by the base's `_authorizeUpgrade` from S2 of the review items plan; unused until then.
-  // aderyn-ignore-next-line(unused-error)
   error Templated_WrongTemplate(address _newImplementation, bytes32 _expected, bytes32 _actual);
 
   /*///////////////////////////////////////////////////////////////

@@ -8,8 +8,11 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
  * @notice Per-token minimum position: after a movement, each side that still holds tokens must hold at least the
  *         minimum, so no dust is left behind and no dust can open a holder slot. A breach is rejected with
  *         `Reasons.BELOW_MIN_POSITION`. A minimum of 0 switches the rule off for the token
- * @dev Applies to TRANSFER, EXECUTED, MINT and holder-initiated BURN. FORCED is exempt, and so are the token itself (the
- *      7540 escrow, which holds the shares of pending redemptions) and the accounts the token's admin lists. The
+ * @dev Applies to TRANSFER, EXECUTED, MINT and holder-initiated BURN. FORCED is exempt, and so is an enforcement burn
+ *      (the operator holds the token's BURNER_ROLE, as the lockup rule and the token's frozen-balance check define it),
+ *      which may leave any remainder; the role is asked only when a burn would leave a balance below the minimum, so
+ *      the usual path pays nothing for it. The token itself (the 7540 escrow, which holds the shares of pending
+ *      redemptions) and the accounts the token's admin lists are exempt too. The
  *      post-move balances are derived from the balances in `TransferContext.extra` and the amount, so the rule makes
  *      no call back into the token. State is keyed by token and authorised live by the token's own DEFAULT_ADMIN_ROLE
  */

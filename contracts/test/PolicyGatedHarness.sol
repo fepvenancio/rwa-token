@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
+import {ITemplated} from 'interfaces/ITemplated.sol';
 
 import {PolicyGatedERC20Upgradeable} from 'contracts/base/PolicyGatedERC20Upgradeable.sol';
 
@@ -39,6 +40,11 @@ contract PolicyGatedHarness is PolicyGatedERC20Upgradeable {
     IComplianceRule[] calldata _initialRules
   ) external initializer {
     __PolicyGatedERC20_init(_name, _symbol, _admin, _guardian, _registry, _hook, _initialRules);
+  }
+
+  /// @inheritdoc ITemplated
+  function templateId() public pure virtual override returns (bytes32 _id) {
+    _id = keccak256('PolicyGatedHarness');
   }
 
   /**

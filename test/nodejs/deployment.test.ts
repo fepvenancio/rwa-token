@@ -22,7 +22,7 @@ describe("deployment (Ignition: Components → council → Activate)", async fun
       assert.equal(await s.rules.maxHoldersRule.read.capOf([t.address]), HOLDER_CAP);
     }
     // Live from deploy: the identity rule already gates the first mint.
-    const [ok, reason] = await s.token.read.canTransfer([zeroAddress, s.holders.eve.account.address, 1n]);
+    const [ok, reason] = await s.token.read.canTransferWithReason([zeroAddress, s.holders.eve.account.address, 1n]);
     assert.equal(ok, false);
     assert.equal(reason, REASONS.RECEIVER_NOT_VERIFIED);
   });

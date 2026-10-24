@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+import {ITemplated} from 'interfaces/ITemplated.sol';
 
 import {IntentSettledUpgradeable} from 'contracts/mixins/IntentSettledUpgradeable.sol';
 
@@ -41,5 +42,10 @@ contract IntentToken is IntentSettledUpgradeable {
   ) external initializer {
     __PolicyGatedERC20_init(_name, _symbol, _admin, _guardian, _registry, _hook, _initialRules);
     __IntentSettled_init();
+  }
+
+  /// @inheritdoc ITemplated
+  function templateId() public pure override returns (bytes32 _id) {
+    _id = keccak256('IntentToken');
   }
 }

@@ -156,7 +156,7 @@ contract FundHoldersRuleUnit_Check is FundHoldersRuleUnitTest {
     assertEq(_check(_kind, _from, _receiver, _amount), Reasons.NOT_FUND_CLASS);
   }
 
-  function test_WhenTheTokenIsNotAClass_AZeroAmountIsStillRejectedSoIsUserAllowedFailsClosed() external {
+  function test_WhenTheTokenIsNotAClass_AZeroAmountIsStillRejectedSoAProbeFailsClosed() external {
     vm.mockCall(_fund, abi.encodeCall(IFund.admission, (_token, _to)), abi.encode(0, 0, false, 0, 5, address(_rule)));
     assertEq(_check(IPolicyHook.TransferKind.MINT, address(0), _to, 0), Reasons.NOT_FUND_CLASS);
   }
@@ -674,5 +674,48 @@ contract FundHoldersRuleGate is Helpers {
   function test_WhenAFakeTokenIsChecked_TheRuleRejectsItWithoutTouchingState() external {
     assertEq(_rule.check(_ctx(_fake, _alice)), Reasons.NOT_FUND_CLASS);
     assertEq(_fund.holderCount(), 0);
+  }
+}
+
+/// @notice The account-level answers behind `canSend` and `canReceive`. The fund rule has no opinion about an account,
+///         but a class that is not the fund's, or a rule the fund has replaced, rejects every movement, so no account
+///         may send or receive: the answers say so, as `check` does
+contract FundHoldersRuleUnit_AccountChecks is FundHoldersRuleUnitTest {
+  function test_WhenTheTokenIsARegisteredClassWithThisRule_BothAccept() external {
+    _admit(_to, 0, false, 3, 3);
+    assertEq(_rule.checkSend(_token, _to), Reasons.TRANSFER_OK);
+    assertEq(_rule.checkReceive(_token, _to), Reasons.TRANSFER_OK);
+  }
+
+  /// @dev A full fund does not stop an account from being asked: the cap is a decision about a movement
+  function test_WhenTheFundIsFull_BothStillAccept() external {
+    _admit(_to, 0, false, 3, 3);
+    assertEq(_rule.checkReceive(_token, _to), Reasons.TRANSFER_OK);
+  }
+
+  function test_WhenTheTokenIsNotAClass_BothReturnNotFundClass() external {
+    vm.mockCall(_fund, abi.encodeCall(IFund.admission, (_token, _to)), abi.encode(0, 0, false, 0, 5, address(_rule)));
+    assertEq(_rule.checkSend(_token, _to), Reasons.NOT_FUND_CLASS);
+    assertEq(_rule.checkReceive(_token, _to), Reasons.NOT_FUND_CLASS);
+  }
+
+  function testFuzz_WhenTheRuleIsNotTheFundsInstalledOne_BothReturnNotFundClass(
+    address _installed
+  ) external {
+    vm.assume(_installed != address(_rule));
+    vm.mockCall(_fund, abi.encodeCall(IFund.admission, (_token, _to)), abi.encode(_INDEX, 0, false, 0, 5, _installed));
+    assertEq(_rule.checkSend(_token, _to), Reasons.NOT_FUND_CLASS);
+    assertEq(_rule.checkReceive(_token, _to), Reasons.NOT_FUND_CLASS);
+  }
+
+  /// @dev When the account checks reject, `check` rejects every movement that touches the account, for every kind
+  function testFuzz_WhenTheAccountChecksReject_CheckRejectsToo(
+    uint8 _kindSeed,
+    uint256 _amount
+  ) external {
+    IPolicyHook.TransferKind _kind = IPolicyHook.TransferKind(bound(_kindSeed, 0, 4));
+    vm.mockCall(_fund, abi.encodeCall(IFund.admission, (_token, _to)), abi.encode(0, 0, false, 0, 5, address(_rule)));
+    assertEq(_rule.checkReceive(_token, _to), Reasons.NOT_FUND_CLASS);
+    assertEq(_check(_kind, _from, _to, _amount), Reasons.NOT_FUND_CLASS);
   }
 }

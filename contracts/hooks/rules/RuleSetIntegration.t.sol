@@ -64,7 +64,7 @@ contract RuleSetIntegrationTest is IntentTokenIntegrationTest {
     uint256 _amount,
     bytes32 _expected
   ) internal {
-    (bool _ok, bytes32 _reason) = _token.canTransfer(_from, _to, _amount);
+    (bool _ok, bytes32 _reason) = _token.canTransferWithReason(_from, _to, _amount);
     assertEq(_reason, _expected, 'canTransfer reason');
     assertEq(_ok, _expected == Reasons.TRANSFER_OK);
     if (_expected != Reasons.TRANSFER_OK) vm.expectRevert(_rejected(_expected));

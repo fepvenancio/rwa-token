@@ -67,8 +67,6 @@ interface IERC7943Fungible is IERC165 {
    * @param _amount The amount requested
    * @param _unfrozen The unfrozen balance, the balance minus the frozen amount, zero when the frozen amount is larger
    */
-  // Thrown by the base's frozen-balance check from S2 of the review items plan; unused until then.
-  // aderyn-ignore-next-line(unused-error)
   error ERC7943InsufficientUnfrozenBalance(address _account, uint256 _amount, uint256 _unfrozen);
 
   /*///////////////////////////////////////////////////////////////

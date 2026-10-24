@@ -79,6 +79,29 @@ contract FundHoldersRule is BaseRule, IFundHoldersRule {
     _reason = Reasons.MAX_HOLDERS;
   }
 
+  /**
+   * @inheritdoc IComplianceRule
+   * @dev The rule has no opinion about an account, but a token that is not a registered class of the fund, or a rule
+   *      the fund has replaced, rejects every movement (`NOT_FUND_CLASS`), so no account can receive
+   */
+  function checkReceive(
+    address _token,
+    address _account
+  ) external view override(BaseRule, IComplianceRule) returns (bytes32 _reason) {
+    _reason = _classReason(_token, _account);
+  }
+
+  /**
+   * @inheritdoc IComplianceRule
+   * @dev As `checkReceive`: nothing can move on a token that is not the fund's class under this rule
+   */
+  function checkSend(
+    address _token,
+    address _account
+  ) external view override(BaseRule, IComplianceRule) returns (bytes32 _reason) {
+    _reason = _classReason(_token, _account);
+  }
+
   /// @inheritdoc IComplianceRule
   function ruleId() external pure returns (bytes32 _ruleId) {
     _ruleId = keccak256('FundHoldersRule.v1');
@@ -94,6 +117,22 @@ contract FundHoldersRule is BaseRule, IFundHoldersRule {
   /// @inheritdoc BaseRule
   function wantsAfter() public pure override(BaseRule, IComplianceRule) returns (bool _wantsAfter) {
     _wantsAfter = true;
+  }
+
+  /**
+   * @notice Whether the token is a registered class of the fund and this is the fund's installed rule
+   * @param _token The token
+   * @param _account Any account; the fund is read for it only because `admission` takes one
+   * @return _reason `TRANSFER_OK`, or `NOT_FUND_CLASS`
+   */
+  function _classReason(
+    address _token,
+    address _account
+  ) internal view returns (bytes32 _reason) {
+    // The class number and the installed rule are the only fields used.
+    // slither-disable-next-line unused-return
+    (uint256 _index,,,,, address _installed) = FUND.admission(_token, _account);
+    _reason = (_index == 0 || _installed != address(this)) ? Reasons.NOT_FUND_CLASS : Reasons.TRANSFER_OK;
   }
 
   /**

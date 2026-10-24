@@ -261,7 +261,7 @@ contract FundIntegrationTest is Test {
     uint256 _amount,
     bytes32 _expected
   ) internal {
-    (bool _ok, bytes32 _reason) = _token.canTransfer(_from, _to, _amount);
+    (bool _ok, bytes32 _reason) = _token.canTransferWithReason(_from, _to, _amount);
     assertEq(_reason, _expected, 'canTransfer reason');
     assertEq(_ok, _expected == Reasons.TRANSFER_OK);
     if (_expected != Reasons.TRANSFER_OK) vm.expectRevert(_rejected(_expected));
@@ -355,7 +355,7 @@ contract FundIntegration_Cap is FundIntegrationTest {
     _deposit4626(_bob, 5e6);
     assertEq(_fund.holderCount(), 2);
 
-    (bool _ok, bytes32 _reason) = _token.canTransfer(address(0), _carol, 1);
+    (bool _ok, bytes32 _reason) = _token.canTransferWithReason(address(0), _carol, 1);
     assertFalse(_ok);
     assertEq(_reason, Reasons.MAX_HOLDERS);
     vm.expectRevert(_rejected(Reasons.MAX_HOLDERS));
@@ -459,16 +459,16 @@ contract FundIntegration_Registration is FundIntegrationTest {
   function test_WhenAClassIsNotRegistered_EveryMovementIsRejectedUntilItIs() external {
     _deployUnregistered();
 
-    (bool _ok, bytes32 _reason) = _other.canTransfer(address(0), _alice, 1);
+    (bool _ok, bytes32 _reason) = _other.canTransferWithReason(address(0), _alice, 1);
     assertFalse(_ok);
     assertEq(_reason, Reasons.NOT_FUND_CLASS);
-    assertFalse(_other.isUserAllowed(_alice));
+    assertFalse(_other.canReceive(_alice));
     vm.expectRevert(_rejected(Reasons.NOT_FUND_CLASS));
     vm.prank(_minter);
     _other.mint(_alice, 1 ether);
 
     _fund.registerClass(address(_other));
-    assertTrue(_other.isUserAllowed(_alice));
+    assertTrue(_other.canReceive(_alice));
     vm.prank(_minter);
     _other.mint(_alice, 1 ether);
     assertEq(_fund.holderCount(), 1);
@@ -638,14 +638,14 @@ contract FundIntegration_Replacement is FundIntegrationTest {
     // The hooks still list the old rule, which is no longer the fund's. It rejects every movement, the ones that would
     // not touch the fund's state too, and the pre-flight says the same as the write: nothing drifts, nothing lies.
     assertEq(_fundRule.check(_ctxFor(address(_token), _carol)), Reasons.NOT_FUND_CLASS);
-    (bool _ok, bytes32 _reason) = _token.canTransfer(address(0), _carol, 1);
+    (bool _ok, bytes32 _reason) = _token.canTransferWithReason(address(0), _carol, 1);
     assertFalse(_ok);
     assertEq(_reason, Reasons.NOT_FUND_CLASS);
     vm.expectRevert(_rejected(Reasons.NOT_FUND_CLASS));
     _mintToken(_carol, 1 ether);
     // A transfer between two existing holders needs no write to the fund, and is refused all the same.
     _assertTransferParity(_alice, _bob, 0.5 ether, Reasons.NOT_FUND_CLASS);
-    assertFalse(_token.isUserAllowed(_alice));
+    assertFalse(_token.canReceive(_alice));
     assertEq(_fund.holderCount(), 2);
 
     _hook.setRules(address(_token), _rules(_next));

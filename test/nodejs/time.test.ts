@@ -35,13 +35,13 @@ describe("time-based flows", async function () {
     });
 
     await time.increaseTo(unlock - 2);
-    assert.deepEqual(await s.token.read.canTransfer([alice.account.address, bob.account.address, 1n]), [false, REASONS.LOCKED]);
+    assert.deepEqual(await s.token.read.canTransferWithReason([alice.account.address, bob.account.address, 1n]), [false, REASONS.LOCKED]);
     await time.setNextBlockTimestamp(unlock - 1);
     await rejected(s, s.token.write.transfer([bob.account.address, 1n], { account: alice.account }), REASONS.LOCKED);
 
     await time.setNextBlockTimestamp(unlock);
     await s.token.write.transfer([bob.account.address, 1n], { account: alice.account });
-    assert.deepEqual(await s.token.read.canTransfer([alice.account.address, bob.account.address, 1n]), [true, REASONS.TRANSFER_OK]);
+    assert.deepEqual(await s.token.read.canTransferWithReason([alice.account.address, bob.account.address, 1n]), [true, REASONS.TRANSFER_OK]);
   });
 
   it("the settlement window is [open, close) on weekdays only", async function () {

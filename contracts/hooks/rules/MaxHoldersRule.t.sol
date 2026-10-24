@@ -652,7 +652,7 @@ contract MaxHoldersHandler is Test {
     uint256 _amount
   ) external {
     address _sender = _actor(_from);
-    _amount = bound(_amount, 0, _token.balanceOf(_sender) - _token.getFrozen(_sender));
+    _amount = bound(_amount, 0, _token.balanceOf(_sender) - _token.getFrozenTokens(_sender));
     vm.prank(_sender);
     try _token.transfer(_actor(_to), _amount) {
       if (_amount > 0) ++executed['transfer'];
@@ -665,7 +665,7 @@ contract MaxHoldersHandler is Test {
     uint256 _amount
   ) external {
     address _account = _actor(_user);
-    _token.setFrozen(_account, bound(_amount, 0, _token.balanceOf(_account)));
+    _token.setFrozenTokens(_account, bound(_amount, 0, _token.balanceOf(_account)));
   }
 
   /// @dev Exemption changes move a current holder in or out of the count
@@ -927,7 +927,7 @@ contract MaxHoldersRuleIntegration_Seeding is MaxHoldersRuleIntegrationTest {
     vm.stopPrank();
     assertEq(_maxHoldersRule.holderCount(address(_token)), 3);
 
-    (bool _ok, bytes32 _reason) = _token.canTransfer(address(0), _carol, 1);
+    (bool _ok, bytes32 _reason) = _token.canTransferWithReason(address(0), _carol, 1);
     assertFalse(_ok);
     assertEq(_reason, Reasons.MAX_HOLDERS);
     vm.expectRevert(_rejected(Reasons.MAX_HOLDERS));

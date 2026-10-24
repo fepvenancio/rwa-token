@@ -14,6 +14,7 @@ import {IGated4626Vault} from 'interfaces/IGated4626Vault.sol';
 // Needed by the compiler to resolve `@inheritdoc IPolicyGated`; solhint does not see NatSpec usage.
 // solhint-disable-next-line no-unused-vars
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
+import {ITemplated} from 'interfaces/ITemplated.sol';
 
 import {PolicyGatedERC20Upgradeable} from 'contracts/base/PolicyGatedERC20Upgradeable.sol';
 
@@ -51,6 +52,7 @@ contract Gated4626Vault is ERC4626Upgradeable, PolicyGatedERC20Upgradeable, IGat
     __ERC20Permit_init(_name);
     __AccessControl_init();
     __Pausable_init();
+    __Multicall_init();
     __PolicyGatedERC20_init_unchained(_admin, _guardian, _registry, _hook, _initialRules);
   }
 
@@ -111,7 +113,7 @@ contract Gated4626Vault is ERC4626Upgradeable, PolicyGatedERC20Upgradeable, IGat
     address _owner
   ) public view override returns (uint256 _maxShares) {
     if (_canTransfer(_owner, address(0), 1) != Reasons.TRANSFER_OK) return 0;
-    _maxShares = balanceOf(_owner) - getFrozen(_owner);
+    _maxShares = _unfrozenBalance(_owner);
   }
 
   /**
@@ -129,6 +131,11 @@ contract Gated4626Vault is ERC4626Upgradeable, PolicyGatedERC20Upgradeable, IGat
     bytes4 _interfaceId
   ) public view override returns (bool _supported) {
     _supported = _interfaceId == type(IERC4626).interfaceId || super.supportsInterface(_interfaceId);
+  }
+
+  /// @inheritdoc ITemplated
+  function templateId() public pure override returns (bytes32 _id) {
+    _id = keccak256('Gated4626Vault');
   }
 
   /**

@@ -19,6 +19,7 @@ import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
+import {ITemplated} from 'interfaces/ITemplated.sol';
 
 import {ProxyDeployer} from 'contracts/deploy/ProxyDeployer.sol';
 import {PolicyRegistry} from 'contracts/governance/PolicyRegistry.sol';
@@ -29,7 +30,9 @@ import {MaxHoldersRule} from 'contracts/hooks/rules/MaxHoldersRule.sol';
 import {Helpers} from 'contracts/test/Helpers.sol';
 import {MockAsset} from 'contracts/test/MockAsset.sol';
 import {MockIdentityRegistry} from 'contracts/test/MockIdentityRegistry.sol';
+import {IntentToken} from 'contracts/tokens/IntentToken.sol';
 import {Gated4626Vault} from 'contracts/vaults/Gated4626Vault.sol';
+import {Gated7540Vault} from 'contracts/vaults/Gated7540Vault.sol';
 
 contract Gated4626VaultUnitTest is Helpers {
   uint256 internal constant _FUNDS = 1e18; // 1e12 whole units of a 6-decimals asset
@@ -253,7 +256,7 @@ contract Gated4626VaultUnit_MaxRedeemWithdraw is Gated4626VaultUnitTest {
     uint256 _shares = _deposit(_alice, _assets);
     _frozen = bound(_frozen, 0, _shares);
     vm.prank(_agent);
-    _vault.setFrozen(_alice, _frozen);
+    _vault.setFrozenTokens(_alice, _frozen);
     assertEq(_vault.maxRedeem(_alice), _shares - _frozen);
   }
 
@@ -266,7 +269,7 @@ contract Gated4626VaultUnit_MaxRedeemWithdraw is Gated4626VaultUnitTest {
     uint256 _shares = _deposit(_alice, _assets);
     _frozen = bound(_frozen, 0, _shares - 1);
     vm.prank(_agent);
-    _vault.setFrozen(_alice, _frozen);
+    _vault.setFrozenTokens(_alice, _frozen);
     uint256 _max = _vault.maxRedeem(_alice);
 
     vm.expectRevert(
@@ -311,7 +314,7 @@ contract Gated4626VaultUnit_MaxRedeemWithdraw is Gated4626VaultUnitTest {
     _asset.mint(address(_vault), _donation); // the share price rises
     _frozen = bound(_frozen, 0, _shares);
     vm.prank(_agent);
-    _vault.setFrozen(_alice, _frozen);
+    _vault.setFrozenTokens(_alice, _frozen);
 
     uint256 _max = _vault.maxWithdraw(_alice);
     assertEq(_max, _vault.convertToAssets(_vault.maxRedeem(_alice)));
@@ -469,7 +472,7 @@ contract Gated4626VaultIntegration_Exit is Gated4626VaultIntegrationTest {
     vm.prank(_agent);
     _lockupRule.setLockup(address(_vault), _alice, block.timestamp + 30 days);
 
-    (bool _ok, bytes32 _reason) = _vault.canTransfer(_alice, address(0), 1);
+    (bool _ok, bytes32 _reason) = _vault.canTransferWithReason(_alice, address(0), 1);
     assertFalse(_ok);
     assertEq(_reason, Reasons.LOCKED);
     assertEq(_vault.maxRedeem(_alice), 0);
@@ -574,7 +577,7 @@ contract Gated4626Handler is Test {
     uint256 _shares
   ) external {
     address _sender = _actors[_from % 3];
-    _shares = bound(_shares, 0, _vault.balanceOf(_sender) - _vault.getFrozen(_sender));
+    _shares = bound(_shares, 0, _vault.balanceOf(_sender) - _vault.getFrozenTokens(_sender));
     vm.prank(_sender);
     _vault.transfer(_actors[_to % 3], _shares);
   }
@@ -584,7 +587,7 @@ contract Gated4626Handler is Test {
     uint256 _amount
   ) external {
     address _actor = _actors[_seed % 3];
-    _vault.setFrozen(_actor, bound(_amount, 0, _vault.balanceOf(_actor)));
+    _vault.setFrozenTokens(_actor, bound(_amount, 0, _vault.balanceOf(_actor)));
   }
 
   function donate(
@@ -620,7 +623,7 @@ contract Gated4626VaultInvariantTest is Gated4626VaultUnitTest {
   function invariant_FrozenNeverExceedsBalance() external view {
     address[3] memory _all = _handler.actors();
     for (uint256 _i; _i < 3; ++_i) {
-      assertLe(_vault.getFrozen(_all[_i]), _vault.balanceOf(_all[_i]));
+      assertLe(_vault.getFrozenTokens(_all[_i]), _vault.balanceOf(_all[_i]));
     }
   }
 
@@ -642,5 +645,57 @@ contract Gated4626VaultUnit_Ether is Gated4626VaultUnitTest {
     (bool _ok,) = address(_vault).call{value: 1}('');
     assertFalse(_ok);
     assertEq(address(_vault).balance, 0);
+  }
+}
+
+/// @notice A vault proxy cannot be moved onto another template's implementation, attested or not
+contract Gated4626VaultUnit_Template is Gated4626VaultUnitTest {
+  function _attestedImplementation(
+    address _impl
+  ) internal {
+    vm.mockCall(
+      _registry,
+      abi.encodeCall(IPolicyRegistry.isAttested, (_impl, IPolicyRegistry.AttestKind.IMPLEMENTATION)),
+      abi.encode(true)
+    );
+    vm.startPrank(_admin);
+    _vault.grantRole(_vault.UPGRADER_ROLE(), _admin);
+    vm.stopPrank();
+  }
+
+  function test_WhenQueried_ItNamesItsTemplate() external view {
+    assertEq(_vault.templateId(), keccak256('Gated4626Vault'));
+  }
+
+  function test_WhenUpgradedToTheTokenImplementation_ItIsRefused() external {
+    address _impl = address(new IntentToken());
+    _attestedImplementation(_impl);
+    vm.expectRevert(
+      abi.encodeWithSelector(
+        ITemplated.Templated_WrongTemplate.selector, _impl, keccak256('Gated4626Vault'), keccak256('IntentToken')
+      )
+    );
+    vm.prank(_admin);
+    _vault.upgradeToAndCall(_impl, '');
+  }
+
+  function test_WhenUpgradedToTheOtherVaultImplementation_ItIsRefused() external {
+    address _impl = address(new Gated7540Vault());
+    _attestedImplementation(_impl);
+    vm.expectRevert(
+      abi.encodeWithSelector(
+        ITemplated.Templated_WrongTemplate.selector, _impl, keccak256('Gated4626Vault'), keccak256('Gated7540Vault')
+      )
+    );
+    vm.prank(_admin);
+    _vault.upgradeToAndCall(_impl, '');
+  }
+
+  function test_WhenUpgradedToANewImplementationOfItself_ItUpgrades() external {
+    address _impl = address(new Gated4626Vault());
+    _attestedImplementation(_impl);
+    vm.prank(_admin);
+    _vault.upgradeToAndCall(_impl, '');
+    assertEq(_vault.templateId(), keccak256('Gated4626Vault'));
   }
 }

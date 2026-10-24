@@ -19,6 +19,7 @@ import {IGated7540Vault} from 'interfaces/IGated7540Vault.sol';
 // solhint-disable-next-line no-unused-vars
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
+import {ITemplated} from 'interfaces/ITemplated.sol';
 
 import {PolicyGatedERC20Upgradeable} from 'contracts/base/PolicyGatedERC20Upgradeable.sol';
 
@@ -121,6 +122,7 @@ contract Gated7540Vault is
     __ERC20Permit_init(_name);
     __AccessControl_init();
     __Pausable_init();
+    __Multicall_init();
     __PolicyGatedERC20_init_unchained(_admin, _guardian, _registry, _hook, _initialRules);
     // The call above installs the rules on the hook, which the registry attested and which cannot re-enter
     // `initialize` (the `initializer` modifier) or use a role: only the admin and the guardian hold one yet. What
@@ -582,6 +584,11 @@ contract Gated7540Vault is
     uint256
   ) public pure override returns (uint256) {
     revert Gated7540Vault_AsyncOnly();
+  }
+
+  /// @inheritdoc ITemplated
+  function templateId() public pure override returns (bytes32 _id) {
+    _id = keccak256('Gated7540Vault');
   }
 
   /**

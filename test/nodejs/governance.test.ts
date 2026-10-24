@@ -63,6 +63,23 @@ describe("governance through the timelock", async function () {
     assert.equal(await implementationOf(s, s.token.address), before);
   });
 
+  it("an upgrade to another template's attested implementation is refused at execution", async function () {
+    const s = await networkHelpers.loadFixture(stack);
+    const before = await implementationOf(s, s.token.address);
+    // The council attested the vault implementations for the vaults. Offered to the token proxy, one of them used to be
+    // accepted: balances survived, `decimals()` changed and the vault entry points broke.
+    const vaultImplementation = s.implementations.vault4626.address;
+    assert.equal(await s.registry.read.isAttested([vaultImplementation, ATTEST.IMPLEMENTATION]), true);
+    const op = await schedule(s, s.token.address, upgradeCall(s, vaultImplementation));
+    await networkHelpers.time.increase(op.delay);
+    const failure = await revertOf(op.execute(), [...s.timelock.abi, ...s.token.abi] as Abi);
+    assert.deepEqual(failure, {
+      errorName: "Templated_WrongTemplate",
+      args: [getAddress(vaultImplementation), keccak256(toHex("IntentToken")), keccak256(toHex("Gated4626Vault"))],
+    });
+    assert.equal(await implementationOf(s, s.token.address), before);
+  });
+
   it("nobody but the timelock can upgrade, swap the hook or change the rules directly", async function () {
     const s = await networkHelpers.loadFixture(stack);
     const governance = s.wallets.governance.account;

@@ -41,7 +41,12 @@ import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
  */
 contract InterfaceFreezeTest is Test {
   function test_WhenInterfacesCompile_TheirErc165IdsArePinned() external pure {
-    assertEq(type(IPolicyGated).interfaceId, bytes4(0xf517b40d), 'IPolicyGated');
+    // Re-pinned in S2 of the review items (2026-10-24) on owner instruction (RD3): `IPolicyGated` inherits the ERC-7943
+    // Final interface, so `forcedTransfer`, `setFrozenTokens`, `getFrozenTokens`, `canSend`, `canReceive` and the
+    // boolean `canTransfer` live in `IERC7943Fungible`. What is left in `IPolicyGated` is mint, burn, pause, unpause,
+    // setPolicyHook, canTransferWithReason, policyHook and registry (was 0xf517b40d; `setFrozen`, `getFrozen`,
+    // `isUserAllowed` and the tuple `canTransfer` are gone)
+    assertEq(type(IPolicyGated).interfaceId, bytes4(0x02331726), 'IPolicyGated');
     // Re-pinned in S1 of the review items (2026-10-24) on owner instruction (RD1 to RD3): `TransferContext` lost `ref` and
     // `deadline`, `IPolicyHook` and `IComplianceRule` gained `checkSend` and `checkReceive`, and `IComplianceHook` became
     // the shared hook (per-token `setRules`, `rules` and `ruleCount`; no `ADMIN` or `TOKEN`). Ids computed from the
@@ -99,8 +104,10 @@ contract InterfaceFreezeTest is Test {
   }
 
   function test_WhenInterfacesCompile_TheirEventTopicsArePinned() external pure {
-    assertEq(IPolicyGated.ForcedTransfer.selector, 0x31a05a6a55253f32ca1a2eae200ad7ddf38d17e9f6e0535e9a85ab4a218aeaa3);
-    assertEq(IPolicyGated.Frozen.selector, 0x68e0d8c112165d0949ce87205b719ed7d98c7401866c34a159f7c67c6f5620e7);
+    // Changed in S2 of the review items (2026-10-24): the four-argument `ForcedTransfer` (topic 0x31a05a6a...) is gone,
+    // replaced by the standard's three-argument one (pinned below) and `ForcedTransferBy`, which keeps the agent;
+    // `Frozen` is the standard's, with the same topic as before
+    assertEq(IPolicyGated.ForcedTransferBy.selector, 0x9820680c613c6b8b74bedc929c1ffd105ced2cf11b34457bb8b06bd8ecb15978);
     assertEq(
       IPolicyGated.PolicyHookChanged.selector, 0x964de01ec9270e869e61cc2efab9db5a19eac89859423a5963b19266cef000ca
     );

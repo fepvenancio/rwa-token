@@ -199,7 +199,8 @@ contract IntentTokenHalmos is Test {
     } catch {}
   }
 
-  /// @notice Holder transfers never spend frozen tokens, and no action breaks `frozen <= balance`
+  /// @notice Holder transfers never spend frozen tokens, and no action raises the frozen amount. The frozen amount may
+  ///         exceed the balance (ERC-7943), in which case nothing is unfrozen
   function check_frozenBalanceInvariants(
     uint256 _minted,
     uint256 _frozen,
@@ -209,13 +210,15 @@ contract IntentTokenHalmos is Test {
     vm.prank(_minter);
     _token.mint(_holder, _minted);
     vm.prank(_agent);
-    _token.setFrozen(_holder, _frozen);
+    _token.setFrozenTokens(_holder, _frozen);
 
     uint256 _before = _token.balanceOf(_holder);
+    uint256 _unfrozen = _before > _frozen ? _before - _frozen : 0;
     if (_action % 3 == 0) {
       vm.prank(_holder);
       try _token.transfer(_other, _amount) {
-        assert(_amount <= _before - _frozen);
+        assert(_amount <= _unfrozen);
+        assert(_token.getFrozenTokens(_holder) == _frozen);
       } catch {}
     } else if (_action % 3 == 1) {
       vm.prank(_agent);
@@ -224,21 +227,25 @@ contract IntentTokenHalmos is Test {
       vm.prank(_burner);
       try _token.burn(_holder, _amount) {} catch {}
     }
-    assert(_token.getFrozen(_holder) <= _token.balanceOf(_holder));
+    assert(_token.getFrozenTokens(_holder) <= _frozen);
   }
 
-  /// @notice Enforcement always reaches frozen tokens: burn and forcedTransfer of any amount up to the balance succeed
+  /// @notice Enforcement always reaches frozen tokens, and releases exactly the part of the amount that was frozen:
+  ///         burn and forcedTransfer of any amount up to the balance succeed, whatever the frozen amount
   function check_enforcementCanTakeFrozenTokens(
     uint256 _minted,
     uint256 _frozen,
     uint256 _amount,
     bool _isBurn
   ) public {
-    vm.assume(_frozen <= _minted && _amount <= _minted);
+    vm.assume(_amount <= _minted);
     vm.prank(_minter);
     _token.mint(_holder, _minted);
     vm.prank(_agent);
-    _token.setFrozen(_holder, _frozen);
+    _token.setFrozenTokens(_holder, _frozen);
+
+    uint256 _unfrozen = _minted > _frozen ? _minted - _frozen : 0;
+    uint256 _needed = _amount > _unfrozen ? _amount - _unfrozen : 0;
 
     if (_isBurn) {
       vm.prank(_burner);
@@ -254,6 +261,6 @@ contract IntentTokenHalmos is Test {
       }
     }
     assert(_token.balanceOf(_holder) == _minted - _amount);
-    assert(_token.getFrozen(_holder) <= _token.balanceOf(_holder));
+    assert(_token.getFrozenTokens(_holder) == _frozen - _needed);
   }
 }

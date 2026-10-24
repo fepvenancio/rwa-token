@@ -137,7 +137,7 @@ describe("fund: investors counted across classes", async function () {
     assert.equal(await s.fund.read.holderCount(), FUND_HOLDER_CAP);
 
     // Token: pre-flight says MAX_HOLDERS and the mint reverts with that reason.
-    assert.deepEqual(await s.token.read.canTransfer([zeroAddress, d, 1n]), [false, REASONS.MAX_HOLDERS]);
+    assert.deepEqual(await s.token.read.canTransferWithReason([zeroAddress, d, 1n]), [false, REASONS.MAX_HOLDERS]);
     await viem.assertions.revertWithCustomErrorWithArgs(mintToken(s, dave), s.token, "PolicyGated_TransferRejected", [REASONS.MAX_HOLDERS]);
     // 4626: the gating-aware max is zero, and a deposit above it reverts.
     assert.equal(await s.vault4626.read.maxDeposit([d]), 0n);
@@ -210,8 +210,8 @@ describe("fund: investors counted across classes", async function () {
 
     // Live with its hook, and unusable: the fund does not know it yet.
     const alice = s.holders.alice.account.address;
-    assert.deepEqual(await created.read.canTransfer([zeroAddress, alice, 1n]), [false, REASONS.NOT_FUND_CLASS]);
-    assert.equal(await created.read.isUserAllowed([alice]), false);
+    assert.deepEqual(await created.read.canTransferWithReason([zeroAddress, alice, 1n]), [false, REASONS.NOT_FUND_CLASS]);
+    assert.equal(await created.read.canReceive([alice]), false);
 
     // Only the timelock registers, and only after the delay.
     await viem.assertions.revertWithCustomErrorWithArgs(
@@ -229,7 +229,7 @@ describe("fund: investors counted across classes", async function () {
     await networkHelpers.time.increase(registration.delay);
     await viem.assertions.emitWithArgs(registration.execute(), s.fund, "ClassRegistered", [getAddress(created.address), 4n]);
 
-    assert.deepEqual(await created.read.canTransfer([zeroAddress, alice, 1n]), [true, REASONS.TRANSFER_OK]);
+    assert.deepEqual(await created.read.canTransferWithReason([zeroAddress, alice, 1n]), [true, REASONS.TRANSFER_OK]);
     assert.equal(await s.fund.read.classCount(), 4n);
   });
 
@@ -293,11 +293,11 @@ describe("fund: investors counted across classes", async function () {
       await alone.execute();
 
       // The hooks still list the old rule, which is no longer the fund's: it rejects a new holder and a transfer
-      // between existing holders alike, and `canTransfer` says so before any write.
+      // between existing holders alike, and `canTransferWithReason` says so before any write.
       const carol = s.holders.carol.account.address;
       const [alice, bob] = [s.holders.alice.account.address, s.holders.bob.account.address];
-      assert.deepEqual(await s.token.read.canTransfer([zeroAddress, carol, 1n]), [false, REASONS.NOT_FUND_CLASS]);
-      assert.deepEqual(await s.token.read.canTransfer([alice, bob, 1n]), [false, REASONS.NOT_FUND_CLASS]);
+      assert.deepEqual(await s.token.read.canTransferWithReason([zeroAddress, carol, 1n]), [false, REASONS.NOT_FUND_CLASS]);
+      assert.deepEqual(await s.token.read.canTransferWithReason([alice, bob, 1n]), [false, REASONS.NOT_FUND_CLASS]);
       await viem.assertions.revertWithCustomErrorWithArgs(mintToken(s, s.holders.carol), s.token, "PolicyGated_TransferRejected", [REASONS.NOT_FUND_CLASS]);
       await viem.assertions.revertWithCustomErrorWithArgs(
         s.token.write.transfer([bob, 1n], { account: s.holders.alice.account }),
