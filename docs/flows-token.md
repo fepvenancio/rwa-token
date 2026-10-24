@@ -1,8 +1,10 @@
 # Token flows
 
-Step-by-step flows for `IntentToken`. Transfer, forced transfer, freeze and pause apply to vault shares the same way, because they come from the base. Lockup applies the same way because the vaults' hooks include `LockupRule`. How a redemption meets them differs per vault. Role-gated `mint` and `burn`, and signed intents, work only on `IntentToken`. Both vaults reject `mint(address,uint256)` and `burn(address,uint256)`. Vault flows are in [flows-vaults.md](flows-vaults.md).
+Step-by-step flows for `IntentToken`. Transfer, forced transfer, freeze and pause apply to vault shares the same way, because they come from the base. The lockup and the address freeze apply the same way because the vaults' rule lists include `HolderRestrictionRule`. How a redemption meets them differs per vault. Role-gated `mint` and `burn`, and signed intents, work only on `IntentToken`. Both vaults reject `mint(address,uint256)` and `burn(address,uint256)`. Vault flows are in [flows-vaults.md](flows-vaults.md).
 
-In every diagram, "Hook" stands for `ComplianceHook` and the rules it calls. The checks that matter for each flow are listed under it. How the hook reaches a decision is in [transfer-checks.md](transfer-checks.md).
+In every diagram, "Hook" stands for the `ComplianceHook` the token names and the rules it holds for that token. The checks that matter for each flow are listed under it. How the hook reaches a decision is in [transfer-checks.md](transfer-checks.md).
+
+"The standard rules" below are the rules `Activate` puts in each token's list, in this order: `IdentityRule`, `MinPositionRule`, `HolderRestrictionRule`, then `SettlementWindowRule` on `IntentToken` only, then `FundHoldersRule`. `MaxHoldersRule` is deployed and attested but is in no token's list, so a flow mentions it only where it would add an event. `MinPositionRule` does nothing until the token's admin sets a minimum, and `Activate` sets none by default.
 
 ## Mint
 
@@ -19,12 +21,12 @@ sequenceDiagram
   T->>H: beforeTransfer
   H-->>T: TRANSFER_OK
   T->>T: balance of to up, totalSupply up, Transfer event
-  T->>H: afterTransfer (holder count)
+  T->>H: afterTransfer (investor count)
 ```
 
-Checks with the standard rules: `IdentityRule` needs `to` verified. `MaxHoldersRule` rejects if `to` is a new holder and the cap is full. `FundHoldersRule` rejects if `to` would be a new investor of a full fund, and with `NOT_FUND_CLASS` if the token is not a registered class of its fund. Paused rejects it.
+Checks with the standard rules: `IdentityRule` needs `to` verified. `MinPositionRule` rejects if a minimum is set and `to` would end up holding less than it. `HolderRestrictionRule` rejects a frozen `to`. `FundHoldersRule` rejects if `to` would be a new investor of a full fund, and with `NOT_FUND_CLASS` if the token is not a registered class of its fund. Paused rejects it.
 
-Reverts: `AccessControlUnauthorizedAccount` without the role. A zero `to` reverts with `ERC20InvalidReceiver(address(0))` before `_update`. Otherwise `PolicyGated_TransferRejected(PAUSED | RECEIVER_NOT_VERIFIED | MAX_HOLDERS)`.
+Reverts: `AccessControlUnauthorizedAccount` without the role. A zero `to` reverts with `ERC20InvalidReceiver(address(0))` before `_update`. Otherwise `PolicyGated_TransferRejected(PAUSED | RECEIVER_NOT_VERIFIED | BELOW_MIN_POSITION | RECEIVER_FROZEN | MAX_HOLDERS | NOT_FUND_CLASS)`.
 
 Code: `PolicyGatedERC20Upgradeable.mint`, `_update`.
 
@@ -44,22 +46,28 @@ sequenceDiagram
   T->>H: beforeTransfer
   H-->>T: TRANSFER_OK
   T->>T: balance of from down, totalSupply down, Transfer event
-  T->>H: afterTransfer (holder count)
+  T->>H: afterTransfer (investor count)
 ```
 
-Checks: `IdentityRule` needs `from` verified. `LockupRule` skips the lock because the operator holds `BURNER_ROLE`. A paused token rejects the burn. If `amount` is more than the balance, `_releaseFrozen` reverts with `ERC20InsufficientBalance`.
+The burn is an enforcement action, so it may take frozen tokens. `_releaseFrozen` first lowers the frozen amount by the part of `amount` that comes out of frozen tokens, and the burn then needs only the balance. See [Freeze](#freeze).
 
-Code: `PolicyGatedERC20Upgradeable.burn`, `_releaseFrozen`; `LockupRule.check`.
+Checks: `IdentityRule` needs `from` verified, so the burner cannot burn from a de-verified holder (`SENDER_NOT_VERIFIED`). `HolderRestrictionRule` refuses a frozen `from` with `SENDER_FROZEN`, burner or not. It does not stop the burn for a lockup, because the operator holds `BURNER_ROLE`. `MinPositionRule` does not require `from` to keep a minimum, for the same reason. A paused token rejects the burn, because only a forced transfer is exempt from pause. If `amount` is more than the balance, `_releaseFrozen` reverts with `ERC20InsufficientBalance`.
+
+Code: `PolicyGatedERC20Upgradeable.burn`, `_releaseFrozen`; `HolderRestrictionRule.check`.
 
 ## Transfer, approval and permit
 
-A holder sends tokens with `transfer`. A spender with allowance uses `transferFrom`. Both arrive at the hook as `TRANSFER`. For `transferFrom` the operator in the context is the spender. None of the standard rules checks the spender. They look at `from` and `to`, and `LockupRule` reads the operator only on a `BURN`.
+A holder sends tokens with `transfer`. A spender with allowance uses `transferFrom`. Both arrive at the hook as `TRANSFER`. For `transferFrom` the operator in the context is the spender. None of the standard rules checks the spender. They look at `from` and `to`. `HolderRestrictionRule` and `MinPositionRule` read the operator only on a `BURN`, to see whether it holds `BURNER_ROLE`.
 
 `approve` and `permit` change an allowance. They do not move tokens and do not call the hook, so they work while the token is paused. `permit` is ERC-2612 and uses the same EIP-712 domain as signed intents.
 
-Checks with the standard rules: pause, `balance - frozen >= amount`, `IdentityRule` on both parties, `LockupRule` on the sender, `MaxHoldersRule` if the receiver is a new holder, `FundHoldersRule` if the receiver would be a new investor of the fund. `SettlementWindowRule` does not apply to a direct transfer.
+Checks with the standard rules: pause, then `amount <= balance - frozen` (zero when the frozen amount is the larger), `IdentityRule` on both parties, `MinPositionRule` (neither party may be left above zero and below the minimum, if one is set), `HolderRestrictionRule` (a frozen sender or receiver, and a lockup on the sender), `FundHoldersRule` if the receiver would be a new investor of the fund. `SettlementWindowRule` does not apply to a direct transfer.
 
-Code: ERC-20 functions inherited from OpenZeppelin; `PolicyGatedERC20Upgradeable._update`.
+Reverts: an amount above the unfrozen balance, which includes an amount above the balance, reverts with `ERC7943InsufficientUnfrozenBalance(account, amount, unfrozen)`. Every rejection by the hook reverts with `PolicyGated_TransferRejected(reason)`.
+
+Before sending, an integrator can ask `canTransfer(from, to, amount)`, or `canTransferWithReason`, which also returns the reason code. Both run these checks without the write. `canSend(account)` and `canReceive(account)` ask the account-level question only ([architecture.md](architecture.md#account-level-questions)).
+
+Code: ERC-20 functions inherited from OpenZeppelin; `PolicyGatedERC20Upgradeable._update`, `canTransfer`, `canTransferWithReason`, `canSend`, `canReceive`.
 
 ## Signed intent
 
@@ -80,7 +88,7 @@ TransferIntent(address from,address to,uint256 amount,bytes32 nonce,uint256 dead
 | `amount` | token amount |
 | `nonce` | 32 random bytes chosen by the signer. Each signer has its own set of nonces |
 | `deadline` | last valid unix timestamp, inclusive |
-| `ref` | a 32-byte reference to an off-chain message, for example the hash of an ISO 20022 message id. The token emits it and puts it in the context. None of the five standard rules reads it |
+| `ref` | a 32-byte reference to an off-chain message, for example the hash of an ISO 20022 message id. The token emits it and puts it in the context, in `extra` after the two balances. None of the standard rules reads it |
 | `executor` | the only account allowed to execute the intent. Zero means any holder of `EXECUTOR_ROLE` |
 | `validAfter` | first valid unix timestamp, inclusive. Zero means no lower bound |
 | `considerationToken`, `considerationAmount` | what the signer is to receive for this leg. The token hashes them into the digest the holder signs and reads them only for step 4 below. Only the executor named in `executor` can enforce the payment, if its code does |
@@ -117,6 +125,7 @@ sequenceDiagram
   T->>T: signature invalid for from? BAD_SIGNATURE
   T->>T: mark the nonce used
   T->>T: _moveAs(EXECUTED, ref, deadline), then _update
+  Note over T: extra holds the balances, then ref and deadline
   T->>H: beforeTransfer, kind EXECUTED
   H-->>T: TRANSFER_OK
   T->>T: balances move
@@ -125,7 +134,7 @@ sequenceDiagram
   Ex-->>Op: intentHash
 ```
 
-Checks in `executeTransfer`, in this order. Step 1 reverts with `AccessControlUnauthorizedAccount`. Steps 2 to 7, and the pause, frozen and hook checks inside step 9, revert with `PolicyGated_TransferRejected(reason)`. A zero `to` reverts with `ERC20InvalidReceiver(address(0))` at the start of step 9, before the pause, frozen and hook checks. `canExecute` returns the reason instead of reverting for steps 2 to 7, and for the pause, frozen and hook checks of step 9. It does not check step 1, and it does not reproduce the zero-`to` revert. For a zero `to` it returns the result of the pause, frozen and hook checks; with `IdentityRule` and nothing else failing, that is `RECEIVER_NOT_VERIFIED`:
+Checks in `executeTransfer`, in this order. Step 1 reverts with `AccessControlUnauthorizedAccount`. Steps 2 to 7, and the pause and hook checks inside step 9, revert with `PolicyGated_TransferRejected(reason)`. An amount above the unfrozen balance, checked inside step 9 before the hook, reverts with `ERC7943InsufficientUnfrozenBalance(from, amount, unfrozen)`. A zero `to` reverts with `ERC20InvalidReceiver(address(0))` at the start of step 9, before the pause, frozen and hook checks. `canExecute` returns the reason instead of reverting for steps 2 to 7, and for the pause, frozen and hook checks of step 9. It does not check step 1, and it does not reproduce the zero-`to` revert. For a zero `to` it returns the result of the pause, frozen and hook checks; with `IdentityRule` and nothing else failing, that is `RECEIVER_NOT_VERIFIED`:
 
 1. The caller holds `EXECUTOR_ROLE`. After `Activate` that is the `IntentExecutor` contract or the `DvPExecutor` contract.
 2. `block.timestamp > deadline`: reason `INTENT_EXPIRED`.
@@ -135,7 +144,7 @@ Checks in `executeTransfer`, in this order. Step 1 reverts with `AccessControlUn
 6. `block.timestamp < validAfter`: reason `INTENT_NOT_YET_VALID`.
 7. The signature does not match `from`: reason `BAD_SIGNATURE`.
 8. The nonce is marked used.
-9. The movement goes through `_update` as `EXECUTED`: pause, frozen balance, then the hook. With the standard rules that means `IdentityRule` on both parties, `LockupRule` on the sender, `SettlementWindowRule` (the window must be open), `MaxHoldersRule`, and `FundHoldersRule`.
+9. The movement goes through `_update` as `EXECUTED`: pause, frozen balance, then the hook. With the standard rules that means `IdentityRule` on both parties, `MinPositionRule`, `HolderRestrictionRule` (a frozen sender or receiver, and a lockup on the sender), `SettlementWindowRule` (the window must be open), and `FundHoldersRule`.
 10. `IntentExecuted(intentHash, from, to, amount, executor, ref)` is emitted. `executor` is the account that called the token, so it is the `IntentExecutor` contract when the call came through it.
 
 An intent can be bound to an executor, and it can state what its signer is to receive for it. The token enforces the binding, and that a stated consideration comes with a named executor. It does not enforce the payment: it never reads `considerationToken` or `considerationAmount` beyond that check. An executor that moves the other leg, and that the intent names, is what makes the payment happen. `IntentExecutor` does not move another leg, so it refuses any intent that states a consideration, whoever the intent names, with `IntentExecutor_ConsiderationNotSupported(index)` before the token is called: otherwise the shares would move without the payment the signer read in the message. `DvPExecutor` is the executor that does enforce a payment ([flows-dvp.md](flows-dvp.md)). The token's own `canExecute` does not see this refusal, because it is the executor's check, not the token's.
@@ -171,9 +180,15 @@ sequenceDiagram
   Ex-->>Op: array of intent hashes
 ```
 
-The revert names the index of the failing intent and carries the token's revert data, for example `PolicyGated_TransferRejected(reason)`. The operator can drop that intent and resubmit the rest. Intents execute in array order, so an earlier intent in the batch can change what a later one sees, such as a balance or the holder count.
+The revert names the index of the failing intent and carries the token's revert data, for example `PolicyGated_TransferRejected(reason)`. The operator can drop that intent and resubmit the rest. Intents execute in array order, so an earlier intent in the batch can change what a later one sees, such as a balance or the fund's investor count.
 
 Code: `IntentExecutor.executeBatch`.
+
+## Several calls on one token
+
+Any account can batch calls to one token with `multicall(bytes[] data)`. The token runs each call against itself with a `delegatecall`, so `msg.sender` stays the account that called `multicall`, and the role check of every call inside applies to it. If one call reverts, the whole batch reverts. `multicall` is not payable. An agent that holds `AGENT_ROLE` can use it to set a frozen amount and force a transfer in one transaction, and a minter to mint to several accounts. The tokens have no bespoke batch functions. Each balance movement inside the batch still goes through the hook as its own movement, with the account that called `multicall` as the operator.
+
+Code: `PolicyGatedERC20Upgradeable` (inherits OpenZeppelin's `MulticallUpgradeable`).
 
 ## Cancel
 
@@ -210,17 +225,17 @@ sequenceDiagram
   T->>T: _releaseFrozen(from, amount)
   Note over T: reverts ERC20InsufficientBalance if amount is above the balance
   T->>T: _moveAs(FORCED), then _update
-  Note over T: pause and frozen checks are skipped for FORCED
+  Note over T: FORCED skips the pause check and may take frozen tokens
   T->>H: beforeTransfer, kind FORCED
   H-->>T: TRANSFER_OK
   T->>T: balances move, Transfer event
-  T->>H: afterTransfer (holder count)
-  T-->>A: event ForcedTransfer(from, to, amount, agent)
+  T->>H: afterTransfer (investor count)
+  T-->>A: events ForcedTransfer and ForcedTransferBy, returns true
 ```
 
-The hook still decides. With the standard rules: `IdentityRule` needs `to` verified and does not look at `from`. `LockupRule` passes. `MaxHoldersRule` does not apply the cap, but counts the new holder. `FundHoldersRule` does the same for the fund, and still rejects with `NOT_FUND_CLASS` if the token is not a registered class. Pause and the frozen amount do not stop it.
+The hook still decides. With the standard rules: `IdentityRule` needs `to` verified and does not look at `from`. `MinPositionRule` passes, because a forced transfer is exempt. `HolderRestrictionRule` ignores the sender's freeze and lockup, but refuses a frozen `to` with `RECEIVER_FROZEN`. `FundHoldersRule` does not apply the cap, but counts the new investor, and still rejects with `NOT_FUND_CLASS` if the token is not a registered class. Pause, the frozen amount and the sender's address freeze do not stop it. A frozen `to` does, so a quarantine account used for enforcement must not be address-frozen.
 
-If the forced amount cuts into the frozen amount, `_releaseFrozen` lowers the frozen amount to what is left and emits `Frozen`. The token emits `Frozen`, then `Transfer`, then `ForcedTransfer`. With `MaxHoldersRule` installed, the rule's own `HolderCountUpdated` event can appear between `Transfer` and `ForcedTransfer`, and with `FundHoldersRule` installed the fund's `HolderClassesUpdated` and `HolderCountUpdated` events can too.
+The forced amount can include frozen tokens, never more than the balance. `_releaseFrozen` works out the unfrozen part of the balance and lowers the frozen amount by whatever part of `amount` is above it. With balance 100 and frozen 40, forcing 70 leaves frozen 30. A frozen amount may exceed the balance, so with balance 10 and frozen 100, forcing 10 leaves frozen 90. `Frozen` is emitted only if the frozen amount changes. The token emits `Frozen`, then `Transfer`, then `ForcedTransfer` (the ERC-7943 event), then `ForcedTransferBy`, which also carries the agent. `FundHoldersRule` is in every standard list, so the fund's `HolderClassesUpdated` and `HolderCountUpdated` events can appear between `Transfer` and `ForcedTransfer`. If governance adds `MaxHoldersRule` to a token's list, the rule's own `HolderCountUpdated` event can too.
 
 Code: `PolicyGatedERC20Upgradeable.forcedTransfer`, `_releaseFrozen`, `_moveAs`.
 
@@ -228,19 +243,35 @@ Code: `PolicyGatedERC20Upgradeable.forcedTransfer`, `_releaseFrozen`, `_moveAs`.
 
 The agent holds back part of a holder's balance.
 
-`setFrozen(user, amount)` sets the frozen amount to `amount`. It is an absolute value, not an increase. It cannot be above the balance: `PolicyGated_FrozenExceedsBalance(user, amount, balance)`. It emits `Frozen(user, amount)`.
+`setFrozenTokens(account, amount)` sets the frozen amount to `amount` and returns `true`. It is an absolute value, not an increase. The amount can be above the balance, and the token does not cap it. It emits `Frozen(account, amount)`. `getFrozenTokens(account)` reads it.
 
-While `amount` is frozen, a movement from the holder can use only `balanceOf - frozen`. That covers transfers, executed intents and burns by the holder or a vault. The exceptions are a forced transfer and a role `burn` by the burner on any token, plus `recoverRedeemRequest` on `Gated7540Vault`, which moves the vault's own escrow. Each first lowers the frozen amount as far as it needs (see [Burn](#burn)) and then moves the tokens. The vaults have no role `burn`. Tokens received later do not raise the frozen amount. `setFrozen(user, 0)` lifts the freeze. It does not check pause.
+The unfrozen balance is `balanceOf - frozen`, or zero when the frozen amount is the larger. A movement from the holder can use only that. It covers transfers, executed intents and burns by the holder or a vault. An amount above it reverts with `ERC7943InsufficientUnfrozenBalance(account, amount, unfrozen)`.
 
-Code: `PolicyGatedERC20Upgradeable.setFrozen`, `getFrozen`.
+The exceptions are enforcement: a forced transfer and a role `burn` by the burner on any token, plus `recoverRedeemRequest` on `Gated7540Vault`, which moves the vault's own escrow. Each may take frozen tokens, never more than the balance. Before the move, `_releaseFrozen` lowers the frozen amount by exactly the part of the amount that was frozen, and emits `Frozen` before the `Transfer` event. With balance 10 and frozen 100, a forced transfer of 10 leaves frozen 90. The vaults have no role `burn`. Tokens received later do not raise the frozen amount. `setFrozenTokens(account, 0)` lifts the freeze. It does not check pause.
+
+The pre-flights `canTransfer` and `canTransferWithReason` model a holder-driven movement, so frozen tokens count against the amount. They do not model a forced transfer. A pre-flight of a burn whose sender itself holds `BURNER_ROLE` is bounded by the balance, as the write by the burner is.
+
+This freezes an amount. To block an address, see [Address freeze](#address-freeze).
+
+Code: `PolicyGatedERC20Upgradeable.setFrozenTokens`, `getFrozenTokens`, `_releaseFrozen`, `_check`.
 
 ## Lockup
 
 The agent blocks a holder from sending until a time.
 
-The agent calls the rule, not the token: `LockupRule.setLockup(token, holder, unlockTime)`. The rule asks the token whether the caller holds `AGENT_ROLE`. A time in the past or present clears the lockup. While locked, the holder's `transfer` and executed intents are rejected with `LOCKED`. On `Gated4626Vault`, a holder's `redeem` or `withdraw` is a holder burn and is blocked too. `maxRedeem` and `maxWithdraw` drop to 0, so a non-zero call reverts with `ERC4626ExceededMaxRedeem` or `ERC4626ExceededMaxWithdraw`. On `Gated7540Vault`, `requestRedeem` is rejected with `LOCKED`, because it moves the shares to the vault as a `TRANSFER`. A locked controller also cannot collect a fulfilled redemption: the claim reverts with `Gated7540Vault_ControllerNotEligible(LOCKED)`. See [transfer-checks.md](transfer-checks.md) for the full rule.
+The agent calls the rule, not the token: `HolderRestrictionRule.setLockup(token, holder, unlockTime)`. The rule asks the token whether the caller holds `AGENT_ROLE`. A time at or before the current block time clears the lockup. A future time that does not fit in 64 bits reverts with `HolderRestrictionRule_UnlockTimeTooLarge`. Setting a lockup leaves the holder's address freeze as it was. While locked, the holder's `transfer` and executed intents are rejected with `LOCKED`. On `Gated4626Vault`, a holder's `redeem` or `withdraw` is a holder burn and is blocked too. `maxRedeem` and `maxWithdraw` drop to 0, so a non-zero call reverts with `ERC4626ExceededMaxRedeem` or `ERC4626ExceededMaxWithdraw`. On `Gated7540Vault`, `requestRedeem` is rejected with `LOCKED`, because it moves the shares to the vault as a `TRANSFER`. A locked controller also cannot collect a fulfilled redemption: the claim reverts with `Gated7540Vault_ControllerNotEligible(LOCKED)`. A forced transfer, a mint and a burn by the burner are not stopped by a lockup. `canSend(holder)` is false while the lockup runs, and `canReceive(holder)` is not affected: a locked account can still be paid. See [transfer-checks.md](transfer-checks.md) for the full rule.
 
-Code: `LockupRule.setLockup`.
+Code: `HolderRestrictionRule.setLockup`, `check`, `checkSend`.
+
+## Address freeze
+
+The agent blocks an address from sending and from receiving. This is not the frozen amount of [Freeze](#freeze), which holds back part of a balance.
+
+The agent calls the rule, as for the lockup: `HolderRestrictionRule.setFrozen(token, holder, frozen)`. The rule asks the token whether the caller holds `AGENT_ROLE`. Setting the freeze leaves the holder's lockup as it was. The rule emits `HolderFrozenSet`.
+
+While the address is frozen, a movement from it is rejected with `SENDER_FROZEN` for every kind except a forced transfer, and a movement to it is rejected with `RECEIVER_FROZEN` for every kind except a burn. So a mint to a frozen address, and a forced transfer into one, are refused. A burn from a frozen address is refused too, even by the burner. The way out of a frozen address is a forced transfer to a quarantine account, which therefore must not be address-frozen. The sender is judged before the receiver. `canSend(holder)` and `canReceive(holder)` are both false (the reason, `SENDER_FROZEN` or `RECEIVER_FROZEN`, comes from the hook's `checkSend` and `checkReceive`, and a rule earlier in the list can answer first: for an unverified holder `IdentityRule` does). Setting and clearing it work while the token is paused.
+
+Code: `HolderRestrictionRule.setFrozen`, `check`, `checkSend`, `checkReceive`.
 
 ## Pause and unpause
 
@@ -269,7 +300,11 @@ sequenceDiagram
 
 `pause()` works at once. Inside `_update` the rejection reason is `PAUSED`. Checks that run before `_update` can revert first with their own error, such as an intent check, a zero address, or a vault's `max*` limit. `unpause()` needs `DEFAULT_ADMIN_ROLE`, held by the main timelock, or `RECOVERY_ROLE`, held by the recovery timelock, so it takes the full delay of either. The guardian and governance both hold `CANCELLER_ROLE` on the main timelock, so either can cancel an unpause scheduled there. As deployed, nobody can cancel on the recovery timelock, which can also remove the guardian. See [roles.md](roles.md#what-the-guardian-can-do).
 
-While paused, these still work: `approve`, `permit`, `cancelIntent`, `setFrozen`, `setLockup`, `forcedTransfer`, role changes and every view function.
+Enforcement while paused. A pause refuses `mint` and `burn` as it refuses every kind except `FORCED`, so the issuer's mint and the burner's burn stop with `PAUSED`. `forcedTransfer` still works. During a pause the agent's route is `forcedTransfer(from, quarantine, amount)`. The hook still decides on the receiver: `quarantine` must pass `IdentityRule` and must not be address-frozen. A `burn` of what sits in the quarantine account waits for the unpause. The burner cannot go at the holder directly instead. Once the pause is lifted, a `burn` from a de-verified holder is still refused by `IdentityRule` with `SENDER_NOT_VERIFIED`, and one from an address-frozen holder by `HolderRestrictionRule` with `SENDER_FROZEN`. A forced transfer ignores both on the sender side.
+
+This differs from the ERC-3643 reference token (`Token.sol` in the ERC-3643 repository, branch `main`, checked on 2026-10-23). There `whenNotPaused` is on `transfer` and `transferFrom` only, and `mint`, `burn` and `forcedTransfer` carry `onlyAgent` alone, so its agents can mint, burn and force while paused. Its `setAddressFrozen` blocks `transfer` and `transferFrom` in both directions, but mint, burn and `forcedTransfer` ignore the flag. Here the pause also blocks the issuer's mint, and the address freeze also blocks a mint to the frozen address and a forced transfer into it. This compares the two tokens' code. It is not a claim about the ERC-3643 text.
+
+While paused, these still work: `approve`, `permit`, `cancelIntent`, `setFrozenTokens`, `HolderRestrictionRule.setLockup` and `setFrozen`, `forcedTransfer`, role changes and every view function. `mint` and `burn` do not.
 
 `IntentExecutor` and `DvPExecutor` each have their own pause. The guardian calls `pause()` on one, and the main or the recovery timelock calls `unpause()`. It stops `execute` and `executeBatch`, or `executeDvPGated` and `executeDvP3009`, without touching the token.
 

@@ -574,6 +574,28 @@ contract Gated4626VaultIntegration_MinPosition is Gated4626VaultIntegrationTest 
     assertEq(_vault.balanceOf(_alice), _MIN_SHARES);
   }
 
+  /// @dev The one case where `maxRedeem` overstates: the minimum judges the whole balance and `maxRedeem` counts only the
+  ///      unfrozen part, so a frozen remainder below the minimum would stay behind. Documented in SECURITY.md
+  function test_WhenAFrozenRemainderBelowTheMinimumWouldStay_RedeemingAllOfMaxRedeemReverts() external {
+    _enableMinPosition();
+    uint256 _shares = _deposit(_alice, 2 * _MIN_ASSETS);
+    vm.prank(_agent);
+    _vault.setFrozenTokens(_alice, 5);
+
+    uint256 _max = _vault.maxRedeem(_alice);
+    assertEq(_max, _shares - 5);
+    vm.expectRevert(
+      abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.BELOW_MIN_POSITION)
+    );
+    vm.prank(_alice);
+    _vault.redeem(_max, _alice, _alice);
+
+    // Leaving at least the minimum behind works: the frozen part is part of what stays.
+    vm.prank(_alice);
+    _vault.redeem(_max - _MIN_SHARES, _alice, _alice);
+    assertEq(_vault.balanceOf(_alice), _MIN_SHARES + 5);
+  }
+
   /// @dev The cap is still known to `maxDeposit`: a receiver that could not become a holder has none
   function test_WhenTheCapIsFull_MaxDepositIsStillZeroForANewInvestorWithAMinimumSet() external {
     _enableMinPosition();

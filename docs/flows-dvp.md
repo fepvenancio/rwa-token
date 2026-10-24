@@ -52,15 +52,15 @@ sequenceDiagram
   D->>D: nonReentrant, onlyRole(OPERATOR_ROLE), whenNotPaused
   D->>D: the legs mirror? else DvPExecutor_LegsDoNotMatch
   D->>C: executeTransfer(buyer intent, sig)
-  C-->>D: cash moves from the buyer to the seller, through C's hook
+  C-->>D: cash moves from the buyer to the seller, through the hook under C's rules
   D->>S: executeTransfer(seller intent, sig)
-  S-->>D: shares move from the seller to the buyer, through S's hook
+  S-->>D: shares move from the seller to the buyer, through the hook under S's rules
   D-->>Op: the seller intent's hash, event DvPSettled
 ```
 
 The legs mirror when the parties are swapped (the seller's `from` is the buyer's `to` and the other way round), each amount is the other leg's stated consideration, each stated consideration token is the other leg's token, and the two tokens differ. The executor does not compare the `executor` fields. Each token does, and a stated consideration forces a named executor, so a leg that states a payment can be run only by the executor it names.
 
-The cash leg runs first. If a leg fails, the whole transaction reverts with `DvPExecutor_LegFailed(leg, reason)`, where `leg` is `CASH` (0) or `SECURITIES` (1) and `reason` is the token's revert data, for example `PolicyGated_TransferRejected(reason)`. If both legs would fail, the cash leg is the one reported.
+The cash leg runs first. If a leg fails, the whole transaction reverts with `DvPExecutor_LegFailed(leg, reason)`, where `leg` is `CASH` (0) or `SECURITIES` (1) and `reason` is the token's revert data, for example `PolicyGated_TransferRejected(reason)`, or `ERC7943InsufficientUnfrozenBalance(account, amount, unfrozen)` when the leg's sender has less unfrozen balance than the amount (a buyer short of cash, or a frozen amount in the way). If both legs would fail, the cash leg is the one reported.
 
 ## The ERC-3009 form
 
@@ -77,7 +77,7 @@ sequenceDiagram
   D->>C: receiveWithAuthorization(buyer, D, value, times, nonce, sig)
   C-->>D: cash moves from the buyer to the executor
   D->>S: executeTransfer(seller intent, sig)
-  S-->>D: shares move from the seller to the buyer, through S's hook
+  S-->>D: shares move from the seller to the buyer, through the hook under S's rules
   D->>C: transfer(seller, value)
   D->>D: balances: the executor is where it started, the seller is up by exactly value
   D-->>Op: the seller intent's hash, event DvPSettled
@@ -96,7 +96,7 @@ The executor does not map or touch the authorization's times. The intent's deadl
 1. the executor's own pause: `PAUSED`;
 2. the match: `LEGS_DO_NOT_MATCH`;
 3. for the ERC-3009 form, the authorization's window (`INTENT_NOT_YET_VALID` at or before `validAfter`, `INTENT_EXPIRED` at or after `validBefore`, both ends exclusive), its state (`NONCE_USED`) and the buyer's balance (`INSUFFICIENT_UNFROZEN`);
-4. each leg's `canExecute` from the executor's address, cash first for the gated form and the securities leg for the ERC-3009 form, with the token's reason.
+4. each leg's `canExecute` from the executor's address, cash first for the gated form and the securities leg for the ERC-3009 form, with the token's reason. A leg whose sender has less unfrozen balance than the amount answers `INSUFFICIENT_UNFROZEN` here, and the trade itself then reverts with `ERC7943InsufficientUnfrozenBalance` inside `DvPExecutor_LegFailed`.
 
 What it does not see:
 
@@ -123,13 +123,13 @@ An operator that never submits a trade cannot take anything. There is no on-chai
 
 ## Policy and the fund layer
 
-The securities leg reaches the hook as `EXECUTED`, so the settlement window, lockup, identity, holder cap and the fund-wide investor cap apply to it unchanged. At a full per-token cap, a whole-balance sale to a new holder is admitted, because the seller leaves as the buyer joins, and a partial sale is refused. At a full fund-wide cap the sale is admitted only if it empties the seller's only class, which is what makes the seller leave the fund: a seller who holds another class stays in the fund, the count would grow, and the sale is refused. The executor never holds a class token, so it needs no identity entry and no exemption.
+The securities leg reaches the hook as `EXECUTED`, so the settlement window, identity, the holder restriction (address freeze and lockup), the minimum position and the fund-wide investor cap apply to it unchanged. Where a minimum is set, it applies to both parties: the buyer must end with at least the minimum, and the seller with nothing or at least the minimum. At a full fund-wide cap, a buyer who is not yet an investor (and is not exempt) is admitted only if the sale empties the seller's only class, which is what makes the seller leave the fund: a seller who holds another class stays in the fund, the count would grow, and the sale is refused. A buyer who already holds a class is admitted. Above a lowered cap a new investor is refused even then. A class whose list also has `MaxHoldersRule` (the deployed lists do not) has a per-class cap as well: at a full cap, a whole-balance sale to a new holder is admitted, because the seller leaves as the buyer joins, and a partial sale is refused. The executor never holds a class token, so it needs no identity entry and no exemption.
 
-A gated cash token is an `IntentToken` under its own hook. The executor needs `EXECUTOR_ROLE` on it, granted by that token's administrator; `Activate` grants it only on the intent token it deploys. An ERC-3009 token is external. The executor was written against Circle's FiatToken v2.2, which has the `bytes` signature overload of `receiveWithAuthorization`. Check that overload on any chain and any token before use. USDC's pause and blocklist apply, and a blocklisted executor, buyer or seller fails the trade.
+A gated cash token is an `IntentToken` with a rule list of its own: its initialiser installs the list on the deployment's shared hook, or the token uses another attested hook. The cash leg runs that list, and the cash token's own pause and frozen amounts. The executor needs `EXECUTOR_ROLE` on it, granted by that token's administrator; `Activate` grants it only on the intent token it deploys. An ERC-3009 token is external. The executor was written against Circle's FiatToken v2.2, which has the `bytes` signature overload of `receiveWithAuthorization`. Check that overload on any chain and any token before use. USDC's pause and blocklist apply, and a blocklisted executor, buyer or seller fails the trade.
 
 ## Cost
 
-Measured on the local test chain with the real policy on the security token (identity, lockup, settlement window, holder cap, fund rule) and identity on the gated cash token. `npx hardhat test nodejs test/nodejs/dvp.test.ts` prints the figures. They move by a few hundred gas between runs, because the random nonces, references and signatures change the calldata cost (a zero byte costs 4 gas and any other byte 16). The two rows for scale run after the trades, so the cash transfer empties the buyer's balance, and they are not like for like with the first two.
+Measured on the local test chain at commit `589790a`, with an earlier rule list on the security token (identity, lockup, settlement window, holder cap, fund rule) and identity on the gated cash token. Since then the deployed list became identity, minimum position, holder restriction, settlement window and fund rule, and the token started reading its balances once into the context, so the figures below have not been measured again for the current code. `npx hardhat test nodejs test/nodejs/dvp.test.ts` prints current figures. They move by a few hundred gas between runs, because the random nonces, references and signatures change the calldata cost (a zero byte costs 4 gas and any other byte 16). The two rows for scale run after the trades, so the cash transfer empties the buyer's balance, and they are not like for like with the first two.
 
 | Operation | Gas |
 |---|---|

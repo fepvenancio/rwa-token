@@ -2,7 +2,7 @@
 
 These pages explain how the contracts in `contracts/` work and how they are deployed. They describe what the code does. Where the build brief ([CLAUDE.md](../CLAUDE.md)) or the [README](../README.md) says something different, the code is right, and the page follows the code.
 
-Checked against: the contracts and Ignition modules of release `v0.2.0` (commit `ca88619`), plus the `MaxHoldersRule` seeding change merged in PR #1 (commit `b6f8e9b`), plus the fund layer (`Fund`, `FundHoldersRule` and their Ignition steps) and the intent revision (`executor`, `validAfter` and the consideration fields on `TransferIntent`, `canExecute` taking the signature) and the DvP executor (`DvPExecutor` and its Ignition steps) on the `fund-layer` branch. If a later commit changes them, these pages may be out of date.
+Checked against: the contracts and Ignition modules of release `v0.2.0` (commit `ca88619`), plus the `MaxHoldersRule` seeding change merged in PR #1 (commit `b6f8e9b`), plus the fund layer (`Fund`, `FundHoldersRule` and their Ignition steps) and the intent revision (`executor`, `validAfter` and the consideration fields on `TransferIntent`, `canExecute` taking the signature) and the DvP executor (`DvPExecutor` and its Ignition steps), plus the review items on the `fund-layer` branch up to commit `f3a8295`: the one shared `ComplianceHook`, the balances in `TransferContext.extra`, the ERC-7943 Final token face, the template check on upgrades, `multicall`, `HolderRestrictionRule` and `MinPositionRule`, the account-level vault probes, the `Fund` monitor views and the demo rule lists. The pages describe the code as it stands, including where it departs from ERC-7943 (the README lists the departures). If a later commit changes it, these pages may be out of date.
 
 ## Which page answers what
 
@@ -16,7 +16,7 @@ Checked against: the contracts and Ignition modules of release `v0.2.0` (commit 
 | How do the two vaults work, call by call? | [flows-vaults.md](flows-vaults.md) |
 | Where do tokens and assets sit at each step? How is the price set? | [money.md](money.md) |
 | How does a share trade settle against cash, atomically? | [flows-dvp.md](flows-dvp.md) |
-| How does the policy change after launch? How is a token deployed? | [governance-and-deployment.md](governance-and-deployment.md) |
+| How does the policy change after launch? How is a token deployed? What do I do in an incident? | [governance-and-deployment.md](governance-and-deployment.md), and [its incident runbook](governance-and-deployment.md#incident-runbook-pause-enforce-resume) |
 
 Read them in that order the first time. Each page stands alone after that.
 
@@ -28,10 +28,10 @@ Other documents in the repo: [README.md](../README.md) has the security model su
 |---|---|
 | Token | A proxy running `IntentToken`, `Gated4626Vault` or `Gated7540Vault`. Vault shares are tokens too |
 | Movement | Any change to a token balance: transfer, mint, burn, forced transfer, executed intent |
-| Hook | The `ComplianceHook` bound to one token. The token asks it about every movement |
+| Hook | The `ComplianceHook`, one per deployment and shared by every token, with an ordered rule list for each token. The token asks it about every movement |
 | Fund | The `Fund` contract: the classes of one fund, how many distinct investors hold any of them, and which classes each investor holds |
 | Class | A token registered in a fund. Any of the three templates can be a class |
-| Rule | A small contract the hook calls, with `check` (a view) and `after_`. Examples: `IdentityRule`, `LockupRule` |
+| Rule | A small contract the hook calls, with `check` (a view) and `after_`. Examples: `IdentityRule`, `HolderRestrictionRule` |
 | Kind | How the hook sees a movement: `TRANSFER`, `EXECUTED`, `FORCED`, `MINT`, `BURN` |
 | Context | The `TransferContext` struct the token builds for each movement and passes to the hook and rules |
 | Reason code | A `bytes32` returned instead of `TRANSFER_OK` to reject a movement. Listed in `contracts/interfaces/Errors.sol` |
@@ -44,7 +44,9 @@ Other documents in the repo: [README.md](../README.md) has the security model su
 | Operator | Three different things. See [roles.md](roles.md) |
 | Intent | A transfer the holder signs (EIP-712) and an executor submits. It can name the only executor allowed to run it and state what the signer is to receive for it |
 | DvP | Delivery versus payment: a share trade against cash, both legs in one transaction, through `DvPExecutor`. The cash is a gated token or an ERC-3009 token |
-| Frozen | An amount of a holder's balance that the holder cannot move. The agent sets it. Enforcement actions (`burn`, forced transfers, the 7540 vault's recovery of pending redemptions) lower it as far as they need |
+| Frozen | An amount of a holder's balance that the holder cannot move. The agent sets it, and it may exceed the balance, in which case nothing can be moved. Enforcement actions (`burn`, forced transfers, the 7540 vault's recovery of pending redemptions) lower it by the part of the amount they take from it. It can stay above the balance. Not the same as an address freeze, which `HolderRestrictionRule` keeps and which stops an account from sending or receiving |
+| Minimum position | The smallest balance an account may be left holding above zero, kept per token by `MinPositionRule` (0 is off) |
+| Account-level answer | What `canSend` and `canReceive` say about one account, with no amount and no kind: the hook's `checkSend` and `checkReceive`. The vaults' `maxDeposit` and `maxMint` rest on the receiving one |
 | Controller | In `Gated7540Vault`, the account that owns a request's bookkeeping. The claim is made by the controller or by an operator it approved |
 | Fulfiller | The holder of `FULFILLER_ROLE` on `Gated7540Vault`. It decides price and timing of fulfilments |
 | Custody | In `Gated7540Vault`, the address that receives the assets of fulfilled deposits |
