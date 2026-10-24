@@ -149,7 +149,7 @@ contract Gated7540Vault is
     address _sender = _msgSender();
     if (_owner != _sender && !$.operators[_owner][_sender]) revert Gated7540Vault_Unauthorized(_sender);
     // No cancellation exists, so refuse assets from a controller that could not hold the shares.
-    bytes32 _reason = _canTransfer(address(0), _controller, 1);
+    bytes32 _reason = _accountReason(_controller, false);
     if (_reason != Reasons.TRANSFER_OK) revert Gated7540Vault_ControllerNotEligible(_reason);
 
     $.deposits[_controller].pendingAssets += _assets;
@@ -492,7 +492,7 @@ contract Gated7540Vault is
   function maxDeposit(
     address _controller
   ) public view override returns (uint256 _maxAssets) {
-    if (_canTransfer(address(0), _controller, 1) != Reasons.TRANSFER_OK) return 0;
+    if (_accountReason(_controller, false) != Reasons.TRANSFER_OK) return 0;
     _maxAssets = _getGated7540Storage().deposits[_controller].claimableAssets;
   }
 
@@ -503,7 +503,7 @@ contract Gated7540Vault is
   function maxMint(
     address _controller
   ) public view override returns (uint256 _maxShares) {
-    if (_canTransfer(address(0), _controller, 1) != Reasons.TRANSFER_OK) return 0;
+    if (_accountReason(_controller, false) != Reasons.TRANSFER_OK) return 0;
     _maxShares = _getGated7540Storage().deposits[_controller].claimableShares;
   }
 
@@ -752,7 +752,7 @@ contract Gated7540Vault is
   function _requireDepositClaimEligible(
     address _controller
   ) private view {
-    bytes32 _reason = _canTransfer(address(0), _controller, 1);
+    bytes32 _reason = _accountReason(_controller, false);
     if (_reason != Reasons.TRANSFER_OK) revert Gated7540Vault_ControllerNotEligible(_reason);
   }
 

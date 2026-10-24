@@ -10,10 +10,12 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
  * @notice ERC-4626 vault whose shares are a policy-gated token. Deposits and mints arrive at the hook as MINT to the
  *         receiver; withdrawals and redemptions as BURN from the owner, with the caller as operator. The asset leg is
  *         an ordinary ERC-20 transfer and is not hooked
- * @dev `max*` express the gating: `maxDeposit` / `maxMint` are 0 when paused or when `canTransfer(0, receiver, 1)` is
- *      not OK; `maxRedeem` is `balanceOf - getFrozen`, or 0 when paused or `canTransfer(owner, 0, 1)` is not OK;
- *      `maxWithdraw` is `convertToAssets(maxRedeem, Floor)`. `preview*` stay pure conversions. Share supply moves only
- *      through deposits and redemptions: the issuer `mint` / `burn` primitives revert
+ * @dev `max*` express the gating: `maxDeposit` / `maxMint` are 0 when paused or when `canReceive(receiver)` is false (the
+ *      account-level question: identity, freeze, holder cap); `maxRedeem` is the unfrozen balance, or 0 when paused or
+ *      when a burn of nothing from `owner` would be rejected (identity, freeze, lockup). Neither probe depends on an
+ *      amount, so a minimum position does not read as a block: a deposit or redemption that would leave dust reverts
+ *      when it executes. `maxWithdraw` is `convertToAssets(maxRedeem, Floor)`. `preview*` stay pure conversions. Share
+ *      supply moves only through deposits and redemptions: the issuer `mint` / `burn` primitives revert
  */
 interface IGated4626Vault {
   /*///////////////////////////////////////////////////////////////

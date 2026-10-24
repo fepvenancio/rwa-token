@@ -85,34 +85,37 @@ contract Gated4626Vault is ERC4626Upgradeable, PolicyGatedERC20Upgradeable, IGat
 
   /**
    * @inheritdoc ERC4626Upgradeable
-   * @dev 0 when paused or when the policy would reject a mint to `_receiver`
+   * @dev 0 when paused or when `_receiver` could not receive shares at all (`canReceive`: identity, freeze, the holder
+   *      cap). It does not depend on an amount, so a minimum position does not read as a block
    */
   function maxDeposit(
     address _receiver
   ) public view override returns (uint256 _maxAssets) {
-    if (_canTransfer(address(0), _receiver, 1) != Reasons.TRANSFER_OK) return 0;
+    if (_accountReason(_receiver, false) != Reasons.TRANSFER_OK) return 0;
     _maxAssets = super.maxDeposit(_receiver);
   }
 
   /**
    * @inheritdoc ERC4626Upgradeable
-   * @dev 0 when paused or when the policy would reject a mint to `_receiver`
+   * @dev 0 when paused or when `_receiver` could not receive shares at all, as `maxDeposit`
    */
   function maxMint(
     address _receiver
   ) public view override returns (uint256 _maxShares) {
-    if (_canTransfer(address(0), _receiver, 1) != Reasons.TRANSFER_OK) return 0;
+    if (_accountReason(_receiver, false) != Reasons.TRANSFER_OK) return 0;
     _maxShares = super.maxMint(_receiver);
   }
 
   /**
    * @inheritdoc ERC4626Upgradeable
-   * @dev The unfrozen balance; 0 when paused or when the policy would reject a burn from `_owner`
+   * @dev The unfrozen balance; 0 when paused or when the policy would reject a burn from `_owner` (identity, freeze,
+   *      lockup). The probe burns nothing: one share would leave a remainder, which a minimum position rejects, and
+   *      hide a holder who can redeem everything. The size of a real redemption is judged when it burns
    */
   function maxRedeem(
     address _owner
   ) public view override returns (uint256 _maxShares) {
-    if (_canTransfer(_owner, address(0), 1) != Reasons.TRANSFER_OK) return 0;
+    if (_canTransfer(_owner, address(0), 0) != Reasons.TRANSFER_OK) return 0;
     _maxShares = _unfrozenBalance(_owner);
   }
 

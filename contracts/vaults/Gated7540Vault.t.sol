@@ -30,9 +30,10 @@ import {ITemplated} from 'interfaces/ITemplated.sol';
 import {ProxyDeployer} from 'contracts/deploy/ProxyDeployer.sol';
 import {PolicyRegistry} from 'contracts/governance/PolicyRegistry.sol';
 import {ComplianceHook} from 'contracts/hooks/ComplianceHook.sol';
+import {HolderRestrictionRule} from 'contracts/hooks/rules/HolderRestrictionRule.sol';
 import {IdentityRule} from 'contracts/hooks/rules/IdentityRule.sol';
-import {LockupRule} from 'contracts/hooks/rules/LockupRule.sol';
 import {MaxHoldersRule} from 'contracts/hooks/rules/MaxHoldersRule.sol';
+import {MinPositionRule} from 'contracts/hooks/rules/MinPositionRule.sol';
 import {Helpers} from 'contracts/test/Helpers.sol';
 import {MockAsset} from 'contracts/test/MockAsset.sol';
 import {MockIdentityRegistry} from 'contracts/test/MockIdentityRegistry.sol';
@@ -112,6 +113,8 @@ contract Gated7540VaultUnitTest is Helpers {
     bytes32 _reason
   ) internal {
     vm.mockCall(_hook, abi.encodeWithSelector(IPolicyHook.beforeTransfer.selector), abi.encode(_reason));
+    // The `max*` and eligibility probes ask the account-level question, so the stub answers it the same way.
+    vm.mockCall(_hook, abi.encodeWithSelector(IPolicyHook.checkReceive.selector), abi.encode(_reason));
   }
 
   function _requestDeposit(
@@ -1101,12 +1104,12 @@ contract Gated7540VaultUnit_ViewsAndAdmin is Gated7540VaultUnitTest {
   }
 }
 
-/// @notice Integration: the async vault behind a real ComplianceHook with Identity, Lockup and MaxHolders
+/// @notice Integration: the async vault behind a real ComplianceHook with Identity, HolderRestriction and MaxHolders
 contract Gated7540VaultIntegrationTest is Test {
   Gated7540Vault internal _vault;
   MockAsset internal _asset;
   MockIdentityRegistry internal _identity;
-  LockupRule internal _lockupRule;
+  HolderRestrictionRule internal _restrictionRule;
   MaxHoldersRule internal _maxHoldersRule;
   address internal _guardian = makeAddr('guardian');
   address internal _agent = makeAddr('agent');
@@ -1122,17 +1125,17 @@ contract Gated7540VaultIntegrationTest is Test {
     PolicyRegistry _registry = new PolicyRegistry(address(this), address(this));
     _identity = new MockIdentityRegistry();
     IdentityRule _identityRule = new IdentityRule(IIdentityRegistry(address(_identity)));
-    _lockupRule = new LockupRule();
+    _restrictionRule = new HolderRestrictionRule();
     _maxHoldersRule = new MaxHoldersRule();
     _registry.attest(address(_identityRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
-    _registry.attest(address(_lockupRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
+    _registry.attest(address(_restrictionRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
     _registry.attest(address(_maxHoldersRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
 
     _asset = new MockAsset(6);
     Gated7540Vault _impl = new Gated7540Vault();
     IComplianceRule[] memory _rules = new IComplianceRule[](3);
     _rules[0] = _identityRule;
-    _rules[1] = _lockupRule;
+    _rules[1] = _restrictionRule;
     _rules[2] = _maxHoldersRule;
     // CREATE2 through ProxyDeployer, as in production: the address does not depend on this contract's nonce.
     ProxyDeployer _proxyDeployer = new ProxyDeployer(address(this));
@@ -1253,7 +1256,7 @@ contract Gated7540VaultIntegration_Escrow is Gated7540VaultIntegrationTest {
   function test_WhenTheHolderIsLocked_ARedeemRequestIsRefused() external {
     _invest(_alice, 100);
     vm.prank(_agent);
-    _lockupRule.setLockup(address(_vault), _alice, block.timestamp + 30 days);
+    _restrictionRule.setLockup(address(_vault), _alice, block.timestamp + 30 days);
     vm.expectRevert(abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.LOCKED));
     vm.prank(_alice);
     _vault.requestRedeem(100, _alice, _alice);
@@ -1708,6 +1711,90 @@ contract Gated7540VaultUnit_Storage is Gated7540VaultUnitTest {
 
 /// @dev M-3: compliance holds after fulfilment. Claims re-run the controller's policy pre-flight, and the agent can
 ///      recover claimable balances to a verified account, even while paused or at a full cap
+/// @notice The async vault with a minimum position (RD7). The eligibility probes must not read the minimum as a block, and
+///         the escrow (the vault itself) is exempt, or a redeem request below the minimum could never be filed
+contract Gated7540VaultIntegration_MinPosition is Gated7540VaultIntegrationTest {
+  uint256 internal constant _MIN = 1000;
+
+  function _enableMinPosition() internal {
+    MinPositionRule _minRule = new MinPositionRule();
+    IPolicyRegistry(_vault.registry()).attest(address(_minRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
+    ComplianceHook _hook = ComplianceHook(_vault.policyHook());
+    IComplianceRule[] memory _old = _hook.rules(address(_vault));
+    IComplianceRule[] memory _list = new IComplianceRule[](_old.length + 1);
+    _list[0] = _old[0]; // identity first, then the minimum, then the holder rules
+    _list[1] = _minRule;
+    for (uint256 _i = 1; _i < _old.length; ++_i) {
+      _list[_i + 1] = _old[_i];
+    }
+    _hook.setRules(address(_vault), _list);
+    _minRule.setMinPosition(address(_vault), _MIN);
+  }
+
+  /// @dev An empty controller cannot know how many shares a request will buy, so the request is not refused for size
+  function test_WhenAMinimumIsSet_AFreshControllerCanRequestAndClaimTheMinimum() external {
+    _enableMinPosition();
+    _invest(_alice, _MIN);
+    assertEq(_vault.balanceOf(_alice), _MIN);
+  }
+
+  function test_WhenAMinimumIsSet_ClaimableAmountsOfAFreshControllerAreNotHidden() external {
+    _enableMinPosition();
+    vm.prank(_alice);
+    _vault.requestDeposit(_MIN, _alice, _alice);
+    vm.prank(_fulfiller);
+    _vault.fulfillDeposit(_alice, _MIN, _MIN);
+    assertEq(_vault.maxDeposit(_alice), _MIN);
+    assertEq(_vault.maxMint(_alice), _MIN);
+  }
+
+  /// @dev A claim below the minimum is refused by the hook; the agent's enforcement mint is exempt and delivers it
+  function test_WhenAClaimWouldLeaveDust_TheClaimRevertsAndTheAgentCanRecover() external {
+    _enableMinPosition();
+    vm.prank(_alice);
+    _vault.requestDeposit(_MIN - 1, _alice, _alice);
+    vm.prank(_fulfiller);
+    _vault.fulfillDeposit(_alice, _MIN - 1, _MIN - 1);
+
+    vm.expectRevert(
+      abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.BELOW_MIN_POSITION)
+    );
+    vm.prank(_alice);
+    _vault.mint(_MIN - 1, _alice, _alice);
+    assertEq(_vault.maxMint(_alice), _MIN - 1, 'the failed claim consumed nothing');
+
+    vm.prank(_agent);
+    _vault.recoverClaimable(_alice, _alice);
+    assertEq(_vault.balanceOf(_alice), _MIN - 1);
+  }
+
+  function test_WhenARedeemRequestWouldLeaveDustWithTheController_ItIsRefused() external {
+    _enableMinPosition();
+    _invest(_alice, 2 * _MIN);
+    vm.expectRevert(
+      abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.BELOW_MIN_POSITION)
+    );
+    vm.prank(_alice);
+    _vault.requestRedeem(_MIN + 1, _alice, _alice);
+  }
+
+  /// @dev The escrow holds 1 share, below the minimum, and is exempt as the token itself; the fulfilment burns from it
+  function test_WhenTheEscrowHoldsLessThanTheMinimum_TheRedeemLifecycleStillRuns() external {
+    _enableMinPosition();
+    _invest(_alice, 2 * _MIN);
+    vm.prank(_alice);
+    _vault.requestRedeem(1, _alice, _alice);
+    assertEq(_vault.balanceOf(address(_vault)), 1);
+
+    vm.prank(_fulfiller);
+    _vault.fulfillRedeem(_alice, 1, 1);
+    vm.prank(_alice);
+    _vault.redeem(1, _alice, _alice);
+    assertEq(_vault.balanceOf(address(_vault)), 0);
+    assertEq(_vault.balanceOf(_alice), 2 * _MIN - 1);
+  }
+}
+
 contract Gated7540VaultIntegration_Claimable is Gated7540VaultIntegrationTest {
   address internal _treasury = makeAddr('treasury');
 
@@ -1777,7 +1864,7 @@ contract Gated7540VaultIntegration_Claimable is Gated7540VaultIntegrationTest {
   function test_WhenTheControllerIsLockedUp_ThePayoutWaitsForTheUnlock() external {
     _fulfilledRedemption(_alice, 100);
     vm.prank(_agent);
-    _lockupRule.setLockup(address(_vault), _alice, block.timestamp + 1 days);
+    _restrictionRule.setLockup(address(_vault), _alice, block.timestamp + 1 days);
     assertEq(_vault.maxRedeem(_alice), 0);
     vm.expectRevert(
       abi.encodeWithSelector(IGated7540Vault.Gated7540Vault_ControllerNotEligible.selector, Reasons.LOCKED)

@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import { network } from "hardhat";
 import { encodeFunctionData, getAddress, parseEther, zeroAddress } from "viem";
 
-import { deployStack, revertOf } from "./fixtures.js";
+import { deployStack, REASONS, revertOf } from "./fixtures.js";
 
 /** The ERC-7943 Final fungible id, the XOR of the standard's six selectors. */
 const IERC7943_FUNGIBLE_ID = "0x3edbb4c4";
@@ -48,6 +48,26 @@ describe("ERC-7943 face and multicall on the deployed stack", async function () 
     assert.equal(await s.token.read.canTransfer([alice, bob, 1n]), false);
     const failure = await revertOf(s.token.simulate.transfer([bob, 1n], { account: alice }), s.token.abi);
     assert.deepEqual(failure, { errorName: "ERC7943InsufficientUnfrozenBalance", args: [getAddress(alice), 1n, 0n] });
+  });
+
+  it("an address freeze blocks an account both ways, and the standard's answers say so", async function () {
+    const s = await networkHelpers.loadFixture(stack);
+    const alice = s.holders.alice.account.address;
+    const bob = s.holders.bob.account.address;
+    const agent = s.wallets.agent.account;
+    await s.token.write.mint([alice, parseEther("10")], { account: s.wallets.minter.account });
+    await s.rules.holderRestrictionRule.write.setFrozen([s.token.address, bob, true], { account: agent });
+
+    assert.equal(await s.token.read.canSend([bob]), false);
+    assert.equal(await s.token.read.canReceive([bob]), false);
+    assert.deepEqual(await s.token.read.canTransferWithReason([alice, bob, 1n]), [false, REASONS.RECEIVER_FROZEN]);
+    const failure = await revertOf(s.token.simulate.transfer([bob, 1n], { account: alice }), s.token.abi);
+    assert.deepEqual(failure, { errorName: "PolicyGated_TransferRejected", args: [REASONS.RECEIVER_FROZEN] });
+
+    await s.rules.holderRestrictionRule.write.setFrozen([s.token.address, bob, false], { account: agent });
+    assert.equal(await s.token.read.canReceive([bob]), true);
+    await s.token.write.transfer([bob, 1n], { account: s.holders.alice.account });
+    assert.equal(await s.token.read.balanceOf([bob]), 1n);
   });
 
   it("a minter batches two mints in one transaction, and a stranger cannot", async function () {

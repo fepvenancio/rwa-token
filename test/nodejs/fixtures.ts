@@ -51,6 +51,9 @@ const REASON_NAMES = [
   "INTENT_NOT_YET_VALID",
   "CONSIDERATION_NEEDS_EXECUTOR",
   "LEGS_DO_NOT_MATCH",
+  "BELOW_MIN_POSITION",
+  "SENDER_FROZEN",
+  "RECEIVER_FROZEN",
 ] as const;
 
 /** `Errors.sol` reason codes, keyed by name; `reasonName` maps a code back for readable assertions. */
@@ -126,7 +129,7 @@ export async function deployUntilActivate(connection: NetworkConnection) {
     registry,
     hook,
     identityRule,
-    lockupRule,
+    holderRestrictionRule,
     windowRule,
     maxHoldersRule,
     fundContract,
@@ -141,7 +144,7 @@ export async function deployUntilActivate(connection: NetworkConnection) {
   };
 
   // Council step: the rules, the one shared hook and the implementations.
-  for (const rule of [identityRule, lockupRule, windowRule, maxHoldersRule, fundHoldersRule]) {
+  for (const rule of [identityRule, holderRestrictionRule, windowRule, maxHoldersRule, fundHoldersRule]) {
     await attest(rule.address, ATTEST.RULE, `ipfs://rule-review/${rule.address}`);
   }
   await attest(hook.address, ATTEST.HOOK, `ipfs://hook-review/${hook.address}`);
@@ -155,7 +158,7 @@ export async function deployUntilActivate(connection: NetworkConnection) {
     proxyDeployer: proxyDeployer.address,
     hook: hook.address,
     identityRule: identityRule.address,
-    lockupRule: lockupRule.address,
+    holderRestrictionRule: holderRestrictionRule.address,
     windowRule: windowRule.address,
     maxHoldersRule: maxHoldersRule.address,
     fundHoldersRule: fundHoldersRule.address,
@@ -200,7 +203,7 @@ export async function deployUntilActivate(connection: NetworkConnection) {
       recoveryTimelock,
       registry,
       identity,
-      rules: { identityRule, lockupRule, windowRule, maxHoldersRule, fundHoldersRule },
+      rules: { identityRule, holderRestrictionRule, windowRule, maxHoldersRule, fundHoldersRule },
       fund: fundContract,
       proxyDeployer,
       asset,

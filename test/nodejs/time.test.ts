@@ -30,7 +30,7 @@ describe("time-based flows", async function () {
     const s = await networkHelpers.loadFixture(funded);
     const { alice, bob } = s.holders;
     const unlock = (await time.latest()) + 30 * 86_400;
-    await s.rules.lockupRule.write.setLockup([s.token.address, alice.account.address, BigInt(unlock)], {
+    await s.rules.holderRestrictionRule.write.setLockup([s.token.address, alice.account.address, BigInt(unlock)], {
       account: s.wallets.agent.account,
     });
 

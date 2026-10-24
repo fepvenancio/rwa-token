@@ -1777,7 +1777,7 @@ Gates on the final tree: `npx hardhat test` **792 passing (707 Solidity, 85 Type
 
 Docs updated: flows-token (the executor paragraph and the batch diagram), transfer-checks, flows-dvp, architecture, roles, the README, SECURITY.md (the consideration bullet and a mutation row), the brief's §1 and §5. Not changed: `IIntentExecutor`'s ERC-165 id (errors are not part of it) and `InterfaceFreeze.t.sol`, which pins no error selectors. Nothing is committed or pushed.
 
-## Review items, built before the first deployment (plan 2026-10-23; decisions made, S0 built, waits for review)
+## Review items, built before the first deployment (plan 2026-10-23; decisions made; S0 to S2 committed, S3 built and waits for review)
 
 On 2026-10-23 the owner pasted a merged outside assessment and then said: "I prefer to have the code ready from the gate than waiting to do fixes X months after... if one institutions uses this seriously the gas costs are unecessary". The first version of this section proposed eleven decisions. The owner answered them the same day with changes, and added an S0 for the interfaces. The numbers below are the owner's answer; they differ from the first version's. A second answer settled the one open point of the first reply: `IPolicyHook` keeps its shape, with `checkSend` and `checkReceive` added and `ref` and `deadline` moved from fields into `extra`. The brief's rule 4 is satisfied: the owner's RD3 is the explicit instruction to reopen `contracts/interfaces/`, to be re-frozen after S0.
 
@@ -1953,7 +1953,7 @@ Each step: tests first with the red run shown, implementation, both runners, Sli
 | S0 | This section, the new interface files, the appended reasons and their pins (built, see below). The breaking edits to the existing frozen interfaces land with the step that implements them. Re-freeze on approval |
 | S1 | The shared hook and the context with balances; the rules' balance reads move to the context (the existing rules, so the tree stays green); `ProxyDeployer` and the initialisers take `initialRules` |
 | S2 | The base: ERC-7943 face, `_releaseFrozen`, `MulticallUpgradeable`, `templateId`. **Size gate** on the 7540 vault |
-| S3 | The rules: `HolderRestrictionRule`, `MinPositionRule`; `MaxHoldersRule` and `FundHoldersRule` adapted to the context. Gas probe re-run |
+| S3 | The rules: `HolderRestrictionRule`, `MinPositionRule`; `MaxHoldersRule` and `FundHoldersRule` adapted to the context. Gas probe re-run (built, see "S3 as built"; the two counting rules had read the context since S1, so their S3 change is the cap answer in `checkReceive`) |
 | S4 | The fund views; the Ignition modules and fixtures (shared hook deployment, the new `RULE_ORDER`, the post-deploy checks) |
 | S5 | Docs, `SECURITY.md`, `README.md`, the brief (`CLAUDE.md` §1, §4, §5, §6 and the rule list), the pause runbook, the amendment to the draft ERC for RD2, `InterfaceFreeze` re-pinned, reproducibility |
 
@@ -1961,7 +1961,7 @@ Each step: tests first with the red run shown, implementation, both runners, Sli
 
 By step: S1 `IPolicyHook`, `IComplianceRule`, `IComplianceHook` and the semantics of `TransferContext.extra`; S2 `IPolicyGated` and the ERC-165 id of every template; S4 `IFund`. New files, built in S0: `IERC7943Fungible`, `ITemplated`, `IHolderRestrictionRule`, `IMinPositionRule`, and three appended reason codes in `Errors.sol`. `ILockupRule` goes in S3. Every implementation, hook and rule codehash changes, which is free before the first deployment. `InterfaceFreeze.t.sol` is re-pinned in each step's commit.
 
-### S0 as built (2026-10-23, working tree, not committed)
+### S0 as built (2026-10-23, committed `71f10cd`)
 
 The owner's S0 was: the specification, the interface edits and the re-pinned `InterfaceFreeze.t.sol`, one commit, tree green. All of it cannot be one green commit. Changing `IPolicyGated`, `IPolicyHook`, `IComplianceRule` and `IComplianceHook` breaks every contract and test that implements or calls them (`TransferContext` alone appears in 23 contract and test files, and the shared hook is a rewrite of `ComplianceHook`). Making that compile would pull S1 and S2 into S0. So S0 is built in the additive form, which stays green:
 
@@ -1974,7 +1974,7 @@ Tests first: the pins were added before the files and the run failed to compile 
 
 "Re-freeze" then means: the specification here is frozen for S1 to S5, and the new interface files are frozen by their pins. Each existing interface changes in one commit together with the code that implements it and its new pin.
 
-### S1 as built (2026-10-24, working tree, not committed)
+### S1 as built (2026-10-24, committed `0aaed89`)
 
 One shared `ComplianceHook` and the balances in the context. What changed:
 
@@ -2008,7 +2008,7 @@ Sizes (deployed bytes, headroom to 24,576): `IntentToken` 16,287 (8,289), `Gated
 
 The docs, `README.md`, `SECURITY.md` and `CLAUDE.md` still describe a hook per token and the `Tokens` stage; the plan puts them in S5.
 
-### S2 as built (2026-10-24, working tree, not committed)
+### S2 as built (2026-10-24, committed `6709889`)
 
 The ERC-7943 face, the freeze semantics, `MulticallUpgradeable` and the template check. What changed:
 
@@ -2049,6 +2049,49 @@ Gas, same probe: the four-rule transfer is 82,020 (S1: 81,804, so +216, the `_ch
 | `EXIT_ONLY` fixes a real vault case: a lapsed investor cannot redeem | True of the code: `Gated7540Vault._requirePayoutEligible` runs the burn probe `_canTransfer(controller, 0, 0)`, `IdentityRule` rejects an unverified sender for a burn, and `requestRedeem` is a transfer from the same sender. Today the exit is `recoverRedeemRequest` or `recoverClaimable` by `AGENT_ROLE` |
 
 Found while validating, fixed in S2: the pre-flight gap above, and a flaw the fuzzer found afterwards: a hook returning `INSUFFICIENT_UNFROZEN` for a mint was relabelled with the standard's error and a zero account. The token now confirms a real shortfall before using the standard's error.
+
+### S3 as built (2026-10-24, working tree, not committed)
+
+The two rules, and one change to the vaults and the counting rules that the minimum forced. What changed:
+
+- **`HolderRestrictionRule`** replaces `LockupRule`; `LockupRule.sol`, `LockupRule.t.sol` and `ILockupRule.sol` are deleted. One storage word per (token, holder): `struct Restriction { uint64 unlockTime; bool frozen }` (a test pins the packing). `check` judges the sender first, for every kind except FORCED and a mint: frozen gives `SENDER_FROZEN`, a lockup still running gives `LOCKED` (TRANSFER and EXECUTED; a BURN unless the operator holds `BURNER_ROLE`, asked only while a lockup is running). Then the receiver, for every kind except a burn: frozen gives `RECEIVER_FROZEN`, so a mint or a forced transfer into a frozen account is refused, as RD4 decided. A burn from a frozen account is refused even for the burner. `checkSend` and `checkReceive` answer the freeze; the lockup depends on the kind, so they ignore it. `setLockup` and `setFrozen` keep each other's field. `setLockup` refuses a future time above 64 bits (`UnlockTimeTooLarge`); a time at or before now clears the lockup as before.
+- **`MinPositionRule`**, as RD7: per token, 0 is off. After a movement the receiver holds `toBalance + amount`, which must reach the minimum, and the sender holds `fromBalance - amount`, which must be 0 or reach it. Neither sum is computed where it could overflow or underflow, so a view never reverts on arithmetic (Halmos proves it for every input). Exempt: FORCED (including the enforcement mint), the token itself (the 7540 escrow), accounts the token's admin lists, and an enforcement burn (the operator holds `BURNER_ROLE`); the role is asked only when a burn would leave a remainder below the minimum, and the exemptions only when a position would breach. Zero amounts and self-moves are never judged. A holder who sits below a raised minimum can only exit completely or top up. `isExempt` is true for the token itself without a listing.
+- **Aderyn.** The five "unused until S3" suppressions in `IHolderRestrictionRule` and `IMinPositionRule` are gone; the three on `IERC7943Fungible` stay for good (the standard's own errors).
+- **Pins.** The `ILockupRule` id and event pin go; `LockupSet` keeps its topic under `IHolderRestrictionRule` (same signature). No interface id changed in S3. NatSpec only: `IComplianceRule.checkReceive` (below), `IGated4626Vault`, `IFundHoldersRule`, `IMaxHoldersRule`, `IMinPositionRule`.
+
+**What the plan did not foresee: the one-wei probes.** The vaults asked `canTransfer(0, receiver, 1)` for `maxDeposit`, `maxMint`, the 7540 `requestDeposit` and the claim check, and `canTransfer(owner, 0, 1)` for the 4626 `maxRedeem`. With a minimum set, one wei is dust. Written first, the new vault tests failed: `maxDeposit` read 0 for any account holding less than the minimum, `requestDeposit` refused every fresh controller with `ControllerNotEligible(BELOW_MIN_POSITION)` (10 tests red), and after fixing the mint side alone a holder sitting exactly at the minimum still had `maxRedeem` 0, because a burn of one share leaves dust. A rule cannot tell a probe from a movement, so the probes had to ask what they mean:
+
+- **Mint side: `canReceive`.** A new internal `_accountReason(account, sending)` in the base (the reason behind `canSend` and `canReceive`; PAUSED, NO_HOOK, or the hook's `checkSend` / `checkReceive`). It has no amount, so a minimum cannot read as a block. The vault `max*` and the 7540 request and claim checks use it.
+- **The cap had to follow.** `maxDeposit` is 0 for a new investor at a full cap, which `Gated4626Vault.t.sol` and `FundIntegration.t.sol` assert and ERC-4626 requires (`maxDeposit` must not exceed what `deposit` accepts). The one-wei probe carried that. So `MaxHoldersRule.checkReceive` and `FundHoldersRule.checkReceive` now answer the cap as `check` answers for a mint: an account that is not yet a holder (an investor, for the fund) cannot receive at or above the cap; an exempt account, an existing holder and the class itself can. The token is asked for a balance only at or above the cap. This reverses a stance of mine in S2 ("a full fund does not stop an account from being asked"), not one of yours. `canReceive` becomes more useful to integrators for it: an exchange asking whether it can send to an address now learns that the fund is full.
+- **Burn side.** The 4626 `maxRedeem` probes a burn of nothing (the 7540 payout probe already did): identity, freeze, lockup, pause. The size of a real redemption is judged when it burns.
+- **`IComplianceRule.checkReceive` NatSpec.** It must not depend on an amount, and it must agree with `check` except where the movement itself frees what the account would take: a transfer that empties its sender can still admit a new holder at the cap, which an account question cannot know.
+- **Limit that stays.** A 7540 request cannot know how many shares it will buy, so it is not refused for size. For a fresh controller whose fulfilled shares come to less than the minimum, the claim reverts with `BELOW_MIN_POSITION` and the claimable stays; the agent's `recoverClaimable` (an enforcement mint, exempt) delivers it, or the fulfiller rejects the request before fulfilling. A test shows the claim reverting and the recovery.
+
+Alternatives I did not take: leave the counting rules alone and let `maxDeposit` ignore the cap (it would overstate, against ERC-4626); probe with the largest amount instead of one wei (works for a minimum, breaks `maxDeposit` for any future supply-cap or maximum-position rule, which is why one wei was the right probe for upper bounds); put `if (reason == BELOW_MIN_POSITION)` in the vault (rule knowledge in a template, brief rule 11).
+
+Tests first, red runs shown. The first run failed to compile against the missing rules; with the rules in, the rule suites passed and nine `checkReceive` cap tests failed; the ten vault minimum-position tests failed on the probes; after the mint side, one `maxRedeem` test still failed. Solidity runner 890 passing (was 790), Node runner 92 (was 91, with the freeze test). Halmos 16 of 16 (was 13): `MinPositionRuleHalmos` proves that a transfer is rejected exactly when a position would be left in (0, min), that the rule never reverts on any input of any kind, and that FORCED is never rejected. Mutation checks: 5 of 5 planted bugs fail a Halmos property; of 24 planted in the two rules, 23 fail a Solidity test and one is equivalent (dropping the `min == 0` early return gives the same answers, since the checks that follow pass at 0; it only saves the decode); of 12 planted in the probes and account answers, 11 failed a test at once and one (the no-hook answer of `_accountReason`) survived because no test could reach a token without a hook. The new base test clears the hook slot and kills it; it also covers the `NO_HOOK` reason of the pre-flight, which nothing tested before.
+
+Gates on the working tree: `forge fmt --check`, `solhint --max-warnings 0`, `tsc --noEmit`, `validate:upgrades` (3 of 3), Aderyn 0, Halmos 16 of 16, reproducibility (17 contracts: `LockupRule` out, `HolderRestrictionRule` and `MinPositionRule` in). Slither's first full run had one result: `_stored` in `setLockup` starts at zero by design. It is suppressed inline with that reason; the rule alone then gives 0 results, and the second full run (375 contracts, 97 detectors) gave 0 results.
+
+Sizes against the 24,576-byte limit, with S2 in brackets: `IntentToken` 17,855 (17,778), `Gated4626Vault` 18,449 (18,375), `Gated7540Vault` **23,548** (23,479), headroom 1,028. The base grew about 70 bytes (`_accountReason`); the vaults' probes got lighter and nearly paid for it. `HolderRestrictionRule` 3,180, `MinPositionRule` 2,779.
+
+**Gas, and a flag about the numbers.** Same probe as before (transfer of 0.1 token, every account cold), on forge 1.8.1. The absolute numbers in the S1 and S2 commit messages do not reproduce today: the same probe on the S2 commit (`6709889`) gives 108,336 for identity, lockup and fund, against the 63,604 reported, and 129,252 for the four rules, against 82,020. About 27,000 of each figure is outside the token's own frame (the proxy and the cold accesses around it, constant across rule sets); the token's frame alone is 81,122 and 102,038. I could not find why the earlier figures were lower (the probe file is the same; I suspect a different forge version or a harness detail). The deltas between rule sets are what the decisions used, and they hold: below, S2 and S3 are measured side by side now. Inside the token's frame:
+
+| Rules, in order | Gas | Step |
+|---|---|---|
+| S2: identity, lockup, fund | 81,122 | |
+| S3: identity, restriction, fund | 84,549 | +3,427 (the receiver's word; the freeze) |
+| + `MinPositionRule`, minimum off | 93,757 | +9,208 |
+| the same, minimum on | 95,295 | +1,538 |
+| + `MaxHoldersRule` (a class with its own cap) | 116,211 | +20,916 |
+
+The demo class set of the assumptions (identity, minimum, restriction, fund) costs 95,295 against S2's 81,122: +14,173 (17%), of which 10,746 is the minimum rule. **A rule that is off still costs 9,208**: the call, the context it is handed, a cold account and a cold read. The rule list is per token, so a token that does not want a minimum should leave the rule out; the list is S4's decision (assumption 1 puts the rule in all three classes).
+
+**Decisions for you.**
+
+1. **The probes.** The change above (`canReceive` for the mint side, cap-aware counting rules, a zero-amount burn probe). It touches the vaults, which the plan listed for S5 at most, and reverses my S2 position on `canReceive`. The alternatives are above.
+2. **Where `MinPositionRule` is listed (S4).** In all three demo classes as assumption 1 says (+10.7k a transfer with the minimum on, 9.2k when off), or only in the classes that set a minimum. A token's list is its own, so this is a deployment choice, not a code one.
+3. **The Credential layer plan** (the other session) does not mention `checkSend` or `checkReceive`. `BaseRule` answers OK to both, so `canSend`, `canReceive` and the vaults' `max*` would say yes to an account that `CredentialRule` refuses in `check`. The rule has to override them, without an amount.
 
 ### Not in this plan
 

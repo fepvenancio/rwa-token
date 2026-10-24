@@ -24,9 +24,10 @@ import {ITemplated} from 'interfaces/ITemplated.sol';
 import {ProxyDeployer} from 'contracts/deploy/ProxyDeployer.sol';
 import {PolicyRegistry} from 'contracts/governance/PolicyRegistry.sol';
 import {ComplianceHook} from 'contracts/hooks/ComplianceHook.sol';
+import {HolderRestrictionRule} from 'contracts/hooks/rules/HolderRestrictionRule.sol';
 import {IdentityRule} from 'contracts/hooks/rules/IdentityRule.sol';
-import {LockupRule} from 'contracts/hooks/rules/LockupRule.sol';
 import {MaxHoldersRule} from 'contracts/hooks/rules/MaxHoldersRule.sol';
+import {MinPositionRule} from 'contracts/hooks/rules/MinPositionRule.sol';
 import {Helpers} from 'contracts/test/Helpers.sol';
 import {MockAsset} from 'contracts/test/MockAsset.sol';
 import {MockIdentityRegistry} from 'contracts/test/MockIdentityRegistry.sol';
@@ -99,6 +100,8 @@ contract Gated4626VaultUnitTest is Helpers {
     bytes32 _reason
   ) internal {
     vm.mockCall(_hook, abi.encodeWithSelector(IPolicyHook.beforeTransfer.selector), abi.encode(_reason));
+    // The `max*` and eligibility probes ask the account-level question, so the stub answers it the same way.
+    vm.mockCall(_hook, abi.encodeWithSelector(IPolicyHook.checkReceive.selector), abi.encode(_reason));
   }
 
   function _deposit(
@@ -360,12 +363,12 @@ contract Gated4626VaultUnit_SupportsInterface is Gated4626VaultUnitTest {
   }
 }
 
-/// @notice Integration: the vault behind a real ComplianceHook with Identity, Lockup and MaxHolders
+/// @notice Integration: the vault behind a real ComplianceHook with Identity, HolderRestriction and MaxHolders
 contract Gated4626VaultIntegrationTest is Test {
   Gated4626Vault internal _vault;
   MockAsset internal _asset;
   MockIdentityRegistry internal _identity;
-  LockupRule internal _lockupRule;
+  HolderRestrictionRule internal _restrictionRule;
   MaxHoldersRule internal _maxHoldersRule;
   address internal _guardian = makeAddr('guardian');
   address internal _agent = makeAddr('agent');
@@ -379,17 +382,17 @@ contract Gated4626VaultIntegrationTest is Test {
     PolicyRegistry _registry = new PolicyRegistry(address(this), address(this));
     _identity = new MockIdentityRegistry();
     IdentityRule _identityRule = new IdentityRule(IIdentityRegistry(address(_identity)));
-    _lockupRule = new LockupRule();
+    _restrictionRule = new HolderRestrictionRule();
     _maxHoldersRule = new MaxHoldersRule();
     _registry.attest(address(_identityRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
-    _registry.attest(address(_lockupRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
+    _registry.attest(address(_restrictionRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
     _registry.attest(address(_maxHoldersRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
 
     _asset = new MockAsset(6);
     Gated4626Vault _impl = new Gated4626Vault();
     IComplianceRule[] memory _rules = new IComplianceRule[](3);
     _rules[0] = _identityRule;
-    _rules[1] = _lockupRule;
+    _rules[1] = _restrictionRule;
     _rules[2] = _maxHoldersRule;
     // CREATE2 through ProxyDeployer, as in production: the address does not depend on this contract's nonce.
     ProxyDeployer _proxyDeployer = new ProxyDeployer(address(this));
@@ -470,7 +473,7 @@ contract Gated4626VaultIntegration_Exit is Gated4626VaultIntegrationTest {
   function test_WhenTheHolderIsLocked_RedemptionIsBlockedWithParity() external {
     uint256 _shares = _deposit(_alice, 1e6);
     vm.prank(_agent);
-    _lockupRule.setLockup(address(_vault), _alice, block.timestamp + 30 days);
+    _restrictionRule.setLockup(address(_vault), _alice, block.timestamp + 30 days);
 
     (bool _ok, bytes32 _reason) = _vault.canTransferWithReason(_alice, address(0), 1);
     assertFalse(_ok);
@@ -498,6 +501,84 @@ contract Gated4626VaultIntegration_Exit is Gated4626VaultIntegrationTest {
     _vault.redeem(_shares, _alice, _alice);
     assertEq(_maxHoldersRule.holderCount(address(_vault)), 1);
     assertEq(_vault.maxDeposit(_carol), type(uint256).max); // a slot freed up
+  }
+}
+
+/// @notice The vault with a minimum position (RD7). The `max*` answers must not read the minimum as "disabled": a
+///         receiver that can take shares at all has `maxDeposit` of the full range, and a holder at the minimum can
+///         redeem all of it. The minimum is in shares, and the vault's decimals offset of 6 makes one asset unit 1e6
+///         shares at the first deposit
+contract Gated4626VaultIntegration_MinPosition is Gated4626VaultIntegrationTest {
+  uint256 internal constant _MIN_ASSETS = 1e6;
+  uint256 internal constant _MIN_SHARES = 1e12;
+
+  function _enableMinPosition() internal {
+    MinPositionRule _minRule = new MinPositionRule();
+    IPolicyRegistry(_vault.registry()).attest(address(_minRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
+    ComplianceHook _hook = ComplianceHook(_vault.policyHook());
+    IComplianceRule[] memory _old = _hook.rules(address(_vault));
+    IComplianceRule[] memory _list = new IComplianceRule[](_old.length + 1);
+    _list[0] = _old[0]; // identity first, then the minimum, then the holder rules
+    _list[1] = _minRule;
+    for (uint256 _i = 1; _i < _old.length; ++_i) {
+      _list[_i + 1] = _old[_i];
+    }
+    _hook.setRules(address(_vault), _list);
+    _minRule.setMinPosition(address(_vault), _MIN_SHARES);
+  }
+
+  function test_WhenAMinimumIsSet_MaxDepositForAnEmptyReceiverIsStillTheFullRange() external {
+    _enableMinPosition();
+    assertEq(_vault.maxDeposit(_alice), type(uint256).max);
+    assertEq(_vault.maxMint(_alice), type(uint256).max);
+  }
+
+  function test_WhenADepositWouldLeaveDust_ItRevertsWithTheReasonAndTheMinimumDepositWorks() external {
+    _enableMinPosition();
+    vm.expectRevert(
+      abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.BELOW_MIN_POSITION)
+    );
+    vm.prank(_alice);
+    _vault.deposit(_MIN_ASSETS - 1, _alice);
+
+    assertEq(_deposit(_alice, _MIN_ASSETS), _MIN_SHARES);
+    assertEq(_vault.balanceOf(_alice), _MIN_SHARES);
+  }
+
+  /// @dev A holder at exactly the minimum is the usual position, and a 1-share burn would leave dust
+  function test_WhenAHolderSitsAtTheMinimum_MaxRedeemIsTheWholeBalanceAndRedeemWorks() external {
+    _enableMinPosition();
+    uint256 _shares = _deposit(_alice, _MIN_ASSETS);
+    assertEq(_vault.maxRedeem(_alice), _shares);
+    assertEq(_vault.maxWithdraw(_alice), _MIN_ASSETS);
+
+    uint256 _max = _vault.maxRedeem(_alice);
+    vm.prank(_alice);
+    _vault.redeem(_max, _alice, _alice);
+    assertEq(_vault.balanceOf(_alice), 0);
+  }
+
+  function test_WhenARedemptionWouldLeaveDust_ItRevertsWithTheReason() external {
+    _enableMinPosition();
+    _deposit(_alice, 2 * _MIN_ASSETS);
+    vm.expectRevert(
+      abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.BELOW_MIN_POSITION)
+    );
+    vm.prank(_alice);
+    _vault.redeem(_MIN_SHARES + 1, _alice, _alice);
+
+    vm.prank(_alice);
+    _vault.redeem(_MIN_SHARES, _alice, _alice);
+    assertEq(_vault.balanceOf(_alice), _MIN_SHARES);
+  }
+
+  /// @dev The cap is still known to `maxDeposit`: a receiver that could not become a holder has none
+  function test_WhenTheCapIsFull_MaxDepositIsStillZeroForANewInvestorWithAMinimumSet() external {
+    _enableMinPosition();
+    _deposit(_alice, _MIN_ASSETS);
+    _deposit(_bob, _MIN_ASSETS);
+    assertEq(_vault.maxDeposit(_carol), 0);
+    assertEq(_vault.maxDeposit(_alice), type(uint256).max);
   }
 }
 

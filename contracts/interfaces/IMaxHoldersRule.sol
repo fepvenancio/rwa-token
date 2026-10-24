@@ -9,7 +9,8 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
  *         Only movements that add a new holder are checked, net of a sender who leaves, so a lowered cap never blocks
  *         existing holders. FORCED is exempt from the cap but still counted. `cap == 0` fails closed
  *      Exempt accounts (e.g. a 7540 escrow vault, a treasury) never count and never trigger the cap; a seeded count
- *      must exclude them too
+ *      must exclude them too. `checkReceive` answers for the account as `check` answers for a mint: at or above the cap
+ *      an account without tokens cannot receive, so `canReceive` and the vaults' `maxDeposit` say so
  * @dev The count is maintained in `after_` from post-transfer balances. The three seeds are accepted only while the
  *      rule is not in the rule list of the token's current hook (`IComplianceHook.rules()`): `seedHolderCountFromHolders`
  *      proves the count on-chain, `seedHolderCountFromRule` copies it from the instance being replaced, and

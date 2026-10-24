@@ -677,20 +677,62 @@ contract FundHoldersRuleGate is Helpers {
   }
 }
 
-/// @notice The account-level answers behind `canSend` and `canReceive`. The fund rule has no opinion about an account,
-///         but a class that is not the fund's, or a rule the fund has replaced, rejects every movement, so no account
-///         may send or receive: the answers say so, as `check` does
+/// @notice The account-level answers behind `canSend`, `canReceive` and the vaults' `max*`. A class that is not the
+///         fund's, or a rule the fund has replaced, rejects every movement, so no account may send or receive. The cap
+///         is about who may become an investor, which does not depend on the amount: an account that is not yet an
+///         investor cannot receive while the fund is full, as a mint to it would be refused
 contract FundHoldersRuleUnit_AccountChecks is FundHoldersRuleUnitTest {
   function test_WhenTheTokenIsARegisteredClassWithThisRule_BothAccept() external {
-    _admit(_to, 0, false, 3, 3);
+    _admit(_to, 0, false, 2, 3);
     assertEq(_rule.checkSend(_token, _to), Reasons.TRANSFER_OK);
     assertEq(_rule.checkReceive(_token, _to), Reasons.TRANSFER_OK);
   }
 
-  /// @dev A full fund does not stop an account from being asked: the cap is a decision about a movement
-  function test_WhenTheFundIsFull_BothStillAccept() external {
+  function test_WhenTheFundIsFull_ANewInvestorCannotReceiveButAnySenderCanSend() external {
     _admit(_to, 0, false, 3, 3);
+    assertEq(_rule.checkReceive(_token, _to), Reasons.MAX_HOLDERS);
+    assertEq(_rule.checkSend(_token, _to), Reasons.TRANSFER_OK);
+  }
+
+  function test_WhenTheFundIsAboveALoweredCap_ANewInvestorCannotReceive() external {
+    _admit(_to, 0, false, 5, 3);
+    assertEq(_rule.checkReceive(_token, _to), Reasons.MAX_HOLDERS);
+  }
+
+  function test_WhenTheFundHasRoom_ANewInvestorCanReceive() external {
+    _admit(_to, 0, false, 2, 3);
     assertEq(_rule.checkReceive(_token, _to), Reasons.TRANSFER_OK);
+  }
+
+  function test_WhenTheCapIsZero_ANewInvestorCannotReceive() external {
+    _admit(_to, 0, false, 0, 0);
+    assertEq(_rule.checkReceive(_token, _to), Reasons.MAX_HOLDERS);
+  }
+
+  /// @dev Who is not a new investor is never capped: an investor in any class, an exempt account, the class itself
+  function test_WhenTheFundIsFull_AnExistingInvestorAnExemptAccountAndTheClassCanReceive() external {
+    _admit(_to, _OTHER_BIT, false, 3, 3);
+    assertEq(_rule.checkReceive(_token, _to), Reasons.TRANSFER_OK);
+    _admit(_to, _BIT, false, 3, 3);
+    assertEq(_rule.checkReceive(_token, _to), Reasons.TRANSFER_OK);
+    _admit(_to, 0, true, 3, 3);
+    assertEq(_rule.checkReceive(_token, _to), Reasons.TRANSFER_OK);
+    _admit(_token, 0, false, 3, 3);
+    assertEq(_rule.checkReceive(_token, _token), Reasons.TRANSFER_OK);
+  }
+
+  /// @dev The account answer is the decision `check` takes for a mint, which adds no sender and so frees no slot
+  function testFuzz_ForAMint_CheckReceiveAgreesWithCheck(
+    uint8 _heldSeed,
+    bool _exempt,
+    uint256 _count,
+    uint256 _cap
+  ) external {
+    uint256 _held = bound(_heldSeed, 0, 2) == 0 ? 0 : (bound(_heldSeed, 0, 2) == 1 ? _BIT : _OTHER_BIT);
+    _count = bound(_count, 0, 6);
+    _cap = bound(_cap, 0, 5);
+    _admit(_to, _held, _exempt, _count, _cap);
+    assertEq(_rule.checkReceive(_token, _to), _check(IPolicyHook.TransferKind.MINT, address(0), _to, 1));
   }
 
   function test_WhenTheTokenIsNotAClass_BothReturnNotFundClass() external {

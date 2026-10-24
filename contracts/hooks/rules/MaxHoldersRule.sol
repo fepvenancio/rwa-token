@@ -198,6 +198,23 @@ contract MaxHoldersRule is BaseRule, IMaxHoldersRule {
     _reason = Reasons.TRANSFER_OK;
   }
 
+  /**
+   * @inheritdoc IComplianceRule
+   * @dev The cap is about who may become a holder, which does not depend on the amount. With room under the cap anyone
+   *      can receive and the token is not asked for a balance; at or above it only an exempt account, or one that already
+   *      holds tokens, can: what `check` decides for a mint, which frees no slot. A transfer that empties its sender can
+   *      still admit a new holder at the cap, which an account question cannot know
+   */
+  function checkReceive(
+    address _token,
+    address _account
+  ) external view override(BaseRule, IComplianceRule) returns (bytes32 _reason) {
+    uint256 _cap = _caps[_token];
+    if (_cap != 0 && _counts[_token] < _cap) return Reasons.TRANSFER_OK;
+    if (_exempts[_token][_account]) return Reasons.TRANSFER_OK;
+    _reason = IERC20(_token).balanceOf(_account) > 0 ? Reasons.TRANSFER_OK : Reasons.MAX_HOLDERS;
+  }
+
   /// @inheritdoc IMaxHoldersRule
   function capOf(
     address _token

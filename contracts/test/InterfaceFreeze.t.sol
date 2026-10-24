@@ -24,7 +24,6 @@ import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IIdentityRule} from 'interfaces/IIdentityRule.sol';
 import {IIntentExecutor} from 'interfaces/IIntentExecutor.sol';
 import {IIntentExecutorBatch} from 'interfaces/IIntentExecutorBatch.sol';
-import {ILockupRule} from 'interfaces/ILockupRule.sol';
 import {IMaxHoldersRule} from 'interfaces/IMaxHoldersRule.sol';
 import {IMinPositionRule} from 'interfaces/IMinPositionRule.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
@@ -63,7 +62,6 @@ contract InterfaceFreezeTest is Test {
     // Added in Phase 3 (2026-10-16): executeBatch, pause, unpause
     assertEq(type(IIntentExecutorBatch).interfaceId, bytes4(0x58c0d550), 'IIntentExecutorBatch');
     // Added in Phase 4 (2026-10-16)
-    assertEq(type(ILockupRule).interfaceId, bytes4(0xaafb038e), 'ILockupRule');
     assertEq(type(ISettlementWindowRule).interfaceId, bytes4(0xf2058aff), 'ISettlementWindowRule');
     // Re-pinned in Phase 5b (2026-10-17) on owner instruction R1: setExemptHolder / isExemptHolder added (was 0xa13cb93c)
     // Re-pinned 2026-10-22 on owner instruction: seedHolderCountFromHolders / seedHolderCountFromRule added (was
@@ -128,7 +126,6 @@ contract InterfaceFreezeTest is Test {
       IComplianceHook.RuleSetChanged.selector, 0x052ffefccfad2a8a01111e4860d2a689b1f4b6e9d3a42f3d03311bbad21ed820
     );
     // Added in Phase 4 (2026-10-16)
-    assertEq(ILockupRule.LockupSet.selector, 0xd3de67b8116f1abe42856d12f29c6dd6798dc57c837e1d2083e129b58d2e323a);
     assertEq(
       ISettlementWindowRule.WindowSet.selector, 0xcfbaf2575cd70ccd40d11716312d33d4c45312c933586af58b3ccc959f81b96c
     );

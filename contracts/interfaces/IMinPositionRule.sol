@@ -9,12 +9,14 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
  *         minimum, so no dust is left behind and no dust can open a holder slot. A breach is rejected with
  *         `Reasons.BELOW_MIN_POSITION`. A minimum of 0 switches the rule off for the token
  * @dev Applies to TRANSFER, EXECUTED, MINT and holder-initiated BURN. FORCED is exempt, and so is an enforcement burn
- *      (the operator holds the token's BURNER_ROLE, as the lockup rule and the token's frozen-balance check define it),
- *      which may leave any remainder; the role is asked only when a burn would leave a balance below the minimum, so
- *      the usual path pays nothing for it. The token itself (the 7540 escrow, which holds the shares of pending
- *      redemptions) and the accounts the token's admin lists are exempt too. The
- *      post-move balances are derived from the balances in `TransferContext.extra` and the amount, so the rule makes
- *      no call back into the token. State is keyed by token and authorised live by the token's own DEFAULT_ADMIN_ROLE
+ *      (the operator holds the token's BURNER_ROLE, as the holder restriction rule and the token's frozen-balance check
+ *      define it), which may leave any remainder; the role is asked only when a burn would leave a balance below the
+ *      minimum, so the usual path pays nothing for it. The token itself (the 7540 escrow, which holds the shares of
+ *      pending redemptions) and the accounts the token's admin lists are exempt too. The post-move balances are derived
+ *      from the balances in `TransferContext.extra` and the amount, so the rule makes no call back into the token. State
+ *      is keyed by token and authorised live by the token's own DEFAULT_ADMIN_ROLE. The rule has no account-level
+ *      opinion (`checkSend` and `checkReceive` accept): a minimum depends on the amount, so integrators that ask whether
+ *      an account can take part at all, as the vaults' `max*` do, are not told "no" because a single wei would be dust
  */
 interface IMinPositionRule is IComplianceRule {
   /*///////////////////////////////////////////////////////////////
@@ -46,13 +48,9 @@ interface IMinPositionRule is IComplianceRule {
    * @param _token The token
    * @param _caller The unauthorized caller
    */
-  // Thrown by `MinPositionRule`, built in S3 of the review items plan; unused until then.
-  // aderyn-ignore-next-line(unused-error)
   error MinPositionRule_OnlyTokenAdmin(address _token, address _caller);
 
   /// @notice Thrown when the account is the zero address
-  // Thrown by `MinPositionRule`, built in S3 of the review items plan; unused until then.
-  // aderyn-ignore-next-line(unused-error)
   error MinPositionRule_ZeroAddress();
 
   /*///////////////////////////////////////////////////////////////

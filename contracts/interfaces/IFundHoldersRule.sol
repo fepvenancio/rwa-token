@@ -13,7 +13,9 @@ import {IFund} from 'interfaces/IFund.sol';
  *      so a class is unusable until it is registered. So is every class of a rule that is no longer the fund's
  *      installed one, so a retired rule never says yes in a pre-flight while the write fails. Only a new investor is
  *      checked, net of a sender who leaves the fund, so a lowered cap never blocks existing investors. FORCED is exempt
- *      from the cap but still counted. A cap of 0 fails closed. The class itself and exempt accounts never count
+ *      from the cap but still counted. A cap of 0 fails closed. The class itself and exempt accounts never count.
+ *      `checkReceive` answers for the account as `check` answers for a mint: a new investor cannot receive while the fund
+ *      is full, so `canReceive` and the vaults' `maxDeposit` say so
  */
 interface IFundHoldersRule is IComplianceRule {
   /*///////////////////////////////////////////////////////////////

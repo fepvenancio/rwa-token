@@ -113,8 +113,8 @@ describe("deployment with a tampered Activate", async function () {
   it("a rule the council did not attest stops Activate before any role is granted", async function () {
     const { activate, parameters, components, wallets } = await connection.networkHelpers.loadFixture(stages);
     const client = await connection.viem.getPublicClient();
-    // The lockup rule's place in every token's rule list names a contract nobody attested as a rule.
-    const tampered = { ...parameters, lockupRule: parameters.asset };
+    // The holder-restriction rule's place in every token's rule list names a contract nobody attested as a rule.
+    const tampered = { ...parameters, holderRestrictionRule: parameters.asset };
     // `ComplianceHook_NotAttested(address)` from the hook, through the token's initialiser and `ProxyDeployer`: Ignition
     // reports the selector.
     await assert.rejects(activate(tampered), /signature 0xebefa01e/);

@@ -48,7 +48,7 @@ const CONDITIONS: Condition[] = [
     setup: async (s) => {
       const until = (await s.publicClient.getBlock()).timestamp + FULL_LOCK;
       for (const t of [s.token, s.vault4626]) {
-        await s.rules.lockupRule.write.setLockup([t.address, s.holders.alice.account.address, until], {
+        await s.rules.holderRestrictionRule.write.setLockup([t.address, s.holders.alice.account.address, until], {
           account: s.wallets.agent.account,
         });
       }
@@ -195,8 +195,9 @@ describe("pre-flight parity matrix", async function () {
         const { alice, bob } = s.holders;
         const [ok, reason] = await s.vault4626.read.canTransferWithReason([zeroAddress, bob.account.address, 1n]);
         assert.equal(reasonName(reason), c.deposit);
+        assert.equal(await s.vault4626.read.canReceive([bob.account.address]), ok, "canReceive agrees with the mint probe");
         const max = await s.vault4626.read.maxDeposit([bob.account.address]);
-        assert.equal(max, ok ? maxUint256 : 0n, "maxDeposit agrees with canTransfer");
+        assert.equal(max, ok ? maxUint256 : 0n, "maxDeposit agrees with canReceive");
         await assertCallParity(
           "deposit",
           () => s.vault4626.simulate.deposit([1n, bob.account.address], { account: alice.account.address }),

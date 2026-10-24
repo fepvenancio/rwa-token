@@ -152,7 +152,7 @@ describe("governance through the timelock", async function () {
 
   it("a hook swap and a rule-set change take effect only when the timelock executes them", async function () {
     const s = await networkHelpers.loadFixture(stack);
-    const { identityRule, lockupRule } = s.rules;
+    const { identityRule, holderRestrictionRule } = s.rules;
     const replacement = await viem.deployContract("ComplianceHook", [s.registry.address]);
     // Same registry as the installed hook, so the same codehash: the council's attestation of the hook already covers it.
     // Only the timelock can install it, and only after the delay. The replacement needs the token's rules first.
@@ -163,7 +163,7 @@ describe("governance through the timelock", async function () {
       encodeFunctionData({
         abi: replacement.abi,
         functionName: "setRules",
-        args: [s.token.address, [identityRule.address, lockupRule.address]],
+        args: [s.token.address, [identityRule.address, holderRestrictionRule.address]],
       }),
     );
     const swap = await schedule(

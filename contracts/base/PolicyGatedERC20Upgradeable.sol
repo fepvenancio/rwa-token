@@ -443,6 +443,26 @@ abstract contract PolicyGatedERC20Upgradeable is
   }
 
   /**
+   * @notice The account-level verdict behind `canSend` and `canReceive`, with the reason, for templates that ask whether
+   *         an account can take part at all (e.g. vault `max*`)
+   * @dev PAUSED while paused and NO_HOOK without a hook; otherwise the hook's `checkSend` or `checkReceive` for this
+   *      token. It does not depend on an amount, so a rule that limits the size of a position cannot read it as a block.
+   *      Never reverts of its own: a reverting hook or rule, which attested ones do not, would revert it
+   * @param _account The account
+   * @param _sending True to ask about sending, false about receiving
+   * @return _reason TRANSFER_OK, or the reason the account cannot
+   */
+  function _accountReason(
+    address _account,
+    bool _sending
+  ) internal view returns (bytes32 _reason) {
+    IPolicyHook _hook = _policyHook();
+    if (paused()) return Reasons.PAUSED;
+    if (address(_hook) == address(0)) return Reasons.NO_HOOK;
+    _reason = _sending ? _hook.checkSend(address(this), _account) : _hook.checkReceive(address(this), _account);
+  }
+
+  /**
    * @notice Mechanical checks then the hook decision, shared by `_update` and the pre-flights
    * @param _ctx The movement context
    * @param _hook The hook to consult, read once by the caller
@@ -455,7 +475,7 @@ abstract contract PolicyGatedERC20Upgradeable is
     if (paused() && _ctx.kind != IPolicyHook.TransferKind.FORCED) return Reasons.PAUSED;
 
     // The amount must fit in the unfrozen balance, which is zero when the frozen amount is the larger (ERC-7943). A
-    // forced transfer and an enforcement burn (the operator holds BURNER_ROLE, as the lockup rule defines it) may take
+    // forced transfer and an enforcement burn (the operator holds BURNER_ROLE, as the holder restriction rule defines it) may take
     // frozen tokens, since `_releaseFrozen` lowers the frozen amount by the part that comes out of it, but never more
     // than the balance: that bound holds for the pre-flight as it does for the write.
     if (_ctx.from != address(0) && _availableToMove(_ctx) < _ctx.amount) return Reasons.INSUFFICIENT_UNFROZEN;
@@ -571,8 +591,6 @@ abstract contract PolicyGatedERC20Upgradeable is
 
   /**
    * @notice Whether the hook lets an account send, or receive, at all; the account-level question of ERC-7943
-   * @dev False while paused and when the token has no hook. Never reverts of its own: a reverting hook or rule, which
-   *      attested ones do not, would revert it
    * @param _account The account
    * @param _sending True to ask about sending, false about receiving
    * @return _allowed True if the account may
@@ -581,12 +599,9 @@ abstract contract PolicyGatedERC20Upgradeable is
     address _account,
     bool _sending
   ) private view returns (bool _allowed) {
-    IPolicyHook _hook = _policyHook();
-    if (paused() || address(_hook) == address(0)) return false;
-    bytes32 _reason = _sending ? _hook.checkSend(address(this), _account) : _hook.checkReceive(address(this), _account);
     // Compares a reason code with a constant, not a balance.
     // slither-disable-next-line incorrect-equality
-    _allowed = _reason == Reasons.TRANSFER_OK;
+    _allowed = _accountReason(_account, _sending) == Reasons.TRANSFER_OK;
   }
 
   /**

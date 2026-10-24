@@ -36,7 +36,7 @@ export default buildModule("Components", (m) => {
   const hook = m.contract("ComplianceHook", [registry]);
 
   const identityRule = m.contract("IdentityRule", [identityRegistry]);
-  const lockupRule = m.contract("LockupRule");
+  const holderRestrictionRule = m.contract("HolderRestrictionRule");
   const windowRule = m.contract("SettlementWindowRule");
   const maxHoldersRule = m.contract("MaxHoldersRule");
   // The fund and its rule need each other's address, so the rule takes the fund at construction and `Activate` installs
@@ -58,7 +58,7 @@ export default buildModule("Components", (m) => {
     registry,
     hook,
     identityRule,
-    lockupRule,
+    holderRestrictionRule,
     windowRule,
     maxHoldersRule,
     fundContract,

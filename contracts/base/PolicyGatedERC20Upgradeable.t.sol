@@ -869,6 +869,21 @@ contract PolicyGatedUnit_CanSendAndCanReceive is PolicyGatedUnitTest {
     assertFalse(_token.canReceive(_bob));
   }
 
+  /// @dev A token without a hook cannot be built through the public API (the initialiser and `setPolicyHook` refuse the
+  ///      zero address), so the hook slot is cleared to prove the guard that answers instead of calling address(0)
+  function test_WhenThereIsNoHook_BothAreFalseAndThePreflightSaysNoHook() external {
+    bytes32 _location =
+      keccak256(abi.encode(uint256(keccak256('gated.storage.PolicyGatedERC20')) - 1)) & ~bytes32(uint256(0xff));
+    vm.store(address(_token), bytes32(uint256(_location) + 1), bytes32(0)); // PolicyGatedStorage.hook
+    assertEq(_token.policyHook(), address(0));
+
+    assertFalse(_token.canSend(_bob));
+    assertFalse(_token.canReceive(_bob));
+    (bool _ok, bytes32 _reason) = _token.canTransferWithReason(_alice, _bob, 1);
+    assertFalse(_ok);
+    assertEq(_reason, Reasons.NO_HOOK);
+  }
+
   /// @dev The answers do not depend on the caller or on any amount
   function test_WhenAskedByAnyone_TheAnswerIsTheSame() external {
     vm.prank(_stranger);

@@ -32,7 +32,7 @@ export default buildModule("Activate", (m) => {
   const asset = p("asset");
   const rules = {
     identityRule: p("identityRule"),
-    lockupRule: p("lockupRule"),
+    holderRestrictionRule: p("holderRestrictionRule"),
     windowRule: p("windowRule"),
     maxHoldersRule: p("maxHoldersRule"),
     fundHoldersRule: p("fundHoldersRule"),

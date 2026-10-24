@@ -81,19 +81,25 @@ contract FundHoldersRule is BaseRule, IFundHoldersRule {
 
   /**
    * @inheritdoc IComplianceRule
-   * @dev The rule has no opinion about an account, but a token that is not a registered class of the fund, or a rule
-   *      the fund has replaced, rejects every movement (`NOT_FUND_CLASS`), so no account can receive
+   * @dev A token that is not a registered class of the fund, or a rule the fund has replaced, rejects every movement
+   *      (`NOT_FUND_CLASS`). The cap is about who may become an investor, which does not depend on the amount: a new
+   *      investor cannot receive while the fund is full, as `check` decides for a mint, which frees no slot. An investor
+   *      in any class, an exempt account and the class itself are never new
    */
   function checkReceive(
     address _token,
     address _account
   ) external view override(BaseRule, IComplianceRule) returns (bytes32 _reason) {
-    _reason = _classReason(_token, _account);
+    (uint256 _index, uint256 _held, bool _exempt, uint256 _count, uint256 _cap, address _installed) =
+      FUND.admission(_token, _account);
+    if (_index == 0 || _installed != address(this)) return Reasons.NOT_FUND_CLASS;
+    if (_account == _token || _exempt || _held != 0 || (_cap != 0 && _count < _cap)) return Reasons.TRANSFER_OK;
+    _reason = Reasons.MAX_HOLDERS;
   }
 
   /**
    * @inheritdoc IComplianceRule
-   * @dev As `checkReceive`: nothing can move on a token that is not the fund's class under this rule
+   * @dev The cap never stops a sender. Nothing can move on a token that is not the fund's class under this rule
    */
   function checkSend(
     address _token,

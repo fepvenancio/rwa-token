@@ -19,8 +19,8 @@ import {Fund} from 'contracts/fund/Fund.sol';
 import {PolicyRegistry} from 'contracts/governance/PolicyRegistry.sol';
 import {ComplianceHook} from 'contracts/hooks/ComplianceHook.sol';
 import {FundHoldersRule} from 'contracts/hooks/rules/FundHoldersRule.sol';
+import {HolderRestrictionRule} from 'contracts/hooks/rules/HolderRestrictionRule.sol';
 import {IdentityRule} from 'contracts/hooks/rules/IdentityRule.sol';
-import {LockupRule} from 'contracts/hooks/rules/LockupRule.sol';
 import {MaxHoldersRule} from 'contracts/hooks/rules/MaxHoldersRule.sol';
 import {MockAsset} from 'contracts/test/MockAsset.sol';
 import {MockIdentityRegistry} from 'contracts/test/MockIdentityRegistry.sol';
@@ -45,7 +45,7 @@ contract FundIntegrationTest is Test {
   Fund internal _fund;
   FundHoldersRule internal _fundRule;
   IdentityRule internal _identityRule;
-  LockupRule internal _lockupRule;
+  HolderRestrictionRule internal _restrictionRule;
   MaxHoldersRule internal _maxHoldersRule;
 
   IntentToken internal _token;
@@ -73,12 +73,12 @@ contract FundIntegrationTest is Test {
     _deployer = new ProxyDeployer(address(this));
 
     _identityRule = new IdentityRule(IIdentityRegistry(address(_identity)));
-    _lockupRule = new LockupRule();
+    _restrictionRule = new HolderRestrictionRule();
     _maxHoldersRule = new MaxHoldersRule();
     _fund = new Fund(address(this), IPolicyRegistry(address(_registry)));
     _fundRule = new FundHoldersRule(_fund);
     _registry.attest(address(_identityRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
-    _registry.attest(address(_lockupRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
+    _registry.attest(address(_restrictionRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
     _registry.attest(address(_maxHoldersRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
     _registry.attest(address(_fundRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
     _fund.setRule(address(_fundRule));
@@ -97,7 +97,7 @@ contract FundIntegrationTest is Test {
   ) internal view returns (IComplianceRule[] memory _list) {
     _list = new IComplianceRule[](4);
     _list[0] = _identityRule;
-    _list[1] = _lockupRule;
+    _list[1] = _restrictionRule;
     _list[2] = _maxHoldersRule;
     _list[3] = _last;
   }
@@ -611,7 +611,7 @@ contract FundIntegration_Replacement is FundIntegrationTest {
     IComplianceRule[] memory _reordered = new IComplianceRule[](4);
     _reordered[0] = _fundRule;
     _reordered[1] = _identityRule;
-    _reordered[2] = _lockupRule;
+    _reordered[2] = _restrictionRule;
     _reordered[3] = _maxHoldersRule;
     ComplianceHook _twin = new ComplianceHook(_registry);
     assertEq(address(_twin).codehash, address(_hook).codehash);

@@ -887,7 +887,7 @@ contract DvPExecutorIntegrationTest is RuleSetIntegrationTest {
     address _holder
   ) internal {
     vm.prank(_agent);
-    _lockupRule.setLockup(address(_token), _holder, block.timestamp + 90 days);
+    _restrictionRule.setLockup(address(_token), _holder, block.timestamp + 90 days);
   }
 }
 
