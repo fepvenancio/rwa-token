@@ -9,7 +9,9 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
  *         storage word so a movement costs one read per side. Replaces `ILockupRule`
  * @dev Lockup: TRANSFER, EXECUTED and holder-initiated BURN (e.g. an ERC-4626 redeem) from a locked holder are rejected
  *      with `Reasons.LOCKED` until the unlock time; FORCED, MINT and BURN driven by the token's BURNER_ROLE are exempt.
- *      The lock covers the whole balance. It is kind-dependent, so it is part of `check` only, not of `checkSend`.
+ *      The lock covers the whole balance. `checkSend` returns `Reasons.LOCKED` for a holder whose lockup is running, so
+ *      `canSend` says so; `check` applies the lock by kind, and the exemptions (FORCED, an enforcement burn) are for the
+ *      movement to decide, which an account question cannot know.
  *      Freeze: a frozen account can neither send nor receive. `checkSend` returns `Reasons.SENDER_FROZEN` and
  *      `checkReceive` returns `Reasons.RECEIVER_FROZEN`, and `check` applies the same to a movement: a frozen sender is
  *      rejected for every kind except FORCED, a frozen receiver for every kind except BURN, so a mint to a frozen

@@ -97,6 +97,9 @@ contract RuleSetIntegration_Lockup is RuleSetIntegrationTest {
     vm.prank(_agent);
     _restrictionRule.setLockup(address(_token), _alice, block.timestamp + 30 days);
 
+    // The standard's account question agrees: a locked holder cannot send, and can still be paid.
+    assertFalse(_token.canSend(_alice));
+    assertTrue(_token.canReceive(_alice));
     _assertTransferParity(_alice, _bob, 1 ether, Reasons.LOCKED);
     (ITransferIntent.TransferIntent memory _i, bytes memory _sig) = _signedIntent(_bob, 1 ether, keccak256('n'));
     _assertExecuteParity(_i, _sig, Reasons.LOCKED);
@@ -106,6 +109,7 @@ contract RuleSetIntegration_Lockup is RuleSetIntegrationTest {
     assertEq(_token.balanceOf(_bob), 1 ether);
 
     vm.warp(block.timestamp + 30 days); // the unlock second; plain transfers ignore the settlement window
+    assertTrue(_token.canSend(_alice));
     _assertTransferParity(_alice, _bob, 1 ether, Reasons.TRANSFER_OK);
   }
 }

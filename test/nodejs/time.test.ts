@@ -36,11 +36,15 @@ describe("time-based flows", async function () {
 
     await time.increaseTo(unlock - 2);
     assert.deepEqual(await s.token.read.canTransferWithReason([alice.account.address, bob.account.address, 1n]), [false, REASONS.LOCKED]);
+    // The standard's account question says the same: she cannot send, and can still be paid.
+    assert.equal(await s.token.read.canSend([alice.account.address]), false);
+    assert.equal(await s.token.read.canReceive([alice.account.address]), true);
     await time.setNextBlockTimestamp(unlock - 1);
     await rejected(s, s.token.write.transfer([bob.account.address, 1n], { account: alice.account }), REASONS.LOCKED);
 
     await time.setNextBlockTimestamp(unlock);
     await s.token.write.transfer([bob.account.address, 1n], { account: alice.account });
+    assert.equal(await s.token.read.canSend([alice.account.address]), true);
     assert.deepEqual(await s.token.read.canTransferWithReason([alice.account.address, bob.account.address, 1n]), [true, REASONS.TRANSFER_OK]);
   });
 

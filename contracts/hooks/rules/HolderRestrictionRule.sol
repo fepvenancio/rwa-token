@@ -111,12 +111,20 @@ contract HolderRestrictionRule is BaseRule, IHolderRestrictionRule {
     _reason = _restrictions[_token][_account].frozen ? Reasons.RECEIVER_FROZEN : Reasons.TRANSFER_OK;
   }
 
-  /// @inheritdoc IComplianceRule
+  /**
+   * @inheritdoc IComplianceRule
+   * @dev A holder whose lockup is running cannot send in any holder-driven kind, so the answer is `LOCKED`, after the
+   *      freeze as in `check`. The kinds the lockup exempts (FORCED, an enforcement burn) are decided by the movement, which
+   *      an account question cannot know, and `check` still passes them. The holder's word is the one `check` reads, and
+   *      no role is asked
+   */
   function checkSend(
     address _token,
     address _account
   ) external view override(BaseRule, IComplianceRule) returns (bytes32 _reason) {
-    _reason = _restrictions[_token][_account].frozen ? Reasons.SENDER_FROZEN : Reasons.TRANSFER_OK;
+    Restriction memory _restriction = _restrictions[_token][_account];
+    if (_restriction.frozen) return Reasons.SENDER_FROZEN;
+    _reason = block.timestamp < _restriction.unlockTime ? Reasons.LOCKED : Reasons.TRANSFER_OK;
   }
 
   /// @inheritdoc IHolderRestrictionRule

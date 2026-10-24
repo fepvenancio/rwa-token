@@ -384,8 +384,8 @@ contract HolderRestrictionRuleUnit_CheckFreeze is HolderRestrictionRuleUnitTest 
   }
 }
 
-/// @notice The freeze is an account-level decision, so `checkSend` and `checkReceive` answer it; the lockup depends on the
-///         kind of movement, so they ignore it
+/// @notice The freeze and the lockup are decisions about an account, so `checkSend` answers both and `checkReceive` the
+///         freeze. `check` applies the lockup by kind, so it exempts what an account question cannot know
 contract HolderRestrictionRuleUnit_AccountChecks is HolderRestrictionRuleUnitTest {
   function test_WhenTheAccountIsNotFrozen_BothAccept() external view {
     assertEq(_rule.checkSend(_token, _holder), Reasons.TRANSFER_OK);
@@ -398,23 +398,69 @@ contract HolderRestrictionRuleUnit_AccountChecks is HolderRestrictionRuleUnitTes
     assertEq(_rule.checkReceive(_token, _holder), Reasons.RECEIVER_FROZEN);
   }
 
-  function test_WhenTheAccountIsLocked_BothStillAccept() external {
+  /// @dev A locked holder cannot send in any holder-driven kind, so the account question says so; the lock is the
+  ///      sender's, and a locked account can still be paid
+  function test_WhenTheAccountIsLocked_SendReturnsLockedAndReceiveAccepts() external {
     _lock(_holder, block.timestamp + 1 days);
-    assertEq(_rule.checkSend(_token, _holder), Reasons.TRANSFER_OK);
+    assertEq(_rule.checkSend(_token, _holder), Reasons.LOCKED);
     assertEq(_rule.checkReceive(_token, _holder), Reasons.TRANSFER_OK);
+  }
+
+  function test_WhenTheUnlockSecondArrives_SendAcceptsAgain(
+    uint256 _remaining
+  ) external {
+    _remaining = bound(_remaining, 1, 3650 days);
+    _lock(_holder, _NOW + _remaining);
+    vm.warp(_NOW + _remaining - 1);
+    assertEq(_rule.checkSend(_token, _holder), Reasons.LOCKED);
+    vm.warp(_NOW + _remaining);
+    assertEq(_rule.checkSend(_token, _holder), Reasons.TRANSFER_OK);
+  }
+
+  function test_WhenTheLockupIsCleared_SendAcceptsAgain() external {
+    _lock(_holder, block.timestamp + 1 days);
+    _lock(_holder, 0);
+    assertEq(_rule.checkSend(_token, _holder), Reasons.TRANSFER_OK);
+  }
+
+  /// @dev As in `check`, the freeze is reported first
+  function test_WhenTheAccountIsFrozenAndLocked_SendReturnsFrozen() external {
+    _freeze(_holder, true);
+    _lock(_holder, block.timestamp + 1 days);
+    assertEq(_rule.checkSend(_token, _holder), Reasons.SENDER_FROZEN);
+  }
+
+  /// @dev The account answer never asks the token for a role: the enforcement burner is a kind, which it cannot know
+  function test_WhenTheAccountIsLocked_SendNeverAsksTheTokenForRoles() external {
+    _lock(_holder, block.timestamp + 1 days);
+    vm.expectCall(_token, abi.encodeWithSelector(IAccessControl.hasRole.selector), 0);
+    assertEq(_rule.checkSend(_token, _holder), Reasons.LOCKED);
+  }
+
+  /// @dev The one allowed gap between `check` and the account answer (see `IComplianceRule`): a locked holder cannot
+  ///      send, yet the kinds the lockup exempts still pass `check`
+  function test_WhenTheAccountIsLocked_TheKindsTheLockupExemptsStillPassCheck() external {
+    _lock(_holder, block.timestamp + 1 days);
+    assertEq(_rule.checkSend(_token, _holder), Reasons.LOCKED);
+    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.FORCED)), Reasons.TRANSFER_OK);
+    IPolicyHook.TransferContext memory _burnCtx = _ctx(IPolicyHook.TransferKind.BURN);
+    _burnCtx.operator = _burner;
+    assertEq(_rule.check(_burnCtx), Reasons.TRANSFER_OK);
   }
 
   /// @dev A rule's `check` and its account checks must agree for the kinds the account checks describe
   function testFuzz_ForAHolderDrivenTransfer_CheckAgreesWithTheAccountChecks(
     uint8 _seed,
     bool _senderFrozen,
+    bool _senderLocked,
     bool _receiverFrozen
   ) external {
     _freeze(_holder, _senderFrozen);
     _freeze(_to, _receiverFrozen);
+    if (_senderLocked) _lock(_holder, block.timestamp + 1 days);
     bytes32 _send = _rule.checkSend(_token, _holder);
     bytes32 _receive = _rule.checkReceive(_token, _to);
-    assertEq(_send, _senderFrozen ? Reasons.SENDER_FROZEN : Reasons.TRANSFER_OK);
+    assertEq(_send, _senderFrozen ? Reasons.SENDER_FROZEN : (_senderLocked ? Reasons.LOCKED : Reasons.TRANSFER_OK));
     assertEq(_receive, _receiverFrozen ? Reasons.RECEIVER_FROZEN : Reasons.TRANSFER_OK);
 
     bytes32 _expected = _send != Reasons.TRANSFER_OK ? _send : _receive;

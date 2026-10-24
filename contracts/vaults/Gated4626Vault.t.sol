@@ -478,12 +478,14 @@ contract Gated4626VaultIntegration_Exit is Gated4626VaultIntegrationTest {
     (bool _ok, bytes32 _reason) = _vault.canTransferWithReason(_alice, address(0), 1);
     assertFalse(_ok);
     assertEq(_reason, Reasons.LOCKED);
+    assertFalse(_vault.canSend(_alice), 'the account question says the same as the burn');
     assertEq(_vault.maxRedeem(_alice), 0);
     vm.expectRevert(abi.encodeWithSelector(ERC4626Upgradeable.ERC4626ExceededMaxRedeem.selector, _alice, _shares, 0));
     vm.prank(_alice);
     _vault.redeem(_shares, _alice, _alice);
 
     vm.warp(block.timestamp + 30 days);
+    assertTrue(_vault.canSend(_alice));
     vm.prank(_alice);
     _vault.redeem(_shares, _alice, _alice);
   }
