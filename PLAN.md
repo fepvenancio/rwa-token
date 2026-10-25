@@ -1777,7 +1777,7 @@ Gates on the final tree: `npx hardhat test` **792 passing (707 Solidity, 85 Type
 
 Docs updated: flows-token (the executor paragraph and the batch diagram), transfer-checks, flows-dvp, architecture, roles, the README, SECURITY.md (the consideration bullet and a mutation row), the brief's §1 and §5. Not changed: `IIntentExecutor`'s ERC-165 id (errors are not part of it) and `InterfaceFreeze.t.sol`, which pins no error selectors. Nothing is committed or pushed.
 
-## Review items, built before the first deployment (plan 2026-10-23; decisions made; S0 to S5, decision 4 and finding 1 committed, finding 4 built and waits for review)
+## Review items, built before the first deployment (plan 2026-10-23; decisions made; S0 to S5, decision 4, finding 1 and finding 4 committed)
 
 On 2026-10-23 the owner pasted a merged outside assessment and then said: "I prefer to have the code ready from the gate than waiting to do fixes X months after... if one institutions uses this seriously the gas costs are unecessary". The first version of this section proposed eleven decisions. The owner answered them the same day with changes, and added an S0 for the interfaces. The numbers below are the owner's answer; they differ from the first version's. A second answer settled the one open point of the first reply: `IPolicyHook` keeps its shape, with `checkSend` and `checkReceive` added and `ref` and `deadline` moved from fields into `extra`. The brief's rule 4 is satisfied: the owner's RD3 is the explicit instruction to reopen `contracts/interfaces/`, to be re-frozen after S0.
 
@@ -2206,7 +2206,7 @@ Your option (a1) for finding 1 of the outside review, built as the first of two 
 
 **Left for you.** Finding 4 (the balance shortfall) is the next step, as its own commit. Nothing else changes.
 
-### Finding 4 as built: a balance shortfall follows ERC-7943 (2026-10-24, working tree, not committed)
+### Finding 4 as built: a balance shortfall follows ERC-7943 (2026-10-25, committed `a4f237d`)
 
 Decision 2 of the second outside review, built as the second of the two separate steps. ERC-7943 Final, fetched again on 2026-10-24: `canTransfer` "MUST validate that the `amount` being transferred doesn't exceed the unfrozen amount (which is the difference between the current balance and the frozen balance)" and "MUST NOT return false based on token-specific, non-permissioned validations such as balance or allowance checks"; `ERC7943InsufficientUnfrozenBalance` is for an amount "less than or equal to its balance, but greater than its unfrozen balance", and for an amount above the whole balance "more specific errors from the base standard SHOULD be used instead". The two MUSTs collide when nothing is frozen and the amount is above the balance: the first would say false, the second forbids it. I resolved it the way the draft ERC's reference does (`ExampleToken._tokenCheck`, Phase 0.7): the unfrozen validation applies while something is frozen, and with nothing frozen the balance is left to the base. What changed, all in `PolicyGatedERC20Upgradeable`:
 
