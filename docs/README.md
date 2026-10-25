@@ -2,7 +2,7 @@
 
 These pages explain how the contracts in `contracts/` work and how they are deployed. They describe what the code does. Where the build brief ([CLAUDE.md](../CLAUDE.md)) or the [README](../README.md) says something different, the code is right, and the page follows the code.
 
-Checked against: the contracts and Ignition modules of release `v0.2.0` (commit `ca88619`), plus the `MaxHoldersRule` seeding change merged in PR #1 (commit `b6f8e9b`), plus the fund layer (`Fund`, `FundHoldersRule` and their Ignition steps) and the intent revision (`executor`, `validAfter` and the consideration fields on `TransferIntent`, `canExecute` taking the signature) and the DvP executor (`DvPExecutor` and its Ignition steps), plus the review items on the `fund-layer` branch up to commit `f3a8295`: the one shared `ComplianceHook`, the balances in `TransferContext.extra`, the ERC-7943 Final token face, the template check on upgrades, `multicall`, `HolderRestrictionRule` and `MinPositionRule`, the `Fund` monitor views and the demo rule lists, plus the change after `f3a8295` that takes the holder caps out of `canReceive` and gives the vaults a mint probe of a very large amount, plus the change after that which makes the token revert with `ERC20InsufficientBalance` for an amount above the balance and has `canTransfer` leave a balance shortfall to the base standard, as ERC-7943 asks. The pages describe the code as it stands, including the case where `canTransfer` and `canTransferWithReason` differ, a balance shortfall with no frozen amount in the way (the README records it). If a later commit changes it, these pages may be out of date.
+Checked against: the contracts and Ignition modules of release `v0.2.0` (commit `ca88619`), plus the `MaxHoldersRule` seeding change merged in PR #1 (commit `b6f8e9b`), plus the fund layer (`Fund`, `FundHoldersRule` and their Ignition steps) and the intent revision (`executor`, `validAfter` and the consideration fields on `TransferIntent`, `canExecute` taking the signature) and the DvP executor (`DvPExecutor` and its Ignition steps), plus the review items on the `fund-layer` branch up to commit `f3a8295`: the one shared `ComplianceHook`, the balances in `TransferContext.extra`, the ERC-7943 Final token face, the template check on upgrades, `multicall`, `HolderRestrictionRule` and `MinPositionRule`, the `Fund` monitor views and the demo rule lists, plus the change after `f3a8295` that takes the holder caps out of `canReceive` and gives the vaults a mint probe of a very large amount, plus the change after that which makes the token revert with `ERC20InsufficientBalance` for an amount above the balance and has `canTransfer` leave a balance shortfall to the base standard, as ERC-7943 asks, plus the credential layer (`CredentialRegistry`, `CredentialRule` and their Ignition steps), rebased onto `fund-layer` at `a4f237d`. The pages describe the code as it stands, including the case where `canTransfer` and `canTransferWithReason` differ, a balance shortfall with no frozen amount in the way (the README records it). If a later commit changes it, these pages may be out of date.
 
 ## Which page answers what
 
@@ -12,6 +12,7 @@ Checked against: the contracts and Ignition modules of release `v0.2.0` (commit 
 | How does a fund count its investors across share classes? | [architecture.md](architecture.md#the-fund) and [transfer-checks.md](transfer-checks.md#fundholdersrule) |
 | Who can call what, and who holds each role after deployment? | [roles.md](roles.md) |
 | What happens inside a transfer? Why was it rejected? | [transfer-checks.md](transfer-checks.md) |
+| Who may hold a token, for how long, and what happens when a credential lapses? | [credentials.md](credentials.md) |
 | How do I mint, burn, sign an intent, claw back, freeze or pause? | [flows-token.md](flows-token.md) |
 | How do the two vaults work, call by call? | [flows-vaults.md](flows-vaults.md) |
 | Where do tokens and assets sit at each step? How is the price set? | [money.md](money.md) |
@@ -29,16 +30,19 @@ Other documents in the repo: [README.md](../README.md) has the security model su
 | Token | A proxy running `IntentToken`, `Gated4626Vault` or `Gated7540Vault`. Vault shares are tokens too |
 | Movement | Any change to a token balance: transfer, mint, burn, forced transfer, executed intent |
 | Hook | The `ComplianceHook`, one per deployment and shared by every token, with an ordered rule list for each token. The token asks it about every movement |
+| Credential | A record in the `CredentialRegistry`: which attester vouched for an address, its qualification bits, its country, until when, and its standing |
+| Attester | An account, or a contract account, allowed to write credentials within a set of qualification bits. The demo has one, the KYC provider |
+| Standing | What the registry reads an address as, now: `ACTIVE`, `EXIT_ONLY`, `LAPSED`, `BLOCKED` or `NONE`. See [credentials.md](credentials.md#standings) |
 | Fund | The `Fund` contract: the classes of one fund, how many distinct investors hold any of them, and which classes each investor holds |
 | Class | A token registered in a fund. Any of the three templates can be a class |
-| Rule | A small contract the hook calls, with `check` (a view) and `after_`. Examples: `IdentityRule`, `HolderRestrictionRule` |
+| Rule | A small contract the hook calls, with `check` (a view) and `after_`. Examples: `CredentialRule`, `HolderRestrictionRule` |
 | Kind | How the hook sees a movement: `TRANSFER`, `EXECUTED`, `FORCED`, `MINT`, `BURN` |
 | Context | The `TransferContext` struct the token builds for each movement and passes to the hook and rules |
 | Reason code | A `bytes32` returned instead of `TRANSFER_OK` to reject a movement. Listed in `contracts/interfaces/Errors.sol` |
 | Attested | A runtime codehash recorded in `PolicyRegistry` as `HOOK`, `RULE` or `IMPLEMENTATION` |
 | Main timelock | `GovernanceTimelock`, OpenZeppelin's `TimelockController` with one added recovery power. It holds the admin powers after deployment |
-| Recovery timelock | A second, plain `TimelockController`. As deployed, nobody can cancel its operations. Through `RECOVERY_ROLE` it can only unpause the tokens and the executors, revoke `GUARDIAN_ROLE` on them, and revoke `CANCELLER_ROLE` on the main timelock |
-| Guardian | The account, a multisig in a real deployment, that can pause tokens and the executors and cancel operations on the main timelock. It can do nothing else, and the recovery timelock can remove it |
+| Recovery timelock | A second, plain `TimelockController`. As deployed, nobody can cancel its operations. Through `RECOVERY_ROLE` it can only unpause the tokens and the executors, revoke `GUARDIAN_ROLE` on them and on the credential registry, revoke `CANCELLER_ROLE` on the main timelock, and clear a guardian block or revive an attester on the credential registry |
+| Guardian | The account, a multisig in a real deployment, that can pause tokens and the executors, cancel operations on the main timelock, and block an address or kill an attester on the credential registry. It can do nothing else, and the recovery timelock can remove it and undo its blocks |
 | Council | The security council, a multisig in a real deployment, holder of `ATTESTER_ROLE` on the registry |
 | Agent | The holder of `AGENT_ROLE`: forced transfers, freezes, lockups, and in `Gated7540Vault` recovery of pending redemptions and of claimable amounts |
 | Operator | Three different things. See [roles.md](roles.md) |

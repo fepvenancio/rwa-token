@@ -1,6 +1,6 @@
 import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
 
-import { ROLES, RULE_ORDER, TOKENS } from "./roles.js";
+import { QUALS, ROLES, RULE_ORDER, TOKENS } from "./roles.js";
 
 /**
  * Stage 2 of 2. Deploys each token through `ProxyDeployer` with the shared hook and the token's rules (`RULE_ORDER`) in
@@ -8,21 +8,26 @@ import { ROLES, RULE_ORDER, TOKENS } from "./roles.js";
  * holding exactly those rules for it, so every later step (configuration, roles, hand-over) runs only for tokens that
  * came up as intended. Then:
  *
- * 1. Configure while the deployer is the tokens' admin: the settlement window and each token's minimum position (the
- *    `*MinPosition` parameters, 0 by default, which switches the rule off). There is no per-class holder cap and no
- *    escrow exemption to set: the fund counts investors across classes, and the 7540 vault is the token itself, which
- *    neither the fund rule nor the minimum counts. The fund is configured the same way while the deployer owns it: install its rule, set its cap, then register the
- *    three tokens as classes one after another, so class numbers 1 to 3 are intent, fund, asyncFund. Until a class is
- *    registered every movement on it is rejected, so no balance exists before it is.
+ * 1. Configure while the deployer is the tokens' admin: the credential layer (the KYC attester, and each token's
+ *    policy: KYC from that attester, which is what the identity check asked for before), the settlement window and each
+ *    token's minimum position (the `*MinPosition` parameters, 0 by default, which switches the rule off). There is no
+ *    per-class holder cap and no escrow exemption to set: the fund counts investors across classes, and the 7540 vault
+ *    is the token itself, which neither the fund rule nor the minimum counts. The fund is configured the same way
+ *    while the deployer owns it: install its rule, set its cap, then register the three tokens as classes one after
+ *    another, so class numbers 1 to 3 are intent, fund, asyncFund. Until a class is registered every movement on it is
+ *    rejected, so no balance exists before it is.
  * 2. Grant the operational roles, after the registrations; UPGRADER_ROLE goes to the timelock only; the guardian becomes a timelock canceller;
- *    the recovery timelock gets RECOVERY_ROLE (unpause and revoke GUARDIAN_ROLE only) on every token and both executors.
+ *    the recovery timelock gets RECOVERY_ROLE (unpause and revoke GUARDIAN_ROLE only) on every token and both executors,
+ *    and on the credential registry (where it also clears a guardian block and revives an attester).
  *    The intent token's EXECUTOR_ROLE goes to the intent executor and to the DvP executor, and to no one else.
- * 3. Hand over: DEFAULT_ADMIN_ROLE to the timelock on the tokens and both executors; the deployer renounces everywhere,
- *    and `ProxyDeployer` and `Fund` ownership move to the timelock.
+ * 3. Hand over: DEFAULT_ADMIN_ROLE to the timelock on the tokens, the credential registry and both executors; the
+ *    deployer renounces everywhere, and `ProxyDeployer` and `Fund` ownership move to the timelock.
  *
- * Outside this module: the identity provider must verify the 7540 vault (it escrows pending redemptions). A gated cash
- * token for the DvP executor is a separate instrument, not deployed here: its administrator grants the DvP executor
- * EXECUTOR_ROLE on it, which for a timelock-administered token is a governance operation.
+ * Until a token has its policy, its rule admits no receiver, so no balance exists before it is configured.
+ *
+ * Outside this module: the KYC attester must credential the 7540 vault (it escrows pending redemptions) and every
+ * holder. A gated cash token for the DvP executor is a separate instrument, not deployed here: its administrator
+ * grants the DvP executor EXECUTOR_ROLE on it, which for a timelock-administered token is a governance operation.
  */
 export default buildModule("Activate", (m) => {
   const deployer = m.getAccount(0);
@@ -33,7 +38,7 @@ export default buildModule("Activate", (m) => {
   const hook = p("hook");
   const asset = p("asset");
   const rules = {
-    identityRule: p("identityRule"),
+    credentialRule: p("credentialRule"),
     minPositionRule: p("minPositionRule"),
     holderRestrictionRule: p("holderRestrictionRule"),
     windowRule: p("windowRule"),
@@ -47,6 +52,8 @@ export default buildModule("Activate", (m) => {
   const dvpExecutor = m.contractAt("DvPExecutor", p("dvpExecutor"));
   const windowRule = m.contractAt("SettlementWindowRule", p("windowRule"));
   const minPositionRule = m.contractAt("MinPositionRule", p("minPositionRule"));
+  const credentialRegistry = m.contractAt("CredentialRegistry", p("credentialRegistry"));
+  const credentialRule = m.contractAt("CredentialRule", p("credentialRule"));
   const fundContract = m.contractAt("Fund", p("fundContract"));
   const fundCap = m.getParameter<bigint>("fundHolderCap");
 
@@ -96,12 +103,24 @@ export default buildModule("Activate", (m) => {
   const tokens = { intent, fund, asyncFund };
 
   // 1. Configure. Rules authorise these against the token's DEFAULT_ADMIN_ROLE, still held by the deployer.
+  // The one attester is the demo KYC provider, id 0. It may assert the eight named qualification bits unless the
+  // deployment narrows that. Every token trusts attester 0 (bit 0 of the bitmap) and asks for KYC and nothing more.
+  const attesterAdded = m.call(
+    credentialRegistry,
+    "addAttester",
+    [p("kycAttester"), m.getParameter<number>("kycAllowedQuals", 255)],
+    { after: deploys },
+  );
   const configured = [
+    attesterAdded,
     m.call(
       windowRule,
       "setWindow",
       [intent, m.getParameter<number>("windowOpen"), m.getParameter<number>("windowClose"), m.getParameter<number>("windowDays")],
       { after: deploys },
+    ),
+    ...Object.entries(tokens).map(([key, token]) =>
+      m.call(credentialRule, "setPolicy", [token, QUALS.KYC, 0, 0, 1n], { id: `${key}_policy`, after: deploys }),
     ),
     ...Object.entries(tokens).map(([key, token]) =>
       m.call(minPositionRule, "setMinPosition", [token, m.getParameter<bigint>(`${key}MinPosition`, 0n)], {
@@ -129,6 +148,7 @@ export default buildModule("Activate", (m) => {
       | (typeof tokens)[keyof typeof tokens]
       | typeof executor
       | typeof dvpExecutor
+      | typeof credentialRegistry
       | typeof timelock
       | typeof recoveryTimelock,
     role: string,
@@ -151,6 +171,7 @@ export default buildModule("Activate", (m) => {
     // M-1: the recovery timelock may unpause and remove the guardian on every token and both executors (the main
     // timelock already names it in its constructor for CANCELLER_ROLE revocation).
     ...Object.entries(tokens).map(([key, token]) => grant(`${key}_recovery`, token, ROLES.RECOVERY, recoveryTimelock)),
+    grant("credentials_recovery", credentialRegistry, ROLES.RECOVERY, recoveryTimelock),
     grant("executor_recovery", executor, ROLES.RECOVERY, recoveryTimelock),
     grant("dvp_recovery", dvpExecutor, ROLES.RECOVERY, recoveryTimelock),
   ];
@@ -161,6 +182,7 @@ export default buildModule("Activate", (m) => {
     ...Object.entries(tokens),
     ["executor", executor] as const,
     ["dvpExecutor", dvpExecutor] as const,
+    ["credentials", credentialRegistry] as const,
   ]) {
     const handed = m.call(contract, "grantRole", [ROLES.DEFAULT_ADMIN, timelock], { id: `${key}_admin_grant`, after });
     m.call(contract, "renounceRole", [ROLES.DEFAULT_ADMIN, deployer], { id: `${key}_admin_renounce`, after: [handed] });

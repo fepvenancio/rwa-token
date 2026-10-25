@@ -6,9 +6,9 @@ How the policy around a token changes after it is live, what to watch, what to d
 
 There are two timelocks.
 
-**The main timelock** holds the admin powers: `DEFAULT_ADMIN_ROLE` on the tokens, both executors, the registry and itself, `UPGRADER_ROLE` on the tokens, and ownership of `ProxyDeployer` and `Fund`. It is `GovernanceTimelock`: OpenZeppelin's `TimelockController` unchanged, except that the holder of `RECOVERY_ROLE` on it may revoke `CANCELLER_ROLE` (and do nothing else). The hook has no admin of its own: it asks a token who holds `DEFAULT_ADMIN_ROLE` on it, so the main timelock's role on a token is its authority over that token's rule list.
+**The main timelock** holds the admin powers: `DEFAULT_ADMIN_ROLE` on the tokens, both executors, the policy registry, the credential registry and itself, `UPGRADER_ROLE` on the tokens, and ownership of `ProxyDeployer` and `Fund`. It is `GovernanceTimelock`: OpenZeppelin's `TimelockController` unchanged, except that the holder of `RECOVERY_ROLE` on it may revoke `CANCELLER_ROLE` (and do nothing else). The hook has no admin of its own: it asks a token who holds `DEFAULT_ADMIN_ROLE` on it, so the main timelock's role on a token is its authority over that token's rule list.
 
-**The recovery timelock** is a plain OpenZeppelin `TimelockController`. It holds `RECOVERY_ROLE` on the main timelock, granted by that contract's constructor, and, after `Activate`, on the three tokens and both executors. A token placed later does not get it from its initialiser: whoever holds `DEFAULT_ADMIN_ROLE` on that token (the main timelock, if it is initialised that way) must grant it. As deployed, nobody can cancel the recovery timelock's operations.
+**The recovery timelock** is a plain OpenZeppelin `TimelockController`. It holds `RECOVERY_ROLE` on the main timelock, granted by that contract's constructor, and, after `Activate`, on the three tokens, both executors and the credential registry. A token placed later does not get it from its initialiser: whoever holds `DEFAULT_ADMIN_ROLE` on that token (the main timelock, if it is initialised that way) must grant it. As deployed, nobody can cancel the recovery timelock's operations.
 
 A timelock is itself the account that calls the target contract, so the target sees that timelock as `msg.sender`.
 
@@ -50,6 +50,8 @@ sequenceDiagram
 | Grant or revoke a role | `grantRole`, `revokeRole` on a token, an executor, the registry or the main timelock itself | none |
 | Let the DvP executor settle against a gated cash token | `cashToken.grantRole(EXECUTOR_ROLE, dvpExecutor)`, with the cash token's administrator as caller | none. `Activate` grants `EXECUTOR_ROLE` only on the intent token it deploys, so a gated cash token is a separate instrument whose own deployment or governance does this ([flows-dvp.md](flows-dvp.md#policy-and-the-fund-layer)) |
 | Window, minimum position, holder cap, holder-count seed, holder exemption | `SettlementWindowRule`, `MinPositionRule` and `MaxHoldersRule` functions | the rule asks the token whether the caller holds `DEFAULT_ADMIN_ROLE`. `setWindow` also rejects an invalid window, and `setExemptHolder` and `MinPositionRule.setExempt` a zero account. The three holder-count seeds also revert while the rule is in the token's rule list, and two of them check their inputs ([below](#the-holder-count-across-rule-and-hook-changes)). The minimum has its own section ([below](#setting-a-minimum-position)) |
+| Add an attester, rotate its account, change the bits it may assert, kill or revive it, clear a guardian block | `credentials.addAttester`, `setAttesterAccount`, `setAttesterQuals`, `killAttester`, `reviveAttester`, `clearGuardianBlock` | `DEFAULT_ADMIN_ROLE` on the credential registry. At most 64 attesters, ids are never reused ([credentials.md](credentials.md#operations)) |
+| Change a token's credential policy | `credentialRule.setPolicy(token, requireAll, requireAny, forbidAny, attesters)` | the rule asks the token whether the caller holds `DEFAULT_ADMIN_ROLE` |
 | Change the 7540 custody address | `vault.setCustody(newCustody)` | non-zero address |
 | Register a class, set the fund's cap, exempt an account | `fund.registerClass(token)`, `fund.setHolderCap(cap)`, `fund.setExempt(account, exempt)` | `registerClass`: the token reports ERC-165 support for `IPolicyGated`, its hook lists the fund's rule, its total supply is zero, and the fund has room (32 classes). `setHolderCap`: at most `type(uint48).max`. `setExempt`: a non-zero account |
 | Replace the fund's rule | `fund.setRule(newRule)`, with `hook.setRules(class, list)` for every class in the same batch | `newRule` is attested as `RULE` ([below](#changing-the-funds-rule)) |
@@ -68,12 +70,13 @@ Governance schedules and executes on the recovery timelock after its delay, and 
 | Change | Call, with the recovery timelock as caller |
 |---|---|
 | Unpause a token or an executor | `token.unpause()`, `executor.unpause()`, `dvpExecutor.unpause()` |
-| Remove `GUARDIAN_ROLE` from an account on a token or an executor | `revokeRole(GUARDIAN_ROLE, account)` on it |
+| Remove `GUARDIAN_ROLE` from an account on a token, an executor or the credential registry | `revokeRole(GUARDIAN_ROLE, account)` on it |
+| Lift a guardian's block, or bring back an attester the guardian killed | `credentials.clearGuardianBlock(subject)`, `credentials.reviveAttester(id)` |
 | Remove `CANCELLER_ROLE` from an account on the main timelock: the guardian's, or any other canceller's, governance included | `timelock.revokeRole(CANCELLER_ROLE, account)` |
 
-Any other privileged call to a token, an executor or the main timelock reverts. Role-gated functions fail their role check, and `updateDelay` fails `TimelockUnauthorizedCaller`. Permissionless calls, such as `approve` or renouncing its own role, still succeed and give it nothing. It cannot grant roles there, revoke any other role, upgrade, change a hook or rule list, or schedule, execute or cancel on the main timelock. This path exists because the guardian can cancel these same calls on the main timelock ([roles.md](roles.md#what-the-guardian-can-do)). It bounds the guardian. It does not protect against a compromised governance multisig, which proposes on both timelocks.
+Any other privileged call to a token, an executor, the credential registry or the main timelock reverts. Role-gated functions fail their role check, and `updateDelay` fails `TimelockUnauthorizedCaller`. Permissionless calls, such as `approve` or renouncing its own role, still succeed and give it nothing. It cannot grant roles there, revoke any other role, upgrade, change a hook or rule list, or schedule, execute or cancel on the main timelock. This path exists because the guardian can cancel these same calls on the main timelock ([roles.md](roles.md#what-the-guardian-can-do)). It bounds the guardian. It does not protect against a compromised governance multisig, which proposes on both timelocks.
 
-`RECOVERY_ROLE` is not a role admin, because a role admin could also grant the role. Instead, the tokens, both executors and `GovernanceTimelock` let its holder through for exactly those revocations (their `revokeRole` overrides), and the tokens and the executors accept it in `unpause()`.
+`RECOVERY_ROLE` is not a role admin, because a role admin could also grant the role. Instead, the tokens, both executors, the credential registry and `GovernanceTimelock` let its holder through for exactly those revocations (their `revokeRole` overrides), the tokens and the executors accept it in `unpause()`, and the credential registry accepts it in `clearGuardianBlock` and `reviveAttester`.
 
 ```mermaid
 sequenceDiagram
@@ -96,9 +99,9 @@ Each `unpause` in such a batch must target a contract that is paused when the ba
 
 The recovery timelock also administers itself. Changing its own roles or delay is one of its own operations.
 
-Code: `GovernanceTimelock.revokeRole`, `PolicyGatedERC20Upgradeable.unpause` and `revokeRole`, `IntentExecutor` and `DvPExecutor` `unpause` and `revokeRole`.
+Code: `GovernanceTimelock.revokeRole`, `PolicyGatedERC20Upgradeable.unpause` and `revokeRole`, `IntentExecutor` and `DvPExecutor` `unpause` and `revokeRole`, `CredentialRegistry.revokeRole`, `clearGuardianBlock` and `reviveAttester`.
 
-Things that wait for neither timelock: a guardian pause, a `cancel` on the main timelock, a council attestation or revocation, and the work of the agent, minter, burner, operator and fulfiller.
+Things that wait for neither timelock: a guardian pause, a `cancel` on the main timelock, a council attestation or revocation, the work of the agent, minter, burner, operator and fulfiller, and an attester's writes and a guardian's block or kill in the credential registry.
 
 ## What attestation covers
 
@@ -151,6 +154,8 @@ sequenceDiagram
 
 A redeployed copy of an existing rule shares its codehash if its constructor arguments are the same, and so does any copy of a rule that has no immutables. Such a copy is already attested, so `attest` would revert with `PolicyRegistry_AlreadyAttested`. Only new rule code, new immutable values, or a codehash the council has since revoked needs the council's attestation.
 
+Never drop the credential rule from a token's list without putting an equivalent in its place. No other shipped rule looks at who holds, so a list without `CredentialRule` (or `IdentityRule`) admits any address, and the hook does not warn about it. `hook.rules(token)` in the post-deploy check, and the monitoring of it ([below](#watching-the-fund-and-the-policy)), are what catch the omission.
+
 ## Setting a minimum position
 
 `MinPositionRule` holds one minimum per token, in raw units, and 0 means off. Whoever holds `DEFAULT_ADMIN_ROLE` on the token sets it with `setMinPosition(token, amount)` and lists exempt accounts with `setExempt(token, account, exempt)`. That is the deployer while `Activate` runs (the parameters `intentMinPosition`, `fundMinPosition` and `asyncFundMinPosition`, each 0 by default) and the main timelock after the hand-over, so a later change is a timelock operation with its delay. `setMinPosition` does not check that the rule is in the token's list.
@@ -163,7 +168,7 @@ This closes review finding L-1 (one wei taking a holder slot of a counting rule)
 
 On `Gated4626Vault` a deposit or mint that would leave the receiver below the minimum reverts the same way. `maxDeposit` and `maxMint` do not warn about it, because they probe a mint of a very large amount, which is above any minimum up to `type(uint128).max`, not the amount of the call. On `Gated7540Vault` a deposit claim that would leave the receiver below the minimum reverts, and the claimable stays: the agent's `recoverClaimable` delivers it (an enforcement mint is exempt), or the fulfiller rejects the request before fulfilling. A request cannot know how many shares it will buy, so `requestDeposit` is not refused for its size.
 
-A token that will have no minimum should leave `MinPositionRule` out of its rule list. A rule that is in the list with the minimum at 0 still costs about 9,200 gas on every transfer: the call, the context it is handed, a cold account and a cold storage read. The demo lists carry it for all three tokens, off by default (`RULE_ORDER` in `ignition/modules/roles.ts`), so a deployment that wants no minimum on a token removes it from that token's entry before `Activate`. `Activate` still calls `setMinPosition` for every token, which has no effect on a token until the rule is in its list. Adding the rule later is a `setRules` through the main timelock, so leaving it out is reversible. To have a minimum in force from the moment the rule is listed, put `setMinPosition` before `setRules` in the same batch. The demo lists put the rule second, right after `IdentityRule`, so that, with a minimum set, the rules after it see real positions (FORCED, exempt accounts and burner burns can still leave dust).
+A token that will have no minimum should leave `MinPositionRule` out of its rule list. A rule that is in the list with the minimum at 0 still costs about 9,200 gas on every transfer: the call, the context it is handed, a cold account and a cold storage read. The demo lists carry it for all three tokens, off by default (`RULE_ORDER` in `ignition/modules/roles.ts`), so a deployment that wants no minimum on a token removes it from that token's entry before `Activate`. `Activate` still calls `setMinPosition` for every token, which has no effect on a token until the rule is in its list. Adding the rule later is a `setRules` through the main timelock, so leaving it out is reversible. To have a minimum in force from the moment the rule is listed, put `setMinPosition` before `setRules` in the same batch. The demo lists put the rule second, right after `CredentialRule`, so that, with a minimum set, the rules after it see real positions (FORCED, exempt accounts and burner burns can still leave dust).
 
 Code: `MinPositionRule.setMinPosition`, `setExempt`, `check`; `Gated7540Vault.recoverClaimable`; `ignition/modules/roles.ts`, `Activate.ts`.
 
@@ -219,7 +224,7 @@ Governance should not propose these for a token that has holders. To stop cappin
 If one of them cannot be avoided, the rule is seeded while it is out of the token's list, in the same batch that puts it in. A count read when the batch is proposed is at least the delay old when the batch executes, so either the seed reads the count when the batch executes, or nothing may move between the count and the batch (the paused procedure below):
 
 - `seedHolderCountFromRule(token, previousRule)`, when a new instance replaces one that is in the list. It copies the count the old instance holds when the batch executes, whatever the number of holders, so the result is exact only if that count is and both instances exempt the same accounts that hold tokens. Exemptions are not copied and cannot be listed on-chain: the batch sets them on the new instance from the old one's `HolderExemptionSet` events. An instance that served the token before (A, then B, then A again) still has its old exemptions, which the batch brings in line too.
-- `seedHolderCountFromHolders(token, holders)`, in any of the three cases. The list holds every account that may hold tokens when the batch executes, in ascending order. It may include verified accounts that hold nothing yet, so a listed account that becomes a holder during the delay does not break the batch. If an unlisted account holds tokens by then, the call reverts, the whole batch reverts, and nothing is installed.
+- `seedHolderCountFromHolders(token, holders)`, in any of the three cases. The list holds every account that may hold tokens when the batch executes, in ascending order. It may include credentialed accounts that hold nothing yet, so a listed account that becomes a holder during the delay does not break the batch. If an unlisted account holds tokens by then, the call reverts, the whole batch reverts, and nothing is installed.
 
 The batch on the main timelock: `setCap` if the instance has never served the token, and the `setExemptHolder` calls that bring its exemptions in line with the token's (they leave the count alone while the rule is out of the list); then the seed, which reads those exemptions; then the `setRules` or `setPolicyHook` change. Without `setCap`, the cap is 0 and the rule rejects every new holder that does not arrive by `FORCED`.
 
@@ -257,7 +262,7 @@ The hook accepts any list of attested rules, and `Fund.setRule` does not look at
 |---|---|
 | `fund.firstBrokenClass()` | The zero address: every registered class lists the fund's installed rule. Otherwise the first class, in registration order, that does not, or whose token or hook could not be asked. It names one class, so poll again after repairing it |
 | `fund.isClassIntact(token)` | `true`: `token` is a registered class and its hook lists the installed rule. `false`: it does not, or `token` is not a registered class, or the token or its hook could not be asked |
-| `hook.rules(token)` | The token's ordered list. Compare it with the list the council and governance last approved (`RULE_ORDER` at deployment). The two fund views look only for the fund's rule, so another rule that was dropped, `IdentityRule` for one, shows only here |
+| `hook.rules(token)` | The token's ordered list. Compare it with the list the council and governance last approved (`RULE_ORDER` at deployment). The two fund views look only for the fund's rule, so another rule that was dropped, `CredentialRule` for one, shows only here |
 | `token.paused()` | `true`: every movement except `FORCED` is rejected with `PAUSED` |
 | `executor.paused()`, `dvpExecutor.paused()` | `true`: the executor's operator cannot submit (`execute` and `executeBatch` revert with `EnforcedPause`, and the DvP pre-flights answer `PAUSED`). No token movement is blocked by an executor's pause |
 
@@ -282,7 +287,7 @@ sequenceDiagram
   G->>T: pause()
   Note over T: every movement except FORCED is rejected with PAUSED, mint and burn included
   A->>T: forcedTransfer(holder, quarantine, amount)
-  Note over T: allowed while paused. The quarantine account must be verified and not address-frozen
+  Note over T: allowed while paused. The quarantine account must hold an active credential the policy accepts and not be address-frozen
   Gov->>TL: schedule(token.unpause())
   Note over TL: the delay. The guardian may cancel, and the recovery timelock is the path it cannot cancel
   Gov->>TL: execute(...)
@@ -292,21 +297,21 @@ sequenceDiagram
 ```
 
 1. **Pause.** The guardian calls `pause()` on the token, with no delay. While the token is paused every movement except `FORCED` is rejected with `PAUSED`, `mint` and `burn` included, and a vault's `max*` functions return 0. Calls that move no balance still work: `setFrozenTokens`, and the agent's `setLockup` and `setFrozen` on `HolderRestrictionRule`. Each executor has its own `pause()`.
-2. **Enforce.** The agent calls `forcedTransfer(from, quarantine, amount)`, which works while paused. It ignores the sender's identity status, address freeze, lockup and minimum position, and it may take frozen tokens (it lowers the frozen amount by the part it takes). The receiver is judged. `quarantine` must be verified in the identity registry (`RECEIVER_NOT_VERIFIED`) and must not be address-frozen (`RECEIVER_FROZEN`). Several enforcement calls to one token can go in one `multicall` from the agent.
+2. **Enforce.** The agent calls `forcedTransfer(from, quarantine, amount)`, which works while paused. It ignores the sender's credential standing, address freeze, lockup and minimum position, and it may take frozen tokens (it lowers the frozen amount by the part it takes). The receiver is judged. `quarantine` must hold an `ACTIVE` credential that the token's policy accepts (`RECEIVER_NOT_VERIFIED`, `CREDENTIAL_EXPIRED` or `RECEIVER_NOT_ELIGIBLE`) and must not be address-frozen (`RECEIVER_FROZEN`). Several enforcement calls to one token can go in one `multicall` from the agent.
 3. **Resume.** The token stays paused until `unpause()`, which the holders of `DEFAULT_ADMIN_ROLE` (the main timelock, after the delay, and the guardian can cancel that) and of `RECOVERY_ROLE` (the recovery timelock, after its delay, and as deployed nobody can cancel that) can call. Plan for a pause of at least the delay.
-4. **Burn what sits in quarantine.** On `IntentToken` the burner calls `burn(quarantine, amount)` after the unpause. It is an enforcement burn, exempt from the lockup and the minimum position, but `quarantine` must still be verified and not address-frozen. On both vaults the role `mint` and `burn` always revert (`Gated4626Vault_Unsupported`, `Gated7540Vault_Unsupported`), so there is no burn step: the shares leave through a redemption by the quarantine account.
+4. **Burn what sits in quarantine.** On `IntentToken` the burner calls `burn(quarantine, amount)` after the unpause. It is an enforcement burn, exempt from the lockup, the minimum position and the credential check on the sender, but `quarantine` must still not be address-frozen. On both vaults the role `mint` and `burn` always revert (`Gated4626Vault_Unsupported`, `Gated7540Vault_Unsupported`), so there is no burn step: the shares leave through a redemption by the quarantine account.
 
 Prepare the quarantine account before it is needed:
 
-- The identity provider verifies it.
+- The KYC attester credentials it with the bits the token's policy asks for, and renews it before `validUntil`: a lapsed account cannot receive, so a forced transfer into it would be refused with `CREDENTIAL_EXPIRED`.
 - The agent never sets `HolderRestrictionRule.setFrozen` on it. An address freeze refuses payments into the account, forced ones included. To keep the account from sending, set a lockup with `setLockup`: it stops the account's transfers, executed intents and own burns (a vault redemption is one), and does not stop a `FORCED` move or a burner's `burn`. On a vault class the exit is the quarantine account's own redemption, so the agent clears the lockup (`setLockup(token, quarantine, 0)`) before it.
 - On a fund class, governance can exempt it with `fund.setExempt(quarantine, true)`. A forced transfer is exempt from the investor cap but is still counted, so an account that is not exempt becomes an investor of the fund until its balance leaves. `setExempt` is a timelock operation, so it cannot wait for the incident.
 
-**Why a frozen account is exited by `forcedTransfer` and not by a burn.** A role `burn` from an address-frozen account is refused with `SENDER_FROZEN`, even for the burner, and from a holder who is no longer verified with `SENDER_NOT_VERIFIED`. While the token is paused the same burn is refused with `PAUSED` first. `forcedTransfer` ignores the sender's freeze and identity status, so it is the way out of such an account, and the burn then comes from the quarantine account. A frozen amount set with `setFrozenTokens` is a different thing: it stops the holder, but not `forcedTransfer` or a burner's `burn`, which may take frozen tokens.
+**Why a frozen account is exited by `forcedTransfer` and not by a burn.** A role `burn` from an address-frozen account is refused with `SENDER_FROZEN`, even for the burner. A burner's `burn` from a holder with no credential or a blocked one passes `CredentialRule`, which exempts the enforcement burn. While the token is paused the same burn is refused with `PAUSED` first. `forcedTransfer` ignores the sender's freeze and credential standing, so it is the way out of such an account, and the burn then comes from the quarantine account. A frozen amount set with `setFrozenTokens` is a different thing: it stops the holder, but not `forcedTransfer` or a burner's `burn`, which may take frozen tokens.
 
 **How this differs from the ERC-3643 reference token.** Checked on 2026-10-23, against `Token.sol` in the ERC-3643 repository, `main`. There `whenNotPaused` is on `transfer` and `transferFrom` only, and `mint`, `burn` and `forcedTransfer` carry `onlyAgent` alone, so its agents can mint, burn and force while the token is paused. Its `setAddressFrozen` blocks `transfer` and `transferFrom` in both directions, and `mint`, `burn` and `forcedTransfer` ignore the flag. Here the pause also blocks `mint` and `burn`, so the issuer cannot mint during a pause, and only `FORCED` movements run. An address freeze also refuses a mint into the frozen account and a forced transfer into it, and refuses any burn from it. Not checked: whether the ERC-3643 text, as opposed to that token, says anything about pause, and whether it declares an ERC-165 id. The comparison is with the reference token on that date, not with the standard.
 
-Code: `PolicyGatedERC20Upgradeable.pause`, `unpause`, `forcedTransfer`, `burn`, `_check`; `IdentityRule.check`; `HolderRestrictionRule.check`; `FundHoldersRule.check` and `after_`; `Fund.setExempt`.
+Code: `PolicyGatedERC20Upgradeable.pause`, `unpause`, `forcedTransfer`, `burn`, `_check`; `CredentialRule.check`; `HolderRestrictionRule.check`; `FundHoldersRule.check` and `after_`; `Fund.setExempt`.
 
 ## Why deployment has two stages and a council step
 
@@ -343,21 +348,22 @@ Code: `ProxyDeployer.deploy`, `predict`, `TokenProxy`, `ComplianceHook.setRules`
 sequenceDiagram
   participant D as Deployer
   participant Co as Security council
-  participant IP as Identity provider
+  participant KA as KYC attester
   participant Ch as Chain
 
-  Note over D,Ch: Stage 1, Components. Ignition batches independent deployments. The fixed orders are recovery timelock, then GovernanceTimelock, then PolicyRegistry, and PolicyRegistry then ComplianceHook, and PolicyRegistry then Fund then FundHoldersRule
+  Note over D,Ch: Stage 1, Components. Ignition batches independent deployments. The fixed orders are recovery timelock, then GovernanceTimelock, then PolicyRegistry, and PolicyRegistry then ComplianceHook, CredentialRegistry then CredentialRule, and PolicyRegistry then Fund then FundHoldersRule
   D->>Ch: recovery TimelockController(minDelay, governance, governance, deployer)
   D->>Ch: GovernanceTimelock(minDelay, governance, governance, deployer, recovery timelock)
   D->>Ch: PolicyRegistry(main timelock, council)
   D->>Ch: ComplianceHook(registry), the one hook for every token
-  D->>Ch: IdentityRule(identityRegistry), MinPositionRule, HolderRestrictionRule, SettlementWindowRule, MaxHoldersRule
+  D->>Ch: CredentialRegistry(deployer, guardian), CredentialRule(credential registry)
+  D->>Ch: MinPositionRule, HolderRestrictionRule, SettlementWindowRule, MaxHoldersRule
   D->>Ch: Fund(deployer, registry), FundHoldersRule(fund)
   D->>Ch: IntentToken, Gated4626Vault, Gated7540Vault implementations
   D->>Ch: ProxyDeployer(deployer), IntentExecutor(deployer, guardian), DvPExecutor(deployer, guardian)
 
   Note over D,Ch: Council step
-  Co->>Ch: read the fund's code and owner, and the hook's REGISTRY()
+  Co->>Ch: read the fund's code and owner, the hook's REGISTRY(), and the credential registry's code, admin and attester list
   Co->>Ch: attest the 6 rules as RULE, the hook as HOOK and the 3 implementations as IMPLEMENTATION
 
   Note over D,Ch: Stage 2, Activate
@@ -366,10 +372,10 @@ sequenceDiagram
     Note over Ch: the token installs the hook and then its rules on the hook, and ProxyDeployer checks both
   end
   D->>Ch: Fund.setRule and setHolderCap, then registerClass for the three tokens in order
-  D->>Ch: configure (window, minimum positions). Grant roles, which waits for the registrations
+  D->>Ch: configure (KYC attester, each token's credential policy, window, minimum positions). Grant roles, which waits for the registrations
   D->>Ch: hand over admin to the main timelock, deployer renounces, Fund ownership moves too
   D->>Ch: recovery timelock: revoke governance's CANCELLER_ROLE, then deployer renounces (waits only for the deploys)
-  IP->>Ch: verify the 7540 vault in the identity registry
+  KA->>Ch: credential the 7540 vault and every holder in the credential registry
 ```
 
 ### What each stage creates
@@ -380,20 +386,20 @@ sequenceDiagram
 - The main timelock, `GovernanceTimelock(minDelay, [governance], [governance], deployer, recoveryTimelock)`. Its constructor grants the recovery timelock `RECOVERY_ROLE`. The deployer is the admin of both timelocks until `Activate`.
 - `PolicyRegistry(mainTimelock, council)`.
 - `ComplianceHook(registry)`, the one hook every token uses. It has no admin, no token binding and no rules yet.
-- Five shared rules: `IdentityRule`, with the identity registry address as its constructor argument, `MinPositionRule`, `HolderRestrictionRule`, `SettlementWindowRule` and `MaxHoldersRule`.
+- `CredentialRegistry(deployer, guardian)`, administered by the deployer until `Activate` hands it over, and five shared rules: `CredentialRule`, with the registry as its constructor argument, `MinPositionRule`, `HolderRestrictionRule`, `SettlementWindowRule` and `MaxHoldersRule`.
 - `Fund(deployer, registry)`, owned by the deployer until `Activate`, and `FundHoldersRule(fund)`, the sixth rule. The fund and its rule need each other, so the rule takes the fund at construction and `Activate` installs the rule in the fund.
 - One implementation per template: `IntentToken`, `Gated4626Vault`, `Gated7540Vault`.
 - `ProxyDeployer(deployer)`, `IntentExecutor(deployer, guardian)` and `DvPExecutor(deployer, guardian)`. Neither executor is attested: neither is a hook, a rule or an implementation, and each token authorises an executor by granting it `EXECUTOR_ROLE`.
 
-The council step attests six rules as `RULE` (the five shared ones and `FundHoldersRule`), the hook as `HOOK` and the three implementations as `IMPLEMENTATION`, in one step. `MaxHoldersRule` is attested although no demo class lists it, so governance can add it later without another council step. Before attesting `FundHoldersRule` the council reads the fund's code and owner, and before attesting the hook it reads its `REGISTRY()`. `Activate` is where the attestations are checked (the token's `initialize` for the hook, the hook's `setRules` for the rules, `Fund.setRule` for the fund's rule), so the step comes before it.
+The council step attests six rules as `RULE` (the five shared ones and `FundHoldersRule`), the hook as `HOOK` and the three implementations as `IMPLEMENTATION`, in one step. `MaxHoldersRule` is attested although no demo class lists it, so governance can add it later without another council step. Before attesting `FundHoldersRule` the council reads the fund's code and owner, before attesting the hook it reads its `REGISTRY()`, and before attesting `CredentialRule` it reads the credential registry: its code, its admin and its attester list, none of which the rule's codehash covers. `Activate` is where the attestations are checked (the token's `initialize` for the hook, the hook's `setRules` for the rules, `Fund.setRule` for the fund's rule), so the step comes before it.
 
 `Activate` gives each token its rule list from `RULE_ORDER` in `roles.ts`, in the token's init data:
 
 | Token | Rules, in order |
 |---|---|
-| `IntentToken` (symbol `INT`) | `IdentityRule`, `MinPositionRule`, `HolderRestrictionRule`, `SettlementWindowRule`, `FundHoldersRule` |
-| `Gated4626Vault` (`gFUND`) | `IdentityRule`, `MinPositionRule`, `HolderRestrictionRule`, `FundHoldersRule` |
-| `Gated7540Vault` (`gASYNC`) | `IdentityRule`, `MinPositionRule`, `HolderRestrictionRule`, `FundHoldersRule` |
+| `IntentToken` (symbol `INT`) | `CredentialRule`, `MinPositionRule`, `HolderRestrictionRule`, `SettlementWindowRule`, `FundHoldersRule` |
+| `Gated4626Vault` (`gFUND`) | `CredentialRule`, `MinPositionRule`, `HolderRestrictionRule`, `FundHoldersRule` |
+| `Gated7540Vault` (`gASYNC`) | `CredentialRule`, `MinPositionRule`, `HolderRestrictionRule`, `FundHoldersRule` |
 
 `MaxHoldersRule` is in none of them ([adding it later](#adding-maxholdersrule-to-a-class-later)). A token that wants no minimum position can leave `MinPositionRule` out of its entry ([why](#setting-a-minimum-position)).
 
@@ -402,23 +408,24 @@ The symbols above, and the token names in `TOKENS` ("Intent Token", "Gated Fund"
 `Activate` runs in these stages. Ignition orders calls by their dependencies: the futures they use, plus the `after` lists in this module:
 
 1. Deploy the three tokens through `ProxyDeployer`, each with its rule list in its init data. The tokens are initialised with the deployer as admin and the guardian as guardian, and each installs its own rules on the hook. Every later call waits for all three deploys, so a token that does not come up with the shared hook and exactly its rule list stops the whole stage before anything is configured or granted.
-2. Configure, after the deploys and while the deployer still holds `DEFAULT_ADMIN_ROLE` on the tokens: `SettlementWindowRule.setWindow` for `IntentToken` (`windowOpen`, `windowClose`, `windowDays`), and `MinPositionRule.setMinPosition` for each token (`intentMinPosition`, `fundMinPosition`, `asyncFundMinPosition`, each 0 by default, which switches the rule off). There is no per-class holder cap and no escrow exemption to set: the fund counts investors across its classes, and the 7540 vault is the token itself, which `FundHoldersRule` does not count and `MinPositionRule` exempts.
+2. Configure, after the deploys and while the deployer still holds `DEFAULT_ADMIN_ROLE` on the tokens and on the credential registry: `CredentialRegistry.addAttester(kycAttester, kycAllowedQuals)` (attester 0, allowed to assert all eight named bits unless `kycAllowedQuals` narrows that), `CredentialRule.setPolicy(token, KYC, 0, 0, 1)` for each token (every receiver needs the `KYC` bit from attester 0, which is what the identity check asked for before; until a token has its policy its rule admits no receiver), `SettlementWindowRule.setWindow` for `IntentToken` (`windowOpen`, `windowClose`, `windowDays`), and `MinPositionRule.setMinPosition` for each token (`intentMinPosition`, `fundMinPosition`, `asyncFundMinPosition`, each 0 by default, which switches the rule off). There is no per-class holder cap and no escrow exemption to set: the fund counts investors across its classes, and the 7540 vault is the token itself, which `FundHoldersRule` does not count and `MinPositionRule` exempts.
    The fund is configured in the same stage, while the deployer owns it: `Fund.setRule(fundHoldersRule)` and `Fund.setHolderCap(fundHolderCap)`, then `Fund.registerClass` for `IntentToken`, `Gated4626Vault` and `Gated7540Vault`, each after the one before, so they are classes 1, 2 and 3. Registration checks that the token's hook lists the rule and that its supply is zero, so a rule list without the fund's rule stops `Activate` here. No role has been granted by then, and `Fund` ownership has not moved. The `ProxyDeployer` ownership transfer and the recovery timelock calls wait only for the deploys, so they may already have run.
-3. Grant roles: `MINTER_ROLE` and `BURNER_ROLE` on `IntentToken`; `EXECUTOR_ROLE` on `IntentToken` to the intent executor and to the DvP executor, and to no one else; `FULFILLER_ROLE` on the 7540 vault; `AGENT_ROLE` on all three tokens; `UPGRADER_ROLE` on all three tokens to the main timelock; `OPERATOR_ROLE` on both executors; `CANCELLER_ROLE` on the main timelock to the guardian; `RECOVERY_ROLE` on all three tokens and on both executors to the recovery timelock. The grants wait for the deploys and for the three registrations, so no operational role exists on a class the fund has not registered. The window and minimum-position calls of step 2 and these grants have no order between them.
-4. Hand over: once configuration and the role grants are done, grant `DEFAULT_ADMIN_ROLE` on each token and on both executors to the main timelock, then the deployer renounces it there. The deployer also renounces `DEFAULT_ADMIN_ROLE` on the main timelock once configuration and the grants are done. On the recovery timelock, after the deploys, `Activate` revokes governance's `CANCELLER_ROLE` (OpenZeppelin gave it as a proposer), then the deployer renounces `DEFAULT_ADMIN_ROLE` there. `ProxyDeployer` ownership goes to the main timelock after the deploys, and `Fund` ownership after the three registrations, with no order against the other hand-over calls, so any later token is placed, and any later class registered, through governance.
+3. Grant roles: `MINTER_ROLE` and `BURNER_ROLE` on `IntentToken`; `EXECUTOR_ROLE` on `IntentToken` to the intent executor and to the DvP executor, and to no one else; `FULFILLER_ROLE` on the 7540 vault; `AGENT_ROLE` on all three tokens; `UPGRADER_ROLE` on all three tokens to the main timelock; `OPERATOR_ROLE` on both executors; `CANCELLER_ROLE` on the main timelock to the guardian; `RECOVERY_ROLE` on all three tokens, on both executors and on the credential registry to the recovery timelock. The grants wait for the deploys and for the three registrations, so no operational role exists on a class the fund has not registered. The attester, policy, window and minimum-position calls of step 2 and these grants have no order between them.
+4. Hand over: once configuration and the role grants are done, grant `DEFAULT_ADMIN_ROLE` on each token, on the credential registry and on both executors to the main timelock, then the deployer renounces it there. The deployer also renounces `DEFAULT_ADMIN_ROLE` on the main timelock once configuration and the grants are done. On the recovery timelock, after the deploys, `Activate` revokes governance's `CANCELLER_ROLE` (OpenZeppelin gave it as a proposer), then the deployer renounces `DEFAULT_ADMIN_ROLE` there. `ProxyDeployer` ownership goes to the main timelock after the deploys, and `Fund` ownership after the three registrations, with no order against the other hand-over calls, so any later token is placed, and any later class registered, through governance.
 
-The identity provider has to verify the 7540 vault, because the vault holds shares in escrow and `IdentityRule` checks it on both legs. `Activate` does not do this. It can happen any time once the vault's address can be computed, which is after `Components` (`ProxyDeployer.predict`, with the symbol `Activate` will use), and must happen before the first redemption request. The runbook and the test fixture do it after `Activate`.
+The KYC attester has to credential the 7540 vault, because the vault holds shares in escrow and `CredentialRule` checks it on both legs. The credential needs the `KYC` bit the policy asks for, and the `INFRA` bit is the fitting label for a vault. `Activate` does not do this. It needs attester 0, which `Activate` adds (nothing can be credentialed before that), so it happens after `Activate` and before the first redemption request. The vault's address is known earlier (`ProxyDeployer.predict`, with the symbol `Activate` will use). The runbook and the test fixture do it after `Activate`.
 
 ### After `Activate`
 
 The roles are in [roles.md](roles.md#who-holds-what-after-activate). The test fixture's `assertHandedOver` checks that:
 
-- the deployer holds no role on either timelock, the registry, the tokens or either executor;
-- the main timelock holds `DEFAULT_ADMIN_ROLE` on itself, the registry, the tokens and both executors, and is the only `UPGRADER_ROLE` holder among the known accounts;
-- the recovery timelock holds exactly `RECOVERY_ROLE` on the main timelock, each token and both executors, nothing on the registry, and `DEFAULT_ADMIN_ROLE` on itself;
+- the deployer holds no role on either timelock, the policy registry, the credential registry, the tokens or either executor;
+- the main timelock holds `DEFAULT_ADMIN_ROLE` on itself, the policy registry, the credential registry, the tokens and both executors, and is the only `UPGRADER_ROLE` holder among the known accounts;
+- the recovery timelock holds exactly `RECOVERY_ROLE` on the main timelock, each token, both executors and the credential registry, nothing on the policy registry, and `DEFAULT_ADMIN_ROLE` on itself;
 - the DvP executor's `OPERATOR_ROLE` is held by the stack's operator and its `GUARDIAN_ROLE` by the guardian, and `EXECUTOR_ROLE` on `IntentToken` is held by the two executors and by no account the stack knows about;
 - no known account can cancel on the recovery timelock, the guardian holds nothing there, and governance is its proposer and executor;
 - `ProxyDeployer` and `Fund` are owned by the main timelock;
+- the credential registry's guardian holds only `GUARDIAN_ROLE`, it has one attester, the KYC provider, which is not killed, the credential rule reads that registry and is attested as `RULE`, and each token's policy is `KYC` from attester 0 and nothing more;
 - the fund runs the rule that points back at it and is attested as `RULE`, its cap is the intended one, and its classes 1, 2 and 3 are `IntentToken`, `Gated4626Vault` and `Gated7540Vault`, each of them intact (`isClassIntact`), so `firstBrokenClass()` is the zero address;
 - every token runs the one hook the council reviewed, which names the deployment's registry, and `hook.rules(token)` holds each token's intended rules in `RULE_ORDER` order. No rule has its own access control;
 - the guardian can cancel on the main timelock but not propose or execute;

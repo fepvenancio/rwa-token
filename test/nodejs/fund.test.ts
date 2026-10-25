@@ -19,7 +19,7 @@ import {
 } from "viem";
 
 import { RULE_ORDER } from "../../ignition/modules/roles.js";
-import { deployStack, FUND_HOLDER_CAP, REASONS, revertOf, signIntent, type Stack } from "./fixtures.js";
+import { deployStack, FUND_HOLDER_CAP, QUALS, REASONS, revertOf, signIntent, type Stack } from "./fixtures.js";
 
 const ATTEST = { HOOK: 1, RULE: 2 } as const;
 const usd = (amount: string) => parseUnits(amount, 6);
@@ -191,7 +191,7 @@ describe("fund: investors counted across classes", async function () {
     const implementation = s.implementations.token.address;
     const predicted = await s.proxyDeployer.read.predict(["NEWF", implementation]);
     // The shared hook is already attested; the new class only names its rules.
-    const rules = [s.rules.identityRule.address, s.rules.fundHoldersRule.address];
+    const rules = [s.rules.credentialRule.address, s.rules.fundHoldersRule.address];
     const initData = encodeFunctionData({
       abi: s.token.abi,
       functionName: "initialize",
@@ -206,8 +206,16 @@ describe("fund: investors counted across classes", async function () {
         args: ["NEWF", implementation, initData, s.hook.address, rules],
       }),
     );
+    // The new class asks for KYC from attester 0, like the others. The timelock administers it, so the policy is its
+    // operation too; it can only run once the token exists.
+    const policy = await schedule(
+      s,
+      s.rules.credentialRule.address,
+      encodeFunctionData({ abi: s.rules.credentialRule.abi, functionName: "setPolicy", args: [predicted, QUALS.KYC, 0, 0, 1n] }),
+    );
     await networkHelpers.time.increase(deploy.delay);
     await deploy.execute();
+    await policy.execute();
     const created = await viem.getContractAt("IntentToken", predicted);
 
     // Live with its hook, and unusable: the fund does not know it yet.

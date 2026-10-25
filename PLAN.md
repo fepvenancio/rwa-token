@@ -2226,7 +2226,7 @@ Decision 2 of the second outside review, built as the second of the two separate
 ### Not in this plan
 
 A `JurisdictionRule`, amount-level lockups, an ERC-3643 read adapter, ERC-1066 style reason codes, a recovery address for identity re-keying. The assessment calls them secondary, and none of them changes what the items above build.
-## Credential layer: `CredentialRegistry` plus `CredentialRule` (track A; planned 2026-10-23; C-1 built and awaiting review, C-2 not started)
+## Credential layer: `CredentialRegistry` plus `CredentialRule` (track A; planned 2026-10-23; C-1 committed and ported, C-2 built and awaiting review)
 
 Source: [the assessment](docs/superpowers/specs/2026-10-23-credential-layer-assessment.md) and the [three research reports](docs/superpowers/specs/research-2026-10-23/). On 2026-10-23 the owner asked for this plan using the assessment's defaults for its section 6. No code is written. Nothing here changes an existing contract's code, an existing interface id or an existing event, so the bytecode of every contract already in the manifest stays as it is.
 
@@ -2491,7 +2491,56 @@ The owner chose to wait for S0 and S1, then port C-1. S0 to S5 and two follow-up
 - **The tests.** `TransferContext` has eight fields (`ref` and `deadline` are gone); `canTransfer` with a reason is `canTransferWithReason`; `isUserAllowed` is `canReceive`; the vault tests build the shared `ComplianceHook(registry)` and pass the rules to `initialize` and `deploy`. Five new unit tests pin the probes against `check`, and the integration tests now assert `canSend` and `canReceive` on the token, the lapsed and the blocked holder included.
 - **Result.** `npx hardhat test`: 1186 passing (1090 Solidity, 96 TypeScript), 0 failing. The other session's 915 Solidity tests are untouched; the 175 new ones are C-1's 170 and the five probe tests. The other gates (Slither, Halmos, the mutation run, reproducibility, gas, the isolated profile) are re-run on the final tree at the end of C-2, which includes this port.
 
+### C-2 as built (2026-10-25, awaiting review)
+
+Deployment, TypeScript tests and docs, on top of C-1 as rebased and ported above. Branch `credential-layer` is at `9a8e43a`; C-2 is **not committed**: 22 modified files and 2 new ones (`docs/credentials.md`, `test/nodejs/credentials.test.ts`) sit in the worktree `/Users/address0/dev/gated-token-stack-credential`. Nothing is pushed.
+
+**Deployment.**
+- `Components` deploys `CredentialRegistry(deployer, guardian)` and `CredentialRule(registry)`, and no longer takes `identityRegistry`. Its parameters are `governance`, `council`, `guardian`, `minDelay`. `IdentityRule` is not deployed, so the council still attests six rules (`CredentialRule` where `IdentityRule` was). `IdentityRule` stays in the repo and the reproducibility manifest.
+- `roles.ts`: `credentialRule` first in all three `RULE_ORDER` lists, and a `QUALS` copy of `Quals.sol` (the Solidity bits are pinned by `InterfaceFreeze.t.sol`, so a change there fails the build before the two copies can disagree).
+- `Activate`: `addAttester(kycAttester, kycAllowedQuals)` while the deployer is the registry's admin, then `setPolicy(token, KYC, 0, 0, 1)` for each token (the same "KYC from attester 0 and nothing more" the identity check meant), `RECOVERY_ROLE` on the registry to the recovery timelock, and `DEFAULT_ADMIN_ROLE` on the registry to the main timelock with the deployer renouncing. The hand-over waits for the attester and the policies, so no token is handed over unconfigured.
+- Registry code is reviewed by the council, not attested (like `Fund` and `ProxyDeployer`). The runbook has the council read `REGISTRY()`, the registry's code, its admin and its attester list before it attests the rule.
+
+**TypeScript.** `fixtures.ts` has the demo attester (`kyc`), `verify` and `deverify` helpers, `STATUS`, `COUNTRY`, and the credentialled holders, recovery account and 7540 vault (`KYC | INFRA`). `assertHandedOver` now also checks: the registry's admin is the main timelock, the recovery timelock holds exactly `RECOVERY_ROLE` on it, the guardian holds only `GUARDIAN_ROLE`, the deployer holds nothing, one attester (the KYC provider, not killed), the rule reads this registry and is attested, and every token's policy is `KYC` from attester 0. New `credentials.test.ts` (8 tests): the deployment wiring; eligible and ineligible holders with probes and pre-flight agreeing; a credential signed with viem and submitted by a stranger (a replay and a forgery fail); expiry on the real clock; a guardian block lifted only by the recovery timelock; killing and reviving an attester; a policy change by the timelock deciding who may receive; event decoding. `parity.test.ts` gets five conditions (sender and receiver exit-only, sender and receiver lapsed, sender blocked by the guardian) across its four operations: 20 tests. The other six test files change only their identity set-up.
+
+**Docs.** New `docs/credentials.md`. Edited: `README.md`, `SECURITY.md` (scope, the attester trust assumption), and in `docs/`: `README`, `architecture`, `roles`, `transfer-checks`, `flows-token`, `flows-vaults`, `flows-dvp`, `money`, `governance-and-deployment` (runbook, sequence diagram, rule-order table, a warning not to drop the credential rule from a list). A fresh agent checked the diff against the code and found 22 things: 5 wrong, 7 stale, 10 nits. I checked each against the code and fixed all of them except three nits (generic "verified account" wording in `transfer-checks.md`, a missing `RECOVERY_ROLE` bullet that predates this work, and a list that puts `CredentialRule` and `IdentityRule` side by side). The Mermaid diagrams, the internal links and anchors were checked by the same agent and are clean. SECURITY.md also gets the credential layer's inline suppressions (section 4) and three mutation rows (section 5).
+
+**Behaviour the owner should know about** (all were in the C-1 design; the docs now say them):
+- A holder whose credential lapsed, or whose attester was killed, can send, burn and redeem, and cannot receive. Under `IdentityRule` they could do none of these.
+- The issuer's enforcement burn (operator holds `BURNER_ROLE`) now passes the sender check even for a blocked or unknown holder. Under `IdentityRule` that burn was refused with `SENDER_NOT_VERIFIED`. `forcedTransfer` into an eligible account stays the other way out.
+- A redemption payout to a lapsed controller goes through; to a blocked or unknown one it does not.
+
+**Gates, on the final tree (the working tree with C-2).**
+- `npx hardhat test`: **1214 passing (1090 Solidity, 124 TypeScript)**, 0 failing. At the port it was 1186 (1090, 96): the 28 more are the 8 in `credentials.test.ts` and the 20 parity tests. Isolated profile: 1090 passing.
+- `forge fmt --check`, `solhint --max-warnings 0`, `tsc`: clean. Aderyn: 0 findings. Slither: 0 results (420 contracts, 97 detectors). upgrades-core: 3 of 3.
+- Halmos: all pass, 21 properties in five suites (the five registry properties among them).
+- `verify:reproducible`: 19 contracts identical across the two production builds (17 on `a4f237d` plus the two new ones).
+- Mutation run: **62 mutants, 62 killed, none survived** (34 on the registry, 22 on the rule, and 6 new ones on the `checkSend` and `checkReceive` probes the port added), in three scratch copies of the final tree. 23 were killed by exactly one test, which are the sharp boundaries. Deployment wiring: **7 of 7 killed** (no policy set, a policy that asks for no bits, a policy that trusts no attester 0, a registry not handed to the timelock, no recovery role on the registry, the credential rule last in the order, an attester allowed to assert nothing), by `credentials.test.ts` and `deployment.test.ts`. The lists are fixed, not exhaustive.
+
+**Gas** (forge `--isolate`, 21,000 intrinsic included, a transfer between existing holders, same token and hook, re-measured on this tree with a throwaway bench in scratch):
+
+| Rule set | transfer | mint | burn |
+|---|---|---|---|
+| A: `IdentityRule` over a mock registry | 72,461 | 85,205 | 71,957 |
+| B: `IdentityRule` over `CredentialRegistry` | 76,985 | 88,467 | 75,219 |
+| C: `CredentialRule` | 80,640 | 91,613 | 75,604 |
+
+C over A: +8,179 on a transfer, +6,408 on a mint, +3,647 on a burn. Registry writes are unchanged from C-1: `set` 58,203 (new) and 41,138 (rewrite), `setStatus` 35,430, `blockSubject` 32,430. The signed `register` is still not measured.
+
+**Not done or not checked.**
+- Nothing is committed or pushed.
+- The signed `register` gas.
+- The deployment mutants and the mutation run ran in scratch copies, not in CI. CI is not run.
+- Track B is not started.
+
+**Proposed brief edits** (the brief is the standing instruction file, so these need your OK and are **not applied**):
+1. §3 layout: add `identity/  CredentialRegistry.sol  CredentialRegistry.t.sol`; add `CredentialRule.sol` to `hooks/rules/`; add `ICredentialRegistry`, `ICredentialRule` and `Quals` to the interfaces line; add `MockERC1271Wallet.sol` to `test/`.
+2. §5 reason codes: append `CREDENTIAL_EXPIRED` and `RECEIVER_NOT_ELIGIBLE` (2026-10-23).
+3. §6 initial rule set: the demo lists start with `CredentialRule` where they say `IdentityRule`; add a `CredentialRule` bullet: a sender must be able to leave (registry standing `ACTIVE`, `EXIT_ONLY` or `LAPSED`) except on `MINT` and `FORCED` (not checked) and an enforcement `BURN`; a receiver must be `ACTIVE` and meet the token's policy, unless `BURN`; a lapsed receiver gets `CREDENTIAL_EXPIRED`, a token without a policy admits no receiver; state lives in `CredentialRegistry` (immutable, reviewed, not attested), so the rule has no `after_`; keep the `IdentityRule` bullet and mark it "not in the demo lists".
+4. §4 or §6: one line for the registry's guardian (`blockSubject`, `killAttester`) and its recovery path (`clearGuardianBlock`, `reviveAttester`, `revokeRole(GUARDIAN_ROLE)` by the recovery timelock).
+5. §7: "verified holder", "verified recovery account" and "`to` must pass identity" become "must pass the token's policy".
+
 ## Open questions for the owner
 1. DvP: decisions D1 to D8 are recorded in the DvP section (D8: Option B; D6 revised for the `IntentExecutor` refusal). I-1, E-1, E-2 and the refusal are built and wait for your review.
 2. Nothing on `fund-layer` is pushed, and the DvP section is not committed. Push, or open a pull request, only when you say. The branch carries PR #2's commit `d3574df` until PR #2 merges.
-3. Credential layer (track A): C-1 is built on branch `credential-layer` and waits for your review (see "C-1 as built"); nothing is committed. C-2 is not started. Decisions 1 to 6 and 10 adopt the assessment's defaults. Please confirm or change 11 to 17, which came up while planning (11: the recovery timelock can also reverse a guardian block; 12: the rule for one attester overwriting another; 14: the demo deployment swaps `IdentityRule` for `CredentialRule`; 17: the gas stop line). Decision 7 (Cancun and signatures) is closed: accepted. Decisions 8 and 9 (fast upgrade path, ERC-7943) are open and do not block track A. Track B is noted as legos around an unchanged token; it is not planned.
+3. Credential layer (track A): C-1 is committed on branch `credential-layer` (rebased onto `a4f237d` and ported, see above). C-2 is built and waits for your review (see "C-2 as built"); it is not committed, and the brief edits listed there need your OK. Decisions 1 to 6 and 10 adopt the assessment's defaults. Please confirm or change 11 to 17, which came up while planning (11: the recovery timelock can also reverse a guardian block; 12: the rule for one attester overwriting another; 14: the demo deployment swaps `IdentityRule` for `CredentialRule`; 17: the gas stop line). Decision 7 (Cancun and signatures) is closed: accepted. Decisions 8 and 9 (fast upgrade path, ERC-7943) are open and do not block track A. Track B is noted as legos around an unchanged token; it is not planned.

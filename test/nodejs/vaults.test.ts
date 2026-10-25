@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import { network } from "hardhat";
 import { getAddress, maxUint256, parseUnits, zeroAddress } from "viem";
 
-import { deployStack } from "./fixtures.js";
+import { deployStack, deverify } from "./fixtures.js";
 
 const usd = (amount: string) => parseUnits(amount, 6);
 
@@ -120,7 +120,7 @@ describe("vault flows", async function () {
       await s.vault7540.write.requestRedeem([usd("300"), alice.address, alice.address], { account: alice });
 
       // De-verified: a reject would FORCE the shares back to an unverified holder, so it fails; recovery does not.
-      await s.identity.write.set([alice.address, false]);
+      await deverify(s, alice.address);
       await viem.assertions.revertWithCustomError(
         s.vault7540.write.rejectRedeemRequest([alice.address], { account: fulfiller }),
         s.vault7540,

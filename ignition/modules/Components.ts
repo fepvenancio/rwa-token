@@ -9,6 +9,9 @@ import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
  * - The registry, administered by the timelock from the start, and the one shared `ComplianceHook` that every token
  *   uses. Its only immutable is the registry, so the council attests one codehash for the whole deployment, and each
  *   token's rules are installed by the token itself when `Activate` initialises it.
+ * - The `CredentialRegistry` (administered by the deployer until `Activate` hands it over) and the `CredentialRule` that
+ *   reads it. The rule's codehash covers the registry's address and not its code, so the council reads the registry's
+ *   code, its admin and its attester list before it attests the rule.
  * - The shared rules, one implementation per template, the `ProxyDeployer`, the intent executor and the DvP executor
  *   (both administered by the deployer until `Activate` hands them over). Neither executor is attested: neither is a
  *   hook, a rule or an implementation, and each token authorises it by granting it EXECUTOR_ROLE.
@@ -23,7 +26,6 @@ export default buildModule("Components", (m) => {
   const governance = m.getParameter<string>("governance");
   const council = m.getParameter<string>("council");
   const guardian = m.getParameter<string>("guardian");
-  const identityRegistry = m.getParameter<string>("identityRegistry");
   const minDelay = m.getParameter<bigint>("minDelay", 7n * 24n * 3_600n);
 
   // M-1: the recovery timelock (same delay, governance proposes and executes, no cancellers, guardian holds nothing)
@@ -35,7 +37,8 @@ export default buildModule("Components", (m) => {
   const registry = m.contract("PolicyRegistry", [timelock, council]);
   const hook = m.contract("ComplianceHook", [registry]);
 
-  const identityRule = m.contract("IdentityRule", [identityRegistry]);
+  const credentialRegistry = m.contract("CredentialRegistry", [deployer, guardian]);
+  const credentialRule = m.contract("CredentialRule", [credentialRegistry]);
   const minPositionRule = m.contract("MinPositionRule");
   const holderRestrictionRule = m.contract("HolderRestrictionRule");
   const windowRule = m.contract("SettlementWindowRule");
@@ -60,7 +63,8 @@ export default buildModule("Components", (m) => {
     recoveryTimelock,
     registry,
     hook,
-    identityRule,
+    credentialRegistry,
+    credentialRule,
     minPositionRule,
     holderRestrictionRule,
     windowRule,
