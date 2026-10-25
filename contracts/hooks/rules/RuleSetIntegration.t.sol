@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import {IERC20Errors} from '@openzeppelin/contracts/interfaces/draft-IERC6093.sol';
+
 import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
@@ -338,5 +340,46 @@ contract RuleSetIntegration_MinPosition is RuleSetIntegrationTest {
   function test_WhenAMinimumIsSet_CanReceiveStillAcceptsAnEmptyVerifiedAccount() external view {
     assertTrue(_token.canReceive(_bob));
     assertTrue(_token.canSend(_alice));
+  }
+}
+
+/// @notice ERC-7943 leaves a balance shortfall to the base standard: `canTransfer` does not return false for it, the
+///         write reverts with the base error, and the reasoned pre-flight keeps the truth. The real rules must tolerate
+///         an amount above the balance for that to hold
+contract RuleSetIntegration_BalanceShortfall is RuleSetIntegrationTest {
+  function test_WhenTheAmountExceedsTheBalance_ThePlainAnswerIsTrueAndTheWriteRevertsWithTheBaseError() external {
+    uint256 _balance = _token.balanceOf(_alice);
+    assertTrue(_token.canTransfer(_alice, _bob, _balance + 1));
+    (bool _ok, bytes32 _reason) = _token.canTransferWithReason(_alice, _bob, _balance + 1);
+    assertFalse(_ok);
+    assertEq(_reason, Reasons.INSUFFICIENT_UNFROZEN);
+    vm.expectRevert(
+      abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, _alice, _balance, _balance + 1)
+    );
+    vm.prank(_alice);
+    _token.transfer(_bob, _balance + 1);
+  }
+
+  /// @dev The permissioned rules still decide: an unverified receiver or a lockup make the plain answer false
+  ///      whatever the amount
+  function test_WhenTheAmountExceedsTheBalanceAndARuleRejects_ThePlainAnswerIsFalse() external {
+    assertFalse(_token.canTransfer(_alice, _eve, 5000 ether)); // unverified receiver
+    vm.prank(_agent);
+    _restrictionRule.setLockup(address(_token), _alice, block.timestamp + 1 days);
+    assertFalse(_token.canTransfer(_alice, _bob, 5000 ether)); // locked sender
+  }
+
+  /// @dev The plain answer must not revert, as ERC-7943 requires, for any amount and with a minimum set, which the
+  ///      rules of this list do by never subtracting an amount from a balance that it does not fit in. Above the
+  ///      balance it is true unless a rule objects to the receiver's new position: here, one below the minimum
+  function testFuzz_WhateverTheAmount_ThePlainAnswerNeverRevertsAndAboveTheBalanceFollowsTheMinimum(
+    uint256 _amount,
+    uint256 _minimum
+  ) external {
+    _minimum = bound(_minimum, 0, 2000 ether);
+    vm.prank(_admin);
+    _minPositionRule.setMinPosition(address(_token), _minimum);
+    bool _plain = _token.canTransfer(_alice, _bob, _amount);
+    if (_amount > _token.balanceOf(_alice)) assertEq(_plain, _amount >= _minimum);
   }
 }

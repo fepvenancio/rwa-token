@@ -53,8 +53,9 @@ interface IPolicyGated is IERC7943Fungible {
   error PolicyGated_HookRegistryMismatch(address _hookRegistry, address _tokenRegistry);
 
   /**
-   * @notice Thrown when a balance movement is rejected by the policy hook. An amount above the unfrozen balance reverts
-   *         with `ERC7943InsufficientUnfrozenBalance` instead
+   * @notice Thrown when a balance movement is rejected by the policy hook. An amount within the balance but above the
+   *         unfrozen balance reverts with `ERC7943InsufficientUnfrozenBalance` instead, and an amount above the balance
+   *         with the base standard's `ERC20InsufficientBalance`
    * @param _reason A reason code from `Reasons`
    */
   error PolicyGated_TransferRejected(bytes32 _reason);
@@ -119,7 +120,8 @@ interface IPolicyGated is IERC7943Fungible {
    *      the context is `_from`, or the caller for a mint. It models holder-driven movements only: a burn
    *      (`_to` == 0) is simulated as a holder or vault burn, so frozen tokens count against `_amount`. The enforcement
    *      paths differ: `burn` and `forcedTransfer` release frozen tokens first, and `forcedTransfer` also bypasses pause.
-   *      The boolean `canTransfer` is this function's first value
+   *      Every shortfall counts here, an amount above the balance included. The boolean `canTransfer` is this function's
+   *      first value except for a balance shortfall with no frozen amount in the way, which it leaves to the base standard
    * @param _from The sender, or address(0) for a mint
    * @param _to The receiver, or address(0) for a burn
    * @param _amount The amount

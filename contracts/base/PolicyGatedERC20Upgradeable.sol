@@ -181,7 +181,15 @@ abstract contract PolicyGatedERC20Upgradeable is
     _allowed = _accountAllowed(_account, true);
   }
 
-  /// @inheritdoc IERC7943Fungible
+  /**
+   * @inheritdoc IERC7943Fungible
+   * @dev ERC-7943 says this MUST NOT return false for a balance check and MUST return false when a frozen amount keeps
+   *      the amount from the unfrozen balance, so a shortfall counts here only while a frozen amount is in the way.
+   *      With nothing frozen on `_from`, or for a burn by a sender that holds BURNER_ROLE (which may take frozen
+   *      tokens), an amount above the balance reads true if the hook accepts it, and the write reverts with
+   *      `ERC20InsufficientBalance`. `canTransferWithReason` does not make that exception, so it says the write would
+   *      revert
+   */
   function canTransfer(
     address _from,
     address _to,
@@ -189,7 +197,7 @@ abstract contract PolicyGatedERC20Upgradeable is
   ) external view returns (bool _allowed) {
     // Compares a reason code with a constant, not a balance.
     // slither-disable-next-line incorrect-equality
-    _allowed = _canTransfer(_from, _to, _amount) == Reasons.TRANSFER_OK;
+    _allowed = _canTransfer(_from, _to, _amount, false) == Reasons.TRANSFER_OK;
   }
 
   /// @inheritdoc IPolicyGated
@@ -315,11 +323,14 @@ abstract contract PolicyGatedERC20Upgradeable is
     IPolicyHook _hook = _policyHook();
     bytes32 _reason = _check(_ctx, _hook);
     if (_reason != Reasons.TRANSFER_OK) {
-      // The token's own frozen-balance check reverts with the standard's error; every policy decision keeps the typed
+      // The token's own balance checks revert with the standard's error for an amount within the balance, which a frozen
+      // amount keeps from moving, and with the base's for an amount above it; every policy decision keeps the typed
       // rejection that carries its reason, even one that borrows the code without a shortfall behind it.
       // Compares a reason code with a constant, not a balance.
       // slither-disable-next-line incorrect-equality
       if (_reason == Reasons.INSUFFICIENT_UNFROZEN && _from != address(0) && _availableToMove(_ctx) < _value) {
+        uint256 _balance = balanceOf(_from);
+        if (_value > _balance) revert ERC20InsufficientBalance(_from, _balance, _value);
         revert ERC7943InsufficientUnfrozenBalance(_from, _value, _unfrozenBalance(_from));
       }
       revert PolicyGated_TransferRejected(_reason);
@@ -430,8 +441,8 @@ abstract contract PolicyGatedERC20Upgradeable is
   }
 
   /**
-   * @notice The pre-flight behind `canTransfer`, shared with templates (e.g. vault `max*`)
-   * @dev Simulates a holder-driven movement: the operator is `_from`, or the caller for a mint
+   * @notice The pre-flight behind `canTransferWithReason`, shared with templates (e.g. vault `max*`)
+   * @dev Simulates a holder-driven movement: the operator is `_from`, or the caller for a mint. Every shortfall counts
    * @param _from The sender, or address(0) for a mint
    * @param _to The receiver, or address(0) for a burn
    * @param _amount The amount
@@ -442,8 +453,28 @@ abstract contract PolicyGatedERC20Upgradeable is
     address _to,
     uint256 _amount
   ) internal view returns (bytes32 _reason) {
+    _reason = _canTransfer(_from, _to, _amount, true);
+  }
+
+  /**
+   * @notice The pre-flight behind `canTransfer` and `canTransferWithReason`
+   * @dev Simulates a holder-driven movement: the operator is `_from`, or the caller for a mint
+   * @param _from The sender, or address(0) for a mint
+   * @param _to The receiver, or address(0) for a burn
+   * @param _amount The amount
+   * @param _balanceCounts False to leave a shortfall that is only the balance's to the base standard (see `_check`)
+   * @return _reason The reason code
+   */
+  function _canTransfer(
+    address _from,
+    address _to,
+    uint256 _amount,
+    bool _balanceCounts
+  ) internal view returns (bytes32 _reason) {
     address _operator = _from == address(0) ? _msgSender() : _from;
-    _reason = _check(_context(_from, _to, _amount, _operator, _inferKind(_from, _to), bytes32(0), 0), _policyHook());
+    _reason = _check(
+      _context(_from, _to, _amount, _operator, _inferKind(_from, _to), bytes32(0), 0), _policyHook(), _balanceCounts
+    );
   }
 
   /**
@@ -472,13 +503,34 @@ abstract contract PolicyGatedERC20Upgradeable is
     IPolicyHook.TransferContext memory _ctx,
     IPolicyHook _hook
   ) internal view returns (bytes32 _reason) {
+    _reason = _check(_ctx, _hook, true);
+  }
+
+  /**
+   * @notice Mechanical checks then the hook decision, with the choice of whether a balance shortfall counts
+   * @dev The amount must fit in the unfrozen balance, which is zero when the frozen amount is the larger (ERC-7943). A
+   *      forced transfer and an enforcement burn (the operator holds BURNER_ROLE, as the holder restriction rule defines
+   *      it) may take frozen tokens, since `_releaseFrozen` lowers the frozen amount by the part that comes out of it, but
+   *      never more than the balance: that bound holds for the write and for the pre-flights that count every
+   *      shortfall. With `_balanceCounts` false a shortfall counts only while a frozen amount is in the way of a holder:
+   *      ERC-7943 leaves a plain balance shortfall to the base standard, whose error the write reverts with
+   * @param _ctx The movement context
+   * @param _hook The hook to consult, read once by the caller
+   * @param _balanceCounts Whether a balance shortfall with no frozen amount in the way counts as a failure
+   * @return _reason The reason code
+   */
+  function _check(
+    IPolicyHook.TransferContext memory _ctx,
+    IPolicyHook _hook,
+    bool _balanceCounts
+  ) internal view returns (bytes32 _reason) {
     if (paused() && _ctx.kind != IPolicyHook.TransferKind.FORCED) return Reasons.PAUSED;
 
-    // The amount must fit in the unfrozen balance, which is zero when the frozen amount is the larger (ERC-7943). A
-    // forced transfer and an enforcement burn (the operator holds BURNER_ROLE, as the holder restriction rule defines it) may take
-    // frozen tokens, since `_releaseFrozen` lowers the frozen amount by the part that comes out of it, but never more
-    // than the balance: that bound holds for the pre-flight as it does for the write.
-    if (_ctx.from != address(0) && _availableToMove(_ctx) < _ctx.amount) return Reasons.INSUFFICIENT_UNFROZEN;
+    if (_ctx.from != address(0) && _availableToMove(_ctx) < _ctx.amount) {
+      if (_balanceCounts || (!_takesFrozenTokens(_ctx) && _getPolicyGatedStorage().frozen[_ctx.from] > 0)) {
+        return Reasons.INSUFFICIENT_UNFROZEN;
+      }
+    }
 
     if (address(_hook) == address(0)) return Reasons.NO_HOOK;
     _reason = _hook.beforeTransfer(_ctx);

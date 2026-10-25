@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import {IERC20Errors} from '@openzeppelin/contracts/interfaces/draft-IERC6093.sol';
 import {ERC1967Utils} from '@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol';
 import {Errors} from '@openzeppelin/contracts/utils/Errors.sol';
 import {ReentrancyGuardTransient} from '@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol';
@@ -260,14 +261,16 @@ contract IntentTokenIntegration_Erc7943 is IntentTokenIntegrationTest {
   }
 
   /// @dev "canTransfer MUST check canSend on the sender and canReceive on the receiver": over every pair of the four
-  ///      accounts, a transfer of one unit is possible exactly when both sides pass and the sender holds it
-  function test_WhenAnyPairIsAsked_CanTransferIsCanSendAndCanReceiveAndTheBalance() external view {
+  ///      accounts, a transfer of one unit reads true exactly when both sides pass. Whether the sender holds the unit is
+  ///      the balance's question, which `canTransfer` leaves to the base standard and the reasoned answer does not
+  function test_WhenAnyPairIsAsked_CanTransferIsCanSendAndCanReceive() external view {
     address[4] memory _accounts = [_alice, _bob, _eve, _treasury];
     for (uint256 _i; _i < 4; ++_i) {
       for (uint256 _j; _j < 4; ++_j) {
-        bool _expected =
-          _token.canSend(_accounts[_i]) && _token.canReceive(_accounts[_j]) && _token.balanceOf(_accounts[_i]) >= 1;
-        assertEq(_token.canTransfer(_accounts[_i], _accounts[_j], 1), _expected);
+        bool _accountsPass = _token.canSend(_accounts[_i]) && _token.canReceive(_accounts[_j]);
+        assertEq(_token.canTransfer(_accounts[_i], _accounts[_j], 1), _accountsPass);
+        (bool _ok,) = _token.canTransferWithReason(_accounts[_i], _accounts[_j], 1);
+        assertEq(_ok, _accountsPass && _token.balanceOf(_accounts[_i]) >= 1);
       }
     }
   }
@@ -374,6 +377,21 @@ contract IntentTokenIntegration_Intents is IntentTokenIntegrationTest {
     (bool _ok, bytes32 _reason) = _token.canExecute(_i, _sig);
     assertFalse(_ok);
     assertEq(_reason, Reasons.INSUFFICIENT_UNFROZEN);
+  }
+
+  /// @dev An amount above the balance is the balance's failure, so the write reverts with the base standard's error,
+  ///      while `canExecute`, which carries a reason, still says the intent cannot run
+  function test_WhenTheAmountExceedsTheBalance_TheIntentRevertsWithTheBaseErrorAndPreflightAgrees() external {
+    (ITransferIntent.TransferIntent memory _i, bytes memory _sig) = _signedIntent(_bob, 1001 ether, keccak256('n6'));
+    vm.prank(_executor);
+    (bool _ok, bytes32 _reason) = _token.canExecute(_i, _sig);
+    assertFalse(_ok);
+    assertEq(_reason, Reasons.INSUFFICIENT_UNFROZEN);
+    vm.expectRevert(
+      abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, _alice, 1000 ether, 1001 ether)
+    );
+    vm.prank(_executor);
+    _token.executeTransfer(_i, _sig);
   }
 }
 

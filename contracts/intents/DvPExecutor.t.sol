@@ -792,7 +792,7 @@ contract DvPExecutorIntegrationTest is RuleSetIntegrationTest {
     assertEq(_reason, _expected, 'pre-flight reason');
     assertEq(_ok, _expected == Reasons.TRANSFER_OK);
     if (_expected == Reasons.INSUFFICIENT_UNFROZEN) {
-      // The token's own frozen-balance check reverts with the standard's error, not with a policy rejection.
+      // The token's own balance checks revert with the standard's error or the base's, not with a policy rejection.
       vm.expectRevert(_unfrozenLegFailed(_t, _leg));
     } else if (_expected != Reasons.TRANSFER_OK) {
       vm.expectRevert(_legFailed(_leg, _expected));
@@ -800,7 +800,8 @@ contract DvPExecutorIntegrationTest is RuleSetIntegrationTest {
     _runGated(_t);
   }
 
-  /// @dev What a leg reverts with when its sender cannot cover the amount from the unfrozen balance
+  /// @dev What a leg reverts with when its sender cannot cover the amount from the unfrozen balance: the standard's
+  ///      error for an amount within the balance, the base's for an amount above it
   function _unfrozenLegFailed(
     Trade memory _t,
     IDvPExecutor.Leg _leg
@@ -809,16 +810,15 @@ contract DvPExecutorIntegrationTest is RuleSetIntegrationTest {
     ITransferIntent.TransferIntent memory _intent = _leg == IDvPExecutor.Leg.CASH ? _t.c : _t.s;
     uint256 _balance = _legToken.balanceOf(_intent.from);
     uint256 _frozen = _legToken.getFrozenTokens(_intent.from);
-    _revertData = abi.encodeWithSelector(
-      IDvPExecutor.DvPExecutor_LegFailed.selector,
-      _leg,
-      abi.encodeWithSelector(
+    bytes memory _tokenError = _intent.amount > _balance
+      ? abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, _intent.from, _balance, _intent.amount)
+      : abi.encodeWithSelector(
         IERC7943Fungible.ERC7943InsufficientUnfrozenBalance.selector,
         _intent.from,
         _intent.amount,
         _balance > _frozen ? _balance - _frozen : 0
-      )
-    );
+      );
+    _revertData = abi.encodeWithSelector(IDvPExecutor.DvPExecutor_LegFailed.selector, _leg, _tokenError);
   }
 
   // ---- ERC-3009 helpers --------------------------------------------------------------------------------------------

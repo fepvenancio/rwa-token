@@ -9,7 +9,8 @@ import {IERC165} from '@openzeppelin/contracts/utils/introspection/IERC165.sol';
  *         `supportsInterface(0x3edbb4c4)`
  * @dev The id is the XOR of the six selectors below and does not depend on parameter names, which follow the
  *      project's `_camelCase`. `canSend` and `canReceive` are account-level and never revert; `canTransfer` also
- *      checks the unfrozen balance
+ *      checks the unfrozen balance while part of the balance is frozen, and leaves a balance shortfall to the base
+ *      standard
  */
 interface IERC7943Fungible is IERC165 {
   /*///////////////////////////////////////////////////////////////
@@ -62,7 +63,8 @@ interface IERC7943Fungible is IERC165 {
   error ERC7943CannotTransfer(address _from, address _to, uint256 _amount);
 
   /**
-   * @notice Revert for an amount above the sender's unfrozen balance
+   * @notice Revert for an amount within the sender's balance but above its unfrozen balance
+   * @dev An amount above the whole balance reverts with the base standard's error instead
    * @param _account The sender
    * @param _amount The amount requested
    * @param _unfrozen The unfrozen balance, the balance minus the frozen amount, zero when the frozen amount is larger
@@ -131,8 +133,10 @@ interface IERC7943Fungible is IERC165 {
 
   /**
    * @notice Whether a transfer would succeed now
-   * @dev Checks the sender and receiver and that `_amount` is within the unfrozen balance. A transfer must not succeed
-   *      where this returns false
+   * @dev Checks the sender and receiver, and that `_amount` is within the unfrozen balance while part of the balance is
+   *      frozen. When no frozen amount is in the way (nothing frozen, or a burn by a sender that may take frozen
+   *      tokens) it does not fail on a balance shortfall, which the base standard reports, so it can return true for a
+   *      transfer that then reverts. A transfer must not succeed where this returns false
    * @param _from The sender
    * @param _to The receiver
    * @param _amount The amount

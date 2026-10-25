@@ -71,8 +71,9 @@ contract MinPositionRule is BaseRule, IMinPositionRule {
    * @inheritdoc IComplianceRule
    * @dev The receiver ends with `toBalance + amount`, which is above zero, so it breaches when that is below the
    *      minimum. The sender ends with `fromBalance - amount`, which breaches when it is above zero and below the
-   *      minimum. Neither sum is computed where it could overflow or underflow: a sender that holds less than the amount
-   *      is the token's own balance check to refuse, before the hook is asked. The exemptions and the role are read only
+   *      minimum. Neither sum is computed where it could overflow or underflow: the sender's sum is taken only when it holds
+   *      more than the amount, so an amount above its balance is judged without reverting. The write refuses that amount
+   *      before the hook is asked, but `canTransfer` asks the hook with it. The exemptions and the role are read only
    *      once a position would breach
    */
   function check(

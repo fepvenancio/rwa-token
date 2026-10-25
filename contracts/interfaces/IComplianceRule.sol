@@ -34,7 +34,8 @@ interface IComplianceRule {
 
   /**
    * @notice Policy decision for a balance movement
-   * @dev MUST be view. MUST NOT revert on a policy decision
+   * @dev MUST be view. MUST NOT revert on a policy decision, nor for an `amount` above the sender's balance in `extra`:
+   *      the write does not offer the hook such an amount, but `canTransfer` does. Compare before you subtract
    * @param _ctx The movement context
    * @return _reason `Reasons.TRANSFER_OK` to allow, any other reason code to reject
    */

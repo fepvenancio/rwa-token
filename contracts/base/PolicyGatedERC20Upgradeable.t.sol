@@ -565,6 +565,21 @@ contract PolicyGatedUnit_Transfer is PolicyGatedUnitTest {
     _token.transfer(_bob, _amount);
   }
 
+  /// @dev ERC-7943: the standard's error is for an amount at or below the balance. Above the balance the cause is the
+  ///      balance, frozen or not, and "more specific errors from the base standard" speak
+  function test_WhenAmountExceedsTheBalance_ItRevertsWithTheBaseStandardsError(
+    uint256 _frozen,
+    uint256 _amount
+  ) external {
+    _frozen = bound(_frozen, 0, _INITIAL * 2);
+    _amount = bound(_amount, _INITIAL + 1, type(uint128).max);
+    vm.prank(_agent);
+    _token.setFrozenTokens(_alice, _frozen);
+    vm.expectRevert(abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, _alice, _INITIAL, _amount));
+    vm.prank(_alice);
+    _token.transfer(_bob, _amount);
+  }
+
   /// @dev A frozen amount above the balance leaves nothing unfrozen, and the error says so
   function test_WhenFrozenExceedsTheBalance_NothingIsUnfrozen() external {
     vm.prank(_agent);
@@ -757,11 +772,12 @@ contract PolicyGatedUnit_CanTransfer is PolicyGatedUnitTest {
     assertEq(_reason, Reasons.INSUFFICIENT_UNFROZEN);
   }
 
-  /// @dev "MUST validate that the amount does not exceed the unfrozen amount", the exact boundary
+  /// @dev "MUST validate that the amount does not exceed the unfrozen amount", the exact boundary while part of the
+  ///      balance is frozen. With nothing frozen the balance is the limit, which `canTransfer` leaves to the base
   function test_WhenTheAmountIsTheUnfrozenBalance_ItIsAllowedAndOneMoreIsNot(
     uint256 _frozen
   ) external {
-    _frozen = bound(_frozen, 0, _INITIAL - 1);
+    _frozen = bound(_frozen, 1, _INITIAL - 1);
     vm.prank(_agent);
     _token.setFrozenTokens(_alice, _frozen);
     assertTrue(_token.canTransfer(_alice, _bob, _INITIAL - _frozen));
@@ -769,25 +785,29 @@ contract PolicyGatedUnit_CanTransfer is PolicyGatedUnitTest {
   }
 
   /// @dev An enforcement burn (the operator holds BURNER_ROLE) may take frozen tokens, but never more than the balance:
-  ///      the pre-flight must say so, as the write does
-  function test_WhenABurnerAsksAboutBurningMoreThanItHolds_ItIsRefused() external {
+  ///      the reasoned pre-flight must say so, as the write does. The plain answer leaves a balance shortfall to the base
+  ///      standard like any other, because no frozen amount stands in the way of an enforcement burn
+  function test_WhenABurnerAsksAboutBurningMoreThanItHolds_TheReasonedAnswerRefusesAndThePlainOneDoesNot() external {
     bytes32 _burnerRole = _token.BURNER_ROLE(); // read first: an external call in the arguments would consume the prank
     vm.prank(_admin);
     _token.grantRole(_burnerRole, _alice);
     (bool _ok, bytes32 _reason) = _token.canTransferWithReason(_alice, address(0), _INITIAL + 1);
     assertFalse(_ok);
     assertEq(_reason, Reasons.INSUFFICIENT_UNFROZEN);
-    assertFalse(_token.canTransfer(_alice, address(0), _INITIAL + 1));
+    assertTrue(_token.canTransfer(_alice, address(0), _INITIAL + 1));
   }
 
-  function test_WhenABurnerAsksAboutBurningFrozenTokens_ItIsAllowedUpToTheBalance() external {
+  function test_WhenABurnerAsksAboutBurningFrozenTokens_TheReasonedAnswerAllowsUpToTheBalanceOnly() external {
     bytes32 _burnerRole = _token.BURNER_ROLE(); // read first: an external call in the arguments would consume the prank
     vm.prank(_admin);
     _token.grantRole(_burnerRole, _alice);
     vm.prank(_agent);
     _token.setFrozenTokens(_alice, _INITIAL);
     assertTrue(_token.canTransfer(_alice, address(0), _INITIAL));
-    assertFalse(_token.canTransfer(_alice, address(0), _INITIAL + 1));
+    (bool _ok, bytes32 _reason) = _token.canTransferWithReason(_alice, address(0), _INITIAL + 1);
+    assertFalse(_ok);
+    assertEq(_reason, Reasons.INSUFFICIENT_UNFROZEN);
+    assertTrue(_token.canTransfer(_alice, address(0), _INITIAL + 1)); // frozen tokens do not stand in a burner's way
   }
 
   /// @dev A holder without the role is not exempt: frozen tokens count against its burn
@@ -804,6 +824,62 @@ contract PolicyGatedUnit_CanTransfer is PolicyGatedUnitTest {
     assertTrue(_token.canTransfer(_alice, _bob, 0));
   }
 
+  /// @dev ERC-7943: `canTransfer` "MUST NOT return false based on token-specific, non-permissioned validations such as
+  ///      balance". With nothing frozen, an amount above the balance is such a validation, so the plain answer is true
+  ///      while the reasoned answer keeps the truth, since the write reverts
+  function test_WhenNothingIsFrozenAndTheAmountExceedsTheBalance_ThePlainAnswerIsTrueAndTheReasonedOneIsNot(
+    uint256 _amount
+  ) external {
+    _amount = bound(_amount, _INITIAL + 1, type(uint128).max);
+    assertTrue(_token.canTransfer(_alice, _bob, _amount));
+    (bool _ok, bytes32 _reason) = _token.canTransferWithReason(_alice, _bob, _amount);
+    assertFalse(_ok);
+    assertEq(_reason, Reasons.INSUFFICIENT_UNFROZEN);
+  }
+
+  /// @dev "MUST validate that the amount does not exceed the unfrozen amount": once part of the balance is frozen the
+  ///      frozen amount is in the way, whatever the amount, even above the balance
+  function test_WhenSomethingIsFrozenAndTheAmountExceedsTheUnfrozenBalance_BothAnswersAreFalse(
+    uint256 _frozen,
+    uint256 _amount
+  ) external {
+    _frozen = bound(_frozen, 1, _INITIAL * 2);
+    uint256 _unfrozen = _frozen >= _INITIAL ? 0 : _INITIAL - _frozen;
+    _amount = bound(_amount, _unfrozen + 1, type(uint128).max);
+    vm.prank(_agent);
+    _token.setFrozenTokens(_alice, _frozen);
+    assertFalse(_token.canTransfer(_alice, _bob, _amount));
+    (bool _ok, bytes32 _reason) = _token.canTransferWithReason(_alice, _bob, _amount);
+    assertFalse(_ok);
+    assertEq(_reason, Reasons.INSUFFICIENT_UNFROZEN);
+  }
+
+  /// @dev Leaving the balance to the base standard does not skip the permissioned rules: the hook still decides
+  function test_WhenTheAmountExceedsTheBalanceAndTheHookRejects_ThePlainAnswerIsFalse() external {
+    _hookDecides(Reasons.LOCKED);
+    assertFalse(_token.canTransfer(_alice, _bob, _INITIAL + 1));
+  }
+
+  /// @dev The whole table: the plain answer is false exactly when the hook rejects or a frozen amount stands in the way;
+  ///      the reasoned answer is false whenever the write would revert on the unfrozen balance or the hook
+  function testFuzz_ThePlainAnswerFailsOnlyOnTheHookOrAFrozenAmount(
+    uint256 _frozen,
+    uint256 _amount,
+    bool _hookRejects,
+    bool _nothingFrozen
+  ) external {
+    _frozen = _nothingFrozen ? 0 : bound(_frozen, 0, _INITIAL * 2);
+    _amount = bound(_amount, 0, _INITIAL * 3);
+    vm.prank(_agent);
+    _token.setFrozenTokens(_alice, _frozen);
+    if (_hookRejects) _hookDecides(Reasons.LOCKED);
+    uint256 _unfrozen = _frozen >= _INITIAL ? 0 : _INITIAL - _frozen;
+    bool _frozenStandsInTheWay = _frozen > 0 && _amount > _unfrozen;
+    assertEq(_token.canTransfer(_alice, _bob, _amount), !_hookRejects && !_frozenStandsInTheWay);
+    (bool _ok,) = _token.canTransferWithReason(_alice, _bob, _amount);
+    assertEq(_ok, !_hookRejects && _amount <= _unfrozen);
+  }
+
   function test_WhenHookRejects_ItAgreesWithTransfer(
     bytes32 _reason
   ) external {
@@ -818,7 +894,8 @@ contract PolicyGatedUnit_CanTransfer is PolicyGatedUnitTest {
     _token.transfer(_bob, 1);
   }
 
-  /// @dev The boolean is the reasoned answer's first value, for every reason
+  /// @dev The boolean is the reasoned answer's first value, for every reason a hook can give (the amount is within the
+  ///      balance, so no balance shortfall separates them)
   function testFuzz_ThePlainAnswerIsTheReasonedAnswersFlag(
     bytes32 _reason
   ) external {
@@ -1146,15 +1223,21 @@ contract PolicyGatedInvariantTest is PolicyGatedUnitTest {
   }
 
   /// @dev The unfrozen balance is what a transfer can move, to the unit, whether the frozen amount is above the balance
-  ///      or below it: ERC-7943's `canTransfer` and the token's own check agree on the boundary
+  ///      or below it: the reasoned pre-flight and the token's own check agree on the boundary. The plain answer agrees
+  ///      with them while something is frozen, and with nothing frozen leaves the balance to the base standard
   function invariant_TheUnfrozenBalanceIsExactlyWhatCanBeSent() external view {
     address[3] memory _all = _handler.actors();
     for (uint256 _i; _i < 3; ++_i) {
+      address _to = _all[(_i + 1) % 3];
       uint256 _balance = _token.balanceOf(_all[_i]);
       uint256 _frozenAmount = _token.getFrozenTokens(_all[_i]);
       uint256 _unfrozen = _balance > _frozenAmount ? _balance - _frozenAmount : 0;
-      assertTrue(_token.canTransfer(_all[_i], _all[(_i + 1) % 3], _unfrozen));
-      assertFalse(_token.canTransfer(_all[_i], _all[(_i + 1) % 3], _unfrozen + 1));
+      assertTrue(_token.canTransfer(_all[_i], _to, _unfrozen));
+      (bool _ok,) = _token.canTransferWithReason(_all[_i], _to, _unfrozen);
+      assertTrue(_ok);
+      (_ok,) = _token.canTransferWithReason(_all[_i], _to, _unfrozen + 1);
+      assertFalse(_ok);
+      assertEq(_token.canTransfer(_all[_i], _to, _unfrozen + 1), _frozenAmount == 0);
     }
   }
 

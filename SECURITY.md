@@ -159,9 +159,13 @@ Further limits recorded during review:
   to a quarantine account (identity-verified, never address-frozen: the freeze on a receiver applies to FORCED), and the
   burn waits for the unpause. The ERC-3643 reference token differs: its agents can mint, burn and force while paused
   (checked 2026-10-23; the ERC-3643 text itself was not checked).
-- **One known departure from ERC-7943's text** (see the README's deviations): an amount above the balance reverts with the
-  standard's unfrozen-balance error and makes `canTransfer` false, where the standard leaves a balance shortfall to the
-  base token. An integrator that relies on the standard's wording should not assume it.
+- **`canTransfer` can say yes where the write reverts.** ERC-7943 forbids `canTransfer` to fail on a balance check, so an
+  amount above the balance reads true when the hook accepts it and no frozen amount is in the way (nothing frozen, or a
+  burn by a sender that holds `BURNER_ROLE`), and the write reverts with the base's `ERC20InsufficientBalance`. While
+  part of the balance is frozen, an amount above the unfrozen balance reads false: the standard asks `canTransfer` to
+  validate the unfrozen amount, but does not say which rule wins above the balance, and this follows the draft ERC's
+  reference, so a one-unit freeze flips the answer. `canTransferWithReason` and `canExecute` make no exception and say
+  no with `INSUFFICIENT_UNFROZEN`. An integrator that wants to know whether a movement will succeed should call those.
 - **A `BURNER_ROLE` holder's own burns are enforcement burns.** The rules ask the operator, not the intent: a burner who
   redeems its own shares through a vault passes its own lockup and minimum (a probe showed a locked holder redeeming in
   full). It does not pass its own frozen tokens (the vault's `maxRedeem` stops at the unfrozen balance) or its own address
@@ -293,6 +297,7 @@ Each row is a bug deliberately planted, the run that caught it, then restored fr
 | Halmos, `MinPositionRule` (2026-10-24, S3) | the receiver or sender comparison weakened; the remainder guard dropped; FORCED not exempt; the amount guard dropped | 5 of 5, each by a symbolic property (the exact decision for a transfer, never reverting for any kind, FORCED never rejected) |
 | Vault probes, account answers (2026-10-24, S3; the cap and mint-probe parts are superseded by the next row) | `maxDeposit` or `maxRedeem` probing an amount again; the cap compared with `<=`, the exemption, the existing holder, the investor or the class itself ignored in `checkReceive`; pause or no hook ignored in the account answer; the 7540 request or claim check asking the sender side | 12 of 12. The no-hook case survived at first, because no test could build a token without a hook; a test now clears the hook slot |
 | Mint probe, cap out of `checkReceive` (2026-10-24, finding 1) | the probe amount one wei or zero; `Gated4626Vault.maxDeposit` probing one wei; `maxMint` of the 4626 vault, and `requestDeposit`, `maxDeposit` or the deposit-claim check of the 7540 vault, ignoring the probe; `FundHoldersRule` or `MaxHoldersRule` answering the cap in `checkReceive` again; `canReceive` ignoring pause; the mint probe asking the sender side | 11 of 11 |
+| `canTransfer` and the write on a balance shortfall (2026-10-24, finding 4) | the write never using the base error, using it at the balance too, or using it for every shortfall; `canTransfer` counting a pure balance shortfall; `canTransferWithReason` leaving it to the base; the frozen amount ignored in `canTransfer`'s test, or another account's frozen amount asked; enforcement kinds not excluded from it; the ignored shortfall skipping the hook; the shortfall boundary moved to `<=`; the strict `_check` made lenient (`canExecute`, the 7540 checks) | 11 of 11 |
 | `Fund` views (2026-10-24, S4) | an unregistered token passing; the registration ignored; the first or the last class skipped; a failing hook or token counted as listed; the wrong comparison; the last broken class returned instead of the first | 8 of 8 |
 | `HolderRestrictionRule.checkSend` lockup (2026-10-24) | lock ignored; `<=` at the boundary; lock reported before the freeze; freeze ignored; `checkReceive` refusing a locked account; the comparison reversed | 6 of 6 |
 

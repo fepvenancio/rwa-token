@@ -8,9 +8,10 @@ import { deployStack, MONDAY, reasonName, REASONS, revertOf, signIntent, type St
 
 /**
  * Pre-flight never lies, checked from the integrator's side. For every condition × operation, the pre-flight answer
- * (`canTransfer`, `canExecute`, or the gating-aware `max*`), `simulateContract`, and the real write must agree.
- * Token operations revert with the reason itself; vault operations revert at their `max*` bound, so their reason is
- * read from `canTransfer` with the zero address standing in for the vault side, as integrators do.
+ * (`canTransferWithReason`, `canExecute`, or the gating-aware `max*`), `simulateContract`, and the real write must
+ * agree. Token operations revert with the reason itself; vault operations revert at their `max*` bound, so their reason
+ * is read from `canTransferWithReason` with the zero address standing in for the vault side, as integrators do. The
+ * boolean `canTransfer` is left out: it does not fail on a balance shortfall, and every amount here is within the balance.
  */
 
 type Expect = keyof typeof REASONS;

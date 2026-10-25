@@ -60,7 +60,7 @@ sequenceDiagram
 
 The legs mirror when the parties are swapped (the seller's `from` is the buyer's `to` and the other way round), each amount is the other leg's stated consideration, each stated consideration token is the other leg's token, and the two tokens differ. The executor does not compare the `executor` fields. Each token does, and a stated consideration forces a named executor, so a leg that states a payment can be run only by the executor it names.
 
-The cash leg runs first. If a leg fails, the whole transaction reverts with `DvPExecutor_LegFailed(leg, reason)`, where `leg` is `CASH` (0) or `SECURITIES` (1) and `reason` is the token's revert data, for example `PolicyGated_TransferRejected(reason)`, or `ERC7943InsufficientUnfrozenBalance(account, amount, unfrozen)` when the leg's sender has less unfrozen balance than the amount (a buyer short of cash, or a frozen amount in the way). If both legs would fail, the cash leg is the one reported.
+The cash leg runs first. If a leg fails, the whole transaction reverts with `DvPExecutor_LegFailed(leg, reason)`, where `leg` is `CASH` (0) or `SECURITIES` (1) and `reason` is the token's revert data, for example `PolicyGated_TransferRejected(reason)`. When the leg's sender has less unfrozen balance than the amount, the reason is the token's own error. It is `ERC20InsufficientBalance(account, balance, amount)` when the amount is above the sender's balance (a buyer short of cash), and `ERC7943InsufficientUnfrozenBalance(account, amount, unfrozen)` when the amount is within the balance and a frozen amount is in the way. If both legs would fail, the cash leg is the one reported.
 
 ## The ERC-3009 form
 
@@ -96,7 +96,7 @@ The executor does not map or touch the authorization's times. The intent's deadl
 1. the executor's own pause: `PAUSED`;
 2. the match: `LEGS_DO_NOT_MATCH`;
 3. for the ERC-3009 form, the authorization's window (`INTENT_NOT_YET_VALID` at or before `validAfter`, `INTENT_EXPIRED` at or after `validBefore`, both ends exclusive), its state (`NONCE_USED`) and the buyer's balance (`INSUFFICIENT_UNFROZEN`);
-4. each leg's `canExecute` from the executor's address, cash first for the gated form and the securities leg for the ERC-3009 form, with the token's reason. A leg whose sender has less unfrozen balance than the amount answers `INSUFFICIENT_UNFROZEN` here, and the trade itself then reverts with `ERC7943InsufficientUnfrozenBalance` inside `DvPExecutor_LegFailed`.
+4. each leg's `canExecute` from the executor's address, cash first for the gated form and the securities leg for the ERC-3009 form, with the token's reason. A leg whose sender has less unfrozen balance than the amount answers `INSUFFICIENT_UNFROZEN` here, an amount above the whole balance included, and the trade itself then reverts inside `DvPExecutor_LegFailed` with the token's error: `ERC7943InsufficientUnfrozenBalance` when the amount is within the balance, `ERC20InsufficientBalance` when it is above it.
 
 What it does not see:
 

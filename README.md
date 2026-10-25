@@ -82,12 +82,17 @@ The audit package (scope, suppressions, mutation results, findings an auditor sh
 - **Fail closed.** `TRANSFER_OK` is non-zero, a hook with no rules rejects everything (`NO_RULES`), and a token that is
   not a registered class of its fund, or whose hook lists a rule the fund has replaced, rejects everything
   (`NOT_FUND_CLASS`). Every
-  policy rejection reverts with `PolicyGated_TransferRejected(bytes32 reason)`, and the token's own frozen shortfall with
-  the standard's `ERC7943InsufficientUnfrozenBalance`; `transfer` never returns `false`.
-- **Pre-flight parity.** `canTransferWithReason`, `canTransfer` and `canExecute` run the same checks as the state-changing
-  path. `canSend` and `canReceive` are the account-level questions (ERC-7943): `canSend` is false while paused, for an
-  unverified or address-frozen account and for a locked holder; `canReceive` is false while paused, for an unverified or
-  address-frozen account and for a token that is not a fund class. The holder caps are not in them: ERC-7943 says the
+  policy rejection reverts with `PolicyGated_TransferRejected(bytes32 reason)`, the token's own frozen shortfall (an
+  amount within the balance) with the standard's `ERC7943InsufficientUnfrozenBalance`, and an amount above the balance
+  with the base's `ERC20InsufficientBalance`; `transfer` never returns `false`.
+- **Pre-flight parity.** `canTransferWithReason` and `canExecute` run the same checks as the state-changing path.
+  `canTransfer` runs them too, except that ERC-7943 forbids it to fail on a balance check: an amount above the balance
+  reads true when the hook accepts it and no frozen amount is in the way (nothing frozen, or a burn by a sender that
+  holds `BURNER_ROLE`), and the write reverts with `ERC20InsufficientBalance`.
+  Use `canTransferWithReason` to learn whether a movement will succeed. `canSend` and `canReceive` are the
+  account-level questions (ERC-7943): `canSend` is false while paused, for an unverified or address-frozen account
+  and for a locked holder; `canReceive` is false while paused, for an unverified or address-frozen account and for a
+  token that is not a fund class. The holder caps are not in them: ERC-7943 says the
   account questions must not encode quantitative rules (it names balance checks and amount limits), and we read a cap the
   same way, so a cap decides a movement only. For a plain transfer through the shipped rules `canTransfer` is not true
   while either answer is false, but not for every kind: an enforcement burn passes for a locked holder while `canSend`
@@ -264,18 +269,25 @@ The brief is in [`CLAUDE.md`](CLAUDE.md). Where the code intentionally differs, 
   parameters are `_camelCase`; topics are unaffected.
 - **ERC-7943 Final.** `IPolicyGated` inherits `IERC7943Fungible` and the token advertises its id (`0x3edbb4c4`). The
   reasoned pre-flight is a second name, `canTransferWithReason`, and `ForcedTransferBy` carries the agent next to the
-  standard's `ForcedTransfer`. The token's own frozen shortfall reverts the standard's
-  `ERC7943InsufficientUnfrozenBalance`; policy rejections keep `PolicyGated_TransferRejected`.
+  standard's `ForcedTransfer`. The token's own frozen shortfall (an amount within the balance) reverts the standard's
+  `ERC7943InsufficientUnfrozenBalance`, and an amount above the balance the base's `ERC20InsufficientBalance`; policy
+  rejections keep `PolicyGated_TransferRejected`.
 - **Extra reason codes.** `NO_HOOK`, `NO_RULES` and `NOT_FUND_CLASS` are appended.
 - **Fund layer.** `Fund`, `FundHoldersRule`, `IFund` and `IFundHoldersRule` are not in the brief. [`PLAN.md`](PLAN.md)
   records the design and the proposed brief edits.
-- **One known departure from ERC-7943's text** (checked against the Final text on 2026-10-24; [`PLAN.md`](PLAN.md) records
-  it with options, and it is not changed yet): a plain transfer of more than the balance reverts with
-  `ERC7943InsufficientUnfrozenBalance` and `canTransfer` returns false for it. The standard says `canTransfer` must not
-  fail on balance checks, and that the base standard's error should be used when the amount exceeds the whole balance.
+- **`canTransfer` follows the standard where `canTransferWithReason` does not.** ERC-7943 (Final, checked 2026-10-24)
+  says `canTransfer` must not return false on a balance check and must validate the unfrozen amount. It does not say
+  which clause wins for an amount above the balance while something is frozen; `canTransfer` reads it as the draft ERC's
+  reference does, so a one-unit freeze turns that answer false. So `canTransfer` reads true for an amount above the
+  balance when the hook accepts it and no frozen amount is in the way (nothing frozen, or a burn by a sender that holds
+  `BURNER_ROLE`), and false when a frozen amount keeps the amount from the unfrozen balance, above the balance too. The
+  write reverts with `ERC7943InsufficientUnfrozenBalance` for an amount within the balance and
+  `ERC20InsufficientBalance` above it. `canTransferWithReason` says no to every shortfall, with
+  `INSUFFICIENT_UNFROZEN`, so for a balance shortfall it and `canExecute` say what the write does, and the boolean does
+  not. [`PLAN.md`](PLAN.md) records the decision.
 - **`canTransferWithReason` scope.** It, and the boolean `canTransfer`, model holder-driven movements, with the operator
   set to `from`. A simulated burn respects frozen tokens, except that a sender holding `BURNER_ROLE` is bounded by its
-  balance, as the write is. The enforcement paths `burn` and `forcedTransfer` release frozen tokens first.
+  balance in the reasoned answer, as the write is. The enforcement paths `burn` and `forcedTransfer` release frozen tokens first.
 - **Duplicate rules.** A duplicate `ruleId` reuses `ComplianceHook_DuplicateRule`, so the frozen ABI is unchanged.
 - **7540 operators are full delegates** (review L-5, owner decision): the code follows ERC-7540, so an approved
   operator can also create requests that pull the owner's assets or shares under any controller. Owners should approve

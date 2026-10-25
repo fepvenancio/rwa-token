@@ -274,7 +274,8 @@ contract MinPositionRuleUnit_Check is MinPositionRuleUnitTest {
       Reasons.TRANSFER_OK
     );
     assertEq(_transfer(type(uint256).max, type(uint256).max, type(uint256).max), Reasons.TRANSFER_OK);
-    // The sender holds less than the amount: the token's own balance check refuses that before the hook is asked.
+    // The sender holds less than the amount: the write refuses that before the hook is asked, but `canTransfer` asks the
+    // hook with it, so the rule must judge it without reverting.
     assertEq(_transfer(200 ether, 150 ether, 0), Reasons.TRANSFER_OK);
   }
 
