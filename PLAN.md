@@ -2482,6 +2482,15 @@ C over A: +8,127 on a transfer, +6,417 on a mint, +3,543 on a burn. Decision 17 
 - The new contracts use no transient storage, so they do not depend on the Cancun decision.
 - Next, C-2: Ignition (`Components`, `Tokens`, `roles.ts`, `Activate`), the TypeScript fixtures and `credentials.test.ts`, the docs, and the brief edits you must approve.
 
+### C-1 rebased onto the review items and ported (2026-10-25)
+
+The owner chose to wait for S0 and S1, then port C-1. S0 to S5 and two follow-up fixes have landed on `fund-layer` (`a4f237d`), so `credential-layer` was rebased onto it. The old tip is kept as the local ref `backup/credential-layer-c1-8b09efb`.
+
+- **Rebase.** C-1 is now `3d48032`. Five files conflicted, all because both sides appended or because the other session removed lines: `PLAN.md`, `Errors.sol`, `InterfaceFreeze.t.sol`, `ContractSizes.t.sol` and `scripts/verify-reproducible.ts`. Both sides were kept, except in the manifest (`LockupRule` is gone, `HolderRestrictionRule` and `MinPositionRule` are in, `CredentialRule` is added) and in the size test (an import the other side removed). `3d48032` does not pass its tests on its own: three type errors in the tests, and the rule answers the new probes with `BaseRule`'s default. The next commit fixes both.
+- **The rule.** `CredentialRule` overrides `checkSend(token, account)` and `checkReceive(token, account)`, which the review items added to `IComplianceRule` and which feed the token's `canSend` and `canReceive`. `BaseRule` answers `TRANSFER_OK` to both, so without the overrides the rule compiles and says yes to an account with no credential or a lapsed one (six tests fail). `check` is built on the same two helpers, so a probe and `check` cannot disagree: the interface requires it, and a fuzz test pins it. The enforcement burn stays in `check`, since it depends on the operator.
+- **The tests.** `TransferContext` has eight fields (`ref` and `deadline` are gone); `canTransfer` with a reason is `canTransferWithReason`; `isUserAllowed` is `canReceive`; the vault tests build the shared `ComplianceHook(registry)` and pass the rules to `initialize` and `deploy`. Five new unit tests pin the probes against `check`, and the integration tests now assert `canSend` and `canReceive` on the token, the lapsed and the blocked holder included.
+- **Result.** `npx hardhat test`: 1186 passing (1090 Solidity, 96 TypeScript), 0 failing. The other session's 915 Solidity tests are untouched; the 175 new ones are C-1's 170 and the five probe tests. The other gates (Slither, Halmos, the mutation run, reproducibility, gas, the isolated profile) are re-run on the final tree at the end of C-2, which includes this port.
+
 ## Open questions for the owner
 1. DvP: decisions D1 to D8 are recorded in the DvP section (D8: Option B; D6 revised for the `IntentExecutor` refusal). I-1, E-1, E-2 and the refusal are built and wait for your review.
 2. Nothing on `fund-layer` is pushed, and the DvP section is not committed. Push, or open a pull request, only when you say. The branch carries PR #2's commit `d3574df` until PR #2 merges.

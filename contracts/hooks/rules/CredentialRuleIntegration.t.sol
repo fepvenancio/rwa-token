@@ -60,7 +60,7 @@ contract CredentialRuleIntegrationTest is IntentTokenIntegrationTest {
     address _to,
     uint256 _amount
   ) internal returns (bool _ok, bytes32 _reason) {
-    (_ok, _reason) = _token.canTransfer(_from, _to, _amount);
+    (_ok, _reason) = _token.canTransferWithReason(_from, _to, _amount);
     if (!_ok) vm.expectRevert(_rejected(_reason));
     vm.prank(_from);
     _token.transfer(_to, _amount);
@@ -81,8 +81,8 @@ contract CredentialRuleIntegration_Eligibility is CredentialRuleIntegrationTest 
   }
 
   function test_WhenMintingToAnAddressWithoutACredential_ItIsRejectedAndIsUserAllowedAgrees() external {
-    assertFalse(_token.isUserAllowed(_eve));
-    assertTrue(_token.isUserAllowed(_bob));
+    assertFalse(_token.canReceive(_eve));
+    assertTrue(_token.canReceive(_bob));
     vm.expectRevert(_rejected(Reasons.RECEIVER_NOT_VERIFIED));
     vm.prank(_minter);
     _token.mint(_eve, 1 ether);
@@ -128,6 +128,8 @@ contract CredentialRuleIntegration_Eligibility is CredentialRuleIntegrationTest 
 contract CredentialRuleIntegration_Lapse is CredentialRuleIntegrationTest {
   function test_WhenTheSenderHasLapsed_ItCanStillSendButNotReceive() external {
     vm.warp(_NOW + 31 days); // alice's credential ran out after 30 days, bob's after 365
+    assertTrue(_token.canSend(_alice)); // a lapsed holder may send but not receive
+    assertFalse(_token.canReceive(_alice));
     (bool _sendOk,) = _transferWithParity(_alice, _bob, 100 ether);
     assertTrue(_sendOk);
 
@@ -141,7 +143,7 @@ contract CredentialRuleIntegration_Lapse is CredentialRuleIntegrationTest {
     vm.expectRevert(_rejected(Reasons.CREDENTIAL_EXPIRED));
     vm.prank(_minter);
     _token.mint(_alice, 1 ether);
-    assertFalse(_token.isUserAllowed(_alice));
+    assertFalse(_token.canReceive(_alice));
   }
 
   function test_WhenTheAttesterRenews_TheHolderReceivesAgain() external {
@@ -149,7 +151,7 @@ contract CredentialRuleIntegration_Lapse is CredentialRuleIntegrationTest {
     _credential(_alice, Quals.KYC | Quals.PROFESSIONAL, 365 days);
     (bool _ok,) = _transferWithParity(_bob, _alice, 0);
     assertTrue(_ok);
-    assertTrue(_token.isUserAllowed(_alice));
+    assertTrue(_token.canReceive(_alice));
   }
 
   function test_WhenTheAttesterSetsExitOnly_TheHolderCanSendButNotReceive() external {
@@ -205,6 +207,9 @@ contract CredentialRuleIntegration_Enforcement is CredentialRuleIntegrationTest 
     (bool _ok, bytes32 _reason) = _transferWithParity(_alice, _bob, 1 ether);
     assertFalse(_ok);
     assertEq(_reason, Reasons.SENDER_NOT_VERIFIED);
+
+    assertFalse(_token.canSend(_alice)); // the token-level probe agrees with the real call
+    assertTrue(_token.canSend(_bob));
 
     vm.prank(_agent);
     _token.forcedTransfer(_alice, _treasury, 400 ether);

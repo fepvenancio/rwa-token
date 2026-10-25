@@ -52,12 +52,10 @@ abstract contract CredentialVaultsTest is Test {
     _deployer = new ProxyDeployer(address(this));
   }
 
-  function _hook(
-    address _predicted
-  ) internal returns (ComplianceHook _h) {
-    IComplianceRule[] memory _rules = new IComplianceRule[](1);
+  function _hook() internal returns (ComplianceHook _h, IComplianceRule[] memory _rules) {
+    _rules = new IComplianceRule[](1);
     _rules[0] = _rule;
-    _h = new ComplianceHook(address(this), _policyRegistry, _predicted, _rules);
+    _h = new ComplianceHook(_policyRegistry);
     _policyRegistry.attest(address(_h).codehash, IPolicyRegistry.AttestKind.HOOK, '');
   }
 
@@ -96,8 +94,7 @@ contract CredentialRuleVaults_7540 is CredentialVaultsTest {
   function setUp() public {
     _base();
     Gated7540Vault _impl = new Gated7540Vault();
-    address _predicted = _deployer.predict('gASYNC', address(_impl));
-    ComplianceHook _h = _hook(_predicted);
+    (ComplianceHook _h, IComplianceRule[] memory _rules) = _hook();
     _policyRegistry.attest(address(_impl).codehash, IPolicyRegistry.AttestKind.IMPLEMENTATION, '');
     _vault = Gated7540Vault(
       address(
@@ -114,10 +111,12 @@ contract CredentialRuleVaults_7540 is CredentialVaultsTest {
               _guardian,
               address(_policyRegistry),
               address(_h),
+              _rules,
               _custody
             )
           ),
-          address(_h)
+          address(_h),
+          _rules
         )
       )
     );
@@ -264,8 +263,7 @@ contract CredentialRuleVaults_4626 is CredentialVaultsTest {
   function setUp() public {
     _base();
     Gated4626Vault _impl = new Gated4626Vault();
-    address _predicted = _deployer.predict('gFUND', address(_impl));
-    ComplianceHook _h = _hook(_predicted);
+    (ComplianceHook _h, IComplianceRule[] memory _rules) = _hook();
     _policyRegistry.attest(address(_impl).codehash, IPolicyRegistry.AttestKind.IMPLEMENTATION, '');
     _vault = Gated4626Vault(
       address(
@@ -281,10 +279,12 @@ contract CredentialRuleVaults_4626 is CredentialVaultsTest {
               address(this),
               _guardian,
               address(_policyRegistry),
-              address(_h)
+              address(_h),
+              _rules
             )
           ),
-          address(_h)
+          address(_h),
+          _rules
         )
       )
     );

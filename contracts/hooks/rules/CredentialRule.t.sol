@@ -87,8 +87,6 @@ contract CredentialRuleUnitTest is Helpers {
       amount: 1,
       operator: _kind == IPolicyHook.TransferKind.BURN ? _burner : _from,
       kind: _kind,
-      ref: bytes32(0),
-      deadline: 0,
       extra: ''
     });
   }
@@ -549,5 +547,76 @@ contract CredentialRuleUnit_TokenCallsAreStatic is CredentialRuleUnitTest {
       address(_rule).staticcall(abi.encodeCall(_rule.check, (_ctx(IPolicyHook.TransferKind.TRANSFER))));
     assertTrue(_ok);
     assertEq(abi.decode(_ret, (bytes32)), Reasons.TRANSFER_OK);
+  }
+}
+
+/// @dev The account-level probes (`canSend` and `canReceive` on the token) must agree with `check`: a probe that rejects
+///      an account means `check` rejects every movement of a kind the rule does not exempt on that side
+contract CredentialRuleUnit_AccountProbes is CredentialRuleUnitTest {
+  function test_WhenAskedWhetherAnAccountMaySend_ItAnswersFromItsStandingAndIgnoresTheToken(
+    uint8 _statusSeed
+  ) external {
+    ICredentialRegistry.Status _s = _statusOf(_statusSeed);
+    _stand(_from, _s);
+    bool _cannot = _s == ICredentialRegistry.Status.NONE || _s == ICredentialRegistry.Status.BLOCKED;
+    bytes32 _expected = _cannot ? Reasons.SENDER_NOT_VERIFIED : Reasons.TRANSFER_OK;
+    assertEq(_rule.checkSend(_token, _from), _expected);
+    assertEq(_rule.checkSend(address(0xBEEF), _from), _expected);
+  }
+
+  function test_WhenAskedWhetherAnAccountMayReceive_ItAppliesThePolicyOfThatToken() external {
+    _standing(_to, ICredentialRegistry.Status.ACTIVE, Quals.KYC, 0);
+    assertEq(_rule.checkReceive(_token, _to), Reasons.TRANSFER_OK);
+    assertEq(_rule.checkReceive(address(0xBEEF), _to), Reasons.RECEIVER_NOT_ELIGIBLE); // that token has no policy
+    _policy(Quals.KYC | Quals.CUSTOMER, 0, 0, 1);
+    assertEq(_rule.checkReceive(_token, _to), Reasons.RECEIVER_NOT_ELIGIBLE);
+  }
+
+  function test_WhenAProbeIsAskedTwiceForOneAccount_TheRegistryIsReadOncePerCall() external {
+    _stand(_from, ICredentialRegistry.Status.ACTIVE);
+    vm.expectCall(_registry, _call(_from), 1);
+    _rule.checkSend(_token, _from);
+    _stand(_to, ICredentialRegistry.Status.ACTIVE);
+    vm.expectCall(_registry, _call(_to), 1);
+    _rule.checkReceive(_token, _to);
+  }
+
+  function test_WhenKindStandingsAndPolicyAreFuzzed_CheckIsTheProbesInOrderWithTheEnforcementBurnExempt(
+    uint8 _kindSeed,
+    uint8 _senderSeed,
+    uint8 _receiverSeed,
+    uint32 _quals,
+    uint32 _requireAll,
+    bool _isBurner
+  ) external {
+    _policy(_requireAll, 0, 0, 1);
+    IPolicyHook.TransferKind _k = _kind(_kindSeed);
+    _standing(_from, _statusOf(_senderSeed), 0, 0);
+    _standing(_to, _statusOf(_receiverSeed), _quals, 0);
+    IPolicyHook.TransferContext memory _c = _ctx(_k);
+    _c.operator = _isBurner ? _burner : _from;
+
+    bytes32 _send = _rule.checkSend(_token, _from);
+    bytes32 _receive = _rule.checkReceive(_token, _to);
+    bytes32 _expected;
+    if (_k == IPolicyHook.TransferKind.TRANSFER || _k == IPolicyHook.TransferKind.EXECUTED) {
+      _expected = _send != Reasons.TRANSFER_OK ? _send : _receive;
+    } else if (_k == IPolicyHook.TransferKind.BURN) {
+      _expected = _isBurner ? Reasons.TRANSFER_OK : _send;
+    } else {
+      _expected = _receive; // MINT and FORCED check the receiver only
+    }
+    assertEq(_rule.check(_c), _expected);
+  }
+
+  function test_WhenCalledWithStaticcall_TheProbesSucceed() external {
+    _stand(_from, ICredentialRegistry.Status.ACTIVE);
+    _stand(_to, ICredentialRegistry.Status.ACTIVE);
+    (bool _sendOk, bytes memory _sendRet) = address(_rule).staticcall(abi.encodeCall(_rule.checkSend, (_token, _from)));
+    (bool _receiveOk, bytes memory _receiveRet) =
+      address(_rule).staticcall(abi.encodeCall(_rule.checkReceive, (_token, _to)));
+    assertTrue(_sendOk && _receiveOk);
+    assertEq(abi.decode(_sendRet, (bytes32)), Reasons.TRANSFER_OK);
+    assertEq(abi.decode(_receiveRet, (bytes32)), Reasons.TRANSFER_OK);
   }
 }

@@ -71,7 +71,23 @@ contract CredentialRule is BaseRule, ICredentialRule {
       _reason = _checkSender(_ctx);
       if (_reason != Reasons.TRANSFER_OK) return _reason;
     }
-    _reason = _kind == IPolicyHook.TransferKind.BURN ? Reasons.TRANSFER_OK : _checkReceiver(_ctx);
+    _reason = _kind == IPolicyHook.TransferKind.BURN ? Reasons.TRANSFER_OK : _receiveReason(_ctx.token, _ctx.to);
+  }
+
+  /// @inheritdoc IComplianceRule
+  function checkReceive(
+    address _token,
+    address _account
+  ) external view override(BaseRule, IComplianceRule) returns (bytes32 _reason) {
+    _reason = _receiveReason(_token, _account);
+  }
+
+  /// @inheritdoc IComplianceRule
+  function checkSend(
+    address,
+    address _account
+  ) external view override(BaseRule, IComplianceRule) returns (bytes32 _reason) {
+    _reason = _sendReason(_account);
   }
 
   /// @inheritdoc ICredentialRule
@@ -94,43 +110,56 @@ contract CredentialRule is BaseRule, ICredentialRule {
   }
 
   /**
-   * @notice The sender must be able to leave: `ACTIVE`, `EXIT_ONLY` or `LAPSED`. A sender that is `NONE` or `BLOCKED`
-   *         passes only on a BURN whose operator holds the token's BURNER_ROLE (enforcement), looked up only then
+   * @notice The sender of a movement: the account must be able to leave, or the movement must be an enforcement burn
+   * @dev The BURNER_ROLE lookup happens only when the account cannot leave
    * @param _ctx The movement context
    * @return _reason `TRANSFER_OK` or `SENDER_NOT_VERIFIED`
    */
   function _checkSender(
     IPolicyHook.TransferContext calldata _ctx
   ) internal view returns (bytes32 _reason) {
-    // Only the standing decides here; the bits, country and attester matter for a receiver.
-    // slither-disable-next-line unused-return
-    (ICredentialRegistry.Status _status,,,) = REGISTRY.profileOf(_ctx.from);
-    if (_status != ICredentialRegistry.Status.NONE && _status != ICredentialRegistry.Status.BLOCKED) {
-      return Reasons.TRANSFER_OK;
-    }
+    _reason = _sendReason(_ctx.from);
+    if (_reason == Reasons.TRANSFER_OK) return _reason;
     // View interface: compiled to STATICCALL, so the token cannot change any state (test: *_TokenCallsAreStatic).
     // aderyn-ignore-next-line(reentrancy-state-change)
     if (_ctx.kind == IPolicyHook.TransferKind.BURN && IAccessControl(_ctx.token).hasRole(_BURNER_ROLE, _ctx.operator)) {
-      return Reasons.TRANSFER_OK;
+      _reason = Reasons.TRANSFER_OK;
     }
-    _reason = Reasons.SENDER_NOT_VERIFIED;
   }
 
   /**
-   * @notice The receiver must be `ACTIVE` and satisfy the token's policy. A token with no policy admits nobody. The
-   *         policy is read first, so an unconfigured token reports that and not the receiver's standing
-   * @param _ctx The movement context
+   * @notice Whether an account may send at all: `ACTIVE`, `EXIT_ONLY` or `LAPSED`. `NONE` and `BLOCKED` may not
+   * @param _account The prospective sender
+   * @return _reason `TRANSFER_OK` or `SENDER_NOT_VERIFIED`
+   */
+  function _sendReason(
+    address _account
+  ) internal view returns (bytes32 _reason) {
+    // Only the standing decides here; the bits, country and attester matter for a receiver.
+    // slither-disable-next-line unused-return
+    (ICredentialRegistry.Status _status,,,) = REGISTRY.profileOf(_account);
+    _reason = _status != ICredentialRegistry.Status.NONE && _status != ICredentialRegistry.Status.BLOCKED
+      ? Reasons.TRANSFER_OK
+      : Reasons.SENDER_NOT_VERIFIED;
+  }
+
+  /**
+   * @notice Whether an account may receive tokens of a token: `ACTIVE` and within the token's policy. A token with no
+   *         policy admits nobody. The policy is read first, so an unconfigured token reports that and not the standing
+   * @param _token The token
+   * @param _account The prospective receiver
    * @return _reason `TRANSFER_OK`, `RECEIVER_NOT_VERIFIED`, `CREDENTIAL_EXPIRED` or `RECEIVER_NOT_ELIGIBLE`
    */
-  function _checkReceiver(
-    IPolicyHook.TransferContext calldata _ctx
+  function _receiveReason(
+    address _token,
+    address _account
   ) internal view returns (bytes32 _reason) {
-    Policy memory _policy = _policies[_ctx.token];
+    Policy memory _policy = _policies[_token];
     if (_policy.attesters == 0) return Reasons.RECEIVER_NOT_ELIGIBLE;
 
     // The country is stored for later rules; no policy reads it yet.
     // slither-disable-next-line unused-return
-    (ICredentialRegistry.Status _status, uint32 _quals,, uint8 _attester) = REGISTRY.profileOf(_ctx.to);
+    (ICredentialRegistry.Status _status, uint32 _quals,, uint8 _attester) = REGISTRY.profileOf(_account);
     if (_status == ICredentialRegistry.Status.LAPSED) return Reasons.CREDENTIAL_EXPIRED;
     if (_status != ICredentialRegistry.Status.ACTIVE) return Reasons.RECEIVER_NOT_VERIFIED;
 
