@@ -2493,7 +2493,7 @@ The owner chose to wait for S0 and S1, then port C-1. S0 to S5 and two follow-up
 
 ### C-2 as built (2026-10-25, awaiting review)
 
-Deployment, TypeScript tests and docs, on top of C-1 as rebased and ported above. Branch `credential-layer` is at `9a8e43a`; C-2 is **not committed**: 22 modified files and 2 new ones (`docs/credentials.md`, `test/nodejs/credentials.test.ts`) sit in the worktree `/Users/address0/dev/gated-token-stack-credential`. Nothing is pushed.
+Deployment, TypeScript tests and docs, on top of C-1 as rebased and ported above. Branch `credential-layer` is at `cd51112` (C-2, committed 2026-10-25 with its files staged by name: 23 modified and 2 new, `docs/credentials.md` and `test/nodejs/credentials.test.ts`), over `9a8e43a` (the port), in the worktree `/Users/address0/dev/gated-token-stack-credential`. Nothing is pushed.
 
 **Deployment.**
 - `Components` deploys `CredentialRegistry(deployer, guardian)` and `CredentialRule(registry)`, and no longer takes `identityRegistry`. Its parameters are `governance`, `council`, `guardian`, `minDelay`. `IdentityRule` is not deployed, so the council still attests six rules (`CredentialRule` where `IdentityRule` was). `IdentityRule` stays in the repo and the reproducibility manifest.
@@ -2514,7 +2514,7 @@ Deployment, TypeScript tests and docs, on top of C-1 as rebased and ported above
 - `npx hardhat test`: **1214 passing (1090 Solidity, 124 TypeScript)**, 0 failing. At the port it was 1186 (1090, 96): the 28 more are the 8 in `credentials.test.ts` and the 20 parity tests. Isolated profile: 1090 passing.
 - `forge fmt --check`, `solhint --max-warnings 0`, `tsc`: clean. Aderyn: 0 findings. Slither: 0 results (420 contracts, 97 detectors). upgrades-core: 3 of 3.
 - Halmos: all pass, 21 properties in five suites (the five registry properties among them).
-- `verify:reproducible`: 19 contracts identical across the two production builds (17 on `a4f237d` plus the two new ones).
+- `verify:reproducible`: 19 contracts identical across the two production builds (17 on `a4f237d` plus the two new ones). The 17 existing manifest entries (runtime code, creation hash, immutable slots) are identical to those of a clean export of `a4f237d`, built the same way and compared entry by entry on 2026-10-26; only `CredentialRegistry` and `CredentialRule` are new.
 - Mutation run: **62 mutants, 62 killed, none survived** (34 on the registry, 22 on the rule, and 6 new ones on the `checkSend` and `checkReceive` probes the port added), in three scratch copies of the final tree. 23 were killed by exactly one test, which are the sharp boundaries. Deployment wiring: **7 of 7 killed** (no policy set, a policy that asks for no bits, a policy that trusts no attester 0, a registry not handed to the timelock, no recovery role on the registry, the credential rule last in the order, an attester allowed to assert nothing), by `credentials.test.ts` and `deployment.test.ts`. The lists are fixed, not exhaustive.
 
 **Gas** (forge `--isolate`, 21,000 intrinsic included, a transfer between existing holders, same token and hook, re-measured on this tree with a throwaway bench in scratch):
@@ -2525,11 +2525,10 @@ Deployment, TypeScript tests and docs, on top of C-1 as rebased and ported above
 | B: `IdentityRule` over `CredentialRegistry` | 76,985 | 88,467 | 75,219 |
 | C: `CredentialRule` | 80,640 | 91,613 | 75,604 |
 
-C over A: +8,179 on a transfer, +6,408 on a mint, +3,647 on a burn. Registry writes are unchanged from C-1: `set` 58,203 (new) and 41,138 (rewrite), `setStatus` 35,430, `blockSubject` 32,430. The signed `register` is still not measured.
+C over A: +8,179 on a transfer, +6,408 on a mint, +3,647 on a burn. Registry writes are unchanged from C-1: `set` 58,203 (new) and 41,138 (rewrite), `setStatus` 35,430, `blockSubject` 32,430. The signed `register` (a stranger submits an attester's EIP-712 credential; each call its own transaction, 21,000 included, measured 2026-10-26 on a copy of the `cd51112` tree): 68,239 for a new subject and 51,174 for a rewrite with an ECDSA attester, and 69,249 for a new subject with an ERC-1271 attester. The ERC-1271 figure uses `MockERC1271Wallet`, which only recovers one key, so a Safe or an HSM front costs more by whatever its `isValidSignature` does. That is about 10,000 above the direct `set` (58,203 and 41,138), the price of the hash and the signature check.
 
 **Not done or not checked.**
-- Nothing is committed or pushed.
-- The signed `register` gas.
+- Nothing is pushed.
 - The deployment mutants and the mutation run ran in scratch copies, not in CI. CI is not run.
 - Track B is not started.
 
@@ -2543,4 +2542,4 @@ C over A: +8,179 on a transfer, +6,408 on a mint, +3,647 on a burn. Registry wri
 ## Open questions for the owner
 1. DvP: decisions D1 to D8 are recorded in the DvP section (D8: Option B; D6 revised for the `IntentExecutor` refusal). I-1, E-1, E-2 and the refusal are built and wait for your review.
 2. Nothing on `fund-layer` is pushed, and the DvP section is not committed. Push, or open a pull request, only when you say. The branch carries PR #2's commit `d3574df` until PR #2 merges.
-3. Credential layer (track A): C-1 is committed on branch `credential-layer` (rebased onto `a4f237d` and ported, see above). C-2 is built and waits for your review (see "C-2 as built"); it is not committed, and the brief edits listed there need your OK. Decisions 1 to 6 and 10 adopt the assessment's defaults. Please confirm or change 11 to 17, which came up while planning (11: the recovery timelock can also reverse a guardian block; 12: the rule for one attester overwriting another; 14: the demo deployment swaps `IdentityRule` for `CredentialRule`; 17: the gas stop line). Decision 7 (Cancun and signatures) is closed: accepted. Decisions 8 and 9 (fast upgrade path, ERC-7943) are open and do not block track A. Track B is noted as legos around an unchanged token; it is not planned.
+3. Credential layer (track A): C-1 is committed on branch `credential-layer` (rebased onto `a4f237d` and ported, see above). C-2 is built and waits for your review (see "C-2 as built"); it is committed as `cd51112`, and the brief edits listed there need your OK. Decisions 1 to 6 and 10 adopt the assessment's defaults. Please confirm or change 11 to 17, which came up while planning (11: the recovery timelock can also reverse a guardian block; 12: the rule for one attester overwriting another; 14: the demo deployment swaps `IdentityRule` for `CredentialRule`; 17: the gas stop line). Decision 7 (Cancun and signatures) is closed: accepted. Decisions 8 and 9 (fast upgrade path, ERC-7943) are open and do not block track A. Track B is noted as legos around an unchanged token; it is not planned.
