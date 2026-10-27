@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Overview · Gated Token Stack</title>
+<meta name="description" content="What the Gated Token Stack is, the problem it solves, how its contracts connect, and an index of every contract page.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="index.html">Gated Token Stack</a>
+  <a href="index.html" aria-current="page">Overview</a>
+  <a href="index.html#contracts">Contracts</a>
+  <a href="roles.html">Who can do what</a>
+  <a href="movement.html">One movement</a>
+  <a href="deployment.html">Deployment and governance</a>
+  <a href="money.html">Where the money sits</a>
+  <a href="review.html">Security review</a>
+</nav>
+<main class="page">
+
+<header class="top">
+  <div class="crumbs">Overview</div>
+  <h1>Gated Token Stack</h1>
+  <p class="lede">Tokens for fund shares and other real-world assets that only approved holders can hold. Each token keeps its own books and its emergency powers, and asks a separate, replaceable set of compliance rules before any balance changes.</p>
+  <div class="facts">
+    <span class="fact"><b>20 contracts</b> in contracts/ (interfaces and test mocks aside)</span>
+    <span class="fact">Solidity <b>0.8.30</b>, OpenZeppelin <b>5.6.1</b></span>
+    <span class="fact">ERC-20, <b>ERC-7943</b>, ERC-4626, ERC-7540</span>
+    <span class="fact">licence: <b>UNLICENSED</b>, proprietary</span>
+  </div>
+</header>
+
+<section id="in-one-minute">
+  <div class="callout">
+    <h3>In one minute</h3>
+    <p>An issuer of fund shares usually may sell only to approved investors, and must be able to act on an account: pause the token during an incident, hold back part of a balance, or move tokens out of an account. A plain ERC-20 token lets anyone send to anyone and has none of these powers. Here every token keeps the books and the powers, and hands every question about who may hold, send or receive to one outside contract, the hook. The hook asks a short list of small contracts, the rules, and the first rule that says no stops the movement. Rules can be replaced through governance without touching the token or its address.</p>
+  </div>
+</section>
+
+<section id="problem">
+  <div class="prose">
+    <h2>The problem it solves</h2>
+    <p>Real-world assets on a public chain need three things a plain token does not give. Who may hold them is decided by someone outside the chain (an identity provider, the issuer's onboarding). The issuer needs enforcement powers. And the policy changes over time: a new type of investor, a lockup, a limit on the number of investors in a fund.</p>
+    <p>The stack answers with a split. The token is a standard ERC-20 that refuses to move a balance unless its hook says yes. The hook is shared by every token of a deployment and keeps an ordered list of rules for each token. Each rule answers one question, such as "does the receiver hold a credential this token accepts" or "would this leave a balance below the minimum". Every token also implements ERC-7943, a standard interface for permissioned tokens, so outside tools can ask it <code>canTransfer</code>, <code>canSend</code> and <code>canReceive</code> before they send.</p>
+  </div>
+</section>
+
+<section id="layers">
+  <div class="prose">
+    <h2>The layers</h2>
+    <p>Seven groups of contracts, each with one job. Arrows in the diagram are calls between contracts.</p>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 1060 500" role="img" aria-label="How the contracts connect. IntentExecutor and DvPExecutor call executeTransfer on IntentToken. ProxyDeployer creates and initialises the tokens. The three tokens, IntentToken, Gated4626Vault and Gated7540Vault, all extend PolicyGatedERC20Upgradeable and call the shared ComplianceHook before and after every balance change. The hook calls the rules in the token's list: CredentialRule, MinPositionRule, HolderRestrictionRule, SettlementWindowRule and FundHoldersRule. CredentialRule reads CredentialRegistry with profileOf. FundHoldersRule calls Fund with admission, join and leave. PolicyRegistry is asked whether code is attested when ProxyDeployer places a token, when a token installs a hook or is upgraded, and when the hook installs rules. GovernanceTimelock and the recovery timelock hold the admin powers.">
+        <defs>
+          <marker id="ov-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+        </defs>
+
+        <!-- Deployment and governance column -->
+        <text x="20" y="154" class="m bold">Deployment</text>
+        <rect class="b2" x="20" y="166" width="170" height="50" rx="8"/>
+        <text x="34" y="187" class="bold">ProxyDeployer</text>
+        <text x="34" y="205" class="m">places each token</text>
+        <text x="20" y="274" class="m bold">Governance</text>
+        <rect class="b2" x="20" y="286" width="170" height="50" rx="8"/>
+        <text x="34" y="307" class="bold">GovernanceTimelock</text>
+        <text x="34" y="325" class="m">main timelock</text>
+        <rect class="b2" x="20" y="346" width="170" height="50" rx="8"/>
+        <text x="34" y="367" class="bold">Recovery timelock</text>
+        <text x="34" y="385" class="m">OZ TimelockController</text>
+
+        <!-- ProxyDeployer creates tokens -->
+        <line class="ln" x1="190" y1="191" x2="260" y2="191" marker-end="url(#ov-arrow)"/>
+        <text x="226" y="171" class="mono sm" text-anchor="middle">CREATE2,</text>
+        <text x="226" y="184" class="mono sm" text-anchor="middle">initialize</text>
+        <!-- ProxyDeployer asks the registry -->
+        <polyline class="ln dash" points="180,216 180,232 228,232 228,465 268,465" marker-end="url(#ov-arrow)"/>
+        <text x="222" y="430" class="mono sm" text-anchor="end">isAttested:</text>
+        <text x="222" y="444" class="m sm" text-anchor="end">implementation</text>
+
+        <!-- Settlement -->
+        <text x="270" y="32" class="m bold">Settlement</text>
+        <rect class="b2" x="270" y="44" width="127" height="48" rx="8"/>
+        <text x="281" y="64" class="bold">IntentExecutor</text>
+        <text x="281" y="81" class="m sm">intents, batches</text>
+        <rect class="b2" x="403" y="44" width="127" height="48" rx="8"/>
+        <text x="414" y="64" class="bold">DvPExecutor</text>
+        <text x="414" y="81" class="m sm">trades, two legs</text>
+        <line class="ln" x1="333" y1="92" x2="333" y2="164" marker-end="url(#ov-arrow)"/>
+        <line class="ln" x1="466" y1="92" x2="466" y2="164" marker-end="url(#ov-arrow)"/>
+        <text x="400" y="128" class="mono sm" text-anchor="middle">executeTransfer</text>
+
+        <!-- Tokens -->
+        <rect class="frame" x="262" y="150" width="276" height="254" rx="10"/>
+        <rect class="b" x="276" y="166" width="248" height="50" rx="7"/>
+        <text x="290" y="187" class="mono bold">IntentToken</text>
+        <text x="290" y="205" class="m sm">transfers and signed intents</text>
+        <rect class="b" x="276" y="226" width="248" height="50" rx="7"/>
+        <text x="290" y="247" class="mono bold">Gated4626Vault</text>
+        <text x="290" y="265" class="m sm">ERC-4626 deposit and redeem</text>
+        <rect class="b" x="276" y="286" width="248" height="50" rx="7"/>
+        <text x="290" y="307" class="mono bold">Gated7540Vault</text>
+        <text x="290" y="325" class="m sm">ERC-7540 request, fulfil, claim</text>
+        <text x="276" y="358" class="m sm">all three extend</text>
+        <text x="276" y="374" class="mono sm">PolicyGatedERC20Upgradeable</text>
+        <text x="276" y="392" class="m sm">each one is a TokenProxy</text>
+
+        <!-- Token asks the registry -->
+        <line class="ln dash" x1="400" y1="404" x2="400" y2="438" marker-end="url(#ov-arrow)"/>
+        <text x="410" y="425" class="mono sm">isAttested: hook, upgrade</text>
+        <rect class="b2" x="270" y="440" width="260" height="50" rx="8"/>
+        <text x="284" y="461" class="bold">PolicyRegistry</text>
+        <text x="284" y="479" class="m sm">code hashes the council reviewed</text>
+
+        <!-- Token calls the hook -->
+        <line class="ln" x1="538" y1="191" x2="648" y2="191" marker-end="url(#ov-arrow)"/>
+        <text x="587" y="184" class="mono sm" text-anchor="middle">beforeTransfer</text>
+        <text x="587" y="206" class="mono sm" text-anchor="middle">afterTransfer</text>
+
+        <!-- Policy -->
+        <text x="636" y="142" class="m bold">Policy</text>
+        <rect class="frame" x="636" y="150" width="220" height="340" rx="10"/>
+        <rect class="b" x="650" y="166" width="192" height="50" rx="7"/>
+        <text x="664" y="187" class="bold">ComplianceHook</text>
+        <text x="664" y="205" class="m sm">a rule list per token</text>
+        <line class="ln" x1="746" y1="216" x2="746" y2="248" marker-end="url(#ov-arrow)"/>
+        <text x="756" y="236" class="mono sm">check, after_</text>
+        <rect class="b2" x="650" y="250" width="192" height="30" rx="6"/>
+        <text x="662" y="270" class="mono">CredentialRule</text>
+        <rect class="b2" x="650" y="290" width="192" height="30" rx="6"/>
+        <text x="662" y="310" class="mono">MinPositionRule</text>
+        <rect class="b2" x="650" y="330" width="192" height="30" rx="6"/>
+        <text x="662" y="350" class="mono">HolderRestrictionRule</text>
+        <rect class="b2" x="650" y="370" width="192" height="30" rx="6"/>
+        <text x="662" y="390" class="mono">SettlementWindowRule</text>
+        <rect class="b2" x="650" y="410" width="192" height="30" rx="6"/>
+        <text x="662" y="430" class="mono">FundHoldersRule</text>
+        <text x="650" y="466" class="m sm">in list order, first no wins</text>
+
+        <!-- Hook asks the registry about rules -->
+        <line class="ln dash" x1="636" y1="465" x2="532" y2="465" marker-end="url(#ov-arrow)"/>
+        <text x="584" y="456" class="mono sm" text-anchor="middle">isAttested</text>
+        <text x="584" y="482" class="m sm" text-anchor="middle">rules</text>
+
+        <!-- Identity -->
+        <text x="896" y="236" class="m bold">Identity</text>
+        <rect class="b2" x="896" y="244" width="150" height="46" rx="8"/>
+        <text x="908" y="264" class="bold">CredentialRegistry</text>
+        <text x="908" y="281" class="m sm">credential records</text>
+        <line class="ln" x1="842" y1="265" x2="894" y2="265" marker-end="url(#ov-arrow)"/>
+        <text x="860" y="304" class="mono sm">profileOf</text>
+
+        <!-- Fund -->
+        <text x="896" y="396" class="m bold">Fund</text>
+        <rect class="b2" x="896" y="404" width="150" height="56" rx="8"/>
+        <text x="908" y="424" class="bold">Fund</text>
+        <text x="908" y="441" class="m sm">classes and the</text>
+        <text x="908" y="455" class="m sm">investor count</text>
+        <line class="ln" x1="842" y1="425" x2="894" y2="425" marker-end="url(#ov-arrow)"/>
+        <text x="860" y="476" class="mono sm">admission,</text>
+        <text x="860" y="490" class="mono sm">join, leave</text>
+      </svg>
+    </div>
+    <figcaption><b>The policy sits outside the token, and a registry vets what is installed.</b> Solid arrows are calls. Dashed arrows are questions to the registry, asked only when something is placed, installed or upgraded, never on a transfer. Not drawn: the main timelock holds the admin role on every token, the credential registry, both executors and the registry, and owns <code>ProxyDeployer</code> and <code>Fund</code>; <code>Fund</code> also asks the registry about its rule; the vaults move their asset, an ordinary ERC-20. <code>SettlementWindowRule</code> is in the intent token's list only.</figcaption>
+  </figure>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Layer</th><th>Contracts</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td>Token</td><td><code>PolicyGatedERC20Upgradeable</code>, <code>IntentSettledUpgradeable</code>, <code>IntentToken</code>, <code>Gated4626Vault</code>, <code>Gated7540Vault</code></td><td>Keeps balances, roles, the pause, frozen amounts and forced transfers. Every balance change goes through one function, <code>_update</code>, which asks the hook. Three templates share this base: a plain token with signed intents and two vaults.</td></tr>
+        <tr><td>Policy</td><td><code>ComplianceHook</code>, <code>BaseRule</code>, <code>CredentialRule</code>, <code>MinPositionRule</code>, <code>HolderRestrictionRule</code>, <code>SettlementWindowRule</code>, <code>FundHoldersRule</code></td><td>Decides whether a movement may happen. One hook for the whole deployment, an ordered list of at most 16 rules per token. Each rule returns a reason code.</td></tr>
+        <tr><td>Identity</td><td><code>CredentialRegistry</code></td><td>Records what attesters (identity providers) say about each address: who vouched for it, its qualifications, its country, until when. <code>CredentialRule</code> reads it.</td></tr>
+        <tr><td>Fund</td><td><code>Fund</code></td><td>Groups several tokens as share classes of one fund and counts distinct investors across them. <code>FundHoldersRule</code> enforces the fund's investor cap.</td></tr>
+        <tr><td>Governance</td><td><code>GovernanceTimelock</code>, a second OpenZeppelin <code>TimelockController</code>, <code>PolicyRegistry</code></td><td>Admin powers sit behind a delay (7 days by default in the deployment modules). The security council records which code it reviewed. A guardian can stop things at once and do nothing else.</td></tr>
+        <tr><td>Deployment</td><td><code>ProxyDeployer</code>, <code>TokenProxy</code></td><td>Places each token at an address that depends only on the deployer, the symbol and the implementation, sets it up in the same transaction and checks it came up as reviewed.</td></tr>
+        <tr><td>Settlement</td><td><code>IntentExecutor</code>, <code>DvPExecutor</code></td><td>Run transfers that holders signed in advance. <code>DvPExecutor</code> settles shares against cash in one transaction, so neither side moves without the other.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="life">
+  <div class="prose">
+    <h2>The life of a transfer</h2>
+    <p>Every balance change takes the same path: a transfer, a mint, a burn, a forced transfer, an executed intent, a vault deposit or redemption. Here is a holder's plain <code>transfer</code>. <a href="movement.html">One movement</a> follows each step in full.</p>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 1000 190" role="img" aria-label="A transfer in five steps. The holder calls transfer. The token builds the context: kind, amount and balances. The token runs its own checks: pause and unfrozen balance. The hook asks the rules in order and the first no wins. The balances move and after_ updates the fund. A no from the token's checks or from a rule reverts the call with PolicyGated_TransferRejected or a balance error, and nothing changes.">
+        <defs>
+          <marker id="ov-arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+          <marker id="ov-arrow2-rej" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="rej"/></marker>
+        </defs>
+        <rect class="act" x="12" y="20" width="176" height="66" rx="8"/>
+        <text x="24" y="39" class="mono sm acc">1</text>
+        <text x="24" y="57" class="bold">Holder calls transfer</text>
+        <text x="24" y="75" class="m">or mint, burn, deposit</text>
+        <line class="ln" x1="188" y1="53" x2="208" y2="53" marker-end="url(#ov-arrow2)"/>
+
+        <rect class="b2" x="210" y="20" width="176" height="66" rx="8"/>
+        <text x="222" y="39" class="mono sm acc">2</text>
+        <text x="222" y="57" class="bold">Token builds context</text>
+        <text x="222" y="75" class="m">kind, amount, balances</text>
+        <line class="ln" x1="386" y1="53" x2="406" y2="53" marker-end="url(#ov-arrow2)"/>
+
+        <rect class="b" x="408" y="20" width="176" height="66" rx="8"/>
+        <text x="420" y="39" class="mono sm acc">3</text>
+        <text x="420" y="57" class="bold">Token's own checks</text>
+        <text x="420" y="75" class="m">pause, unfrozen balance</text>
+        <line class="ln" x1="584" y1="53" x2="604" y2="53" marker-end="url(#ov-arrow2)"/>
+
+        <rect class="b" x="606" y="20" width="176" height="66" rx="8"/>
+        <text x="618" y="39" class="mono sm acc">4</text>
+        <text x="618" y="57" class="bold">Hook asks the rules</text>
+        <text x="618" y="75" class="m">in order, first no wins</text>
+        <line class="ln" x1="782" y1="53" x2="802" y2="53" marker-end="url(#ov-arrow2)"/>
+
+        <rect class="act" x="804" y="20" width="176" height="66" rx="8"/>
+        <text x="816" y="39" class="mono sm acc">5</text>
+        <text x="816" y="57" class="bold">Balances move</text>
+        <text x="816" y="75" class="m">then after_ runs</text>
+
+        <line class="ln-rej" x1="496" y1="86" x2="496" y2="128" marker-end="url(#ov-arrow2-rej)"/>
+        <text x="504" y="112" class="sm m">no</text>
+        <line class="ln-rej" x1="694" y1="86" x2="694" y2="128" marker-end="url(#ov-arrow2-rej)"/>
+        <text x="702" y="112" class="sm m">no</text>
+        <rect class="rejbox" x="408" y="130" width="374" height="48" rx="6"/>
+        <text x="420" y="150" class="mono sm rej">PolicyGated_TransferRejected(reason)</text>
+        <text x="420" y="168" class="m sm">or a balance error; the call reverts, nothing changes</text>
+      </svg>
+    </div>
+    <figcaption><b>Two places can say no, and both undo the whole call.</b> The token's own checks run first, then the rules. Only a movement that passes both changes a balance.</figcaption>
+  </figure>
+  <ol class="steps">
+    <li><div><b>The holder calls <code>transfer(to, amount)</code>.</b> Any entry point that changes a balance ends in the same internal function, <code>_update</code>, so no route skips the checks.</div></li>
+    <li><div><b>The token describes the movement.</b> It works out the kind (here <span class="k k-transfer">TRANSFER</span>) and builds the context the rules will see: the sender, the receiver, the amount, the account that called, and both balances before the move.</div></li>
+    <li><div><b>The token runs its own checks.</b> While the token is paused only forced movements pass. The amount must fit in the sender's unfrozen balance, the part the agent has not held back.</div></li>
+    <li><div><b>The hook asks the token's rules in order.</b> In the deployed lists: <code>CredentialRule</code> (the sender may leave, the receiver holds a credential the token accepts), <code>MinPositionRule</code>, <code>HolderRestrictionRule</code> (address freeze and lockup), <code>SettlementWindowRule</code> on the intent token (executed intents only), and <code>FundHoldersRule</code> (the fund's investor cap). The first rule that answers anything but <code>TRANSFER_OK</code> stops the movement, and the call reverts with <code>PolicyGated_TransferRejected(reason)</code>.</div></li>
+    <li><div><b>The balances move, then <code>after_</code> runs.</b> Rules that asked for it are told about the finished movement. <code>FundHoldersRule</code> is the one deployed rule that does: it tells <code>Fund</code> when the receiver starts holding this class or the sender stops.</div></li>
+  </ol>
+</section>
+
+<section id="choices">
+  <div class="prose">
+    <h2>Three design choices</h2>
+    <ul class="plain">
+      <li><b>The policy lives outside the token.</b> The token's code has no opinion about who, where or when. A policy change is a new rule list on the hook, not a token upgrade, so the token keeps its address, balances and history.</li>
+      <li><b>Only reviewed code can be installed.</b> Hooks, rules and token implementations are plain contracts (not proxies), and each must have its code hash recorded (attested) in <code>PolicyRegistry</code> by the security council. A token checks its hook, and each upgrade; the hook checks each rule; <code>ProxyDeployer</code> checks a new token's implementation; <code>Fund</code> checks its rule. The registry is asked at install time only, so withdrawing an attestation never changes a running token.</li>
+      <li><b>Authority waits, and the fast power can only stop.</b> Changes go through a timelock with a delay. The guardian can pause at once and cancel queued changes, and cannot unpause, change policy or upgrade. A second timelock can unpause and remove the guardian, so the guardian cannot block its own removal.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="glossary">
+  <div class="prose">
+    <h2>Glossary</h2>
+  </div>
+  <dl class="kv">
+    <dt>token</dt><dd>An ERC-20 contract that holds balances and asks its hook before every balance change. The stack has three templates: <code>IntentToken</code>, <code>Gated4626Vault</code> and <code>Gated7540Vault</code>.</dd>
+    <dt>proxy</dt><dd>A small contract that keeps a token's address and storage and runs the code of another contract, the implementation, for every call. Each token is a <code>TokenProxy</code> (OpenZeppelin's <code>ERC1967Proxy</code>). The upgrade function sits in the implementation (the UUPS pattern).</dd>
+    <dt>implementation</dt><dd>The shared code of one template, deployed once and used by every proxy of that template. Its constructor disables setup, so only a proxy can be set up.</dd>
+    <dt>hook</dt><dd>The contract a token asks before every balance change. Here it is <code>ComplianceHook</code>, one per deployment, holding an ordered rule list for each token.</dd>
+    <dt>rule</dt><dd>A small contract that answers one policy question about a movement with a reason code, such as <code>TRANSFER_OK</code> or <code>RECEIVER_FROZEN</code>. One instance serves every token whose list names it, and any setting it keeps is kept per token.</dd>
+    <dt>reason code</dt><dd>A <code>bytes32</code> answer, the hash of a name like <code>LOCKED</code>. All of them are listed in <code>contracts/interfaces/Errors.sol</code> and on <a href="movement.html#reasons">One movement</a>.</dd>
+    <dt>kind</dt><dd>What sort of movement it is: <span class="k k-transfer">TRANSFER</span> (a holder's transfer), <span class="k k-executed">EXECUTED</span> (a signed intent run by an executor), <span class="k k-forced">FORCED</span> (an enforcement move by the agent), <span class="k k-mint">MINT</span> or <span class="k k-burn">BURN</span>. Rules decide differently per kind.</dd>
+    <dt>attested</dt><dd>The security council recorded a contract's code hash in <code>PolicyRegistry</code> as a reviewed <code>HOOK</code>, <code>RULE</code> or <code>IMPLEMENTATION</code>. It is checked when <code>ProxyDeployer</code> places a token, when a token installs a hook or is upgraded, when the hook installs a rule list, and when <code>Fund</code> installs its rule.</dd>
+    <dt>guardian</dt><dd>A multisig that can only stop things: pause the tokens and the executors with no delay, and cancel operations waiting in the main timelock. On the credential registry it can also block an address or switch off an attester.</dd>
+    <dt>timelock</dt><dd>A contract that holds admin powers and runs a queued operation only after a delay. The main timelock (<code>GovernanceTimelock</code>) administers everything. Outside itself, the recovery timelock can only unpause, remove the guardian, and undo the guardian's actions on the credential registry.</dd>
+    <dt>intent</dt><dd>A transfer a holder signs off-chain (an EIP-712 message): amount, receiver, deadline, a random single-use nonce, and optionally which executor may run it and what the holder is to receive in return.</dd>
+    <dt>executor</dt><dd>An account holding <code>EXECUTOR_ROLE</code> on the intent token, the only role that can run an intent. In the deployment it is held by <code>IntentExecutor</code> and <code>DvPExecutor</code>.</dd>
+    <dt>DvP</dt><dd>Delivery versus payment: the shares and the cash move in the same transaction, or neither moves. <code>DvPExecutor</code> does this from two signed legs.</dd>
+    <dt>fund</dt><dd>A <code>Fund</code> contract: a set of share-class tokens with one investor count and one cap across all of them.</dd>
+    <dt>class</dt><dd>One token registered in a fund. An investor who holds three classes counts once.</dd>
+    <dt>credential</dt><dd>The record an attester (an identity provider) keeps for an address in <code>CredentialRegistry</code>: who vouched for it, its qualification bits, its country, until when it is valid, and its standing.</dd>
+    <dt>frozen amount</dt><dd>The part of an account's balance that the agent holds back on a token (<code>setFrozenTokens</code>). The holder can move only the rest. It is not the same as an address freeze, which <code>HolderRestrictionRule</code> keeps and which stops the address from sending or receiving at all.</dd>
+    <dt>minimum position</dt><dd>A per-token minimum balance kept by <code>MinPositionRule</code>: no transfer, intent, mint or holder's burn may leave an account holding more than zero and less than the minimum. Forced moves, the burner's burns and exempt accounts are outside it. A minimum of 0 switches it off.</dd>
+    <dt>escrow</dt><dd>Tokens held by a contract on someone's behalf. <code>Gated7540Vault</code> holds shares waiting to be redeemed at its own address.</dd>
+  </dl>
+</section>
+
+<section id="contracts">
+  <div class="prose">
+    <h2>The contracts</h2>
+    <p>One page per contract: what it is for, how it works, what it can do, and its tests.</p>
+  </div>
+  <div class="group">
+    <h3>Token</h3>
+    <div class="cards">
+      <a class="card" href="contracts/PolicyGatedERC20Upgradeable.html"><span class="name">PolicyGatedERC20Upgradeable</span><p>The base every token extends: balances, roles, pause, frozen amounts, forced transfers and the call to the hook.</p></a>
+      <a class="card" href="contracts/IntentSettledUpgradeable.html"><span class="name">IntentSettledUpgradeable</span><p>Adds transfers that a holder signs and an executor runs.</p></a>
+      <a class="card" href="contracts/IntentToken.html"><span class="name">IntentToken</span><p>The plain gated token: the base plus signed intents.</p></a>
+      <a class="card" href="contracts/Gated4626Vault.html"><span class="name">Gated4626Vault</span><p>An ERC-4626 vault whose shares are a gated token.</p></a>
+      <a class="card" href="contracts/Gated7540Vault.html"><span class="name">Gated7540Vault</span><p>An ERC-7540 vault: investors request, the fulfiller role fulfils, investors claim.</p></a>
+    </div>
+  </div>
+  <div class="group">
+    <h3>Policy</h3>
+    <div class="cards">
+      <a class="card" href="contracts/ComplianceHook.html"><span class="name">ComplianceHook</span><p>The one hook every token asks. An ordered rule list per token; the first rule to say no wins.</p></a>
+      <a class="card" href="contracts/BaseRule.html"><span class="name">BaseRule</span><p>The parent of every rule: default answers, and the guard that only a token's own hook may call <code>after_</code>.</p></a>
+      <a class="card" href="contracts/CredentialRule.html"><span class="name">CredentialRule</span><p>Who may hold: reads the credential registry and applies the token's policy.</p></a>
+      <a class="card" href="contracts/MinPositionRule.html"><span class="name">MinPositionRule</span><p>No account left holding more than zero and less than the token's minimum.</p></a>
+      <a class="card" href="contracts/HolderRestrictionRule.html"><span class="name">HolderRestrictionRule</span><p>Per-holder lockups and address freezes, set by the token's agent.</p></a>
+      <a class="card" href="contracts/SettlementWindowRule.html"><span class="name">SettlementWindowRule</span><p>Executed intents settle only inside the token's daily window.</p></a>
+      <a class="card" href="contracts/FundHoldersRule.html"><span class="name">FundHoldersRule</span><p>Caps the number of distinct investors across a fund's classes.</p></a>
+    </div>
+  </div>
+  <div class="group">
+    <h3>Identity and fund</h3>
+    <div class="cards">
+      <a class="card" href="contracts/CredentialRegistry.html"><span class="name">CredentialRegistry</span><p>One record per address: which attester vouched for it, what it qualifies for, until when.</p></a>
+      <a class="card" href="contracts/Fund.html"><span class="name">Fund</span><p>Lists a fund's share classes and counts distinct investors across them.</p></a>
+    </div>
+  </div>
+  <div class="group">
+    <h3>Governance and deployment</h3>
+    <div class="cards">
+      <a class="card" href="contracts/PolicyRegistry.html"><span class="name">PolicyRegistry</span><p>The list of code hashes the security council has reviewed.</p></a>
+      <a class="card" href="contracts/GovernanceTimelock.html"><span class="name">GovernanceTimelock</span><p>The main timelock: holds the admin powers and runs changes after a delay.</p></a>
+      <a class="card" href="contracts/ProxyDeployer.html"><span class="name">ProxyDeployer</span><p>Places each token at a predictable address and refuses to finish unless it came up as reviewed.</p></a>
+      <a class="card" href="contracts/TokenProxy.html"><span class="name">TokenProxy</span><p>The proxy every token is: OpenZeppelin's <code>ERC1967Proxy</code>, created without setup data.</p></a>
+    </div>
+  </div>
+  <div class="group">
+    <h3>Settlement</h3>
+    <div class="cards">
+      <a class="card" href="contracts/IntentExecutor.html"><span class="name">IntentExecutor</span><p>Submits signed intents to a token, one at a time or as an all-or-nothing batch.</p></a>
+      <a class="card" href="contracts/DvPExecutor.html"><span class="name">DvPExecutor</span><p>Settles shares against cash in one transaction from two signed legs.</p></a>
+    </div>
+  </div>
+  <div class="group">
+    <h3>Topics</h3>
+    <div class="cards">
+      <a class="card" href="roles.html"><span class="name">Who can do what</span><p>The roles, who holds each one after deployment, and what each can and cannot do.</p></a>
+      <a class="card" href="movement.html"><span class="name">One movement</span><p>Everything that happens when a balance changes: kinds, checks, rules, reason codes and errors.</p></a>
+      <a class="card" href="deployment.html"><span class="name">Deployment and governance</span><p>How a deployment is put together, and how its policy and code are changed later.</p></a>
+      <a class="card" href="money.html"><span class="name">Where the money sits</span><p>Which contract holds the assets, the shares and the cash at each step.</p></a>
+      <a class="card" href="review.html"><span class="name">Security review</span><p>What the review of the token and its policy covered, what it found, and the tests behind it.</p></a>
+    </div>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose">
+    <h2>Source</h2>
+    <ul class="plain">
+      <li>Repository: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/README.md"><code>README.md</code></a> (setup and commands) and <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/SECURITY.md"><code>SECURITY.md</code></a> (audit preparation)</li>
+      <li>Contracts: <a href="https://github.com/fepvenancio/rwa-token/tree/2f8c2e7/contracts"><code>contracts/</code></a>, interfaces in <a href="https://github.com/fepvenancio/rwa-token/tree/2f8c2e7/contracts/interfaces"><code>contracts/interfaces/</code></a></li>
+      <li>Deployment: <a href="https://github.com/fepvenancio/rwa-token/tree/2f8c2e7/ignition/modules"><code>ignition/modules/</code></a> (<code>Components.ts</code>, <code>Activate.ts</code>, and the rule order in <code>roles.ts</code>)</li>
+    </ul>
+  </div>
+</section>
+
+<footer>Describes the contracts at commit <code>2f8c2e7</code> on <code>main</code>.</footer>
+</main>
+</body>
+</html>

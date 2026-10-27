@@ -5,7 +5,7 @@ import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
 
 /**
  * @title IIntentExecutor
- * @notice Role-gated caller that submits signed transfer intents to tokens. Replaceable; grows into multi-leg DvP
+ * @notice Role-gated caller that submits signed transfer intents to tokens. Replaceable
  */
 interface IIntentExecutor {
   /**

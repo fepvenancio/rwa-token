@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Who can do what · Gated Token Stack</title>
+<meta name="description" content="Every role on every contract, who holds it after deployment, what it allows, how long it waits, and what still works during a pause.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="index.html">Gated Token Stack</a>
+  <a href="index.html">Overview</a>
+  <a href="index.html#contracts">Contracts</a>
+  <a href="roles.html" aria-current="page">Who can do what</a>
+  <a href="movement.html">One movement</a>
+  <a href="deployment.html">Deployment and governance</a>
+  <a href="money.html">Where the money sits</a>
+  <a href="review.html">Security review</a>
+</nav>
+<main class="page">
+
+<header class="top">
+  <div class="crumbs"><a href="index.html">Overview</a> / Governance</div>
+  <h1>Who can do what</h1>
+  <p class="lede">Every power in the system is a named role on a named contract. This page lists who holds each one once the deployment is finished, what it allows and what it does not, how long it waits, and what still works while something is paused.</p>
+  <div class="facts">
+    <span class="fact">holders set by <b>ignition/modules/Activate.ts</b></span>
+    <span class="fact">delay: <b>7 days</b> by default, on both timelocks</span>
+    <span class="fact">guardian: <b>stop-only</b></span>
+    <span class="fact">checked by <b>assertHandedOver</b> in test/nodejs/fixtures.ts</span>
+  </div>
+</header>
+
+<nav class="toc" aria-label="On this page">
+  <a href="#in-one-minute">In one minute</a>
+  <a href="#map">Authority map</a>
+  <a href="#holders">Who holds what</a>
+  <a href="#tokens">On the tokens</a>
+  <a href="#others">On the other contracts</a>
+  <a href="#guardian">The guardian</a>
+  <a href="#recovery">The recovery path</a>
+  <a href="#delay">The delay</a>
+  <a href="#pause">During a pause</a>
+  <a href="#why">Why</a>
+</nav>
+
+<section id="in-one-minute">
+  <div class="callout">
+    <h3>In one minute</h3>
+    <p>A <b>role</b> is a permission an account holds on one contract (OpenZeppelin <code>AccessControl</code>). A <b>timelock</b> is a contract that runs a call only after the call has been public for a fixed delay, so anyone can see a change coming and react. After deployment the deployer holds nothing. The main timelock administers every contract, so every change of policy, code or roles waits at least seven days. Day-to-day work, such as issuing, enforcing, settling and fulfilling, belongs to operational accounts and takes effect at once. The <b>guardian</b>, a multisig, can stop things at once but cannot start anything. A second timelock, the recovery timelock, can undo what the guardian did and nothing else.</p>
+  </div>
+</section>
+
+<section id="map">
+  <div class="prose">
+    <h2>Authority map</h2>
+    <p>Two kinds of power. Above the line, everything goes through a timelock: governance proposes, waits out the delay, then executes, and the target contract sees the timelock as the caller. Below the line, each account acts directly and at once, but only within its narrow job.</p>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 960 724" role="img" aria-label="Authority map. Above the line: the governance multisig schedules and executes on the recovery timelock and on the main timelock. The main timelock is admin of the tokens, both executors, both registries and itself, the only upgrader of the tokens, owner of ProxyDeployer and Fund, and the token admin the hook and rules ask. The recovery timelock can only unpause tokens and executors, revoke GUARDIAN_ROLE, clear a guardian block or revive an attester, and revoke CANCELLER_ROLE on the main timelock. The guardian can cancel pending operations on the main timelock. Below the line, acting at once: the guardian pauses tokens and executors and blocks addresses or kills attesters in the credential registry; the security council attests and revokes code in the policy registry; the KYC attester writes credentials; the agent forces transfers, freezes amounts and sets lockups and address freezes; the minter and burner mint and burn the intent token; the operator key submits signed intents through the two executors, which call executeTransfer on the intent token; the fulfiller fulfils and rejects requests on the 7540 vault.">
+        <defs>
+          <marker id="ro-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+          <marker id="ro-arrow-rej" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="rej"/></marker>
+        </defs>
+
+        <text x="20" y="22" class="bold">Through a timelock</text>
+        <text x="168" y="22" class="m">waits at least the delay, and anyone can see it while it waits</text>
+
+        <rect class="b" x="20" y="40" width="170" height="192" rx="8"/>
+        <text x="105" y="120" class="bold" text-anchor="middle">Governance</text>
+        <text x="105" y="138" class="bold" text-anchor="middle">multisig</text>
+        <text x="105" y="160" class="m sm" text-anchor="middle">proposes and executes</text>
+        <text x="105" y="176" class="m sm" text-anchor="middle">on both timelocks</text>
+
+        <rect class="act" x="310" y="40" width="190" height="72" rx="8"/>
+        <text x="326" y="63" class="bold">Recovery timelock</text>
+        <text x="326" y="81" class="mono sm">TimelockController</text>
+        <text x="326" y="99" class="m sm">7-day delay, no cancellers</text>
+
+        <rect class="act" x="310" y="160" width="190" height="72" rx="8"/>
+        <text x="326" y="183" class="bold">Main timelock</text>
+        <text x="326" y="201" class="mono sm">GovernanceTimelock</text>
+        <text x="326" y="219" class="m sm">7-day delay, cancellable</text>
+
+        <line class="ln" x1="190" y1="76" x2="308" y2="76" marker-end="url(#ro-arrow)"/>
+        <text x="249" y="69" class="m sm" text-anchor="middle">schedule, execute</text>
+        <line class="ln" x1="190" y1="196" x2="308" y2="196" marker-end="url(#ro-arrow)"/>
+        <text x="249" y="189" class="m sm" text-anchor="middle">schedule, execute</text>
+
+        <line class="ln" x1="470" y1="112" x2="470" y2="158" marker-end="url(#ro-arrow)"/>
+        <text x="462" y="140" class="m sm" text-anchor="end">revokes CANCELLER_ROLE</text>
+
+        <rect class="b2" x="600" y="30" width="345" height="96" rx="8"/>
+        <text x="614" y="52">unpause() on tokens and executors</text>
+        <text x="614" y="72">revokeRole(GUARDIAN_ROLE) anywhere</text>
+        <text x="614" y="92">clearGuardianBlock, reviveAttester</text>
+        <text x="614" y="113" class="m sm">and nothing else</text>
+        <line class="ln" x1="500" y1="76" x2="598" y2="76" marker-end="url(#ro-arrow)"/>
+        <text x="549" y="69" class="m sm" text-anchor="middle">RECOVERY_ROLE</text>
+
+        <rect class="b2" x="600" y="140" width="345" height="120" rx="8"/>
+        <text x="614" y="162">Admin of the tokens, both executors,</text>
+        <text x="614" y="182">both registries and itself</text>
+        <text x="614" y="202">Only upgrader of the three tokens</text>
+        <text x="614" y="222">Owner of ProxyDeployer and Fund</text>
+        <text x="614" y="242">The token admin the hook and rules ask</text>
+        <line class="ln" x1="500" y1="196" x2="598" y2="196" marker-end="url(#ro-arrow)"/>
+        <text x="549" y="189" class="m sm" text-anchor="middle">admin calls</text>
+
+        <path class="ln-rej" d="M170,326 V296 H420 V236" marker-end="url(#ro-arrow-rej)"/>
+        <text x="428" y="270" class="sm rej">cancels (CANCELLER_ROLE)</text>
+
+        <line class="life" x1="20" y1="284" x2="945" y2="284"/>
+        <text x="20" y="312" class="bold">At once, no delay</text>
+
+        <rect class="b" x="20" y="326" width="170" height="44" rx="8"/>
+        <text x="105" y="344" class="bold" text-anchor="middle">Guardian multisig</text>
+        <text x="105" y="361" class="m sm" text-anchor="middle">stop-only</text>
+        <line class="ln" x1="190" y1="348" x2="598" y2="348" marker-end="url(#ro-arrow)"/>
+        <text x="394" y="341" class="m" text-anchor="middle">pause(); blockSubject, killAttester</text>
+        <rect class="b2" x="600" y="326" width="345" height="44" rx="8"/>
+        <text x="614" y="345" class="bold">Tokens, IntentExecutor, DvPExecutor</text>
+        <text x="614" y="362" class="m sm">CredentialRegistry: block an address, kill an attester</text>
+
+        <rect class="b" x="20" y="382" width="170" height="44" rx="8"/>
+        <text x="105" y="400" class="bold" text-anchor="middle">Security council</text>
+        <text x="105" y="417" class="mono sm" text-anchor="middle">ATTESTER_ROLE</text>
+        <line class="ln" x1="190" y1="404" x2="598" y2="404" marker-end="url(#ro-arrow)"/>
+        <text x="394" y="397" class="m" text-anchor="middle">attest(codehash, kind, uri), revoke(codehash)</text>
+        <rect class="b2" x="600" y="382" width="345" height="44" rx="8"/>
+        <text x="614" y="401" class="bold">PolicyRegistry</text>
+        <text x="614" y="418" class="m sm">the list of reviewed code</text>
+
+        <rect class="b" x="20" y="438" width="170" height="44" rx="8"/>
+        <text x="105" y="456" class="bold" text-anchor="middle">KYC attester</text>
+        <text x="105" y="473" class="m sm" text-anchor="middle">attester 0, not a role</text>
+        <line class="ln" x1="190" y1="460" x2="598" y2="460" marker-end="url(#ro-arrow)"/>
+        <text x="394" y="453" class="m" text-anchor="middle">set, setStatus (setStatus on its own records only)</text>
+        <rect class="b2" x="600" y="438" width="345" height="44" rx="8"/>
+        <text x="614" y="457" class="bold">CredentialRegistry</text>
+        <text x="614" y="474" class="m sm">who is vouched for, with what, until when</text>
+
+        <rect class="b" x="20" y="494" width="170" height="44" rx="8"/>
+        <text x="105" y="512" class="bold" text-anchor="middle">Agent</text>
+        <text x="105" y="529" class="mono sm" text-anchor="middle">AGENT_ROLE</text>
+        <line class="ln" x1="190" y1="516" x2="598" y2="516" marker-end="url(#ro-arrow)"/>
+        <text x="394" y="509" class="m" text-anchor="middle">forcedTransfer, setFrozenTokens, setLockup, setFrozen</text>
+        <rect class="b2" x="600" y="494" width="345" height="44" rx="8"/>
+        <text x="614" y="513" class="bold">Tokens, HolderRestrictionRule</text>
+        <text x="614" y="530" class="m sm">7540 vault: recoverRedeemRequest, recoverClaimable</text>
+
+        <rect class="b" x="20" y="550" width="170" height="44" rx="8"/>
+        <text x="105" y="568" class="bold" text-anchor="middle">Minter and burner</text>
+        <text x="105" y="585" class="m sm" text-anchor="middle">IntentToken roles</text>
+        <line class="ln" x1="190" y1="572" x2="598" y2="572" marker-end="url(#ro-arrow)"/>
+        <text x="394" y="565" class="m" text-anchor="middle">mint(to, amount), burn(from, amount)</text>
+        <rect class="b2" x="600" y="550" width="345" height="44" rx="8"/>
+        <text x="614" y="569" class="bold">IntentToken</text>
+        <text x="614" y="586" class="m sm">the vaults' mint and burn revert for every caller</text>
+
+        <rect class="b" x="20" y="606" width="170" height="44" rx="8"/>
+        <text x="105" y="624" class="bold" text-anchor="middle">Operator key</text>
+        <text x="105" y="641" class="mono sm" text-anchor="middle">OPERATOR_ROLE</text>
+        <line class="ln" x1="190" y1="628" x2="598" y2="628" marker-end="url(#ro-arrow)"/>
+        <text x="394" y="621" class="m" text-anchor="middle">execute, executeBatch, executeDvPGated, executeDvP3009</text>
+        <rect class="b2" x="600" y="606" width="345" height="44" rx="8"/>
+        <text x="614" y="625" class="bold">IntentExecutor, DvPExecutor</text>
+        <text x="614" y="642" class="m sm">they call IntentToken.executeTransfer</text>
+
+        <rect class="b" x="20" y="662" width="170" height="44" rx="8"/>
+        <text x="105" y="680" class="bold" text-anchor="middle">Fulfiller (bank)</text>
+        <text x="105" y="697" class="mono sm" text-anchor="middle">FULFILLER_ROLE</text>
+        <line class="ln" x1="190" y1="684" x2="598" y2="684" marker-end="url(#ro-arrow)"/>
+        <text x="394" y="677" class="m" text-anchor="middle">fulfillDeposit, fulfillRedeem, reject requests</text>
+        <rect class="b2" x="600" y="662" width="345" height="44" rx="8"/>
+        <text x="614" y="681" class="bold">Gated7540Vault</text>
+        <text x="614" y="698" class="m sm">names the assets and the shares of each fulfilment</text>
+      </svg>
+    </div>
+    <figcaption><b>Above the line power waits. Below it power acts at once but is narrow.</b> The red dashed line is the guardian's one power over the main timelock: it can cancel any operation that has not run yet. Holders act on their own balances directly and are not drawn.</figcaption>
+  </figure>
+</section>
+
+<section id="holders">
+  <div class="prose">
+    <h2>Who holds what after deployment</h2>
+    <p>These are the holders that the two Ignition stages set up, <code>Components</code> then <code>Activate</code>. The contracts do not forbid other holders: whoever holds <code>DEFAULT_ADMIN_ROLE</code> on a contract can grant and revoke every other role on it, because no contract here changes OpenZeppelin's default role admin. After the hand-over that is the main timelock, so any new holder waits for its delay.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Holder</th><th>Where</th><th>Role</th><th>Set by</th></tr></thead>
+      <tbody>
+        <tr><td>Main timelock</td><td>each token</td><td><code>DEFAULT_ADMIN_ROLE</code>, <code>UPGRADER_ROLE</code></td><td><code>Activate</code> grants both; the deployer renounces its admin role. Nobody else is upgrader.</td></tr>
+        <tr><td>Main timelock</td><td><code>PolicyRegistry</code></td><td><code>DEFAULT_ADMIN_ROLE</code></td><td>the registry's constructor, in <code>Components</code></td></tr>
+        <tr><td>Main timelock</td><td><code>CredentialRegistry</code>, <code>IntentExecutor</code>, <code>DvPExecutor</code></td><td><code>DEFAULT_ADMIN_ROLE</code></td><td><code>Activate</code> grants it, then the deployer renounces</td></tr>
+        <tr><td>Main timelock</td><td>itself</td><td><code>DEFAULT_ADMIN_ROLE</code></td><td>OpenZeppelin's <code>TimelockController</code> constructor makes every timelock its own admin</td></tr>
+        <tr><td>Main timelock</td><td><code>ProxyDeployer</code>, <code>Fund</code></td><td>owner</td><td><code>Activate</code> calls <code>transferOwnership</code></td></tr>
+        <tr><td>Recovery timelock</td><td>each token, both executors, <code>CredentialRegistry</code></td><td><code>RECOVERY_ROLE</code></td><td><code>Activate</code></td></tr>
+        <tr><td>Recovery timelock</td><td>main timelock</td><td><code>RECOVERY_ROLE</code></td><td>the <code>GovernanceTimelock</code> constructor</td></tr>
+        <tr><td>Recovery timelock</td><td>itself</td><td><code>DEFAULT_ADMIN_ROLE</code></td><td>OpenZeppelin's constructor</td></tr>
+        <tr><td>Governance multisig</td><td>main timelock</td><td><code>PROPOSER_ROLE</code>, <code>EXECUTOR_ROLE</code>, <code>CANCELLER_ROLE</code></td><td><code>Components</code> names it proposer and executor; OpenZeppelin's constructor also makes every initial proposer a canceller</td></tr>
+        <tr><td>Governance multisig</td><td>recovery timelock</td><td><code>PROPOSER_ROLE</code>, <code>EXECUTOR_ROLE</code></td><td><code>Components</code>; <code>Activate</code> revokes the canceller role OpenZeppelin gave it, so nobody can cancel there</td></tr>
+        <tr><td>Guardian multisig</td><td>each token</td><td><code>GUARDIAN_ROLE</code></td><td>the token's initialiser</td></tr>
+        <tr><td>Guardian multisig</td><td>both executors, <code>CredentialRegistry</code></td><td><code>GUARDIAN_ROLE</code></td><td>their constructors</td></tr>
+        <tr><td>Guardian multisig</td><td>main timelock</td><td><code>CANCELLER_ROLE</code></td><td><code>Activate</code>. It holds nothing on the recovery timelock.</td></tr>
+        <tr><td>Security council</td><td><code>PolicyRegistry</code></td><td><code>ATTESTER_ROLE</code></td><td>the registry's constructor</td></tr>
+        <tr><td>KYC provider</td><td><code>CredentialRegistry</code></td><td>attester 0: an entry in the registry's attester list, not an <code>AccessControl</code> role</td><td><code>Activate</code> calls <code>addAttester</code>; it may assert all eight named qualification bits unless the <code>kycAllowedQuals</code> parameter narrows that</td></tr>
+        <tr><td>Agent (the issuer's compliance desk)</td><td>each token</td><td><code>AGENT_ROLE</code></td><td><code>Activate</code></td></tr>
+        <tr><td>Minter, burner (the issuer)</td><td><code>IntentToken</code></td><td><code>MINTER_ROLE</code>, <code>BURNER_ROLE</code></td><td><code>Activate</code></td></tr>
+        <tr><td><code>IntentExecutor</code> and <code>DvPExecutor</code></td><td><code>IntentToken</code></td><td><code>EXECUTOR_ROLE</code></td><td><code>Activate</code>, to these two contracts and to no one else</td></tr>
+        <tr><td>Operator key (a bank or relayer)</td><td>both executors</td><td><code>OPERATOR_ROLE</code></td><td><code>Activate</code></td></tr>
+        <tr><td>Fulfiller (the bank)</td><td><code>Gated7540Vault</code></td><td><code>FULFILLER_ROLE</code></td><td><code>Activate</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <p>Until <code>Activate</code> finishes, the deployer account administers the tokens, both executors, the credential registry and both timelocks, and owns <code>ProxyDeployer</code> and <code>Fund</code>. The hand-over check <code>assertHandedOver</code> reads every <code>*_ROLE()</code> getter of the timelocks, the registries, the tokens and the executors, and fails if the deployer still holds any of those roles. It also pins the recovery timelock's whole role set, so a deployment that gives it more fails the check. <a href="deployment.html#handover">Deployment and governance</a> has the order of the hand-over.</p>
+  </div>
+</section>
+
+<section id="tokens">
+  <div class="prose">
+    <h2>On the tokens</h2>
+    <p>All three tokens, <a href="contracts/IntentToken.html"><code>IntentToken</code></a>, <a href="contracts/Gated4626Vault.html"><code>Gated4626Vault</code></a> and <a href="contracts/Gated7540Vault.html"><code>Gated7540Vault</code></a>, share their roles through the base <a href="contracts/PolicyGatedERC20Upgradeable.html"><code>PolicyGatedERC20Upgradeable</code></a>. Two roles exist on one template only.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Role and holder</th><th>Can</th><th>Cannot, or only with limits</th></tr></thead>
+      <tbody>
+        <tr><td><code>DEFAULT_ADMIN_ROLE</code><br><span class="small">main timelock</span></td><td>Grant and revoke every role. <code>setPolicyHook(newHook)</code>. <code>unpause()</code>. On the 7540 vault, <code>setCustody</code>. It is also the "token admin" that the hook asks before <code>setRules</code> and that the rules ask before their settings.</td><td>A new hook must be attested as <code>HOOK</code> and name the token's registry (<code>PolicyGated_NotAttested</code>, <code>PolicyGated_HookRegistryMismatch</code>). The registry itself has no setter.</td></tr>
+        <tr><td><code>UPGRADER_ROLE</code><br><span class="small">main timelock</span></td><td><code>upgradeToAndCall(newImplementation, data)</code></td><td>The implementation must be attested as <code>IMPLEMENTATION</code> and report the same <code>templateId()</code> (<code>PolicyGated_NotAttested</code>, <code>Templated_WrongTemplate</code>).</td></tr>
+        <tr><td><code>MINTER_ROLE</code><br><span class="small">minter, <code>IntentToken</code></span></td><td><code>mint(to, amount)</code>, which runs the hook as a <span class="k k-mint">MINT</span></td><td>The receiver must pass the rules. On both vaults <code>mint(to, amount)</code> reverts for every caller (<code>Gated4626Vault_Unsupported</code>, <code>Gated7540Vault_Unsupported</code>): shares come only from deposits.</td></tr>
+        <tr><td><code>BURNER_ROLE</code><br><span class="small">burner, <code>IntentToken</code></span></td><td><code>burn(from, amount)</code> with no allowance. It may take frozen tokens and lowers the frozen amount by the part it takes.</td><td>Refused for an address-frozen holder (<code>SENDER_FROZEN</code>) and while paused. Reverts on both vaults for every caller.</td></tr>
+        <tr><td><code>AGENT_ROLE</code><br><span class="small">agent</span></td><td><code>forcedTransfer(from, to, amount)</code>, a <span class="k k-forced">FORCED</span> move that works while paused and may take frozen tokens. <code>setFrozenTokens(account, amount)</code>. On the 7540 vault, <code>recoverRedeemRequest</code> and <code>recoverClaimable</code>. On <code>HolderRestrictionRule</code>, <code>setLockup</code> and <code>setFrozen</code> for this token.</td><td>The receiver of a forced move is still judged: it needs a credential the token's policy accepts and must not be address-frozen.</td></tr>
+        <tr><td><code>GUARDIAN_ROLE</code><br><span class="small">guardian multisig</span></td><td><code>pause()</code>, with no delay</td><td>Cannot unpause, grant roles, change the hook or upgrade.</td></tr>
+        <tr><td><code>RECOVERY_ROLE</code><br><span class="small">recovery timelock</span></td><td><code>unpause()</code> and <code>revokeRole(GUARDIAN_ROLE, account)</code></td><td>Nothing else: it is not a role admin, so it cannot grant, and every other revocation needs the role's admin.</td></tr>
+        <tr><td><code>EXECUTOR_ROLE</code><br><span class="small"><code>IntentToken</code> only; the two executor contracts</span></td><td><code>executeTransfer(intent, sig)</code>: runs a holder-signed intent as an <span class="k k-executed">EXECUTED</span> move</td><td>Only an intent that names this executor, or names none and states no consideration (<code>WRONG_EXECUTOR</code>, <code>CONSIDERATION_NEEDS_EXECUTOR</code>). The token checks the signature, so the executor cannot change any field.</td></tr>
+        <tr><td><code>FULFILLER_ROLE</code><br><span class="small"><code>Gated7540Vault</code> only; the fulfiller</span></td><td><code>fulfillDeposit</code>, <code>fulfillRedeem</code>, <code>rejectDepositRequest</code>, <code>rejectRedeemRequest</code>. It names both numbers of each fulfilment, so it sets the price.</td><td>A reject of a redemption is an ordinary transfer back to the controller and is refused when the rules refuse it, when the escrow's balance is frozen, or while paused. The agent's recovery is the way out then.</td></tr>
+        <tr><td>No role: any account</td><td><code>transfer</code>, <code>transferFrom</code>, <code>approve</code>, <code>permit</code>, <code>multicall</code>, <code>renounceRole</code> for itself. On <code>IntentToken</code>, <code>cancelIntent</code> for its own nonces. On the vaults, deposits, requests and claims.</td><td>Every balance movement goes through the hook. <code>multicall</code> runs each inner call with the caller as sender, so each needs the role it would need alone.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="others">
+  <div class="prose">
+    <h2>On the other contracts</h2>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Contract</th><th>Who</th><th>What</th></tr></thead>
+      <tbody>
+        <tr><td><a href="contracts/IntentExecutor.html"><code>IntentExecutor</code></a>, <a href="contracts/DvPExecutor.html"><code>DvPExecutor</code></a></td><td><code>OPERATOR_ROLE</code></td><td>Submit: <code>execute</code> and <code>executeBatch</code>, or <code>executeDvPGated</code> and <code>executeDvP3009</code>. Only while the executor is not paused (<code>EnforcedPause</code>).</td></tr>
+        <tr><td></td><td><code>GUARDIAN_ROLE</code></td><td><code>pause()</code></td></tr>
+        <tr><td></td><td><code>DEFAULT_ADMIN_ROLE</code> or <code>RECOVERY_ROLE</code></td><td><code>unpause()</code>. Anyone else gets <code>AccessControlUnauthorizedAccount(caller, DEFAULT_ADMIN_ROLE)</code>.</td></tr>
+        <tr><td></td><td><code>DEFAULT_ADMIN_ROLE</code></td><td>Grant and revoke roles. <code>RECOVERY_ROLE</code> may also revoke <code>GUARDIAN_ROLE</code>, and nothing else.</td></tr>
+        <tr><td><a href="contracts/PolicyRegistry.html"><code>PolicyRegistry</code></a></td><td><code>ATTESTER_ROLE</code></td><td><code>attest(codehash, kind, uri)</code>, <code>revoke(codehash)</code>. No delay.</td></tr>
+        <tr><td></td><td><code>DEFAULT_ADMIN_ROLE</code></td><td>Manage the attesters.</td></tr>
+        <tr><td><a href="contracts/CredentialRegistry.html"><code>CredentialRegistry</code></a></td><td>an attester in its list</td><td><code>set(subject, validUntil, quals, country)</code>; <code>setStatus</code> only on a record it wrote.</td></tr>
+        <tr><td></td><td>anyone</td><td><code>register(credential, sig)</code> with a credential an attester signed.</td></tr>
+        <tr><td></td><td><code>GUARDIAN_ROLE</code></td><td><code>blockSubject(address)</code>. <code>killAttester(id)</code>, which the admin may also call.</td></tr>
+        <tr><td></td><td><code>DEFAULT_ADMIN_ROLE</code> or <code>RECOVERY_ROLE</code></td><td><code>clearGuardianBlock(address)</code>, <code>reviveAttester(id)</code>.</td></tr>
+        <tr><td></td><td><code>DEFAULT_ADMIN_ROLE</code></td><td><code>addAttester</code>, <code>setAttesterAccount</code>, <code>setAttesterQuals</code>, roles. <code>RECOVERY_ROLE</code> may also revoke <code>GUARDIAN_ROLE</code>.</td></tr>
+        <tr><td><a href="contracts/ComplianceHook.html"><code>ComplianceHook</code></a></td><td>the token itself, or the holder of <code>DEFAULT_ADMIN_ROLE</code> on that token</td><td><code>setRules(token, rules)</code>. The hook has no roles of its own: it asks the token at call time (<code>ComplianceHook_NotTokenAdmin</code> otherwise). <code>afterTransfer</code> is open only to the token the context names.</td></tr>
+        <tr><td>Rules</td><td>the holder of <code>DEFAULT_ADMIN_ROLE</code> on the token</td><td><code>CredentialRule.setPolicy</code>, <code>SettlementWindowRule.setWindow</code>, <code>MinPositionRule.setMinPosition</code> and <code>setExempt</code>. Each rule asks the token at call time.</td></tr>
+        <tr><td></td><td>the holder of <code>AGENT_ROLE</code> on the token</td><td><code>HolderRestrictionRule.setLockup</code>, <code>setFrozen</code>.</td></tr>
+        <tr><td></td><td>nobody</td><td><code>FundHoldersRule</code> has no settings: its cap and exemptions live in the fund.</td></tr>
+        <tr><td><a href="contracts/Fund.html"><code>Fund</code></a></td><td>owner (main timelock)</td><td><code>registerClass</code>, <code>setRule</code>, <code>setHolderCap</code>, <code>setExempt</code>. <code>join</code> and <code>leave</code> are open only to the installed rule.</td></tr>
+        <tr><td><a href="contracts/ProxyDeployer.html"><code>ProxyDeployer</code></a></td><td>owner (main timelock)</td><td><code>deploy</code>: placing any later token is a governance operation.</td></tr>
+        <tr><td><a href="contracts/GovernanceTimelock.html">Main timelock</a></td><td><code>PROPOSER_ROLE</code>, <code>EXECUTOR_ROLE</code>, <code>CANCELLER_ROLE</code></td><td><code>schedule</code>, <code>execute</code>, <code>cancel</code> and their batch forms. Proposer and executor: governance. Cancellers: governance and the guardian.</td></tr>
+        <tr><td></td><td>the timelock itself</td><td><code>updateDelay</code>, <code>grantRole</code>, <code>revokeRole</code>, through its own operations. <code>RECOVERY_ROLE</code> may also revoke <code>CANCELLER_ROLE</code>, and nothing else.</td></tr>
+        <tr><td>Recovery timelock</td><td>governance</td><td>Proposer and executor. Nobody holds <code>CANCELLER_ROLE</code>. It administers itself.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <p>The word "operator" means three things in this code. <code>OPERATOR_ROLE</code> on an executor is the key that submits signed intents. <code>ctx.operator</code> in a movement's context is whoever called the token: the holder, a spender, the agent, the minter or an executor. <code>setOperator</code> on the 7540 vault approves a full delegate of a controller, which can open requests with the owner's assets or shares and choose the receiver of a claim.</p>
+  </div>
+</section>
+
+<section id="guardian">
+  <div class="prose">
+    <h2>The guardian: stop-only</h2>
+    <p>The guardian is a multisig with four powers, all of them ways to stop something, all with no delay:</p>
+  </div>
+  <ol class="steps">
+    <li><div><b>Pause a token.</b> <code>pause()</code> on a token stops every balance movement except <span class="k k-forced">FORCED</span> ones. Each token has its own pause.</div></li>
+    <li><div><b>Pause an executor.</b> <code>pause()</code> on <code>IntentExecutor</code> or <code>DvPExecutor</code> stops its operator from submitting.</div></li>
+    <li><div><b>Cancel a timelock operation.</b> With <code>CANCELLER_ROLE</code> it can cancel any operation on the main timelock that has not been executed, including one whose delay has passed.</div></li>
+    <li><div><b>Block an address or kill an attester.</b> <code>blockSubject</code> stops an address from sending or receiving under <code>CredentialRule</code>. Only an enforcement move can take tokens out of it (a forced transfer, or a burn by the burner); nothing can deliver tokens to it, not even a forced transfer. <code>killAttester</code> turns every credential that attester wrote into exit-only: the holder can leave but not receive.</div></li>
+  </ol>
+  <div class="prose">
+    <p>It cannot schedule or execute timelock operations, unpause, change a hook or a rule list, grant roles or upgrade. On the credential registry it cannot unblock, revive, add an attester or write a credential. It holds nothing on the recovery timelock. A guardian key that is stolen can therefore halt the system, not take value or change policy.</p>
+  </div>
+</section>
+
+<section id="recovery">
+  <div class="prose">
+    <h2>The two timelocks and the recovery path</h2>
+    <p>The main timelock's <code>cancel</code> does not look at what an operation does. So the guardian could cancel a scheduled <code>unpause</code>, or its own removal, again and again. The recovery timelock is the way around it. Governance proposes and executes there, it has the same seven-day delay, and nobody holds <code>CANCELLER_ROLE</code> on it, so what it schedules runs.</p>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 920 490" role="img" aria-label="The recovery path. 1: the guardian pauses a token at once. 2: governance schedules unpause on the main timelock. 3: the guardian cancels it. 4: governance schedules a batch on the recovery timelock. The batch waits at least the delay and nobody can cancel it. 5: governance executes the batch. 6: the recovery timelock unpauses the tokens and executors and revokes the guardian's GUARDIAN_ROLE. 7: it revokes the guardian's CANCELLER_ROLE on the main timelock.">
+        <defs>
+          <marker id="ro-seq" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+          <marker id="ro-seq-rej" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="rej"/></marker>
+        </defs>
+        <rect class="b2" x="15" y="16" width="150" height="44" rx="8"/>
+        <text x="90" y="43" class="bold" text-anchor="middle">Guardian</text>
+        <rect class="b2" x="195" y="16" width="150" height="44" rx="8"/>
+        <text x="270" y="43" class="bold" text-anchor="middle">Governance</text>
+        <rect class="act" x="375" y="16" width="150" height="44" rx="8"/>
+        <text x="450" y="43" class="bold" text-anchor="middle">Main timelock</text>
+        <rect class="act" x="555" y="16" width="150" height="44" rx="8"/>
+        <text x="630" y="43" class="bold" text-anchor="middle">Recovery timelock</text>
+        <rect class="b2" x="745" y="16" width="150" height="44" rx="8"/>
+        <text x="820" y="43" class="bold" text-anchor="middle">Tokens, executors</text>
+
+        <line class="life" x1="90" y1="60" x2="90" y2="470"/>
+        <line class="life" x1="270" y1="60" x2="270" y2="470"/>
+        <line class="life" x1="450" y1="60" x2="450" y2="470"/>
+        <line class="life" x1="630" y1="60" x2="630" y2="470"/>
+        <line class="life" x1="820" y1="60" x2="820" y2="470"/>
+
+        <line class="ln" x1="90" y1="100" x2="818" y2="100" marker-end="url(#ro-seq)"/>
+        <text x="100" y="92" class="m">1  pause(), at once</text>
+
+        <line class="ln" x1="270" y1="150" x2="448" y2="150" marker-end="url(#ro-seq)"/>
+        <text x="360" y="142" class="m" text-anchor="middle">2  schedule(unpause())</text>
+
+        <line class="ln-rej" x1="90" y1="200" x2="448" y2="200" marker-end="url(#ro-seq-rej)"/>
+        <text x="180" y="192" class="sm rej" text-anchor="middle">3  cancel(id): the veto</text>
+
+        <line class="ln" x1="270" y1="250" x2="628" y2="250" marker-end="url(#ro-seq)"/>
+        <text x="540" y="242" class="m" text-anchor="middle">4  scheduleBatch(…)</text>
+
+        <rect class="b2" x="560" y="270" width="190" height="44" rx="6"/>
+        <text x="572" y="288" class="sm">at least the delay;</text>
+        <text x="572" y="304" class="sm">nobody can cancel</text>
+
+        <line class="ln" x1="270" y1="345" x2="628" y2="345" marker-end="url(#ro-seq)"/>
+        <text x="540" y="337" class="m" text-anchor="middle">5  executeBatch(…)</text>
+
+        <line class="ln" x1="630" y1="395" x2="818" y2="395" marker-end="url(#ro-seq)"/>
+        <text x="725" y="387" class="m" text-anchor="middle">6  unpause, revoke guardian</text>
+
+        <line class="ln" x1="630" y1="445" x2="452" y2="445" marker-end="url(#ro-seq)"/>
+        <text x="540" y="437" class="m" text-anchor="middle">7  revoke CANCELLER_ROLE</text>
+      </svg>
+    </div>
+    <figcaption><b>A guardian that vetoes can be removed, and the pause lifted, after one delay.</b> The batch in step 4 can unpause every token and both executors, revoke <code>GUARDIAN_ROLE</code> on each of them and on the credential registry, revoke the guardian's <code>CANCELLER_ROLE</code> on the main timelock, and clear guardian blocks or revive attesters in the credential registry. The test <code>governance.test.ts</code> runs such a batch end to end.</figcaption>
+  </figure>
+  <div class="prose">
+    <p><code>RECOVERY_ROLE</code> allows those calls and nothing else. It is deliberately not a role admin, because a role admin could also grant. Instead the tokens and the executors accept it in <code>unpause()</code> next to <code>DEFAULT_ADMIN_ROLE</code>; their <code>revokeRole</code> override, and the credential registry's, let it revoke <code>GUARDIAN_ROLE</code>; the main timelock's lets it revoke <code>CANCELLER_ROLE</code>; and the credential registry also accepts it in <code>clearGuardianBlock</code> and <code>reviveAttester</code>. A test schedules forbidden calls through it, such as granting a role, swapping a hook, upgrading or proposing on the main timelock, and each one fails with <code>AccessControlUnauthorizedAccount</code>.</p>
+    <p>Each <code>unpause</code> in a recovery batch must target a contract that is paused when the batch runs, or <code>ExpectedPause</code> reverts the whole batch. Until the batch runs, the guardian keeps all its powers. The recovery path bounds the guardian, not governance: a compromised governance multisig proposes on both timelocks and is out of scope for this control.</p>
+  </div>
+</section>
+
+<section id="delay">
+  <div class="prose">
+    <h2>The delay</h2>
+    <p>A timelock operation can run no sooner than the timelock's <code>getMinDelay()</code> after it is scheduled (<code>TimelockInsufficientDelay</code> refuses a shorter one). The proposer may choose a longer delay, and a later change of the minimum does not move operations already scheduled. <code>Components</code> gives both timelocks the same <code>minDelay</code> parameter, seven days by default. The module does not refuse a smaller value; the hand-over check does, by asserting <code>getMinDelay() &gt;= 7 days</code> on both. Changing a delay is itself one of that timelock's operations, because <code>updateDelay</code> accepts only the timelock as caller.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Waits for a timelock</th><th>Takes effect at once</th></tr></thead>
+      <tbody>
+        <tr><td>Unpause. Replace a hook or a rule list. Rule settings: credential policy, settlement window, minimum position. Fund rule, cap, exemptions and classes. Upgrades. New tokens. Every role grant and revocation. Attester list changes in the credential registry. Custody of the 7540 vault.</td><td>Guardian: pause, cancel, block, kill an attester. Council: attest, revoke. KYC attester: credentials. Agent: forced transfers, frozen amounts, lockups, address freezes, 7540 recoveries. Minter, burner, operator and fulfiller: their daily work. Holders: their own movements.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="pause">
+  <div class="prose">
+    <h2>During a pause</h2>
+    <p>A token's pause is one check at the start of every balance movement, before the frozen-balance check and before the hook. It lets one kind through: an enforcement move by the agent. Calls that move no balance are not affected.</p>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 960 230" role="img" aria-label="While a token is paused, a movement of kind TRANSFER, EXECUTED, MINT or BURN is rejected with PolicyGated_TransferRejected(PAUSED). A FORCED movement continues to the frozen-balance check and the hook.">
+        <defs>
+          <marker id="ro-p" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+          <marker id="ro-p-rej" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="rej"/></marker>
+        </defs>
+        <rect class="chip c-transfer" x="20" y="20" width="130" height="30" rx="15"/>
+        <text x="85" y="40" class="mono bold t-transfer" text-anchor="middle">TRANSFER</text>
+        <rect class="chip c-executed" x="20" y="62" width="130" height="30" rx="15"/>
+        <text x="85" y="82" class="mono bold t-executed" text-anchor="middle">EXECUTED</text>
+        <rect class="chip c-mint" x="20" y="104" width="130" height="30" rx="15"/>
+        <text x="85" y="124" class="mono bold t-mint" text-anchor="middle">MINT</text>
+        <rect class="chip c-burn" x="20" y="146" width="130" height="30" rx="15"/>
+        <text x="85" y="166" class="mono bold t-burn" text-anchor="middle">BURN</text>
+        <rect class="chip c-forced" x="20" y="188" width="130" height="30" rx="15"/>
+        <text x="85" y="208" class="mono bold t-forced" text-anchor="middle">FORCED</text>
+
+        <path class="ln" d="M150,35 H200 V96 H258" marker-end="url(#ro-p)"/>
+        <path class="ln" d="M150,77 H200"/>
+        <path class="ln" d="M150,119 H200 V96"/>
+        <path class="ln" d="M150,161 H200 V119"/>
+        <path class="ln" d="M150,203 H230 V140 H258" marker-end="url(#ro-p)"/>
+
+        <rect class="b" x="260" y="70" width="230" height="84" rx="8"/>
+        <text x="276" y="94" class="bold">While the token is paused:</text>
+        <text x="276" y="114">is the kind FORCED?</text>
+        <text x="276" y="136" class="sm m">first check in the base's _check</text>
+
+        <line class="ln-rej" x1="490" y1="92" x2="578" y2="92" marker-end="url(#ro-p-rej)"/>
+        <text x="534" y="84" class="sm m" text-anchor="middle">no</text>
+        <rect class="rejbox" x="580" y="70" width="360" height="44" rx="6"/>
+        <text x="596" y="97" class="mono sm rej">PolicyGated_TransferRejected(PAUSED)</text>
+
+        <line class="ln" x1="490" y1="140" x2="578" y2="140" marker-end="url(#ro-p)"/>
+        <text x="534" y="132" class="sm m" text-anchor="middle">yes</text>
+        <rect class="act" x="580" y="126" width="360" height="44" rx="6"/>
+        <text x="596" y="153">continues: frozen-balance check, then the hook</text>
+      </svg>
+    </div>
+    <figcaption><b>Only an enforcement move gets past a pause.</b> <code>forcedTransfer</code>, and the 7540 vault's two recoveries, which announce the <span class="k k-forced">FORCED</span> kind, still run the rules, so the receiver must still hold a credential and must not be address-frozen.</figcaption>
+  </figure>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Where</th><th>Entry point</th><th>While paused</th></tr></thead>
+      <tbody>
+        <tr><td rowspan="6">Every token</td><td><code>transfer</code>, <code>transferFrom</code></td><td class="no">reverts <code>PolicyGated_TransferRejected(PAUSED)</code></td></tr>
+        <tr><td><code>forcedTransfer</code></td><td class="ok">works</td></tr>
+        <tr><td><code>setFrozenTokens</code>, <code>approve</code>, <code>permit</code></td><td class="ok">works: no balance moves</td></tr>
+        <tr><td><code>canTransfer</code>, <code>canTransferWithReason</code>, <code>canSend</code>, <code>canReceive</code></td><td><code>false</code>; <code>canTransferWithReason</code> gives the reason <code>PAUSED</code></td></tr>
+        <tr><td><code>setPolicyHook</code>, <code>upgradeToAndCall</code>, <code>grantRole</code></td><td class="ok">works, for their role holders</td></tr>
+        <tr><td><code>unpause</code></td><td>main or recovery timelock only; on a token that is not paused it reverts <code>ExpectedPause</code></td></tr>
+        <tr><td rowspan="3"><code>IntentToken</code></td><td><code>mint</code>, <code>burn</code></td><td class="no">reverts <code>PolicyGated_TransferRejected(PAUSED)</code></td></tr>
+        <tr><td><code>executeTransfer</code></td><td class="no">an intent that passes its own checks reverts <code>PolicyGated_TransferRejected(PAUSED)</code>; <code>canExecute</code> says <code>PAUSED</code></td></tr>
+        <tr><td><code>cancelIntent</code></td><td class="ok">works</td></tr>
+        <tr><td rowspan="3"><code>Gated4626Vault</code></td><td><code>deposit</code>, <code>mint</code></td><td class="no">a non-zero amount reverts <code>ERC4626ExceededMaxDeposit</code> or <code>ERC4626ExceededMaxMint</code>, because <code>maxDeposit</code> and <code>maxMint</code> return 0</td></tr>
+        <tr><td><code>withdraw</code>, <code>redeem</code></td><td class="no">a non-zero amount reverts <code>ERC4626ExceededMaxWithdraw</code> or <code>ERC4626ExceededMaxRedeem</code></td></tr>
+        <tr><td>the same four with 0</td><td class="no">reverts <code>PolicyGated_TransferRejected(PAUSED)</code></td></tr>
+        <tr><td rowspan="9"><code>Gated7540Vault</code></td><td><code>requestDeposit</code></td><td class="no">reverts <code>Gated7540Vault_ControllerNotEligible(PAUSED)</code></td></tr>
+        <tr><td><code>requestRedeem</code></td><td class="no">reverts <code>PolicyGated_TransferRejected(PAUSED)</code></td></tr>
+        <tr><td><code>fulfillDeposit</code>, <code>rejectDepositRequest</code></td><td class="ok">works: they move the asset only, no shares</td></tr>
+        <tr><td><code>fulfillRedeem</code></td><td class="no">reverts <code>PolicyGated_TransferRejected(PAUSED)</code> at the burn of the escrow</td></tr>
+        <tr><td><code>rejectRedeemRequest</code></td><td class="no">reverts <code>PolicyGated_TransferRejected(PAUSED)</code>; the shares stay in escrow</td></tr>
+        <tr><td><code>recoverRedeemRequest</code>, <code>recoverClaimable</code></td><td class="ok">works: <span class="k k-forced">FORCED</span></td></tr>
+        <tr><td><code>deposit</code>, <code>mint</code> (claims)</td><td class="no">reverts <code>Gated7540Vault_ControllerNotEligible(PAUSED)</code></td></tr>
+        <tr><td><code>redeem</code>, <code>withdraw</code> (claims)</td><td class="no">reverts <code>EnforcedPause()</code></td></tr>
+        <tr><td><code>setOperator</code>, <code>setCustody</code></td><td class="ok">works</td></tr>
+        <tr><td rowspan="2">An executor paused</td><td><code>IntentExecutor.execute</code>, <code>executeBatch</code></td><td class="no">reverts <code>EnforcedPause()</code></td></tr>
+        <tr><td><code>DvPExecutor.executeDvPGated</code>, <code>executeDvP3009</code></td><td class="no">reverts <code>EnforcedPause()</code>; the two pre-flights answer <code>PAUSED</code></td></tr>
+        <tr><td rowspan="2">A token paused, its executor not</td><td><code>IntentExecutor.execute</code>, <code>executeBatch</code></td><td class="no"><code>execute</code> passes the token's <code>PolicyGated_TransferRejected(PAUSED)</code> through unchanged; <code>executeBatch</code> wraps it in <code>IntentExecutor_BatchItemFailed(index, reason)</code></td></tr>
+        <tr><td><code>DvPExecutor</code> trades</td><td class="no">reverts <code>DvPExecutor_LegFailed(leg, reason)</code>, with the token's revert data as <code>reason</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <p>The registries, the hook, the rules, the fund and <code>ProxyDeployer</code> have no pause. In the credential registry the guardian's equivalent is blocking an address or killing an attester. <a href="deployment.html#incident">The incident runbook</a> puts the pause, the agent's enforcement and the resume in order.</p>
+  </div>
+</section>
+
+<section id="why">
+  <div class="prose">
+    <h2>Why it is built this way</h2>
+    <ul class="plain">
+      <li><b>Stopping is fast, starting is slow.</b> The guardian can only stop, so the one power with no delay cannot move value or change policy. Everything that starts something again, or changes it, waits for a timelock and is public while it waits.</li>
+      <li><b>A second timelock bounds the first one's cancellers.</b> Cancelling on the main timelock is blind to what is cancelled, so the guardian could block its own removal. The recovery timelock has no cancellers and only the narrow powers to undo a guardian, so governance always has a path the guardian cannot block.</li>
+      <li><b>Rules and the hook have no roles of their own.</b> They ask the token at call time who its admin or agent is. One shared rule instance can serve every token, and moving a token's admin role moves who configures its policy, with nothing else to update. The hand-over check asserts that no rule exposes <code>hasRole</code> or <code>owner</code>.</li>
+      <li><b>Only the timelock can upgrade.</b> <code>UPGRADER_ROLE</code> goes to the main timelock alone, and an upgrade must target reviewed code of the same template.</li>
+      <li><b>Executors are contracts, not keys.</b> <code>EXECUTOR_ROLE</code> on <code>IntentToken</code> is held by the two executor contracts only, so a signed intent always runs through code that the guardian can pause and that checks what it submits.</li>
+      <li><b>No expiring pause.</b> Nothing in the code ends a pause by time. Only a timelock lifts it, so a security control does not turn into a timer.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="connected">
+  <div class="prose"><h2>Connected to</h2></div>
+  <div class="cards">
+    <a class="card" href="contracts/GovernanceTimelock.html"><span class="name">GovernanceTimelock</span><p>The main timelock, with its one recovery power.</p></a>
+    <a class="card" href="contracts/PolicyGatedERC20Upgradeable.html"><span class="name">PolicyGatedERC20Upgradeable</span><p>The base that defines the token roles, the pause and <code>unpause</code>.</p></a>
+    <a class="card" href="contracts/CredentialRegistry.html"><span class="name">CredentialRegistry</span><p>Attesters, the guardian's block and kill, and the recovery calls.</p></a>
+    <a class="card" href="contracts/IntentExecutor.html"><span class="name">IntentExecutor</span><p>The operator's route to <code>executeTransfer</code>, with its own pause.</p></a>
+    <a class="card" href="contracts/DvPExecutor.html"><span class="name">DvPExecutor</span><p>Trade settlement, with the same role layout.</p></a>
+    <a class="card" href="deployment.html"><span class="name">Deployment and governance</span><p>How the roles are handed over and how policy changes later.</p></a>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose">
+    <h2>Source and tests</h2>
+    <ul class="plain">
+      <li>Role grants: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/ignition/modules/Activate.ts"><code>ignition/modules/Activate.ts</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/ignition/modules/Components.ts"><code>Components.ts</code></a>, role ids in <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/ignition/modules/roles.ts"><code>roles.ts</code></a></li>
+      <li>Hand-over check: <code>assertHandedOver</code> in <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/test/nodejs/fixtures.ts"><code>test/nodejs/fixtures.ts</code></a></li>
+      <li>Role gates in code: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/base/PolicyGatedERC20Upgradeable.sol"><code>PolicyGatedERC20Upgradeable.sol</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/governance/GovernanceTimelock.sol"><code>GovernanceTimelock.sol</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/identity/CredentialRegistry.sol"><code>CredentialRegistry.sol</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/intents/IntentExecutor.sol"><code>IntentExecutor.sol</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/intents/DvPExecutor.sol"><code>DvPExecutor.sol</code></a></li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/test/nodejs/governance.test.ts"><code>test/nodejs/governance.test.ts</code></a> (the delay, the guardian's veto and the recovery batch), <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/governance/GovernanceTimelock.t.sol"><code>GovernanceTimelock.t.sol</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/vaults/Gated7540Vault.t.sol"><code>Gated7540Vault.t.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/vaults/Gated4626Vault.t.sol"><code>Gated4626Vault.t.sol</code></a> (behaviour while paused)</li>
+    </ul>
+  </div>
+</section>
+
+<footer>Describes the contracts at commit <code>2f8c2e7</code> on <code>main</code>.</footer>
+</main>
+</body>
+</html>

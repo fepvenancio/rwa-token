@@ -119,7 +119,8 @@ describe("vault flows", async function () {
       await s.vault7540.write.deposit([usd("300"), alice.address, alice.address], { account: alice });
       await s.vault7540.write.requestRedeem([usd("300"), alice.address, alice.address], { account: alice });
 
-      // De-verified: a reject would FORCE the shares back to an unverified holder, so it fails; recovery does not.
+      // De-verified: a reject sends the shares back as a plain TRANSFER, which the credential rule refuses, so it
+      // fails; recovery (FORCED, to a verified account) does not.
       await deverify(s, alice.address);
       await viem.assertions.revertWithCustomError(
         s.vault7540.write.rejectRedeemRequest([alice.address], { account: fulfiller }),

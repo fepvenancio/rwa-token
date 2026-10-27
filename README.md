@@ -6,6 +6,10 @@ executor-settled transfers: the holder signs an EIP-712 intent, and an executor 
 share trade against cash in one transaction. A `Fund` groups several of these tokens as share classes and counts its
 investors across them.
 
+**Documentation:** <https://fepvenancio.github.io/rwa-token/> (the HTML pages in [`docs/`](docs/index.html)): an overview,
+one page per contract, and pages on roles, a single movement, deployment and governance, where the money sits, and the
+security review.
+
 > **Proprietary.** Copyright (c) 2026 Filipe Venancio. All rights reserved. See [LICENSE](LICENSE). No use, copying,
 > modification or deployment without prior written permission.
 
@@ -53,6 +57,10 @@ Every contract except the abstract `BaseRule` has its `.t.sol` next to it. [`PLA
 The audit package (scope, suppressions, mutation results, findings an auditor should know first) is indexed in
 [`SECURITY.md`](SECURITY.md).
 
+The delays below are the timelocks' `minDelay`: 7 days by default in `Components`, and the post-deploy check asserts at
+least 7 days on both. No contract enforces a floor: a timelock operation (`updateDelay`) can change it, after the
+current delay.
+
 | Power | Holder | Delay | Can |
 |---|---|---|---|
 | `DEFAULT_ADMIN_ROLE` | TimelockController | ≥ 7 days | grant/revoke every role, `unpause`, `setPolicyHook`, change the token's rule list on the hook, manage attesters |
@@ -66,7 +74,7 @@ The audit package (scope, suppressions, mutation results, findings an auditor sh
 | `GUARDIAN_ROLE` (executors) | multisig | none | pause an executor only; the timelock or the recovery timelock unpauses |
 | `ATTESTER_ROLE` (registry) | security council | none | attest / revoke codehashes |
 | `GUARDIAN_ROLE` (credential registry) | multisig | none | block an address or kill an attester, and nothing else; the main or recovery timelock undoes it |
-| attester (credential registry) | KYC provider, an account in the registry (≤ 64) | none | write a credential for an address within the qualification bits it may assert, or sign one that anyone submits; it can overwrite only an empty address, a record it wrote, or a killed attester's, and change the status only of records it wrote. The compromise limits are in [`docs/credentials.md`](docs/credentials.md) |
+| attester (credential registry) | KYC provider, an account in the registry (≤ 64) | none | write a credential for an address within the qualification bits it may assert, or sign one that anyone submits; it can overwrite only an empty address, a record it wrote, or a killed attester's, and change the status only of records it wrote. The compromise limits are on the [`CredentialRegistry` page](docs/contracts/CredentialRegistry.html#compromise) |
 | token `DEFAULT_ADMIN_ROLE` → rules | timelock | ≥ 7 days | set a token's credential policy, its minimum position and its exemptions and its settlement window |
 | `Fund` owner | timelock | ≥ 7 days | register a class, set the fund's rule and investor cap, exempt an account. Only the installed rule records which classes an account holds |
 | token `AGENT_ROLE` → rules | issuer | none | set or clear per-holder lockups, freeze or unfreeze a holder (`HolderRestrictionRule`) |
@@ -103,8 +111,7 @@ The audit package (scope, suppressions, mutation results, findings an auditor sh
   says `LOCKED`. The vaults' `maxDeposit` and `maxMint` probe a mint of a very large amount instead.
 - **Pause.** A guardian pause blocks every balance movement except FORCED ones (`forcedTransfer`, and the 7540 vault's `recoverRedeemRequest` and `recoverClaimable`), so the issuer's mint and burn too. Enforcement
   during a pause is `forcedTransfer` to a quarantine account, and the burn waits for the unpause. This differs from the
-  ERC-3643 reference token, whose agents can mint, burn and force while paused (checked 2026-10-23; see the governance page
-  in `docs/`).
+  ERC-3643 reference token, whose agents can mint, burn and force while paused (see [Deployment and governance](docs/deployment.html)).
 - **Fund monitor.** `Fund.firstBrokenClass()` names the first class whose hook no longer lists the fund's rule, which the
   hook cannot know; the post-deploy check asserts it is the zero address.
 - **Reentrancy.** `_update` is `nonReentrant` (transient storage), so no hook or rule can move balances during a
@@ -127,7 +134,8 @@ council and the KYC attester, and ends with the post-deploy checks below.
 1. **`Components`** (deployer):
    - the recovery timelock (plain OZ `TimelockController`, ≥ 7 days, governance multisig as proposer and executor),
      then the main timelock (`GovernanceTimelock`: ≥ 7 days, proposer **and** executor the governance multisig only;
-     the recovery timelock may revoke `CANCELLER_ROLE` there). The deployer is the admin of both until `Activate`;
+     OpenZeppelin also makes every proposer a canceller, so governance can cancel there too, and `Activate` adds the
+     guardian; the recovery timelock may revoke `CANCELLER_ROLE` there). The deployer is the admin of both until `Activate`;
    - the `PolicyRegistry`: admin = timelock, attester = council;
    - the one shared `ComplianceHook`, whose only immutable is the registry;
    - the `CredentialRegistry` (admin = deployer until `Activate`, guardian = the guardian multisig);

@@ -103,7 +103,7 @@ Further limits recorded during review:
   (`test_WhenTheIntentNamesTheIntentExecutorAndStatesAPayment_ItIsRefusedAndNothingMoves`). Without that, a signer who
   read a payment in the message and did not check which contract the `executor` field names would see the shares
   move without it. The token's `canExecute` does not see this refusal: it belongs to the executor.
-- **What the DvP executor trusts, and what it does not** ([`docs/flows-dvp.md`](docs/flows-dvp.md)). An operator chooses
+- **What the DvP executor trusts, and what it does not** ([`DvPExecutor` page](docs/contracts/DvPExecutor.html)). An operator chooses
   which signed legs to pair, when to submit, and the token addresses, and cannot redirect value: each party's signature
   covers the other party, the amounts, both tokens and the executor, the mirror check ties the two together, and for an
   ERC-3009 cash leg the buyer's nonce commits to the whole securities intent and to the security token's address.

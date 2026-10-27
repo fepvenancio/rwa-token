@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GovernanceTimelock · Gated Token Stack</title>
+<meta name="description" content="How the main timelock delays every governance change, how the guardian can cancel, and what the second, recovery timelock can still do.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="../index.html">Gated Token Stack</a>
+  <a href="../index.html">Overview</a>
+  <a href="../index.html#contracts">Contracts</a>
+  <a href="../roles.html">Who can do what</a>
+  <a href="../movement.html">One movement</a>
+  <a href="../deployment.html">Deployment and governance</a>
+  <a href="../money.html">Where the money sits</a>
+  <a href="../review.html">Security review</a>
+</nav>
+<main class="page">
+
+<header class="top">
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Governance</div>
+  <h1>GovernanceTimelock</h1>
+  <p class="lede">The main timelock. Every governance change waits here for a fixed delay before it runs, and the guardian can cancel it during the wait. It is OpenZeppelin's <code>TimelockController</code> with one addition: a second, recovery timelock may take away a canceller's right to cancel.</p>
+  <div class="facts">
+    <span class="fact"><b>contracts/governance/GovernanceTimelock.sol</b></span>
+    <span class="fact">immutable, <b>not a proxy</b></span>
+    <span class="fact">admin: <b>itself</b> after deployment</span>
+    <span class="fact">not attested: nothing installs it by code hash</span>
+  </div>
+</header>
+
+<section id="in-one-minute">
+  <div class="callout">
+    <h3>In one minute</h3>
+    <p>A timelock is a contract that holds admin powers and uses them only after a public waiting period. The governance multisig proposes a change, the timelock records it, and once the delay has passed (7 days by default) governance executes it. While it waits, anyone can see what is coming, and the guardian, a multisig that can only stop things, can cancel it. That cancel power has one weak spot: the guardian could cancel its own replacement. So a second timelock exists, with the same delay and nobody able to cancel it, which can do only a few undoing things: unpause, take the guardian's role away, clear a guardian block or revive an attester in the credential registry, and take its cancel right on this timelock.</p>
+  </div>
+</section>
+
+<section id="how">
+  <div class="prose">
+    <h2>How it works</h2>
+    <p>Two timelocks, one proposer. Governance proposes and executes on both. On the main timelock the guardian can cancel; on the recovery timelock nobody can, but it reaches only a handful of functions.</p>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 820 446" role="img" aria-label="The main timelock: governance schedules an operation, it waits at least the minimum delay, then governance executes it and the timelock calls the target as admin or owner of the three tokens, both executors, both registries, the Fund and the ProxyDeployer. During the wait the guardian can cancel it, and a cancelled operation never runs. The recovery timelock: governance schedules, it waits the same delay and no one can cancel, the guardian holds no role there, then governance executes it. It can only call unpause and revoke GUARDIAN_ROLE on each token and both executors; revoke GUARDIAN_ROLE, clear a guardian block and revive an attester on the credential registry; and revoke CANCELLER_ROLE on the main timelock.">
+        <defs>
+          <marker id="gt-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+          <marker id="gt-arrow-rej" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="rej"/></marker>
+        </defs>
+
+        <!-- Main timelock -->
+        <text x="20" y="24" class="bold">Main timelock: GovernanceTimelock</text>
+        <rect class="act" x="20" y="44" width="140" height="50" rx="8"/>
+        <text x="36" y="65">Governance</text>
+        <text x="36" y="83" class="sm m">multisig</text>
+        <line class="ln" x1="160" y1="69" x2="216" y2="69" marker-end="url(#gt-arrow)"/>
+        <text x="166" y="61" class="sm m">schedule</text>
+        <rect class="b" x="220" y="44" width="200" height="50" rx="8"/>
+        <text x="236" y="65">Pending operation</text>
+        <text x="236" y="83" class="sm m">waits at least minDelay</text>
+        <line class="ln" x1="420" y1="69" x2="476" y2="69" marker-end="url(#gt-arrow)"/>
+        <text x="428" y="61" class="sm m">execute</text>
+        <rect class="b2" x="480" y="34" width="320" height="70" rx="8"/>
+        <text x="496" y="54" class="sm m">Calls the target as admin or owner of</text>
+        <text x="496" y="72" class="sm">the three tokens, both executors,</text>
+        <text x="496" y="90" class="sm">both registries, Fund, ProxyDeployer</text>
+
+        <rect class="b" x="220" y="128" width="200" height="44" rx="8"/>
+        <text x="236" y="147">Guardian multisig</text>
+        <text x="236" y="164" class="mono sm m">CANCELLER_ROLE</text>
+        <line class="ln-rej" x1="320" y1="128" x2="320" y2="98" marker-end="url(#gt-arrow-rej)"/>
+        <text x="328" y="117" class="mono sm rej">cancel(id)</text>
+        <text x="436" y="155" class="sm rej">cancelled: that operation never runs</text>
+
+        <line class="tick" x1="20" y1="198" x2="800" y2="198"/>
+
+        <!-- Recovery timelock -->
+        <text x="20" y="226" class="bold">Recovery timelock: plain TimelockController</text>
+        <rect class="act" x="20" y="262" width="140" height="50" rx="8"/>
+        <text x="36" y="283">Governance</text>
+        <text x="36" y="301" class="sm m">multisig</text>
+        <line class="ln" x1="160" y1="287" x2="216" y2="287" marker-end="url(#gt-arrow)"/>
+        <text x="166" y="279" class="sm m">schedule</text>
+        <rect class="b" x="220" y="262" width="200" height="50" rx="8"/>
+        <text x="236" y="283">Pending operation</text>
+        <text x="236" y="301" class="sm m">same delay; no one can cancel</text>
+        <text x="220" y="334" class="sm m">The guardian holds no role here.</text>
+
+        <line class="ln" x1="420" y1="287" x2="470" y2="287"/>
+        <text x="424" y="279" class="sm m">execute</text>
+        <line class="ln" x1="470" y1="269" x2="470" y2="401"/>
+        <line class="ln" x1="470" y1="269" x2="490" y2="269" marker-end="url(#gt-arrow)"/>
+        <line class="ln" x1="470" y1="335" x2="490" y2="335" marker-end="url(#gt-arrow)"/>
+        <line class="ln" x1="470" y1="401" x2="490" y2="401" marker-end="url(#gt-arrow)"/>
+
+        <rect class="b2" x="494" y="244" width="306" height="50" rx="8"/>
+        <text x="508" y="264">Each token and both executors</text>
+        <text x="508" y="282" class="mono sm">unpause(), revokeRole(GUARDIAN_ROLE, …)</text>
+        <rect class="b2" x="494" y="304" width="306" height="62" rx="8"/>
+        <text x="508" y="323">Credential registry</text>
+        <text x="508" y="340" class="mono sm">revokeRole(GUARDIAN_ROLE, …)</text>
+        <text x="508" y="356" class="mono sm">clearGuardianBlock, reviveAttester</text>
+        <rect class="b2" x="494" y="376" width="306" height="50" rx="8"/>
+        <text x="508" y="396">Main timelock</text>
+        <text x="508" y="413" class="mono sm">revokeRole(CANCELLER_ROLE, …)</text>
+      </svg>
+    </div>
+    <figcaption><b>The guardian can stop a change, and recovery can stop the guardian.</b> If the guardian cancels the operation that would replace it, governance schedules the same undoing steps on the recovery timelock, which the guardian cannot cancel. After the same delay, one batch can unpause what the guardian paused and take its roles everywhere, including its cancel right on the main timelock.</figcaption>
+  </figure>
+  <ol class="steps">
+    <li><div><b>Propose.</b> A <code>PROPOSER_ROLE</code> holder calls <code>schedule</code> or <code>scheduleBatch</code> with the target, the call data and a delay. A delay shorter than the timelock's minimum is refused (<code>TimelockInsufficientDelay</code>).</div></li>
+    <li><div><b>Wait.</b> The operation is public from the moment it is scheduled. Executing it early fails with <code>TimelockUnexpectedOperationState</code>.</div></li>
+    <li><div><b>Cancel, perhaps.</b> A <code>CANCELLER_ROLE</code> holder can cancel any operation that is scheduled and not yet executed, including one whose delay has already passed.</div></li>
+    <li><div><b>Execute.</b> An <code>EXECUTOR_ROLE</code> holder calls <code>execute</code> or <code>executeBatch</code>, and the timelock makes the calls itself. A batch runs all its calls or none.</div></li>
+  </ol>
+</section>
+
+<section id="functions">
+  <div class="prose">
+    <h2>What it can do</h2>
+    <p>Everything except the last row of the table is OpenZeppelin's <code>TimelockController</code> (contracts 5.6.1), unchanged.</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th><th>Reverts</th></tr></thead>
+      <tbody>
+        <tr><td><code>schedule</code>, <code>scheduleBatch</code></td><td><code>PROPOSER_ROLE</code>: governance</td><td>Records an operation and when it becomes ready.</td><td><code>TimelockInsufficientDelay</code> below the minimum; <code>TimelockUnexpectedOperationState</code> if the same operation exists</td></tr>
+        <tr><td><code>execute</code>, <code>executeBatch</code></td><td><code>EXECUTOR_ROLE</code>: governance</td><td>Runs a ready operation. The target sees the timelock as the caller.</td><td><code>TimelockUnexpectedOperationState</code> if not ready; the target's own revert</td></tr>
+        <tr><td><code>cancel(id)</code></td><td><code>CANCELLER_ROLE</code>: governance and the guardian</td><td>Deletes a pending operation.</td><td><code>TimelockUnexpectedOperationState</code> if not pending</td></tr>
+        <tr><td><code>updateDelay(newDelay)</code></td><td>The timelock itself</td><td>Changes the minimum delay. Only reachable as one of its own operations, so it waits out the current delay.</td><td><code>TimelockUnauthorizedCaller</code></td></tr>
+        <tr><td><code>grantRole</code>, <code>revokeRole</code></td><td><code>DEFAULT_ADMIN_ROLE</code>: the timelock itself</td><td>Changes who proposes, executes and cancels. Also an operation of its own.</td><td><code>AccessControlUnauthorizedAccount</code></td></tr>
+        <tr><td><code>getMinDelay</code>, <code>getOperationState</code>, <code>isOperationPending</code>, <code>isOperationReady</code>, <code>hashOperation</code></td><td>Anyone (read-only)</td><td>Read the delay and the state of an operation.</td><td></td></tr>
+        <tr><td><code>revokeRole(CANCELLER_ROLE, account)</code></td><td><code>RECOVERY_ROLE</code>: the recovery timelock</td><td>The one addition: takes the cancel right from any account. Every other revocation still needs the role's admin.</td><td></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small">The constructor is OpenZeppelin's (delay, proposers, executors, optional bootstrap admin) plus the recovery timelock's address, which is granted <code>RECOVERY_ROLE</code> and may not be zero (<code>GovernanceTimelock_ZeroAddress</code>).</p>
+</section>
+
+<section id="deployed">
+  <div class="prose">
+    <h2>Roles as deployed</h2>
+    <p>The <code>Components</code> deployment module creates the recovery timelock first, then the main timelock, which names it. <code>Activate</code> finishes the setup and the deployer account gives up its admin rights on both.</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Role</th><th>Main timelock</th><th>Recovery timelock</th></tr></thead>
+      <tbody>
+        <tr><td><code>PROPOSER_ROLE</code></td><td>Governance multisig</td><td>Governance multisig</td></tr>
+        <tr><td><code>EXECUTOR_ROLE</code></td><td>Governance multisig</td><td>Governance multisig</td></tr>
+        <tr><td><code>CANCELLER_ROLE</code></td><td>Governance multisig (OpenZeppelin gives every proposer this role) and the guardian (granted by <code>Activate</code>)</td><td>Nobody: <code>Activate</code> revokes the one OpenZeppelin gave governance</td></tr>
+        <tr><td><code>DEFAULT_ADMIN_ROLE</code></td><td>Itself (the deployer renounces at the end of <code>Activate</code>)</td><td>Itself (the deployer renounces)</td></tr>
+        <tr><td><code>RECOVERY_ROLE</code></td><td>The recovery timelock</td><td>Not defined: it is a plain <code>TimelockController</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small">The guardian can cancel on the main timelock but cannot propose or execute there, and holds no role at all on the recovery timelock. The post-deployment check (<code>assertHandedOver</code> in <code>test/nodejs/fixtures.ts</code>) asserts the guardian's roles, the recovery timelock's roles and the absence of cancellers on it, the deployer's renunciation and both delays; it does not check governance's roles on the main timelock.</p>
+</section>
+
+<section id="delay">
+  <div class="prose">
+    <h2>The delay</h2>
+    <p>The delay is a deployment parameter, <code>minDelay</code> in the <code>Components</code> module, 7 days (604,800 seconds) unless the deployment sets another value. Both timelocks get the same value, so the recovery path is never faster than the normal one.</p>
+    <ul class="plain">
+      <li><b>What enforces it per operation:</b> OpenZeppelin refuses to schedule anything with a shorter delay than the current minimum, and refuses to execute before the scheduled time.</li>
+      <li><b>What checks the 7 days:</b> the contract itself sets no floor; it takes whatever the constructor is given. The post-deployment check asserts <code>getMinDelay() ≥ 7 days</code> on both timelocks.</li>
+      <li><b>Changing it later:</b> <code>updateDelay</code> accepts only a call from the timelock itself, so a new delay is an ordinary operation: it waits out the current delay, and on the main timelock the guardian can cancel it.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="holds">
+  <div class="prose">
+    <h2>What the main timelock controls</h2>
+    <p>After the hand-over, every lasting change to the system goes through this timelock. It holds:</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Where</th><th>What it holds</th><th>What that lets governance do, after the delay</th></tr></thead>
+      <tbody>
+        <tr><td>The three tokens</td><td><code>DEFAULT_ADMIN_ROLE</code>, and the only <code>UPGRADER_ROLE</code></td><td>Grant and revoke every token role, <code>unpause</code>, <code>setPolicyHook</code>, upgrade to an attested implementation of the same template, change the token's rule list on the hook (<code>setRules</code>) and the token's settings in the rules that the token's admin controls, and <code>setCustody</code> on the 7540 vault.</td></tr>
+        <tr><td><code>IntentExecutor</code>, <code>DvPExecutor</code></td><td><code>DEFAULT_ADMIN_ROLE</code></td><td>Grant and revoke <code>OPERATOR_ROLE</code> and <code>GUARDIAN_ROLE</code>, <code>unpause</code>.</td></tr>
+        <tr><td><code>PolicyRegistry</code></td><td><code>DEFAULT_ADMIN_ROLE</code></td><td>Decide who holds <code>ATTESTER_ROLE</code>. It does not attest.</td></tr>
+        <tr><td><code>CredentialRegistry</code></td><td><code>DEFAULT_ADMIN_ROLE</code></td><td>Manage attesters and the guardian, clear a guardian block, revive an attester.</td></tr>
+        <tr><td><code>ProxyDeployer</code>, <code>Fund</code></td><td>Ownership</td><td>Place a new token; register a fund class, set the fund's rule, investor cap and exemptions.</td></tr>
+        <tr><td>Itself</td><td><code>DEFAULT_ADMIN_ROLE</code></td><td>Change its own proposers, executors, cancellers and delay.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="guardian">
+  <div class="prose">
+    <h2>The guardian as canceller</h2>
+    <p>The guardian is a multisig whose powers all stop things and take effect at once: it pauses tokens and both executors, it can block a subject or switch off an attester in the credential registry, and on this timelock it can cancel. It cannot unpause, grant roles, change hooks or upgrade. Those are timelock operations.</p>
+    <p>Cancelling is what makes the delay a safeguard: a harmful operation can be stopped before it runs. But it also lets the guardian cancel the operation that would replace it, or that would unpause a token it paused. That is the case the recovery timelock exists for.</p>
+  </div>
+</section>
+
+<section id="recovery">
+  <div class="prose">
+    <h2>The recovery timelock</h2>
+    <p>A plain OpenZeppelin <code>TimelockController</code>, with the same delay and governance as proposer and executor, and no cancellers. It holds <code>RECOVERY_ROLE</code> in seven places: each of the three tokens, both executors, the credential registry, and this timelock. Apart from being its own admin, it holds nothing else anywhere, and nothing on <code>PolicyRegistry</code>.</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Where</th><th><code>RECOVERY_ROLE</code> allows exactly</th></tr></thead>
+      <tbody>
+        <tr><td>Each token, <code>IntentExecutor</code>, <code>DvPExecutor</code></td><td><code>unpause()</code>, and <code>revokeRole(GUARDIAN_ROLE, account)</code></td></tr>
+        <tr><td><code>CredentialRegistry</code></td><td><code>revokeRole(GUARDIAN_ROLE, account)</code>, <code>clearGuardianBlock(subject)</code>, <code>reviveAttester(id)</code></td></tr>
+        <tr><td>Main timelock (<code>GovernanceTimelock</code>)</td><td><code>revokeRole(CANCELLER_ROLE, account)</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <p>It cannot grant any role, change a hook, upgrade, or propose, execute or cancel on the main timelock; the tests try each and expect <code>AccessControlUnauthorizedAccount</code>. Each <code>unpause</code> in a recovery batch must target something that is paused when the batch runs, otherwise OpenZeppelin's <code>ExpectedPause</code> reverts the whole batch. Until the batch executes, the guardian keeps all its powers.</p>
+    <p class="note">Recovery bounds the guardian, not governance. The governance multisig proposes and executes on both timelocks, so a compromised governance multisig is outside what this control protects against.</p>
+  </div>
+</section>
+
+<section id="why">
+  <div class="prose">
+    <h2>Why it is built this way</h2>
+    <ul class="plain">
+      <li><b>OpenZeppelin unchanged, plus one override.</b> <code>revokeRole</code> lets <code>RECOVERY_ROLE</code> revoke <code>CANCELLER_ROLE</code> and nothing else, then falls through to OpenZeppelin for every other case.</li>
+      <li><b><code>RECOVERY_ROLE</code> is not a role admin.</b> A role admin could also grant the role it administers. Revoking is the smallest power that gets governance past a guardian that cancels its own replacement. Its own admin is <code>DEFAULT_ADMIN_ROLE</code>, the timelock itself, like every other role.</li>
+      <li><b>No cancellers on the recovery timelock.</b> If anyone could cancel there, the guardian problem would only move. The same delay keeps it from being a shortcut around the main timelock.</li>
+      <li><b>The guardian is stop-only.</b> Every power it has takes effect at once and only stops something. Everything that starts or changes something waits for a timelock.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="connected">
+  <div class="prose"><h2>Connected to</h2></div>
+  <div class="cards">
+    <a class="card" href="PolicyGatedERC20Upgradeable.html"><span class="name">PolicyGatedERC20Upgradeable</span><p>The token base: pause by the guardian, unpause and every role change through a timelock.</p></a>
+    <a class="card" href="PolicyRegistry.html"><span class="name">PolicyRegistry</span><p>Administered by this timelock, which decides who attests.</p></a>
+    <a class="card" href="ProxyDeployer.html"><span class="name">ProxyDeployer</span><p>Owned by this timelock: any later token is placed through governance.</p></a>
+    <a class="card" href="CredentialRegistry.html"><span class="name">CredentialRegistry</span><p>Where the recovery timelock can also clear a guardian block and revive an attester.</p></a>
+    <a class="card" href="IntentExecutor.html"><span class="name">IntentExecutor</span><p>Paused by the guardian, unpaused by either timelock.</p></a>
+    <a class="card" href="../roles.html"><span class="name">Who can do what</span><p>Every role in the system and who holds it.</p></a>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose">
+    <h2>Source and tests</h2>
+    <ul class="plain">
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/governance/GovernanceTimelock.sol"><code>contracts/governance/GovernanceTimelock.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/interfaces/IGovernanceTimelock.sol"><code>IGovernanceTimelock.sol</code></a></li>
+      <li>Deployment: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/ignition/modules/Components.ts"><code>ignition/modules/Components.ts</code></a> (both timelocks, the delay) and <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/ignition/modules/Activate.ts"><code>Activate.ts</code></a> (the guardian as canceller, <code>RECOVERY_ROLE</code> grants, the hand-over)</li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/governance/GovernanceTimelock.t.sol"><code>GovernanceTimelock.t.sol</code></a> (what <code>RECOVERY_ROLE</code> can and cannot do), <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/test/nodejs/governance.test.ts"><code>test/nodejs/governance.test.ts</code></a> (upgrades, cancels and recovery through the real timelocks), and <code>assertHandedOver</code> in <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/test/nodejs/fixtures.ts"><code>test/nodejs/fixtures.ts</code></a> (the post-deployment check)</li>
+    </ul>
+  </div>
+</section>
+
+<footer>Describes the contracts at commit <code>2f8c2e7</code> on <code>main</code>.</footer>
+</main>
+</body>
+</html>

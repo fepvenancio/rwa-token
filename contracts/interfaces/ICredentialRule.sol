@@ -69,7 +69,7 @@ interface ICredentialRule is IComplianceRule {
   /**
    * @notice Sets a token's policy
    * @dev Only the token's DEFAULT_ADMIN_ROLE. Replaces the whole policy. `_attesters == 0` removes the policy: the
-   *      token then admits no receiver, while existing holders can still send and burn
+   *      token then admits no receiver, so every movement but a burn is refused; holders can still leave through a burn
    * @param _token The token
    * @param _requireAll Bits every receiver must have
    * @param _requireAny Bits of which a receiver must have at least one; zero ignores the test

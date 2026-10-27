@@ -546,7 +546,7 @@ contract FundIntegration_VaultEscrow is FundIntegrationTest {
     _mintToken(_carol, 1 ether);
     assertEq(_fund.holderCount(), 2);
 
-    // The return is a plain transfer, so alice is a new investor at a full cap and the reject reverts (owner decision M-2).
+    // The return is a plain transfer, so alice is a new investor at a full cap and the reject reverts.
     vm.expectRevert(_rejected(Reasons.MAX_HOLDERS));
     vm.prank(_fulfiller);
     _vault7540.rejectRedeemRequest(_alice);
@@ -591,7 +591,7 @@ contract FundIntegration_Claimable is FundIntegrationTest {
     _deposit4626(_carol, 1e6);
     assertEq(_fund.holderCount(), 2);
 
-    // The claim re-runs the policy, so it is refused (owner decision M-3), and the shares stay claimable.
+    // The claim re-runs the policy, so it is refused, and the shares stay claimable.
     vm.expectRevert(
       abi.encodeWithSelector(IGated7540Vault.Gated7540Vault_ControllerNotEligible.selector, Reasons.MAX_HOLDERS)
     );
@@ -687,7 +687,7 @@ contract FundIntegration_Replacement is FundIntegrationTest {
   }
 }
 
-/// @notice The monitor against a real hook and real classes (PLAN: RD10, `Fund.isClassIntact` and `firstBrokenClass`)
+/// @notice The monitor against a real hook and real classes (`Fund.isClassIntact` and `firstBrokenClass`)
 contract FundIntegration_Integrity is FundIntegrationTest {
   function test_WhenTheStackIsDeployed_EveryClassIsIntact() external view {
     assertTrue(_fund.isClassIntact(address(_token)));

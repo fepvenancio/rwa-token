@@ -260,8 +260,8 @@ export type Stack = Awaited<ReturnType<typeof deployStack>>;
  * - the fund is owned by the timelock, runs the attested rule that points back at it, has the intended cap, and holds
  *   the three tokens as its classes, in that order, each intact (its hook lists the fund's rule: `firstBrokenClass()`
  *   is the zero address);
- * - the recovery timelock holds exactly RECOVERY_ROLE on each token, both executors and the main timelock (nothing
- *   else, nowhere else), has no cancellers, and the guardian holds nothing on it.
+ * - the recovery timelock holds exactly RECOVERY_ROLE on each token, both executors, the credential registry and the
+ *   main timelock (nothing else, nowhere else), has no cancellers, and the guardian holds nothing on it.
  */
 export async function assertHandedOver(s: Omit<Stack, "holders" | "asset" | "implementations">) {
   const deployer = s.wallets.deployer.account.address;

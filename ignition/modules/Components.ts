@@ -28,7 +28,7 @@ export default buildModule("Components", (m) => {
   const guardian = m.getParameter<string>("guardian");
   const minDelay = m.getParameter<bigint>("minDelay", 7n * 24n * 3_600n);
 
-  // M-1: the recovery timelock (same delay, governance proposes and executes, no cancellers, guardian holds nothing)
+  // The recovery timelock (same delay, governance proposes and executes, no cancellers, guardian holds nothing)
   // can only unpause and remove the guardian everywhere; deployed first so the main timelock can name it.
   const recoveryTimelock = m.contract("TimelockController", [minDelay, [governance], [governance], deployer], {
     id: "recoveryTimelock",

@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SettlementWindowRule · Gated Token Stack</title>
+<meta name="description" content="How SettlementWindowRule lets executor-settled transfers happen only inside a token's daily UTC window on enabled weekdays, including overnight sessions.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="../index.html">Gated Token Stack</a>
+  <a href="../index.html">Overview</a>
+  <a href="../index.html#contracts">Contracts</a>
+  <a href="../roles.html">Who can do what</a>
+  <a href="../movement.html">One movement</a>
+  <a href="../deployment.html">Deployment and governance</a>
+  <a href="../money.html">Where the money sits</a>
+  <a href="../review.html">Security review</a>
+</nav>
+<main class="page">
+
+<header class="top">
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Policy</div>
+  <h1>SettlementWindowRule</h1>
+  <p class="lede">Opening hours for executor-settled transfers. An intent carried out by an executor settles only inside the token's daily window, in UTC, on the weekdays the token enables. Every other kind of movement ignores the window.</p>
+  <div class="facts">
+    <span class="fact"><b>contracts/hooks/rules/SettlementWindowRule.sol</b></span>
+    <span class="fact">immutable, <b>not a proxy</b></span>
+    <span class="fact">set per token by the token's <b>DEFAULT_ADMIN_ROLE</b></span>
+    <span class="fact">attested as <b>RULE</b></span>
+  </div>
+</header>
+
+<section id="in-one-minute">
+  <div class="callout">
+    <h3>In one minute</h3>
+    <p>On the intent token a holder can sign a transfer in advance (an intent) and let an executor carry it out, alone or as one side of a trade against cash. This rule gives those settlements opening hours, for example 09:00 to 17:00 UTC, Monday to Friday. Outside the hours the executor's call is refused with <code>OUTSIDE_SETTLEMENT_WINDOW</code>, and the signed intent can be settled later, until its own deadline. The holder's own transfers, mints, burns and the agent's forced transfers are not affected. A token that lists the rule but has no hours set refuses every executor settlement.</p>
+  </div>
+</section>
+
+<section id="how">
+  <div class="prose">
+    <h2>How the window works over a week</h2>
+    <p>A window is three numbers: <code>open</code> and <code>close</code>, each a second of the UTC day (0 to 86399), and <code>dayMask</code>, seven bits for the weekdays, bit 0 for Monday up to bit 6 for Sunday. <code>MON_TO_FRI</code> is <code>0x1F</code>. The diagram shows the same mask with two windows: one inside the day, one across midnight.</p>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 780 248" role="img" aria-label="One week, Monday to Sunday, with the MON_TO_FRI mask, so Monday to Friday are enabled. A same-day window from 09:00 to 17:00 UTC is open in the middle of each enabled day and never on Saturday or Sunday. An overnight window from 22:00 to 02:00 UTC opens at 22:00 on each enabled day and runs to 02:00 the next morning, so Friday's session runs into Saturday until 02:00, while Monday from 00:00 to 02:00 is closed because Sunday is not enabled.">
+        <rect class="band" x="166" y="14" width="84" height="40"/>
+        <rect class="band" x="250" y="14" width="84" height="40"/>
+        <rect class="band" x="334" y="14" width="84" height="40"/>
+        <rect class="band" x="418" y="14" width="84" height="40"/>
+        <rect class="band" x="502" y="14" width="84" height="40"/>
+        <rect class="b2" x="586" y="14" width="84" height="40"/>
+        <rect class="b2" x="670" y="14" width="84" height="40"/>
+        <text x="20" y="31" class="bold">Weekday</text>
+        <text x="20" y="47" class="mono sm m">MON_TO_FRI</text>
+        <text x="208" y="31" class="bold" text-anchor="middle">Mon</text>
+        <text x="292" y="31" class="bold" text-anchor="middle">Tue</text>
+        <text x="376" y="31" class="bold" text-anchor="middle">Wed</text>
+        <text x="460" y="31" class="bold" text-anchor="middle">Thu</text>
+        <text x="544" y="31" class="bold" text-anchor="middle">Fri</text>
+        <text x="628" y="31" class="bold m" text-anchor="middle">Sat</text>
+        <text x="712" y="31" class="bold m" text-anchor="middle">Sun</text>
+        <text x="208" y="47" class="mono sm m" text-anchor="middle">bit 0</text>
+        <text x="292" y="47" class="mono sm m" text-anchor="middle">bit 1</text>
+        <text x="376" y="47" class="mono sm m" text-anchor="middle">bit 2</text>
+        <text x="460" y="47" class="mono sm m" text-anchor="middle">bit 3</text>
+        <text x="544" y="47" class="mono sm m" text-anchor="middle">bit 4</text>
+        <text x="628" y="47" class="mono sm m" text-anchor="middle">off</text>
+        <text x="712" y="47" class="mono sm m" text-anchor="middle">off</text>
+
+        <line class="life" x1="166" y1="54" x2="166" y2="172"/>
+        <line class="life" x1="250" y1="54" x2="250" y2="172"/>
+        <line class="life" x1="334" y1="54" x2="334" y2="172"/>
+        <line class="life" x1="418" y1="54" x2="418" y2="172"/>
+        <line class="life" x1="502" y1="54" x2="502" y2="172"/>
+        <line class="life" x1="586" y1="54" x2="586" y2="172"/>
+        <line class="life" x1="670" y1="54" x2="670" y2="172"/>
+        <line class="life" x1="754" y1="54" x2="754" y2="172"/>
+
+        <text x="20" y="88" class="bold">Same-day window</text>
+        <text x="20" y="104" class="sm m">09:00 to 17:00 UTC</text>
+        <rect class="seg-a" x="197.5" y="80" width="28" height="24" rx="3"/>
+        <rect class="seg-a" x="281.5" y="80" width="28" height="24" rx="3"/>
+        <rect class="seg-a" x="365.5" y="80" width="28" height="24" rx="3"/>
+        <rect class="seg-a" x="449.5" y="80" width="28" height="24" rx="3"/>
+        <rect class="seg-a" x="533.5" y="80" width="28" height="24" rx="3"/>
+
+        <text x="20" y="150" class="bold">Overnight window</text>
+        <text x="20" y="166" class="sm m">22:00 to 02:00 UTC</text>
+        <rect class="seg-a" x="243" y="142" width="14" height="24" rx="3"/>
+        <rect class="seg-a" x="327" y="142" width="14" height="24" rx="3"/>
+        <rect class="seg-a" x="411" y="142" width="14" height="24" rx="3"/>
+        <rect class="seg-a" x="495" y="142" width="14" height="24" rx="3"/>
+        <rect class="seg-a" x="579" y="142" width="14" height="24" rx="3"/>
+        <rect class="rejbox dash" x="166" y="142" width="7" height="24"/>
+        <rect class="rejbox dash" x="747" y="142" width="7" height="24"/>
+
+        <line class="tick" x1="590" y1="168" x2="590" y2="182"/>
+        <text x="500" y="196" class="sm">Sat 01:00 open: Friday's session</text>
+        <line class="tick" x1="170" y1="168" x2="170" y2="182"/>
+        <text x="166" y="196" class="sm rej">Mon 01:00 closed: Sunday is off</text>
+
+        <line class="tick" x1="166" y1="214" x2="166" y2="222"/>
+        <line class="tick" x1="208" y1="214" x2="208" y2="222"/>
+        <line class="tick" x1="250" y1="214" x2="250" y2="222"/>
+        <text x="20" y="236" class="sm m">hours, UTC</text>
+        <text x="166" y="236" class="mono sm m" text-anchor="middle">00</text>
+        <text x="208" y="236" class="mono sm m" text-anchor="middle">12</text>
+        <text x="250" y="236" class="mono sm m" text-anchor="middle">24</text>
+      </svg>
+    </div>
+    <figcaption><b>An overnight session belongs to the day it opened.</b> Each column is one UTC day from 00:00 to 24:00; shaded bars are open. With <code>open &lt; close</code> the window is open from <code>open</code> (included) to <code>close</code> (excluded) on each enabled day. With <code>open &gt; close</code> it opens on an enabled day and runs past midnight to <code>close</code>, even into a day that is off, and no session opens on a day that is off. The dashed red slots are the Sunday session that never opens.</figcaption>
+  </figure>
+  <ol class="steps">
+    <li><div><b>Which day.</b> The rule takes the block's timestamp. The day number is <code>timestamp / 86400</code>, the second of the day is <code>timestamp % 86400</code>, and the weekday is <code>(day + 3) % 7</code>, with Monday as 0. Day 0, 1 January 1970, was a Thursday, which is 3 when Monday is 0.</div></li>
+    <li><div><b>Same-day window</b> (<code>open &lt; close</code>): open when today's bit is set and <code>open &lt;= second &lt; close</code>.</div></li>
+    <li><div><b>Overnight window</b> (<code>open &gt; close</code>): open when today's bit is set and <code>second &gt;= open</code>, or when yesterday's bit is set and <code>second &lt; close</code>. Yesterday is <code>(weekday + 6) % 7</code>.</div></li>
+    <li><div><b>No window.</b> A token with no window set (a <code>dayMask</code> of 0) is never open.</div></li>
+  </ol>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Worked example</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td>Timestamp</td><td><code>1791763200</code>, Monday 12 October 2026, 00:00 UTC</td></tr>
+        <tr><td>Day number</td><td><code>1791763200 / 86400 = 20738</code></td></tr>
+        <tr><td>Weekday</td><td><code>(20738 + 3) % 7 = 0</code>, Monday</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="kinds">
+  <div class="prose">
+    <h2>What it checks for each kind of movement</h2>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Kind</th><th>What the rule checks</th></tr></thead>
+      <tbody>
+        <tr><td><span class="k k-transfer">TRANSFER</span></td><td class="ok">nothing: passes at any time</td></tr>
+        <tr><td><span class="k k-executed">EXECUTED</span></td><td>the window must be open at the block's timestamp; otherwise <span class="no"><code>OUTSIDE_SETTLEMENT_WINDOW</code></span>, and always so while no window is set</td></tr>
+        <tr><td><span class="k k-forced">FORCED</span></td><td class="ok">nothing: passes at any time, the enforcement mint included</td></tr>
+        <tr><td><span class="k k-mint">MINT</span></td><td class="ok">nothing: passes at any time</td></tr>
+        <tr><td><span class="k k-burn">BURN</span></td><td class="ok">nothing: passes at any time</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <p>Executed movements come from <code>executeTransfer</code> on the intent token, which <a href="IntentExecutor.html"><code>IntentExecutor</code></a> calls for single intents and for atomic batches, and <a href="DvPExecutor.html"><code>DvPExecutor</code></a> calls for each leg it settles on a token that supports intents. The pre-flight <code>canExecute</code> runs the same rule with the same kind, so it says <code>OUTSIDE_SETTLEMENT_WINDOW</code> before an executor submits a call that would fail. The token reverts a refused settlement with <code>PolicyGated_TransferRejected(OUTSIDE_SETTLEMENT_WINDOW)</code>.</p>
+  </div>
+</section>
+
+<section id="functions">
+  <div class="prose"><h2>What it can do</h2></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>setWindow(token, open, close, dayMask)</code></td><td>The token's <code>DEFAULT_ADMIN_ROLE</code></td><td>Sets the token's window, replacing any earlier one. <code>open</code> and <code>close</code> must each be below 86400 and differ, and <code>dayMask</code> must be non-zero and fit in 7 bits, or it reverts with <code>SettlementWindowRule_InvalidWindow</code>. Emits <code>WindowSet(token, open, close, dayMask)</code>. Reverts with <code>SettlementWindowRule_OnlyTokenAdmin(token, caller)</code> for anyone else.</td></tr>
+        <tr><td><code>check(ctx)</code></td><td>Anyone (read-only); the hook in practice</td><td><code>TRANSFER_OK</code> for every kind but <code>EXECUTED</code>; for <code>EXECUTED</code>, <code>TRANSFER_OK</code> inside the window and <code>OUTSIDE_SETTLEMENT_WINDOW</code> outside it.</td></tr>
+        <tr><td><code>isOpen(token, timestamp)</code></td><td>Anyone (read-only)</td><td>Whether the token's window is open at any given timestamp, past or future; false when no window is set. Agrees with <code>check</code> (a fuzz test pins it).</td></tr>
+        <tr><td><code>windowOf(token)</code></td><td>Anyone (read-only)</td><td>The token's <code>open</code>, <code>close</code> and <code>dayMask</code>; a <code>dayMask</code> of 0 means no window.</td></tr>
+        <tr><td><code>MON_TO_FRI()</code></td><td>Anyone (read-only)</td><td><code>0x1F</code>, the mask for Monday to Friday.</td></tr>
+        <tr><td><code>checkSend</code>, <code>checkReceive</code></td><td>Anyone (read-only)</td><td>Always <code>TRANSFER_OK</code> (the <a href="BaseRule.html"><code>BaseRule</code></a> default): time is not a property of an account, so <code>canSend</code> and <code>canReceive</code> ignore the window.</td></tr>
+        <tr><td><code>ruleId()</code>, <code>wantsAfter()</code>, <code>supportsInterface(id)</code></td><td>Anyone (read-only)</td><td><code>keccak256('SettlementWindowRule.v1')</code>; false (no <code>after_</code>); ERC-165 for <code>ISettlementWindowRule</code>, <code>IComplianceRule</code> and <code>IERC165</code>.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="config">
+  <div class="prose">
+    <h2>Who sets the hours</h2>
+    <p>The rule asks the token at call time whether the caller holds <code>DEFAULT_ADMIN_ROLE</code>, through a read-only call. Only <a href="IntentToken.html"><code>IntentToken</code></a> lists this rule; the vaults have no executed transfers. During deployment, while the deploying account is still the token's admin, it calls <code>setWindow</code> for the intent token with the parameters <code>windowOpen</code>, <code>windowClose</code> and <code>windowDays</code>, which have no defaults. The test deployment uses 09:00 to 17:00 UTC with <code>MON_TO_FRI</code>. After the hand-over the main timelock is the admin, so changing the hours is a governance operation with its delay.</p>
+  </div>
+</section>
+
+<section id="edges">
+  <div class="prose">
+    <h2>Edge cases</h2>
+    <ul class="plain">
+      <li><b>The boundaries.</b> <code>open</code> is included and <code>close</code> is not. With the overnight window above, Monday 22:00:00 is open and 21:59:59 is not; Tuesday 01:59:59 is still Monday's session and 02:00:00 is closed.</li>
+      <li><b>A window cannot be cleared.</b> <code>setWindow</code> refuses a <code>dayMask</code> of 0, so once a token has hours they can be changed but not cleared. To stop applying the rule, the token's admin removes it from the token's list on the hook.</li>
+      <li><b>Weekdays only.</b> The rule has no holiday calendar. A closed public holiday that falls on an enabled weekday is open as far as the rule knows.</li>
+      <li><b>Block time.</b> The rule judges the timestamp of the block the settlement is included in, not the time the intent was signed or submitted.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="why">
+  <div class="prose">
+    <h2>Why it is built this way</h2>
+    <ul class="plain">
+      <li><b>Only executor settlement is scheduled.</b> The window governs the movements an executor carries out on a holder's behalf. A holder's own transfer, an issuance, a redemption and an enforcement action pass at any time.</li>
+      <li><b>Plain arithmetic on the timestamp.</b> No time zones and no calendar contract: the weekday follows from the timestamp alone, in UTC, so every node computes the same answer and the rule stays read-only.</li>
+      <li><b>A session runs to its close.</b> An overnight session that opened on an enabled day closes at its stated time, even past midnight into a day that is off, and a day that is off never opens one. Tests pin both cases.</li>
+      <li><b>It fails closed.</b> Listing the rule without setting hours refuses every executor settlement rather than allowing them at any time.</li>
+      <li><b>One instance for every token.</b> Windows are stored per token and authorised by that token's own admin.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="connected">
+  <div class="prose"><h2>Connected to</h2></div>
+  <div class="cards">
+    <a class="card" href="IntentToken.html"><span class="name">IntentToken</span><p>The token that lists this rule, fourth in its list.</p></a>
+    <a class="card" href="IntentSettledUpgradeable.html"><span class="name">IntentSettledUpgradeable</span><p>Where signed intents are checked and executed as <code>EXECUTED</code> movements.</p></a>
+    <a class="card" href="IntentExecutor.html"><span class="name">IntentExecutor</span><p>Submits single intents and atomic batches; refused outside the window.</p></a>
+    <a class="card" href="DvPExecutor.html"><span class="name">DvPExecutor</span><p>Settles the securities leg, and a gated cash leg, as executed movements, so the window applies to them.</p></a>
+    <a class="card" href="ComplianceHook.html"><span class="name">ComplianceHook</span><p>Asks this rule in the intent token's list.</p></a>
+    <a class="card" href="BaseRule.html"><span class="name">BaseRule</span><p>The parent this rule inherits its defaults from.</p></a>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose">
+    <h2>Source and tests</h2>
+    <ul class="plain">
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/hooks/rules/SettlementWindowRule.sol"><code>contracts/hooks/rules/SettlementWindowRule.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/interfaces/ISettlementWindowRule.sol"><code>ISettlementWindowRule.sol</code></a></li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/hooks/rules/SettlementWindowRule.t.sol"><code>SettlementWindowRule.t.sol</code></a> (validation, every kind, an unconfigured token, same-day and overnight windows with their edges, <code>isOpen</code> agreeing with <code>check</code>), <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/hooks/rules/RuleSetIntegration.t.sol"><code>RuleSetIntegration.t.sol</code></a> (intents refused outside the window while plain transfers pass) and <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/test/nodejs/time.test.ts"><code>test/nodejs/time.test.ts</code></a> (the window is open from open to close on weekdays only)</li>
+    </ul>
+  </div>
+</section>
+
+<footer>Describes the contracts at commit <code>2f8c2e7</code> on <code>main</code>.</footer>
+</main>
+</body>
+</html>

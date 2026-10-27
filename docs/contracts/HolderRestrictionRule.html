@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HolderRestrictionRule · Gated Token Stack</title>
+<meta name="description" content="How HolderRestrictionRule applies a per-holder lockup and address freeze set by the token's agent, which movements each one stops, and the way out of a frozen account.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="../index.html">Gated Token Stack</a>
+  <a href="../index.html">Overview</a>
+  <a href="../index.html#contracts">Contracts</a>
+  <a href="../roles.html">Who can do what</a>
+  <a href="../movement.html">One movement</a>
+  <a href="../deployment.html">Deployment and governance</a>
+  <a href="../money.html">Where the money sits</a>
+  <a href="../review.html">Security review</a>
+</nav>
+<main class="page">
+
+<header class="top">
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Policy</div>
+  <h1>HolderRestrictionRule</h1>
+  <p class="lede">Two restrictions on one holder of one token: a lockup, which stops the holder sending until a set time, and an address freeze, which stops the holder sending or receiving until it is lifted. The token's agent sets both.</p>
+  <div class="facts">
+    <span class="fact"><b>contracts/hooks/rules/HolderRestrictionRule.sol</b></span>
+    <span class="fact">immutable, <b>not a proxy</b></span>
+    <span class="fact">set per holder by the token's <b>AGENT_ROLE</b></span>
+    <span class="fact">attested as <b>RULE</b></span>
+  </div>
+</header>
+
+<section id="in-one-minute">
+  <div class="callout">
+    <h3>In one minute</h3>
+    <p>Issuers need two everyday tools for single holders. A <b>lockup</b> keeps a holder's tokens in place until a date, for example after a private placement: the holder cannot transfer or redeem before then, but can still receive. A <b>freeze</b> stops an address altogether, for example while a court order or an investigation is open: nothing goes in or out. The token's agent sets both, holder by holder. Neither blocks enforcement entirely: the agent can always take tokens out of a locked or frozen account with a forced transfer, to an account that is allowed to hold them.</p>
+  </div>
+</section>
+
+<section id="how">
+  <div class="prose">
+    <h2>How a movement is judged</h2>
+    <p>The rule judges the sender first, then the receiver. Both settings of a holder live in one storage word, so a movement costs one read for the sender and one for the receiver.</p>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 780 448" role="img" aria-label="The check, in order. First, if the kind is FORCED or there is no sender, the sender is not judged and the rule goes to step four. Second, a frozen sender returns SENDER_FROZEN. Third, a sender whose lockup is still running returns LOCKED if the movement is a TRANSFER, an EXECUTED intent, or a BURN by an account without the token's BURNER_ROLE. Fourth, if there is a receiver and it is frozen, RECEIVER_FROZEN. Otherwise TRANSFER_OK.">
+        <defs>
+          <marker id="hr-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+          <marker id="hr-arrow-rej" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="rej"/></marker>
+        </defs>
+        <rect class="act" x="40" y="14" width="460" height="40" rx="8"/>
+        <text x="60" y="39" class="bold">The hook asks check(ctx)</text>
+        <line class="ln" x1="270" y1="54" x2="270" y2="76" marker-end="url(#hr-arrow)"/>
+
+        <rect class="b" x="40" y="78" width="460" height="50" rx="8"/>
+        <text x="60" y="99">1. Is the kind not FORCED, and is there a</text>
+        <text x="60" y="117">   sender (the movement is not a mint)?</text>
+        <line class="ln" x1="500" y1="103" x2="530" y2="103" marker-end="url(#hr-arrow)"/>
+        <text x="506" y="95" class="sm m">no</text>
+        <rect class="b2" x="534" y="83" width="226" height="40" rx="6"/>
+        <text x="548" y="100" class="sm">the sender is not judged:</text>
+        <text x="548" y="116" class="sm">go to step 4</text>
+        <line class="ln" x1="270" y1="128" x2="270" y2="152" marker-end="url(#hr-arrow)"/>
+        <text x="280" y="145" class="sm m">yes</text>
+
+        <rect class="b" x="40" y="154" width="460" height="44" rx="8"/>
+        <text x="60" y="181">2. Is the sender frozen?</text>
+        <line class="ln-rej" x1="500" y1="176" x2="530" y2="176" marker-end="url(#hr-arrow-rej)"/>
+        <text x="506" y="168" class="sm m">yes</text>
+        <rect class="rejbox" x="534" y="158" width="226" height="36" rx="6"/>
+        <text x="548" y="181" class="mono sm rej">SENDER_FROZEN</text>
+        <line class="ln" x1="270" y1="198" x2="270" y2="222" marker-end="url(#hr-arrow)"/>
+        <text x="280" y="215" class="sm m">no</text>
+
+        <rect class="b" x="40" y="224" width="460" height="68" rx="8"/>
+        <text x="60" y="245">3. Is the sender's lockup still running, and is</text>
+        <text x="60" y="263">   this a TRANSFER, an EXECUTED intent, or a</text>
+        <text x="60" y="281">   BURN by an account without BURNER_ROLE?</text>
+        <line class="ln-rej" x1="500" y1="258" x2="530" y2="258" marker-end="url(#hr-arrow-rej)"/>
+        <text x="506" y="250" class="sm m">yes</text>
+        <rect class="rejbox" x="534" y="240" width="226" height="36" rx="6"/>
+        <text x="548" y="263" class="mono sm rej">LOCKED</text>
+        <line class="ln" x1="270" y1="292" x2="270" y2="316" marker-end="url(#hr-arrow)"/>
+        <text x="280" y="309" class="sm m">no</text>
+
+        <rect class="b" x="40" y="318" width="460" height="50" rx="8"/>
+        <text x="60" y="339">4. Is there a receiver (the movement is not a</text>
+        <text x="60" y="357">   burn), and is it frozen?</text>
+        <line class="ln-rej" x1="500" y1="343" x2="530" y2="343" marker-end="url(#hr-arrow-rej)"/>
+        <text x="506" y="335" class="sm m">yes</text>
+        <rect class="rejbox" x="534" y="325" width="226" height="36" rx="6"/>
+        <text x="548" y="348" class="mono sm rej">RECEIVER_FROZEN</text>
+        <line class="ln" x1="270" y1="368" x2="270" y2="392" marker-end="url(#hr-arrow)"/>
+        <text x="280" y="385" class="sm m">no</text>
+
+        <rect class="act" x="40" y="394" width="460" height="40" rx="8"/>
+        <text x="60" y="419" class="bold">TRANSFER_OK</text>
+      </svg>
+    </div>
+    <figcaption><b>Freeze before lockup, sender before receiver.</b> A sender that is both frozen and locked sees <code>SENDER_FROZEN</code>. A locked sender paying a frozen receiver sees <code>LOCKED</code>. The token is asked for <code>BURNER_ROLE</code> only on a burn while a lockup is running.</figcaption>
+  </figure>
+</section>
+
+<section id="kinds">
+  <div class="prose">
+    <h2>What it checks for each kind of movement</h2>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Kind</th><th>Sender frozen</th><th>Sender locked</th><th>Receiver frozen</th></tr></thead>
+      <tbody>
+        <tr><td><span class="k k-transfer">TRANSFER</span></td><td class="no"><code>SENDER_FROZEN</code></td><td class="no"><code>LOCKED</code></td><td class="no"><code>RECEIVER_FROZEN</code></td></tr>
+        <tr><td><span class="k k-executed">EXECUTED</span></td><td class="no"><code>SENDER_FROZEN</code></td><td class="no"><code>LOCKED</code></td><td class="no"><code>RECEIVER_FROZEN</code></td></tr>
+        <tr><td><span class="k k-forced">FORCED</span></td><td class="ok">not checked</td><td class="ok">not checked</td><td class="no"><code>RECEIVER_FROZEN</code>, the enforcement mint included</td></tr>
+        <tr><td><span class="k k-mint">MINT</span></td><td>no sender</td><td>no sender</td><td class="no"><code>RECEIVER_FROZEN</code></td></tr>
+        <tr><td><span class="k k-burn">BURN</span></td><td class="no"><code>SENDER_FROZEN</code>, even for the burner</td><td><span class="no"><code>LOCKED</code></span>, unless the operator holds the token's <code>BURNER_ROLE</code></td><td>no receiver</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <p>A lockup never stops a holder from receiving: only the sender's lockup is read. A lockup covers the holder's whole balance, including tokens received after it was set. The token reverts a refused movement with <code>PolicyGated_TransferRejected(reason)</code>.</p>
+  </div>
+</section>
+
+<section id="way-out">
+  <div class="prose">
+    <h2>The way out of a frozen account</h2>
+    <p>A freeze stops even the burner, so the one enforcement route out of a frozen account is a forced transfer by the agent to a quarantine account. The receiver side is still checked on a forced transfer, so the quarantine account must never be frozen itself, and it must pass the token's other rules, such as holding a credential the token accepts.</p>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 780 246" role="img" aria-label="Three ways tokens could leave a frozen holder F. A TRANSFER or EXECUTED movement, by the holder, a spender or an executor, is refused with SENDER_FROZEN. A BURN by the burner is refused with SENDER_FROZEN too. A FORCED transfer by the agent to a quarantine account Q goes through: the sender is not judged, Q must not be frozen and must pass the other rules.">
+        <defs>
+          <marker id="hr2-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+          <marker id="hr2-arrow-rej" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="rej"/></marker>
+        </defs>
+        <rect class="b" x="20" y="24" width="150" height="206" rx="8"/>
+        <text x="34" y="112" class="bold">Holder F</text>
+        <text x="34" y="130" class="sm m">address frozen</text>
+        <text x="34" y="146" class="sm m">on this token</text>
+
+        <rect class="chip c-transfer" x="186" y="25" width="66" height="18" rx="9"/>
+        <text x="193" y="38" class="mono sm bold t-transfer">TRANSFER</text>
+        <rect class="chip c-executed" x="258" y="25" width="66" height="18" rx="9"/>
+        <text x="265" y="38" class="mono sm bold t-executed">EXECUTED</text>
+        <line class="ln-rej" x1="170" y1="49" x2="416" y2="49" marker-end="url(#hr2-arrow-rej)"/>
+        <text x="186" y="66" class="sm m">the holder, a spender or an executor</text>
+        <rect class="rejbox" x="420" y="24" width="340" height="50" rx="8"/>
+        <text x="434" y="45" class="mono sm rej">SENDER_FROZEN</text>
+        <text x="434" y="62" class="sm m">nothing leaves by the holder's own hand</text>
+
+        <rect class="chip c-burn" x="186" y="99" width="40" height="18" rx="9"/>
+        <text x="193" y="112" class="mono sm bold t-burn">BURN</text>
+        <line class="ln-rej" x1="170" y1="123" x2="416" y2="123" marker-end="url(#hr2-arrow-rej)"/>
+        <text x="186" y="140" class="sm m">the burner (BURNER_ROLE)</text>
+        <rect class="rejbox" x="420" y="98" width="340" height="50" rx="8"/>
+        <text x="434" y="119" class="mono sm rej">SENDER_FROZEN</text>
+        <text x="434" y="136" class="sm m">refused even for the burner</text>
+
+        <rect class="chip c-forced" x="186" y="177" width="54" height="18" rx="9"/>
+        <text x="193" y="190" class="mono sm bold t-forced">FORCED</text>
+        <line class="ln" x1="170" y1="201" x2="416" y2="201" marker-end="url(#hr2-arrow)"/>
+        <text x="186" y="218" class="sm m">the agent: forcedTransfer to Q</text>
+        <rect class="act" x="420" y="172" width="340" height="58" rx="8"/>
+        <text x="434" y="192" class="bold">Moves to quarantine account Q</text>
+        <text x="434" y="208" class="sm">the sender is not judged; Q must not be frozen</text>
+        <text x="434" y="223" class="sm m">and must pass the other rules (credential)</text>
+      </svg>
+    </div>
+    <figcaption><b>Only a forced transfer leaves a frozen account.</b> The agent moves the tokens to a quarantine account that is not frozen and is allowed to hold them. The freeze itself stays until the agent lifts it.</figcaption>
+  </figure>
+  <div class="prose">
+    <p>The address freeze here is not the token's own frozen amount (<code>setFrozenTokens</code> on the token), which holds back part of a balance and lets the rest move. The two can be used together.</p>
+  </div>
+</section>
+
+<section id="functions">
+  <div class="prose"><h2>What it can do</h2></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>setLockup(token, holder, unlockTime)</code></td><td>The token's <code>AGENT_ROLE</code></td><td>Locks the holder until <code>unlockTime</code>, the first second at which it may send again. A time at or before now clears the lockup (stored as 0). Leaves the freeze as it is. Emits <code>LockupSet(token, holder, storedTime)</code>. Reverts with <code>HolderRestrictionRule_OnlyTokenAgent(token, caller)</code>, <code>HolderRestrictionRule_ZeroAddress</code> for a zero holder, or <code>HolderRestrictionRule_UnlockTimeTooLarge(time)</code> for a future time that does not fit 64 bits.</td></tr>
+        <tr><td><code>setFrozen(token, holder, frozen)</code></td><td>The token's <code>AGENT_ROLE</code></td><td>Freezes or unfreezes the holder. Leaves the lockup as it is. Emits <code>HolderFrozenSet(token, holder, frozen)</code>. Reverts with <code>HolderRestrictionRule_OnlyTokenAgent</code> or <code>HolderRestrictionRule_ZeroAddress</code>.</td></tr>
+        <tr><td><code>check(ctx)</code></td><td>Anyone (read-only); the hook in practice</td><td>The decision above: <code>TRANSFER_OK</code>, <code>SENDER_FROZEN</code>, <code>LOCKED</code> or <code>RECEIVER_FROZEN</code>.</td></tr>
+        <tr><td><code>checkSend(token, account)</code></td><td>Anyone (read-only)</td><td><code>SENDER_FROZEN</code> for a frozen account, then <code>LOCKED</code> while its lockup runs, otherwise <code>TRANSFER_OK</code>. Asks the token for no role.</td></tr>
+        <tr><td><code>checkReceive(token, account)</code></td><td>Anyone (read-only)</td><td><code>RECEIVER_FROZEN</code> for a frozen account, otherwise <code>TRANSFER_OK</code>. A locked account can receive.</td></tr>
+        <tr><td><code>unlockTime(token, holder)</code>, <code>isFrozen(token, holder)</code></td><td>Anyone (read-only)</td><td>The stored unlock time (0 when not locked) and the freeze flag.</td></tr>
+        <tr><td><code>AGENT_ROLE()</code></td><td>Anyone (read-only)</td><td><code>keccak256('AGENT_ROLE')</code>, the token role the setters require.</td></tr>
+        <tr><td><code>ruleId()</code>, <code>wantsAfter()</code>, <code>supportsInterface(id)</code></td><td>Anyone (read-only)</td><td><code>keccak256('HolderRestrictionRule.v1')</code>; false (no <code>after_</code>); ERC-165 for <code>IHolderRestrictionRule</code>, <code>IComplianceRule</code> and <code>IERC165</code>.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <p>The rule asks the token at call time whether the caller holds <code>AGENT_ROLE</code>, through a read-only call. The deployment grants that role on every token to the agent account named in its parameters. A lockup ends exactly at its unlock second: the holder is locked while the block time is before <code>unlockTime</code> and free from that second on.</p>
+  </div>
+</section>
+
+<section id="account">
+  <div class="prose">
+    <h2>What <code>canSend</code> and <code>canReceive</code> say</h2>
+    <p>The token's account questions reach this rule through the hook. <code>canSend</code> is false for a frozen holder and for a locked one, and <code>canReceive</code> is false only for a frozen one. These answers agree with <code>check</code> for every movement the holder drives. They cannot know about the movements the rule exempts, which only the movement itself reveals: a forced transfer still passes for a frozen or locked sender, and a burn by the burner still passes for a locked one, while <code>canSend</code> says no.</p>
+  </div>
+</section>
+
+<section id="vaults">
+  <div class="prose">
+    <h2>On the vaults</h2>
+    <ul class="plain">
+      <li><a href="Gated4626Vault.html"><code>Gated4626Vault</code></a>: a holder's <code>redeem</code> or <code>withdraw</code> burns shares as a holder burn, so a lockup and a freeze both stop it. <code>maxRedeem</code> and <code>maxWithdraw</code> read 0 for a locked or frozen owner, and <code>maxDeposit</code> and <code>maxMint</code> read 0 for a frozen receiver.</li>
+      <li><a href="Gated7540Vault.html"><code>Gated7540Vault</code></a>: <code>requestRedeem</code> moves the owner's shares into the vault as a <span class="k k-transfer">TRANSFER</span>, so both settings apply there. Collecting a fulfilled redemption runs a burn check of nothing on the controller, so a locked or frozen controller cannot collect until released. Requesting and claiming a deposit run a mint check on the controller, so a frozen controller can do neither.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="why">
+  <div class="prose">
+    <h2>Why it is built this way</h2>
+    <ul class="plain">
+      <li><b>One word per holder.</b> The unlock time (64 bits) and the freeze flag share one storage word, so each side of a movement costs one read, and setting one never disturbs the other.</li>
+      <li><b>The agent's role, asked live.</b> Lockups and freezes are day-to-day operational data, so they belong to the same role that runs forced transfers and frozen amounts on the token. The rule keeps no list of agents; it asks the token, so a role change on the token takes effect here at once.</li>
+      <li><b>A holder's exit respects the lockup; enforcement does not.</b> A holder's own burn, such as a vault redemption, is a way out and waits for the unlock. A burn by the token's <code>BURNER_ROLE</code> and a forced transfer are enforcement actions and pass a lockup.</li>
+      <li><b>A freeze has a single exit.</b> A frozen sender is refused in every kind but a forced transfer, the burner's burn included, and a frozen receiver in every kind that has a receiver. That leaves exactly one controlled route out: the agent's forced transfer to a quarantine account that is never frozen.</li>
+      <li><b>Clearing needs no range check.</b> A time at or before now clears the lockup, so only a future time has to fit the 64 bits it is stored in.</li>
+      <li><b>One instance for every token.</b> Restrictions are stored per token and holder, so a freeze on one token does not touch the same address on another.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="connected">
+  <div class="prose"><h2>Connected to</h2></div>
+  <div class="cards">
+    <a class="card" href="ComplianceHook.html"><span class="name">ComplianceHook</span><p>Asks this rule third in every deployed list, after the credential and minimum checks.</p></a>
+    <a class="card" href="PolicyGatedERC20Upgradeable.html"><span class="name">PolicyGatedERC20Upgradeable</span><p>Where the agent runs <code>forcedTransfer</code> and the token's own frozen amounts.</p></a>
+    <a class="card" href="CredentialRule.html"><span class="name">CredentialRule</span><p>What a quarantine account must also pass to receive a forced transfer.</p></a>
+    <a class="card" href="BaseRule.html"><span class="name">BaseRule</span><p>The parent this rule inherits from.</p></a>
+    <a class="card" href="../roles.html"><span class="name">Who can do what</span><p>Who holds <code>AGENT_ROLE</code> and <code>BURNER_ROLE</code> on each token.</p></a>
+    <a class="card" href="../movement.html"><span class="name">One movement</span><p>Every check a movement meets, in order.</p></a>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose">
+    <h2>Source and tests</h2>
+    <ul class="plain">
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/hooks/rules/HolderRestrictionRule.sol"><code>contracts/hooks/rules/HolderRestrictionRule.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/interfaces/IHolderRestrictionRule.sol"><code>IHolderRestrictionRule.sol</code></a></li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/hooks/rules/HolderRestrictionRule.t.sol"><code>HolderRestrictionRule.t.sol</code></a> (setters, each kind under a lockup and a freeze, the unlock second, the account questions and a fuzz test that they agree with <code>check</code>), <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/hooks/rules/RuleSetIntegration.t.sol"><code>RuleSetIntegration.t.sol</code></a> (on a real token, including the forced transfer to a quarantine account) and <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/test/nodejs/time.test.ts"><code>test/nodejs/time.test.ts</code></a> (a lockup holds until its unlock second)</li>
+    </ul>
+  </div>
+</section>
+
+<footer>Describes the contracts at commit <code>2f8c2e7</code> on <code>main</code>.</footer>
+</main>
+</body>
+</html>

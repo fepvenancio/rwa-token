@@ -26,7 +26,7 @@ contract IntentExecutor is AccessControl, Pausable, IIntentExecutor, IIntentExec
   bytes32 public constant GUARDIAN_ROLE = keccak256('GUARDIAN_ROLE');
 
   /// @notice Role of the recovery timelock: may only `unpause` and revoke GUARDIAN_ROLE, a path the guardian cannot
-  ///         cancel (owner decision M-1). Granted and revoked by DEFAULT_ADMIN_ROLE like any role
+  ///         cancel. Granted and revoked by DEFAULT_ADMIN_ROLE like any role
   bytes32 public constant RECOVERY_ROLE = keccak256('RECOVERY_ROLE');
 
   /**

@@ -69,7 +69,7 @@ abstract contract PolicyGatedERC20Upgradeable is
   bytes32 public constant UPGRADER_ROLE = keccak256('UPGRADER_ROLE');
 
   /// @notice Role of the recovery timelock: may only `unpause` and revoke GUARDIAN_ROLE, a path the guardian cannot
-  ///         cancel (owner decision M-1). Granted and revoked by DEFAULT_ADMIN_ROLE like any role
+  ///         cancel. Granted and revoked by DEFAULT_ADMIN_ROLE like any role
   bytes32 public constant RECOVERY_ROLE = keccak256('RECOVERY_ROLE');
 
   /// @notice keccak256(abi.encode(uint256(keccak256('gated.storage.PolicyGatedERC20')) - 1)) & ~bytes32(uint256(0xff))

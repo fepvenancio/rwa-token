@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ProxyDeployer · Gated Token Stack</title>
+<meta name="description" content="How ProxyDeployer places each token at a predictable address and refuses to finish unless the token came up exactly as reviewed.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="../index.html">Gated Token Stack</a>
+  <a href="../index.html">Overview</a>
+  <a href="../index.html#contracts">Contracts</a>
+  <a href="../roles.html">Who can do what</a>
+  <a href="../movement.html">One movement</a>
+  <a href="../deployment.html">Deployment and governance</a>
+  <a href="../money.html">Where the money sits</a>
+  <a href="../review.html">Security review</a>
+</nav>
+<main class="page">
+
+<header class="top">
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Deployment</div>
+  <h1>ProxyDeployer</h1>
+  <p class="lede">Creates every token. It puts each one at an address anyone can work out in advance, sets it up in the same transaction, and refuses to finish unless the token came up exactly as the security council reviewed it.</p>
+  <div class="facts">
+    <span class="fact"><b>contracts/deploy/ProxyDeployer.sol</b></span>
+    <span class="fact">immutable, <b>not a proxy</b></span>
+    <span class="fact">owner: <b>the main timelock</b> after deployment</span>
+    <span class="fact">not attested: nothing installs it by code hash</span>
+  </div>
+</header>
+
+<section id="in-one-minute">
+  <div class="callout">
+    <h3>In one minute</h3>
+    <p>A token here is a small proxy contract that points at shared, reviewed code (its implementation). Anyone could deploy such a proxy. What makes a token one of ours is how it was placed: only through this contract, only by its owner, and only if five things check out. The code behind it is reviewed, the token uses the same registry of reviewed code, it uses the shared compliance hook named in the call, that hook holds the exact list of rules the call expected, and the token's symbol is the one its address was computed from. If any check fails, nothing is created and the symbol stays free.</p>
+  </div>
+</section>
+
+<section id="how">
+  <div class="prose">
+    <h2>How a token is placed</h2>
+    <p>The owner calls <code>deploy(symbol, implementation, initData, hook, expectedRules)</code>. The steps run in this order, and any failure undoes the whole call, including the step that marked the symbol as used.</p>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 780 770" role="img" aria-label="The deploy call, step by step. The owner calls deploy. If the symbol was used, it reverts with ProxyDeployer_SaltUsed. Otherwise it marks the symbol used, asks the registry whether the implementation is attested as IMPLEMENTATION and reverts with ProxyDeployer_ImplementationNotAttested if not, creates the proxy with CREATE2, runs the token's initialiser, then checks that the token names the deployer's registry, that the token's hook is the one named in the call, that the hook holds exactly the expected rules in order, and that the token reports the symbol. Each check has its own revert. If all pass it emits ProxyDeployed.">
+        <defs>
+          <marker id="pd-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+          <marker id="pd-arrow-rej" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="rej"/></marker>
+        </defs>
+        <rect class="act" x="40" y="14" width="440" height="50" rx="8"/>
+        <text x="60" y="35" class="bold">The owner calls deploy</text>
+        <text x="60" y="53" class="mono sm m">deploy(symbol, implementation, initData, hook, rules)</text>
+        <line class="ln" x1="260" y1="64" x2="260" y2="86" marker-end="url(#pd-arrow)"/>
+
+        <rect class="b" x="40" y="88" width="440" height="44" rx="8"/>
+        <text x="60" y="115">1. Has this symbol been used before?</text>
+        <line class="ln-rej" x1="480" y1="110" x2="530" y2="110" marker-end="url(#pd-arrow-rej)"/>
+        <text x="492" y="102" class="sm m">yes</text>
+        <rect class="rejbox" x="534" y="92" width="226" height="36" rx="6"/>
+        <text x="546" y="115" class="mono sm rej">ProxyDeployer_SaltUsed</text>
+        <line class="ln" x1="260" y1="132" x2="260" y2="154" marker-end="url(#pd-arrow)"/>
+
+        <rect class="b2" x="40" y="156" width="440" height="44" rx="8"/>
+        <text x="60" y="183">2. Mark the symbol as used</text>
+        <line class="ln" x1="260" y1="200" x2="260" y2="222" marker-end="url(#pd-arrow)"/>
+
+        <rect class="b" x="40" y="224" width="440" height="50" rx="8"/>
+        <text x="60" y="245">3. Does the registry attest this implementation</text>
+        <text x="60" y="263">   as <tspan class="mono sm">IMPLEMENTATION</tspan>?</text>
+        <line class="ln-rej" x1="480" y1="249" x2="530" y2="249" marker-end="url(#pd-arrow-rej)"/>
+        <text x="492" y="241" class="sm m">no</text>
+        <rect class="rejbox" x="534" y="231" width="226" height="36" rx="6"/>
+        <text x="546" y="254" class="mono sm rej">…ImplementationNotAttested</text>
+        <line class="ln" x1="260" y1="274" x2="260" y2="296" marker-end="url(#pd-arrow)"/>
+
+        <rect class="b2" x="40" y="298" width="440" height="50" rx="8"/>
+        <text x="60" y="319">4. Create the proxy with CREATE2, at the</text>
+        <text x="60" y="337">   predicted address, with no setup data yet</text>
+        <line class="ln" x1="260" y1="348" x2="260" y2="370" marker-end="url(#pd-arrow)"/>
+
+        <rect class="b2" x="40" y="372" width="440" height="50" rx="8"/>
+        <text x="60" y="393">5. Run initData on the proxy: the token sets its</text>
+        <text x="60" y="411">   admin, registry and hook, and installs its rules</text>
+        <line class="ln" x1="260" y1="422" x2="260" y2="444" marker-end="url(#pd-arrow)"/>
+
+        <rect class="b" x="40" y="446" width="440" height="44" rx="8"/>
+        <text x="60" y="473">6. Does the token name the deployer's registry?</text>
+        <line class="ln-rej" x1="480" y1="468" x2="530" y2="468" marker-end="url(#pd-arrow-rej)"/>
+        <text x="492" y="460" class="sm m">no</text>
+        <rect class="rejbox" x="534" y="450" width="226" height="36" rx="6"/>
+        <text x="546" y="473" class="mono sm rej">…RegistryMismatch</text>
+        <line class="ln" x1="260" y1="490" x2="260" y2="512" marker-end="url(#pd-arrow)"/>
+
+        <rect class="b" x="40" y="514" width="440" height="44" rx="8"/>
+        <text x="60" y="541">7. Is the token's hook the one named in the call?</text>
+        <line class="ln-rej" x1="480" y1="536" x2="530" y2="536" marker-end="url(#pd-arrow-rej)"/>
+        <text x="492" y="528" class="sm m">no</text>
+        <rect class="rejbox" x="534" y="518" width="226" height="36" rx="6"/>
+        <text x="546" y="541" class="mono sm rej">…HookNotInstalled</text>
+        <line class="ln" x1="260" y1="558" x2="260" y2="580" marker-end="url(#pd-arrow)"/>
+
+        <rect class="b" x="40" y="582" width="440" height="44" rx="8"/>
+        <text x="60" y="609">8. Does the hook hold exactly the expected rules?</text>
+        <line class="ln-rej" x1="480" y1="604" x2="530" y2="604" marker-end="url(#pd-arrow-rej)"/>
+        <text x="492" y="596" class="sm m">no</text>
+        <rect class="rejbox" x="534" y="586" width="226" height="36" rx="6"/>
+        <text x="546" y="609" class="mono sm rej">…RulesMismatch</text>
+        <line class="ln" x1="260" y1="626" x2="260" y2="648" marker-end="url(#pd-arrow)"/>
+
+        <rect class="b" x="40" y="650" width="440" height="44" rx="8"/>
+        <text x="60" y="677">9. Does the token report the same symbol?</text>
+        <line class="ln-rej" x1="480" y1="672" x2="530" y2="672" marker-end="url(#pd-arrow-rej)"/>
+        <text x="492" y="664" class="sm m">no</text>
+        <rect class="rejbox" x="534" y="654" width="226" height="36" rx="6"/>
+        <text x="546" y="677" class="mono sm rej">…SymbolMismatch</text>
+        <line class="ln" x1="260" y1="694" x2="260" y2="716" marker-end="url(#pd-arrow)"/>
+
+        <rect class="act" x="40" y="718" width="440" height="40" rx="8"/>
+        <text x="60" y="743" class="bold">Emit ProxyDeployed. The token is live.</text>
+      </svg>
+    </div>
+    <figcaption><b>Nine steps, one transaction.</b> Red boxes are the reverts. Because a revert undoes the whole call, a failed deploy leaves no contract at the address and the symbol can be used again once the problem is fixed.</figcaption>
+  </figure>
+  <ol class="steps">
+    <li><div><b>One symbol, one token.</b> The symbol's hash is the CREATE2 salt, and each salt can be used once, with any implementation (<code>ProxyDeployer_SaltUsed(salt)</code>).</div></li>
+    <li><div><b>Reviewed code only.</b> Before any proxy exists, the deployer asks its registry whether the implementation's code hash is attested as <code>IMPLEMENTATION</code> (<code>ProxyDeployer_ImplementationNotAttested(implementation)</code>). This check has to live here: the token's own setup function is the implementation's code, so code nobody reviewed would simply skip a check of its own.</div></li>
+    <li><div><b>Set up in the same transaction.</b> The proxy is created without setup data, then the deployer calls it with <code>initData</code> right away. Nobody can get in between and set it up first.</div></li>
+    <li><div><b>Read back and compare.</b> The token must name the deployer's registry (<code>ProxyDeployer_RegistryMismatch(expected, actual)</code>), its hook must be the <code>hook</code> argument (<code>ProxyDeployer_HookNotInstalled(expected, installed)</code>), the hook must hold exactly <code>expectedRules</code> for it, same length and same order (<code>ProxyDeployer_RulesMismatch(hook, proxy)</code>), and the token must report the symbol the salt came from (<code>ProxyDeployer_SymbolMismatch(expected, actual)</code>).</div></li>
+  </ol>
+</section>
+
+<section id="address">
+  <div class="prose">
+    <h2>The address is known before the token exists</h2>
+    <p>The token's address depends on three things only: this deployer's own address, the token's symbol, and the implementation. It does not depend on the setup data, which carries the admin, the guardian, the hook and the rules. So the address can be computed, published and monitored before anything is deployed, and changing an admin or a rule in the plan does not move the token.</p>
+    <p><code>predict(symbol, implementation)</code> returns the address. It is CREATE2 with salt <code>keccak256(bytes(symbol))</code> over the creation code of <a href="TokenProxy.html"><code>TokenProxy</code></a> with arguments <code>(implementation, "")</code>, the same formula anyone can run off-chain.</p>
+  </div>
+</section>
+
+<section id="functions">
+  <div class="prose"><h2>What it can do</h2></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>deploy(symbol, implementation, initData, hook, expectedRules)</code></td><td>The owner</td><td>Places and sets up a token, with the checks above. Emits <code>ProxyDeployed(salt, proxy, implementation, hook)</code>.</td></tr>
+        <tr><td><code>predict(symbol, implementation)</code></td><td>Anyone (read-only)</td><td>The address the token will have.</td></tr>
+        <tr><td><code>saltUsed(salt)</code></td><td>Anyone (read-only)</td><td>Whether a symbol's salt has been used.</td></tr>
+        <tr><td><code>REGISTRY()</code></td><td>Anyone (read-only)</td><td>The registry of reviewed code, fixed when the deployer was created.</td></tr>
+        <tr><td><code>transferOwnership</code>, <code>renounceOwnership</code></td><td>The owner</td><td>OpenZeppelin <code>Ownable</code>. Renouncing would disable <code>deploy</code> for good.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="why">
+  <div class="prose">
+    <h2>Why it is built this way</h2>
+    <ul class="plain">
+      <li><b>Only the owner can deploy.</b> The address does not cover the setup data, so without the gate anyone could take a token's address first, with the same symbol and implementation but their own admin. The deployer account owns it while the system is set up, and the deployment hands ownership to the main timelock, so every later token goes through governance and its delay.</li>
+      <li><b>The registry is fixed at construction.</b> The constructor takes the owner and the registry and refuses a zero registry (<code>ProxyDeployer_ZeroAddress</code>). There is no setter, so no one can point the deployer at a different list of reviewed code.</li>
+      <li><b>The registry is read when the token is placed, not later.</b> Like the other places that ask the registry, a later withdrawal of an attestation does not touch a token that already exists.</li>
+      <li><b>It holds no roles and no funds.</b> After the setup call it has no power over the token it created.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="prose">
+    <h2>What it does not check</h2>
+    <ul class="plain">
+      <li>It compares the token with the hook and the rule list passed in the call. It does not know which hook instance the council reviewed, or the deployment's intended rule order. The post-deployment check does that (<a href="../deployment.html">Deployment and governance</a>).</li>
+      <li>It is not itself attested: nothing installs it by code hash. The council checks its code against the release build like any other deployed contract.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="connected">
+  <div class="prose"><h2>Connected to</h2></div>
+  <div class="cards">
+    <a class="card" href="TokenProxy.html"><span class="name">TokenProxy</span><p>The proxy every token is, created by <code>deploy</code>.</p></a>
+    <a class="card" href="PolicyRegistry.html"><span class="name">PolicyRegistry</span><p>The list of reviewed code the deployer asks about each implementation.</p></a>
+    <a class="card" href="ComplianceHook.html"><span class="name">ComplianceHook</span><p>The shared hook whose rule list the deployer reads back.</p></a>
+    <a class="card" href="../deployment.html"><span class="name">Deployment and governance</span><p>Where the deployer fits in the two deployment stages.</p></a>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose">
+    <h2>Source and tests</h2>
+    <ul class="plain">
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/deploy/ProxyDeployer.sol"><code>contracts/deploy/ProxyDeployer.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/interfaces/IProxyDeployer.sol"><code>IProxyDeployer.sol</code></a></li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/deploy/ProxyDeployer.t.sol"><code>ProxyDeployer.t.sol</code></a> (unit tests with a mocked registry, and integration tests with the real <code>PolicyRegistry</code>), and <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/test/nodejs/deployment.test.ts"><code>test/nodejs/deployment.test.ts</code></a> (the full deployment refusing an unattested implementation)</li>
+    </ul>
+  </div>
+</section>
+
+<footer>Describes the contracts at commit <code>2f8c2e7</code> on <code>main</code>.</footer>
+</main>
+</body>
+</html>

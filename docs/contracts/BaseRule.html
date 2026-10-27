@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>BaseRule · Gated Token Stack</title>
+<meta name="description" content="The abstract parent of every compliance rule: the check that only a token's current hook may call after_, safe defaults, ERC-165, and why rules keep their state per token.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="../index.html">Gated Token Stack</a>
+  <a href="../index.html">Overview</a>
+  <a href="../index.html#contracts">Contracts</a>
+  <a href="../roles.html">Who can do what</a>
+  <a href="../movement.html">One movement</a>
+  <a href="../deployment.html">Deployment and governance</a>
+  <a href="../money.html">Where the money sits</a>
+  <a href="../review.html">Security review</a>
+</nav>
+<main class="page">
+
+<header class="top">
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Policy</div>
+  <h1>BaseRule</h1>
+  <p class="lede">The parent every compliance rule is built on. It holds the one access check a rule needs, sensible defaults for everything a rule may leave out, and the ERC-165 answer that says "I am a rule".</p>
+  <div class="facts">
+    <span class="fact"><b>contracts/hooks/BaseRule.sol</b></span>
+    <span class="fact">abstract: <b>never deployed on its own</b></span>
+    <span class="fact">no admin, no state</span>
+    <span class="fact">each rule built on it is attested as <b>RULE</b></span>
+  </div>
+</header>
+
+<section id="in-one-minute">
+  <div class="callout">
+    <h3>In one minute</h3>
+    <p>A rule is a small contract that answers one compliance question about a movement of tokens. Many tokens share the same rule contracts, and many tokens share one hook, the contract that asks the rules. So a rule must be careful about who may tell it that a movement happened. <code>BaseRule</code> settles that once for every rule: it asks the token named in the movement which hook it uses, and accepts the call only from that hook. Each rule then keeps its records under the token's address, so even a caller who builds a fake token can only ever touch the fake token's records.</p>
+  </div>
+</section>
+
+<section id="how">
+  <div class="prose">
+    <h2>How the hook check works</h2>
+    <p>Rules have two kinds of entry point. <code>check</code>, <code>checkSend</code> and <code>checkReceive</code> only read, so anyone may call them. <code>after_</code> is the one that may write: the hook calls it after the balances moved, for rules that asked for it. <code>BaseRule</code> guards it with the <code>onlyHook(ctx)</code> modifier, which asks <code>ctx.token</code> for its current hook (<code>policyHook()</code>, a read-only call) and compares the answer with the caller.</p>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 780 316" role="img" aria-label="Three callers of after_. First, the hook H calls after_ with ctx.token set to the real token T; the rule asks T for its hook, T answers H, H is the caller, so the rule runs and writes under the key T. Second, an attacker A calls after_ naming T; T answers H, A is not H, so the call reverts with ComplianceRule_OnlyHook(A). Third, the attacker deploys a fake token F whose policyHook returns A and calls after_ naming F; the check passes, but the rule writes only under the key F, and T's records are untouched.">
+        <defs>
+          <marker id="br-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+        </defs>
+
+        <text x="20" y="24" class="sm bold">1. The real hook of token T</text>
+        <rect class="b" x="20" y="36" width="130" height="58" rx="8"/>
+        <text x="34" y="60" class="bold">Hook H</text>
+        <text x="34" y="78" class="sm m">T's current hook</text>
+        <line class="ln" x1="150" y1="65" x2="236" y2="65" marker-end="url(#br-arrow)"/>
+        <text x="158" y="57" class="mono sm">after_(ctx)</text>
+        <text x="158" y="81" class="sm m">token = T</text>
+        <rect class="b2" x="240" y="36" width="150" height="58" rx="8"/>
+        <text x="254" y="60" class="mono bold">onlyHook(ctx)</text>
+        <text x="254" y="78" class="sm m">asks ctx.token</text>
+        <line class="ln" x1="390" y1="65" x2="476" y2="65" marker-end="url(#br-arrow)"/>
+        <text x="394" y="57" class="mono sm">policyHook()</text>
+        <rect class="b" x="480" y="36" width="110" height="58" rx="8"/>
+        <text x="494" y="60" class="bold">Token T</text>
+        <text x="494" y="78" class="sm m">answers H</text>
+        <line class="ln" x1="590" y1="65" x2="606" y2="65" marker-end="url(#br-arrow)"/>
+        <rect class="act" x="610" y="36" width="160" height="58" rx="8"/>
+        <text x="624" y="60" class="bold">H is the caller</text>
+        <text x="624" y="78" class="sm">runs, writes state[T]</text>
+
+        <text x="20" y="128" class="sm bold">2. An attacker naming the real token</text>
+        <rect class="b" x="20" y="140" width="130" height="58" rx="8"/>
+        <text x="34" y="164" class="bold">Attacker A</text>
+        <text x="34" y="182" class="sm m">any account</text>
+        <line class="ln" x1="150" y1="169" x2="236" y2="169" marker-end="url(#br-arrow)"/>
+        <text x="158" y="161" class="mono sm">after_(ctx)</text>
+        <text x="158" y="185" class="sm m">token = T</text>
+        <rect class="b2" x="240" y="140" width="150" height="58" rx="8"/>
+        <text x="254" y="164" class="mono bold">onlyHook(ctx)</text>
+        <text x="254" y="182" class="sm m">asks ctx.token</text>
+        <line class="ln" x1="390" y1="169" x2="476" y2="169" marker-end="url(#br-arrow)"/>
+        <text x="394" y="161" class="mono sm">policyHook()</text>
+        <rect class="b" x="480" y="140" width="110" height="58" rx="8"/>
+        <text x="494" y="164" class="bold">Token T</text>
+        <text x="494" y="182" class="sm m">answers H</text>
+        <line class="ln" x1="590" y1="169" x2="606" y2="169" marker-end="url(#br-arrow)"/>
+        <rect class="rejbox" x="610" y="140" width="160" height="58" rx="8"/>
+        <text x="624" y="160" class="bold">A is not T's hook</text>
+        <text x="624" y="176" class="mono sm rej">ComplianceRule_</text>
+        <text x="624" y="191" class="mono sm rej">OnlyHook(A)</text>
+
+        <text x="20" y="232" class="sm bold">3. An attacker with a fake token of its own</text>
+        <rect class="b" x="20" y="244" width="130" height="58" rx="8"/>
+        <text x="34" y="268" class="bold">Attacker A</text>
+        <text x="34" y="286" class="sm m">owns fake token F</text>
+        <line class="ln" x1="150" y1="273" x2="236" y2="273" marker-end="url(#br-arrow)"/>
+        <text x="158" y="265" class="mono sm">after_(ctx)</text>
+        <text x="158" y="289" class="sm m">token = F</text>
+        <rect class="b2" x="240" y="244" width="150" height="58" rx="8"/>
+        <text x="254" y="268" class="mono bold">onlyHook(ctx)</text>
+        <text x="254" y="286" class="sm m">asks ctx.token</text>
+        <line class="ln" x1="390" y1="273" x2="476" y2="273" marker-end="url(#br-arrow)"/>
+        <text x="394" y="265" class="mono sm">policyHook()</text>
+        <rect class="b" x="480" y="244" width="110" height="58" rx="8"/>
+        <text x="494" y="268" class="bold">Fake token F</text>
+        <text x="494" y="286" class="sm m">answers A</text>
+        <line class="ln" x1="590" y1="273" x2="606" y2="273" marker-end="url(#br-arrow)"/>
+        <rect class="b2" x="610" y="244" width="160" height="58" rx="8"/>
+        <text x="624" y="264" class="bold">F names A as hook</text>
+        <text x="624" y="280" class="sm">writes state[F] only</text>
+        <text x="624" y="295" class="sm m">state[T] untouched</text>
+      </svg>
+    </div>
+    <figcaption><b>The token decides who its hook is.</b> The rule trusts the hook that <code>ctx.token</code> names, so a real token's records can only be written by that token's real hook. A fake token can name anyone as its hook, but only for its own records, which no real token reads.</figcaption>
+  </figure>
+  <ol class="steps">
+    <li><div><b>One read per call.</b> The check is one read-only call to the token, and only rules that want <code>after_</code> pay it, because the hook never calls <code>after_</code> on the others.</div></li>
+    <li><div><b>A wrong caller reverts.</b> Anyone but the token's current hook gets <code>ComplianceRule_OnlyHook(caller)</code>.</div></li>
+    <li><div><b>Sound only with per-token state.</b> Case 3 is harmless because every rule keys what it stores by <code>ctx.token</code>. A rule that kept one shared record for all tokens could be written through a fake token, so the interface requires the per-token key. The one rule whose count is shared by several tokens, <a href="FundHoldersRule.html"><code>FundHoldersRule</code></a>, keeps it in the <a href="Fund.html"><code>Fund</code></a>, which accepts updates only from its installed rule and only for a registered class; a fake token's call is refused there.</div></li>
+  </ol>
+</section>
+
+<section id="functions">
+  <div class="prose">
+    <h2>What it gives every rule</h2>
+    <p>A rule built on <code>BaseRule</code> must still write <code>check</code> (its decision) and <code>ruleId()</code> (the name of its type). Everything else has a default it can keep or replace.</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Item</th><th>Who can call</th><th>Default</th></tr></thead>
+      <tbody>
+        <tr><td><code>onlyHook(ctx)</code></td><td>A modifier, used on <code>after_</code></td><td>Lets the call through only if the caller is <code>IPolicyGated(ctx.token).policyHook()</code>; otherwise reverts with <code>ComplianceRule_OnlyHook(caller)</code>.</td></tr>
+        <tr><td><code>after_(ctx)</code></td><td>Only the hook of <code>ctx.token</code></td><td>Does nothing. Kept behind <code>onlyHook</code> even when empty.</td></tr>
+        <tr><td><code>wantsAfter()</code></td><td>Anyone (read-only)</td><td>False: the hook will not call <code>after_</code>. The hook reads this once, when a list is installed, so a rule must keep it constant.</td></tr>
+        <tr><td><code>checkSend(token, account)</code></td><td>Anyone (read-only)</td><td><code>TRANSFER_OK</code>: no opinion about a sender on its own.</td></tr>
+        <tr><td><code>checkReceive(token, account)</code></td><td>Anyone (read-only)</td><td><code>TRANSFER_OK</code>: no opinion about a receiver on its own.</td></tr>
+        <tr><td><code>supportsInterface(id)</code></td><td>Anyone (read-only)</td><td>ERC-165: true for <code>IComplianceRule</code> and <code>IERC165</code>. Each shipped rule adds its own interface.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="shipped">
+  <div class="prose">
+    <h2>What the shipped rules replace</h2>
+    <p>Five rules are built on <code>BaseRule</code>. All of them write <code>check</code> and <code>ruleId</code>, and all add their own interface to <code>supportsInterface</code>.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Rule</th><th>Account questions</th><th><code>after_</code></th><th>Configured by</th></tr></thead>
+      <tbody>
+        <tr><td><a href="CredentialRule.html"><code>CredentialRule</code></a></td><td>its own</td><td>default (none)</td><td>the token's <code>DEFAULT_ADMIN_ROLE</code></td></tr>
+        <tr><td><a href="MinPositionRule.html"><code>MinPositionRule</code></a></td><td>default (accepts)</td><td>default (none)</td><td>the token's <code>DEFAULT_ADMIN_ROLE</code></td></tr>
+        <tr><td><a href="HolderRestrictionRule.html"><code>HolderRestrictionRule</code></a></td><td>its own</td><td>default (none)</td><td>the token's <code>AGENT_ROLE</code></td></tr>
+        <tr><td><a href="SettlementWindowRule.html"><code>SettlementWindowRule</code></a></td><td>default (accepts)</td><td>default (none)</td><td>the token's <code>DEFAULT_ADMIN_ROLE</code></td></tr>
+        <tr><td><a href="FundHoldersRule.html"><code>FundHoldersRule</code></a></td><td>its own</td><td><code>wantsAfter()</code> true; updates the fund</td><td>the <code>Fund</code>'s owner, through the fund</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="context">
+  <div class="prose">
+    <h2>What a rule is told about a movement</h2>
+    <p>The token builds a <code>TransferContext</code> for every movement and the hook hands it to each rule unchanged. On a movement, a rule receives it only through the hook. Anyone can call <code>check</code> with a context of their own, which only reads, and a call to <code>after_</code> passes only from the hook that <code>ctx.token</code> names. The fields are <code>token</code>, <code>from</code>, <code>to</code>, <code>id</code> (0 for these fungible tokens), <code>amount</code>, <code>operator</code> (the account driving the movement), <code>kind</code> and <code>extra</code>. <code>extra</code> starts with both balances before the move, so a rule works out the balances after it from <code>amount</code> and never has to call back into the token for them. The kind says what sort of movement it is:</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Kind</th><th>What it is</th><th>Sender and receiver</th></tr></thead>
+      <tbody>
+        <tr><td><span class="k k-transfer">TRANSFER</span></td><td><code>transfer</code> or <code>transferFrom</code> by the holder or a spender, and the 7540 vault's moves of shares into its escrow (<code>requestRedeem</code>) and back out (<code>rejectRedeemRequest</code>)</td><td>both set</td></tr>
+        <tr><td><span class="k k-executed">EXECUTED</span></td><td>A transfer the holder signed in advance (an intent), carried out by an executor. <code>extra</code> also carries the intent's reference and deadline.</td><td>both set</td></tr>
+        <tr><td><span class="k k-forced">FORCED</span></td><td>An enforcement move by the agent: a forced transfer, or an enforcement mint</td><td>both set; no sender on an enforcement mint</td></tr>
+        <tr><td><span class="k k-mint">MINT</span></td><td>New tokens issued, including vault shares on a deposit</td><td>no sender (<code>address(0)</code>)</td></tr>
+        <tr><td><span class="k k-burn">BURN</span></td><td>Tokens destroyed: a burn by the burner, or a vault redemption</td><td>no receiver (<code>address(0)</code>)</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="writing">
+  <div class="prose">
+    <h2>What a rule must promise</h2>
+    <p>The interface sets the contract between the hook and a rule. <code>BaseRule</code> cannot enforce all of it, so the council reviews each rule against it before attesting it.</p>
+    <ul class="plain">
+      <li><b><code>check</code> is read-only and never reverts on a decision.</b> It returns <code>TRANSFER_OK</code> or a reason code. It must not revert even for an amount above the sender's balance: the write never offers the hook such an amount, but the token's <code>canTransfer</code> does, so a rule compares before it subtracts.</li>
+      <li><b>The account questions agree with <code>check</code>.</b> If <code>checkSend</code> or <code>checkReceive</code> refuses an account, <code>check</code> refuses every movement on that side of a kind the rule does not exempt. They take no amount and must not encode a quantitative rule (a count, a balance, a limit), which ERC-7943 keeps out of the account questions.</li>
+      <li><b>State is keyed by <code>ctx.token</code>.</b> The shipped rules other than <code>FundHoldersRule</code> authorise their per-token settings by the token's own roles, asked live with <code>hasRole</code>; <code>FundHoldersRule</code> keeps its settings in the Fund, under the Fund's owner.</li>
+      <li><b><code>after_</code> never calls back into the token</b> to move anything. It runs inside the token's reentrancy guard, so a transfer from it would revert.</li>
+      <li><b><code>ruleId()</code> names the rule type.</b> A hook takes one rule of each type per token.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="why">
+  <div class="prose">
+    <h2>Why it is built this way</h2>
+    <ul class="plain">
+      <li><b>Rules do not store their hook.</b> Because <code>onlyHook</code> asks the token, a rule has no hook address built in. One deployed instance serves every token, keeps working when a token moves to a new hook, and its code hash, which the council attests, does not depend on any hook.</li>
+      <li><b>Rules are plain contracts, not proxies.</b> They are attested by code hash, so the reviewed code is the code that runs. Changing a rule means deploying a new one, having it attested, and swapping it in with the hook's <code>setRules</code>.</li>
+      <li><b>Defaults that do nothing harmful.</b> A rule that has no account-level opinion accepts there, and <code>check</code> still decides every movement. A rule that does not want <code>after_</code> costs nothing after the move.</li>
+      <li><b>A forgotten answer refuses.</b> Every reason code is the hash of its name, so <code>TRANSFER_OK</code> is not zero. A rule that forgets to set its return value returns zero, which the hook reads as a refusal.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="connected">
+  <div class="prose"><h2>Connected to</h2></div>
+  <div class="cards">
+    <a class="card" href="ComplianceHook.html"><span class="name">ComplianceHook</span><p>The shared hook that calls the rules in order and calls <code>after_</code> on the ones that asked for it.</p></a>
+    <a class="card" href="PolicyGatedERC20Upgradeable.html"><span class="name">PolicyGatedERC20Upgradeable</span><p>The token base that answers <code>policyHook()</code> and builds the context every rule receives.</p></a>
+    <a class="card" href="FundHoldersRule.html"><span class="name">FundHoldersRule</span><p>The one shipped rule that uses <code>after_</code>.</p></a>
+    <a class="card" href="PolicyRegistry.html"><span class="name">PolicyRegistry</span><p>Where each rule's code hash is attested as <code>RULE</code> before a hook will install it.</p></a>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose">
+    <h2>Source and tests</h2>
+    <ul class="plain">
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/hooks/BaseRule.sol"><code>contracts/hooks/BaseRule.sol</code></a>, interfaces <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/interfaces/IComplianceRule.sol"><code>IComplianceRule.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/interfaces/IPolicyHook.sol"><code>IPolicyHook.sol</code></a> (the context and the kinds), reason codes in <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/interfaces/Errors.sol"><code>Errors.sol</code></a></li>
+      <li>Tests: <code>BaseRule</code> has no test file of its own, being abstract; it is tested through the rules built on it. <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/hooks/rules/FundHoldersRule.t.sol"><code>FundHoldersRule.t.sol</code></a> covers <code>onlyHook</code> (a stranger, an attacker naming the real class, and a fake token naming itself and its hook), and each rule's test file checks its ERC-165 answers and that a fake token can only change its own records.</li>
+    </ul>
+  </div>
+</section>
+
+<footer>Describes the contracts at commit <code>2f8c2e7</code> on <code>main</code>.</footer>
+</main>
+</body>
+</html>

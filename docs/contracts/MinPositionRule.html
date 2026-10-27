@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MinPositionRule · Gated Token Stack</title>
+<meta name="description" content="How MinPositionRule keeps every position at zero or at least a token's minimum, which movements it judges, and who sets the minimum.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="../index.html">Gated Token Stack</a>
+  <a href="../index.html">Overview</a>
+  <a href="../index.html#contracts">Contracts</a>
+  <a href="../roles.html">Who can do what</a>
+  <a href="../movement.html">One movement</a>
+  <a href="../deployment.html">Deployment and governance</a>
+  <a href="../money.html">Where the money sits</a>
+  <a href="../review.html">Security review</a>
+</nav>
+<main class="page">
+
+<header class="top">
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Policy</div>
+  <h1>MinPositionRule</h1>
+  <p class="lede">A minimum holding per token. After a movement, every account it judges holds either nothing or at least the minimum, so no tiny leftover balances (dust) are created.</p>
+  <div class="facts">
+    <span class="fact"><b>contracts/hooks/rules/MinPositionRule.sol</b></span>
+    <span class="fact">immutable, <b>not a proxy</b></span>
+    <span class="fact">set per token by the token's <b>DEFAULT_ADMIN_ROLE</b></span>
+    <span class="fact">attested as <b>RULE</b></span>
+  </div>
+</header>
+
+<section id="in-one-minute">
+  <div class="callout">
+    <h3>In one minute</h3>
+    <p>Funds often set a minimum investment. This rule enforces one on the token: if the minimum is 1,000 units, nobody can end a transfer, a subscription or a redemption holding 1 to 999 units. Selling everything is fine; keeping a little is not. It also matters for the investor cap: a tiny balance would count as a whole investor, so blocking dust stops anyone from taking a place under the cap with one unit. The token's administrator sets the minimum, and 0 switches the rule off. Enforcement actions (the agent's forced transfers and the burner's burns) are not held to it.</p>
+  </div>
+</section>
+
+<section id="how">
+  <div class="prose">
+    <h2>How a position is judged</h2>
+    <p>The rule looks at the balance each side will have after the move. It reads both balances before the move from the context the token built (<code>extra</code>) and adds or subtracts the amount, so it never calls back into the token for a balance.</p>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 780 196" role="img" aria-label="Allowed balances after a move. The sender may keep nothing, or the minimum or more; keeping more than zero and less than the minimum is refused with BELOW_MIN_POSITION. The receiver always ends above zero, so it must end with the minimum or more; less is refused with BELOW_MIN_POSITION.">
+        <text x="20" y="54" class="bold">The sender keeps</text>
+        <text x="20" y="71" class="sm m">balance minus amount</text>
+        <circle class="acc" cx="200" cy="60" r="7"/>
+        <text x="186" y="40" class="sm m">nothing</text>
+        <rect class="rejbox" x="212" y="48" width="250" height="24" rx="4"/>
+        <text x="226" y="64" class="mono sm rej">BELOW_MIN_POSITION</text>
+        <rect class="seg-a" x="470" y="48" width="280" height="24" rx="4"/>
+        <text x="484" y="64" class="sm">allowed</text>
+
+        <text x="20" y="124" class="bold">The receiver ends with</text>
+        <text x="20" y="141" class="sm m">balance plus amount</text>
+        <text x="190" y="134" class="sm m">n/a</text>
+        <rect class="rejbox" x="212" y="118" width="250" height="24" rx="4"/>
+        <text x="226" y="134" class="mono sm rej">BELOW_MIN_POSITION</text>
+        <rect class="seg-a" x="470" y="118" width="280" height="24" rx="4"/>
+        <text x="484" y="134" class="sm">allowed</text>
+
+        <line class="tick" x1="200" y1="170" x2="750" y2="170"/>
+        <line class="tick" x1="200" y1="164" x2="200" y2="176"/>
+        <line class="tick" x1="470" y1="164" x2="470" y2="176"/>
+        <text x="196" y="190" class="mono sm">0</text>
+        <text x="420" y="190" class="mono sm">minPosition(token)</text>
+        <text x="690" y="190" class="sm m">more</text>
+      </svg>
+    </div>
+    <figcaption><b>Zero, or the minimum or more.</b> A sender may leave entirely or keep at least the minimum. A receiver of a non-zero amount always ends above zero, so it must reach the minimum. Exactly the minimum is allowed on both sides.</figcaption>
+  </figure>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 780 382" role="img" aria-label="The check, in order. First, if the minimum is 0, the amount is 0, the sender is the receiver, or the kind is FORCED, it returns TRANSFER_OK without judging. Second, if there is a receiver that would end below the minimum and is not exempt, it returns BELOW_MIN_POSITION. Third, if there is a sender that would keep more than zero and less than the minimum, is not exempt, and the movement is not a burn by a holder of the token's BURNER_ROLE, it returns BELOW_MIN_POSITION. Otherwise TRANSFER_OK.">
+        <defs>
+          <marker id="mp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+          <marker id="mp-arrow-rej" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="rej"/></marker>
+        </defs>
+        <rect class="act" x="40" y="14" width="460" height="40" rx="8"/>
+        <text x="60" y="39" class="bold">The hook asks check(ctx)</text>
+        <line class="ln" x1="270" y1="54" x2="270" y2="76" marker-end="url(#mp-arrow)"/>
+
+        <rect class="b" x="40" y="78" width="460" height="50" rx="8"/>
+        <text x="60" y="99">1. Is the minimum 0, the amount 0, the sender</text>
+        <text x="60" y="117">   the receiver, or the kind FORCED?</text>
+        <line class="ln" x1="500" y1="103" x2="530" y2="103" marker-end="url(#mp-arrow)"/>
+        <text x="506" y="95" class="sm m">yes</text>
+        <rect class="act" x="534" y="83" width="226" height="40" rx="6"/>
+        <text x="548" y="100" class="mono sm">TRANSFER_OK</text>
+        <text x="548" y="116" class="sm m">not judged</text>
+        <line class="ln" x1="270" y1="128" x2="270" y2="152" marker-end="url(#mp-arrow)"/>
+        <text x="280" y="145" class="sm m">no</text>
+
+        <rect class="b" x="40" y="154" width="460" height="50" rx="8"/>
+        <text x="60" y="175">2. Is there a receiver that would end below</text>
+        <text x="60" y="193">   the minimum, and is it not exempt?</text>
+        <line class="ln-rej" x1="500" y1="179" x2="530" y2="179" marker-end="url(#mp-arrow-rej)"/>
+        <text x="506" y="171" class="sm m">yes</text>
+        <rect class="rejbox" x="534" y="161" width="226" height="36" rx="6"/>
+        <text x="548" y="184" class="mono sm rej">BELOW_MIN_POSITION</text>
+        <line class="ln" x1="270" y1="204" x2="270" y2="228" marker-end="url(#mp-arrow)"/>
+        <text x="280" y="221" class="sm m">no</text>
+
+        <rect class="b" x="40" y="230" width="460" height="68" rx="8"/>
+        <text x="60" y="251">3. Is there a sender that would keep more than 0</text>
+        <text x="60" y="269">   and less than the minimum, is it not exempt, and</text>
+        <text x="60" y="287">   is this not a burn by a BURNER_ROLE holder?</text>
+        <line class="ln-rej" x1="500" y1="264" x2="530" y2="264" marker-end="url(#mp-arrow-rej)"/>
+        <text x="506" y="256" class="sm m">yes</text>
+        <rect class="rejbox" x="534" y="246" width="226" height="36" rx="6"/>
+        <text x="548" y="269" class="mono sm rej">BELOW_MIN_POSITION</text>
+        <line class="ln" x1="270" y1="298" x2="270" y2="322" marker-end="url(#mp-arrow)"/>
+        <text x="280" y="315" class="sm m">no</text>
+
+        <rect class="act" x="40" y="324" width="460" height="40" rx="8"/>
+        <text x="60" y="349" class="bold">TRANSFER_OK</text>
+      </svg>
+    </div>
+    <figcaption><b>Three steps, receiver before sender.</b> The exemption list and the token's roles are read only once a position would actually breach the minimum, so an ordinary movement pays for neither.</figcaption>
+  </figure>
+</section>
+
+<section id="kinds">
+  <div class="prose">
+    <h2>What it checks for each kind of movement</h2>
+    <p>With a minimum above 0, a non-zero amount, and two different accounts:</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Kind</th><th>Receiver</th><th>Sender</th></tr></thead>
+      <tbody>
+        <tr><td><span class="k k-transfer">TRANSFER</span></td><td>ends at the minimum or more, unless exempt</td><td>keeps 0, or the minimum or more, unless exempt</td></tr>
+        <tr><td><span class="k k-executed">EXECUTED</span></td><td>the same as a transfer</td><td>the same as a transfer</td></tr>
+        <tr><td><span class="k k-forced">FORCED</span></td><td class="ok">not judged</td><td class="ok">not judged (an enforcement mint has no sender)</td></tr>
+        <tr><td><span class="k k-mint">MINT</span></td><td>ends at the minimum or more, unless exempt</td><td>none: a mint has no sender</td></tr>
+        <tr><td><span class="k k-burn">BURN</span></td><td>none: a burn has no receiver</td><td>keeps 0, or the minimum or more, unless exempt or the operator holds the token's <code>BURNER_ROLE</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <p>The refusal is always <code>BELOW_MIN_POSITION</code>, and the token reverts with <code>PolicyGated_TransferRejected(BELOW_MIN_POSITION)</code>. A holder's own burn, such as a vault redemption, is judged on what it leaves behind; a burn by the token's burner is an enforcement action and may leave any remainder.</p>
+  </div>
+</section>
+
+<section id="exempt">
+  <div class="prose">
+    <h2>What is not judged</h2>
+    <ul class="plain">
+      <li><b>Nothing to judge.</b> A minimum of 0 (the rule is off for the token), an amount of 0, and a move from an account to itself all pass. Nothing changes hands, so no new dust appears.</li>
+      <li><b>Enforcement.</b> <code>FORCED</code> passes on both sides, the enforcement mint included, and so does a burn whose operator holds the token's <code>BURNER_ROLE</code> on the sender side. The rule asks the token for that role only when a burn would leave a remainder below the minimum.</li>
+      <li><b>The token itself.</b> The token's own address is always exempt. On <a href="Gated7540Vault.html"><code>Gated7540Vault</code></a> the token is also the escrow that holds the shares of pending redemptions.</li>
+      <li><b>Listed accounts.</b> The token's admin can exempt an account with <code>setExempt(token, account, true)</code>. An exempt account is not judged on its own side; the other side of the same movement still is. A listing on one token does not carry over to another.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="functions">
+  <div class="prose"><h2>What it can do</h2></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>setMinPosition(token, amount)</code></td><td>The token's <code>DEFAULT_ADMIN_ROLE</code></td><td>Sets the token's minimum, in token units; 0 switches the rule off. Emits <code>MinPositionSet(token, oldMin, newMin)</code>. Reverts with <code>MinPositionRule_OnlyTokenAdmin(token, caller)</code>.</td></tr>
+        <tr><td><code>setExempt(token, account, exempt)</code></td><td>The token's <code>DEFAULT_ADMIN_ROLE</code></td><td>Adds an account to, or removes it from, the token's exemption list. Emits <code>MinPositionExemptionSet(token, account, exempt)</code>. Reverts with <code>MinPositionRule_OnlyTokenAdmin</code>, or <code>MinPositionRule_ZeroAddress</code> for the zero address.</td></tr>
+        <tr><td><code>check(ctx)</code></td><td>Anyone (read-only); the hook in practice</td><td>The decision described above: <code>TRANSFER_OK</code> or <code>BELOW_MIN_POSITION</code>.</td></tr>
+        <tr><td><code>minPosition(token)</code></td><td>Anyone (read-only)</td><td>The token's minimum; 0 when off.</td></tr>
+        <tr><td><code>isExempt(token, account)</code></td><td>Anyone (read-only)</td><td>True for the token itself and for listed accounts.</td></tr>
+        <tr><td><code>checkSend</code>, <code>checkReceive</code></td><td>Anyone (read-only)</td><td>Always <code>TRANSFER_OK</code> (the <a href="BaseRule.html"><code>BaseRule</code></a> default). A minimum depends on the amount, and the account questions take none.</td></tr>
+        <tr><td><code>ruleId()</code>, <code>wantsAfter()</code>, <code>supportsInterface(id)</code></td><td>Anyone (read-only)</td><td><code>keccak256('MinPositionRule.v1')</code>; false (no <code>after_</code>); ERC-165 for <code>IMinPositionRule</code>, <code>IComplianceRule</code> and <code>IERC165</code>.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <p>The rule asks the token at call time whether the caller holds <code>DEFAULT_ADMIN_ROLE</code>, through a read-only call. During deployment the deploying account is still each token's admin and sets each minimum from the parameters <code>intentMinPosition</code>, <code>fundMinPosition</code> and <code>asyncFundMinPosition</code>, all 0 by default, so the rule starts switched off. After the hand-over the main timelock is the admin, and a change is a governance operation with its delay.</p>
+  </div>
+</section>
+
+<section id="edges">
+  <div class="prose">
+    <h2>Edge cases</h2>
+    <ul class="plain">
+      <li><b>Raising the minimum.</b> Existing balances are not touched. A holder left below a raised minimum cannot send part of it, but can send all of it to a receiver that then holds at least the minimum, redeem all of it, or receive enough to reach the minimum. A top-up that still leaves it below is refused.</li>
+      <li><b>Small amounts to existing holders.</b> A receiver that already holds at least the minimum can receive any amount, even 1 unit, as long as the sender keeps 0 or at least the minimum.</li>
+      <li><b>An amount above the balance.</b> The token never offers such a movement to the hook on a write, but its <code>canTransfer</code> asks with it. The rule answers without reverting: the sender side is only computed when the sender holds more than the amount.</li>
+      <li><b>It never reverts on arithmetic.</b> The receiver test is written as "the amount is below the minimum, and the balance is below the minimum minus the amount", which cannot overflow, and the sender's remainder is only computed when it is positive. A Halmos symbolic test proves that for any minimum, balances, amount and kind it answers without reverting.</li>
+      <li><b>Vault limits.</b> The vaults' <code>maxDeposit</code> and <code>maxMint</code> test a mint of a very large amount (<code>type(uint128).max</code>), which is above any minimum up to that size, so a minimum does not show up there as a block. A deposit too small for the minimum passes that check and is refused when the shares are minted. On <code>Gated7540Vault</code> a claim that would leave the receiver below the minimum is refused and the claimable amount stays; the agent's <code>recoverClaimable</code> delivers it as an enforcement mint, which is exempt.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="why">
+  <div class="prose">
+    <h2>Why it is built this way</h2>
+    <ul class="plain">
+      <li><b>No dust, no cheap investor slots.</b> The fund caps its number of investors (<a href="FundHoldersRule.html"><code>FundHoldersRule</code></a>), and a one-unit balance counts as an investor. With a minimum set, a movement this rule judges cannot create such a position. The deployed lists put this rule second, right after the credential check, so the rules after it see real positions. Forced transfers, exempt accounts and burns by the burner can still leave dust.</li>
+      <li><b>No call back into the token for balances.</b> The token puts the balances before the move in the context, the same way for the write and for every pre-flight, so the usual path makes no call to the token at all. The token is asked only for a role, and only when a burn would leave dust.</li>
+      <li><b>One instance for every token.</b> The minimum and the exemptions are stored per token and authorised by that token's own admin, so the same attested contract serves every token in the deployment.</li>
+      <li><b>No account-level opinion.</b> ERC-7943 keeps quantitative rules out of <code>canSend</code> and <code>canReceive</code>, so this rule leaves them to <code>check</code>.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="connected">
+  <div class="prose"><h2>Connected to</h2></div>
+  <div class="cards">
+    <a class="card" href="ComplianceHook.html"><span class="name">ComplianceHook</span><p>Asks this rule second in every deployed list.</p></a>
+    <a class="card" href="FundHoldersRule.html"><span class="name">FundHoldersRule</span><p>The investor cap that a dust position would otherwise use up.</p></a>
+    <a class="card" href="Gated4626Vault.html"><span class="name">Gated4626Vault</span><p>Deposits and redemptions are mints and burns this rule judges.</p></a>
+    <a class="card" href="Gated7540Vault.html"><span class="name">Gated7540Vault</span><p>The vault whose escrow is the token itself, which the rule exempts.</p></a>
+    <a class="card" href="BaseRule.html"><span class="name">BaseRule</span><p>The parent this rule inherits its defaults from.</p></a>
+    <a class="card" href="../movement.html"><span class="name">One movement</span><p>Where this rule sits among all the checks a movement meets.</p></a>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose">
+    <h2>Source and tests</h2>
+    <ul class="plain">
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/hooks/rules/MinPositionRule.sol"><code>contracts/hooks/rules/MinPositionRule.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/interfaces/IMinPositionRule.sol"><code>IMinPositionRule.sol</code></a></li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/hooks/rules/MinPositionRule.t.sol"><code>MinPositionRule.t.sol</code></a> (each side, each kind, every exemption, a fuzz test of the whole decision, extreme numbers), <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/test/halmos/MinPositionRuleHalmos.t.sol"><code>MinPositionRuleHalmos.t.sol</code></a> (symbolic proofs that a transfer is refused exactly when it leaves dust, that a forced movement is never refused, and that for any minimum, balances, amount and kind it answers without reverting), <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/hooks/rules/RuleSetIntegration.t.sol"><code>RuleSetIntegration.t.sol</code></a> (on a real token, with pre-flight parity) and <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/test/nodejs/deployment.test.ts"><code>test/nodejs/deployment.test.ts</code></a> (the minimum set during deployment and enforced by the deployed token)</li>
+    </ul>
+  </div>
+</section>
+
+<footer>Describes the contracts at commit <code>2f8c2e7</code> on <code>main</code>.</footer>
+</main>
+</body>
+</html>
