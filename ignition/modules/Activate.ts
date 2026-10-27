@@ -168,8 +168,8 @@ export default buildModule("Activate", (m) => {
     grant("executor_operator", executor, ROLES.OPERATOR, p("operator")),
     grant("dvp_operator", dvpExecutor, ROLES.OPERATOR, p("operator")),
     grant("timelock_canceller", timelock, ROLES.CANCELLER, guardian),
-    // M-1: the recovery timelock may unpause and remove the guardian on every token and both executors (the main
-    // timelock already names it in its constructor for CANCELLER_ROLE revocation).
+    // The recovery timelock may unpause and remove the guardian on every token, the credential registry and both
+    // executors (the main timelock already names it in its constructor for CANCELLER_ROLE revocation).
     ...Object.entries(tokens).map(([key, token]) => grant(`${key}_recovery`, token, ROLES.RECOVERY, recoveryTimelock)),
     grant("credentials_recovery", credentialRegistry, ROLES.RECOVERY, recoveryTimelock),
     grant("executor_recovery", executor, ROLES.RECOVERY, recoveryTimelock),

@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PolicyRegistry · Gated Token Stack</title>
+<meta name="description" content="How PolicyRegistry keeps the list of reviewed code hashes, and which installs of hooks, rules and token implementations ask it first.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="../index.html">Gated Token Stack</a>
+  <a href="../index.html">Overview</a>
+  <a href="../index.html#contracts">Contracts</a>
+  <a href="../roles.html">Who can do what</a>
+  <a href="../movement.html">One movement</a>
+  <a href="../deployment.html">Deployment and governance</a>
+  <a href="../money.html">Where the money sits</a>
+  <a href="../review.html">Security review</a>
+</nav>
+<main class="page">
+
+<header class="top">
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Governance</div>
+  <h1>PolicyRegistry</h1>
+  <p class="lede">The list of reviewed code. For each code hash the security council has reviewed, it records what that code may be installed as: a hook, a rule or a token implementation. Every place that installs one of those asks it first.</p>
+  <div class="facts">
+    <span class="fact"><b>contracts/governance/PolicyRegistry.sol</b></span>
+    <span class="fact">immutable, <b>not a proxy</b></span>
+    <span class="fact">admin: <b>the main timelock</b>; attester: <b>the security council</b></span>
+    <span class="fact">not attested: it is the list itself</span>
+  </div>
+</header>
+
+<section id="in-one-minute">
+  <div class="callout">
+    <h3>In one minute</h3>
+    <p>Every deployed contract has a code hash: a fingerprint of its code. Change one byte and the fingerprint changes. The security council reads a piece of code, then writes its fingerprint here together with what it is for. When a token is created, upgraded, or given a new hook, or when a token's list of rules changes, the contract doing the install asks the registry one question: is this exact code on the list, for this purpose? If not, the install fails. The registry is asked only at that moment. Taking a fingerprint off the list later does not switch off anything already running; governance replaces the component as a separate step.</p>
+  </div>
+</section>
+
+<section id="how">
+  <div class="prose">
+    <h2>How it works</h2>
+    <p>The registry stores one kind per code hash: <code>HOOK</code>, <code>RULE</code> or <code>IMPLEMENTATION</code>, or <code>NONE</code> when nothing is stored. <code>isAttested(target, kind)</code> reads the code hash of the address it is given and compares the stored kind with the kind asked for. Six places in the system ask it, two for each kind.</p>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 780 630" role="img" aria-label="Six gates ask the registry. For HOOK: the token initialiser, run inside ProxyDeployer.deploy, and setPolicyHook, called by the main timelock; both revert with PolicyGated_NotAttested. For RULE: ComplianceHook.setRules, called by the token itself or its admin, reverting with ComplianceHook_NotAttested, and Fund.setRule, called by the fund's owner, reverting with Fund_NotAttested. For IMPLEMENTATION: ProxyDeployer.deploy, reverting with ProxyDeployer_ImplementationNotAttested, and the upgrade check, reverting with PolicyGated_NotAttested. Each asks isAttested(target, kind). The registry maps code hashes to kinds. The security council attests and revokes; the main timelock manages who holds ATTESTER_ROLE.">
+        <defs>
+          <marker id="pr-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+        </defs>
+        <text x="20" y="30" class="sm m">Gate, who triggers it, and its revert</text>
+        <text x="380" y="30" class="mono sm m">isAttested(target, kind)</text>
+
+        <!-- HOOK group -->
+        <rect class="band" x="12" y="44" width="360" height="152" rx="10"/>
+        <rect class="b" x="20" y="52" width="344" height="64" rx="8"/>
+        <text x="34" y="74" class="mono">initialize → _setHook(hook)</text>
+        <text x="34" y="92" class="sm m">token initialiser, inside ProxyDeployer.deploy</text>
+        <text x="34" y="108" class="mono sm rej">PolicyGated_NotAttested(hook, HOOK)</text>
+        <rect class="b" x="20" y="124" width="344" height="64" rx="8"/>
+        <text x="34" y="146" class="mono">setPolicyHook(newHook)</text>
+        <text x="34" y="164" class="sm m">token admin: the main timelock</text>
+        <text x="34" y="180" class="mono sm rej">PolicyGated_NotAttested(hook, HOOK)</text>
+        <line class="ln" x1="372" y1="120" x2="536" y2="120" marker-end="url(#pr-arrow)"/>
+        <text x="384" y="112" class="mono bold">HOOK</text>
+
+        <!-- RULE group -->
+        <rect class="band" x="12" y="212" width="360" height="152" rx="10"/>
+        <rect class="b" x="20" y="220" width="344" height="64" rx="8"/>
+        <text x="34" y="242" class="mono">ComplianceHook.setRules(token, rules)</text>
+        <text x="34" y="260" class="sm m">the token itself, or its admin; every rule</text>
+        <text x="34" y="276" class="mono sm rej">ComplianceHook_NotAttested(rule)</text>
+        <rect class="b" x="20" y="292" width="344" height="64" rx="8"/>
+        <text x="34" y="314" class="mono">Fund.setRule(rule)</text>
+        <text x="34" y="332" class="sm m">the fund's owner: the main timelock</text>
+        <text x="34" y="348" class="mono sm rej">Fund_NotAttested(rule)</text>
+        <line class="ln" x1="372" y1="288" x2="536" y2="288" marker-end="url(#pr-arrow)"/>
+        <text x="384" y="280" class="mono bold">RULE</text>
+
+        <!-- IMPLEMENTATION group -->
+        <rect class="band" x="12" y="380" width="360" height="152" rx="10"/>
+        <rect class="b" x="20" y="388" width="344" height="64" rx="8"/>
+        <text x="34" y="410" class="mono">ProxyDeployer.deploy(…)</text>
+        <text x="34" y="428" class="sm m">its owner; asked before the proxy exists</text>
+        <text x="34" y="444" class="mono sm rej">ProxyDeployer_ImplementationNotAttested</text>
+        <rect class="b" x="20" y="460" width="344" height="64" rx="8"/>
+        <text x="34" y="482" class="mono">upgradeToAndCall → _authorizeUpgrade</text>
+        <text x="34" y="500" class="sm m">UPGRADER_ROLE: the main timelock</text>
+        <text x="34" y="516" class="mono sm rej">PolicyGated_NotAttested(impl, IMPLEMENTATION)</text>
+        <line class="ln" x1="372" y1="456" x2="536" y2="456" marker-end="url(#pr-arrow)"/>
+        <text x="384" y="448" class="mono bold">IMPLEMENTATION</text>
+
+        <!-- Registry -->
+        <rect class="act" x="540" y="44" width="228" height="488" rx="10"/>
+        <text x="556" y="72" class="bold">PolicyRegistry</text>
+        <text x="556" y="90" class="sm m">code hash → kind</text>
+        <rect class="b2" x="554" y="104" width="200" height="26" rx="5"/>
+        <text x="566" y="121" class="mono sm">hook code   → HOOK</text>
+        <rect class="b2" x="554" y="136" width="200" height="26" rx="5"/>
+        <text x="566" y="153" class="mono sm">rule code   → RULE</text>
+        <rect class="b2" x="554" y="168" width="200" height="26" rx="5"/>
+        <text x="566" y="185" class="mono sm">token code  → IMPLEMENTATION</text>
+        <rect class="b2" x="554" y="200" width="200" height="26" rx="5"/>
+        <text x="566" y="217" class="mono sm m">anything else → NONE</text>
+        <text x="556" y="262" class="sm">True only if the kind stored</text>
+        <text x="556" y="278" class="sm">for the target's code hash is</text>
+        <text x="556" y="294" class="sm">the kind asked for.</text>
+        <text x="556" y="326" class="sm">Never true for NONE, or for</text>
+        <text x="556" y="342" class="sm">an address with no code.</text>
+        <text x="556" y="374" class="sm">One kind per code hash. To</text>
+        <text x="556" y="390" class="sm">change it, revoke and attest.</text>
+        <text x="556" y="422" class="sm m">Asked at install time only.</text>
+        <text x="556" y="438" class="sm m">A later revoke leaves what is</text>
+        <text x="556" y="454" class="sm m">already installed as it is.</text>
+
+        <!-- Who writes the list -->
+        <rect class="b" x="150" y="572" width="240" height="46" rx="8"/>
+        <text x="166" y="592">Main timelock</text>
+        <text x="166" y="609" class="sm m">DEFAULT_ADMIN_ROLE here</text>
+        <line class="ln" x1="390" y1="595" x2="556" y2="595" marker-end="url(#pr-arrow)"/>
+        <text x="404" y="587" class="sm m">manages ATTESTER_ROLE</text>
+        <rect class="b" x="560" y="572" width="208" height="46" rx="8"/>
+        <text x="576" y="592">Security council</text>
+        <text x="576" y="609" class="sm m">ATTESTER_ROLE, a multisig</text>
+        <line class="ln" x1="660" y1="572" x2="660" y2="536" marker-end="url(#pr-arrow)"/>
+        <text x="668" y="558" class="sm m">attest, revoke</text>
+      </svg>
+    </div>
+    <figcaption><b>Six gates, one question.</b> Each place that installs code asks whether the target's code hash is on the list for one kind, and reverts with its own error if it is not. Creating a token passes three of them in one transaction: the implementation (ProxyDeployer), the hook (the token's initialiser) and every rule in the token's first rule list (the initialiser installs it through <code>setRules</code> when it is not empty).</figcaption>
+  </figure>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Gate</th><th>Kind</th><th>What it also checks in the same call</th></tr></thead>
+      <tbody>
+        <tr><td>Token initialiser (<code>_setHook</code>)</td><td><code>HOOK</code></td><td>The hook's <code>REGISTRY()</code> is the token's own registry (<code>PolicyGated_HookRegistryMismatch</code>). Then, when the list is not empty, the initialiser installs the token's first rules with <code>setRules</code>, which asks for <code>RULE</code> on each.</td></tr>
+        <tr><td><code>setPolicyHook</code></td><td><code>HOOK</code></td><td>The caller holds the token's <code>DEFAULT_ADMIN_ROLE</code>, and the same registry check as above.</td></tr>
+        <tr><td><code>ComplianceHook.setRules</code></td><td><code>RULE</code></td><td>The caller is the token or holds its <code>DEFAULT_ADMIN_ROLE</code> (<code>ComplianceHook_NotTokenAdmin</code>), at most 16 rules (<code>ComplianceHook_TooManyRules</code>), one rule per <code>ruleId</code> (<code>ComplianceHook_DuplicateRule</code>). One unattested rule reverts the whole list, and the old list stays.</td></tr>
+        <tr><td><code>Fund.setRule</code></td><td><code>RULE</code></td><td>The caller is the fund's owner, and the rule is not the zero address (<code>Fund_ZeroAddress</code>).</td></tr>
+        <tr><td><code>ProxyDeployer.deploy</code></td><td><code>IMPLEMENTATION</code></td><td>Asked before the proxy is created. After setup it compares the token's registry, hook, rule list and symbol with the call (<a href="ProxyDeployer.html">ProxyDeployer</a>).</td></tr>
+        <tr><td><code>_authorizeUpgrade</code></td><td><code>IMPLEMENTATION</code></td><td>The caller holds <code>UPGRADER_ROLE</code> (checked first), and the new implementation reports the same <code>templateId()</code> as the token (<code>Templated_WrongTemplate</code>), so an attested vault implementation cannot be put under an intent token.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="functions">
+  <div class="prose"><h2>What it can do</h2></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th><th>Reverts</th></tr></thead>
+      <tbody>
+        <tr><td><code>attest(codehash, kind, uri)</code></td><td><code>ATTESTER_ROLE</code> (the security council)</td><td>Puts a code hash on the list as <code>kind</code>. <code>uri</code> points to the review record. Emits <code>Attested(codehash, kind, attester, uri)</code>.</td><td><code>PolicyRegistry_InvalidKind</code> for <code>NONE</code>; <code>PolicyRegistry_InvalidCodehash</code> for the zero hash or the hash of empty code; <code>PolicyRegistry_AlreadyAttested(codehash)</code> if the hash already has a kind.</td></tr>
+        <tr><td><code>revoke(codehash)</code></td><td><code>ATTESTER_ROLE</code></td><td>Takes a code hash off the list. Emits <code>AttestationRevoked(codehash, attester)</code>. Components already installed keep running.</td><td><code>PolicyRegistry_NotAttested(codehash)</code> if it has no kind.</td></tr>
+        <tr><td><code>isAttested(target, kind)</code></td><td>Anyone (read-only)</td><td>Whether the kind stored for <code>target</code>'s code hash is <code>kind</code>. Always false for <code>NONE</code> and for an address with no code.</td><td></td></tr>
+        <tr><td><code>kindOf(codehash)</code></td><td>Anyone (read-only)</td><td>The kind stored for a code hash, or <code>NONE</code>.</td><td></td></tr>
+        <tr><td><code>grantRole</code>, <code>revokeRole</code></td><td><code>DEFAULT_ADMIN_ROLE</code> (the main timelock)</td><td>OpenZeppelin <code>AccessControl</code>: decides who holds <code>ATTESTER_ROLE</code>, and who administers the registry. A holder can drop its own role with <code>renounceRole</code>.</td><td><code>AccessControlUnauthorizedAccount</code></td></tr>
+        <tr><td><code>supportsInterface(id)</code></td><td>Anyone (read-only)</td><td>ERC-165: true for <code>IPolicyRegistry</code> and the <code>AccessControl</code> interfaces.</td><td></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small">The constructor takes the admin and the first attester and refuses a zero address for either (<code>PolicyRegistry_ZeroAddress</code>). The deployment passes the main timelock and the council, so the registry is under governance from its first block. Attesting and revoking wait for no timelock: they are the council's own actions.</p>
+</section>
+
+<section id="codehash">
+  <div class="prose">
+    <h2>What a code hash covers</h2>
+    <p>A code hash is the hash of a contract's runtime code, and that code includes the values of its <code>immutable</code> variables. It does not include storage. Several things follow from that, and each shapes how the system is deployed.</p>
+    <ul class="plain">
+      <li><b>Identical code shares one attestation.</b> Two contracts with the same runtime code have the same hash, so attesting one attests both (the registry test <code>test_WhenAnotherContractHasTheSameCode_ItReturnsTrue</code>).</li>
+      <li><b>The shared hook.</b> <a href="ComplianceHook.html"><code>ComplianceHook</code></a>'s only immutable is its registry, so one attestation covers the one hook every token uses, and any other hook built on the same registry carries the same hash. A token refuses a hook that names another registry. The rule list each token runs lives in the hook's storage, which the hash does not cover, so <a href="ProxyDeployer.html"><code>ProxyDeployer</code></a> and the post-deployment check compare the exact hook instance and each token's list.</li>
+      <li><b>Each implementation needs its own attestation.</b> OpenZeppelin's UUPS code stores the implementation's own address in an immutable, so every deployment of a token implementation has a different hash, even from identical source.</li>
+      <li><b>Rules that point at another contract.</b> <a href="CredentialRule.html"><code>CredentialRule</code></a> holds its credential registry's address as an immutable, and <a href="FundHoldersRule.html"><code>FundHoldersRule</code></a> holds its fund's. The hash covers those addresses, not the code at them, so the council reads the contract each one points at before it attests the rule.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="install-time">
+  <div class="prose">
+    <h2>Asked when code is installed, not on every movement</h2>
+    <p>No token asks the registry when tokens move. The registry is read when a hook, a rule list, a fund rule or an implementation is installed, and never again for that install. <code>revoke</code> therefore changes nothing that is already running. It stops the same code from being installed anywhere afterwards.</p>
+    <p>If a revoke reached running tokens, it would have to do one of two things to each token that runs the revoked code: skip that check, so a rule silently stops applying, or fail every movement. Asking only at install time leaves that decision to governance. The guardian can pause the affected tokens at once, and the main timelock then replaces the component, which waits out its delay. Pause does not stop a forced transfer, which still runs the hook and its rules.</p>
+  </div>
+</section>
+
+<section id="plain-contracts">
+  <div class="prose">
+    <h2>Why hooks and rules must be plain contracts</h2>
+    <p>The registry compares the code at an address, so what it vouches for must be all of that component's behaviour.</p>
+    <ul class="plain">
+      <li><b>No proxies.</b> A proxy's code hash is the hash of the small forwarding contract, not of the code it forwards to. Attesting a proxy would vouch for whatever implementation it points at later. Hooks and rules are therefore ordinary contracts: changing one means deploying new code, having it attested, and installing it through governance.</li>
+      <li><b>No authority in storage.</b> Anyone can deploy a copy of attested code and give the copy different storage, and the copy carries the same attestation. So whatever matters for security has to be fixed in the code or its immutables. The hook's registry and a rule's credential registry or fund are immutables. Rules keep no owner or role of their own: they ask the token's roles at the moment of the call (<code>IAccessControl(token).hasRole</code>), and the post-deployment check asserts that no rule exposes <code>hasRole</code> or <code>owner</code>.</li>
+      <li><b>Token implementations</b> are the one kind behind a proxy. Their gate is the upgrade itself, and the template check keeps a token on its own template.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="why">
+  <div class="prose">
+    <h2>Why it is built this way</h2>
+    <ul class="plain">
+      <li><b>One immutable list per deployment.</b> The registry is not a proxy and has no setter beyond its roles, so the list of reviewed code cannot be swapped by an upgrade. Every token, the hook, the fund and the deployer take its address when they are set up, and tokens and the deployer check that they agree on it.</li>
+      <li><b>By code, not by address.</b> An attestation follows the bytes the council read, immutables included. The council publishes where the review is through <code>uri</code>, and the <code>Attested</code> and <code>AttestationRevoked</code> events record who did what.</li>
+      <li><b>One kind per hash.</b> A hash cannot be a hook and a rule at once. Changing its kind takes a revoke first, then a new attestation, so the change is visible in the events.</li>
+      <li><b>Empty hashes are refused.</b> An address with no code has a code hash of zero or the hash of empty code. <code>attest</code> refuses both, so an empty address can never pass a gate.</li>
+      <li><b>Separate duties.</b> The council attests and revokes. The main timelock, with its delay, decides who sits on the council. Neither touches tokens directly through the registry.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="connected">
+  <div class="prose"><h2>Connected to</h2></div>
+  <div class="cards">
+    <a class="card" href="ProxyDeployer.html"><span class="name">ProxyDeployer</span><p>Asks about the implementation before it creates a token.</p></a>
+    <a class="card" href="PolicyGatedERC20Upgradeable.html"><span class="name">PolicyGatedERC20Upgradeable</span><p>The token base: asks about the hook at setup and on <code>setPolicyHook</code>, and about the implementation on upgrade.</p></a>
+    <a class="card" href="ComplianceHook.html"><span class="name">ComplianceHook</span><p>Asks about every rule in a token's list when the list is installed.</p></a>
+    <a class="card" href="Fund.html"><span class="name">Fund</span><p>Asks about the fund-wide holder rule when it is set.</p></a>
+    <a class="card" href="GovernanceTimelock.html"><span class="name">GovernanceTimelock</span><p>The main timelock: the registry's admin.</p></a>
+    <a class="card" href="../deployment.html"><span class="name">Deployment and governance</span><p>The council step between the two deployment stages.</p></a>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose">
+    <h2>Source and tests</h2>
+    <ul class="plain">
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/governance/PolicyRegistry.sol"><code>contracts/governance/PolicyRegistry.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/interfaces/IPolicyRegistry.sol"><code>IPolicyRegistry.sol</code></a></li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/governance/PolicyRegistry.t.sol"><code>PolicyRegistry.t.sol</code></a> (attest, revoke, kinds, empty hashes, shared code, role gates), the gates in <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/base/PolicyGatedERC20Upgradeable.t.sol"><code>PolicyGatedERC20Upgradeable.t.sol</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/hooks/ComplianceHook.t.sol"><code>ComplianceHook.t.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/fund/Fund.t.sol"><code>Fund.t.sol</code></a>, and <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/test/nodejs/governance.test.ts"><code>test/nodejs/governance.test.ts</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/test/nodejs/deployment.test.ts"><code>deployment.test.ts</code></a> (an unattested implementation or rule stops the deployment or the upgrade)</li>
+    </ul>
+  </div>
+</section>
+
+<footer>Describes the contracts at commit <code>2f8c2e7</code> on <code>main</code>.</footer>
+</main>
+</body>
+</html>

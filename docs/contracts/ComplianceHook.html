@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ComplianceHook · Gated Token Stack</title>
+<meta name="description" content="How the one shared ComplianceHook keeps an ordered list of reviewed rules for each token and turns them into a single yes or no for every movement.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="../index.html">Gated Token Stack</a>
+  <a href="../index.html">Overview</a>
+  <a href="../index.html#contracts">Contracts</a>
+  <a href="../roles.html">Who can do what</a>
+  <a href="../movement.html">One movement</a>
+  <a href="../deployment.html">Deployment and governance</a>
+  <a href="../money.html">Where the money sits</a>
+  <a href="../review.html">Security review</a>
+</nav>
+<main class="page">
+
+<header class="top">
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Policy</div>
+  <h1>ComplianceHook</h1>
+  <p class="lede">The policy desk every token asks before a balance moves. One hook serves all the tokens of a deployment. It keeps an ordered list of reviewed rules for each token, asks them in turn, and passes on the first refusal.</p>
+  <div class="facts">
+    <span class="fact"><b>contracts/hooks/ComplianceHook.sol</b></span>
+    <span class="fact">immutable, <b>not a proxy</b></span>
+    <span class="fact">no admin of its own: <b>each token's admin</b> sets that token's rules</span>
+    <span class="fact">attested as <b>HOOK</b></span>
+  </div>
+</header>
+
+<section id="in-one-minute">
+  <div class="callout">
+    <h3>In one minute</h3>
+    <p>A token here does not decide on its own who may hold it. Before every transfer, mint or burn it asks a separate contract, the hook. The hook holds, for each token, a short ordered list of rules: small contracts that each check one thing, such as "does the receiver hold an accepted credential" or "is this holder locked up". The hook asks the rules one by one. If all say yes, the movement goes ahead. The first rule that says no stops it, and its reason code is what the caller sees. Only rules the security council has reviewed and registered (attested) can be put on a list, at most 16 per token, and only the token's own administrator can change its list, which after deployment means a delayed governance operation.</p>
+  </div>
+</section>
+
+<section id="how">
+  <div class="prose">
+    <h2>How one movement passes through the list</h2>
+    <p>The diagram follows one transfer of the intent token, whose deployed list has five rules. Every movement kind takes the same path: transfers, executed intents, forced transfers, mints and burns. The pre-flight answers (<code>canTransferWithReason</code>, <code>canExecute</code>) ask the same <code>beforeTransfer</code>, so they give the same answer the write would.</p>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 780 660" role="img" aria-label="One movement through the hook. The token builds the movement context and calls beforeTransfer. The hook loads the rule list kept for that token; an empty list returns NO_RULES. It then asks CredentialRule, MinPositionRule, HolderRestrictionRule, SettlementWindowRule and FundHoldersRule in order. The first rule that does not answer TRANSFER_OK ends the decision, its reason is returned, later rules are not asked, and the token reverts with PolicyGated_TransferRejected. If all answer OK the token moves the balances, then, because the token's after mask has a bit set, calls afterTransfer, which calls after_ only on FundHoldersRule, the one rule whose bit is set.">
+        <defs>
+          <marker id="ch-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+          <marker id="ch-arrow-rej" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="rej"/></marker>
+        </defs>
+
+        <rect class="act" x="40" y="14" width="460" height="54" rx="8"/>
+        <text x="60" y="36" class="bold">The token builds the context and asks the hook</text>
+        <text x="60" y="56" class="mono sm m">beforeTransfer({token,from,to,id,amount,operator,kind,extra})</text>
+        <line class="ln" x1="270" y1="68" x2="270" y2="92" marker-end="url(#ch-arrow)"/>
+
+        <rect class="b2" x="40" y="94" width="460" height="44" rx="8"/>
+        <text x="60" y="121">The hook loads the rule list kept for ctx.token</text>
+        <line class="ln-rej" x1="500" y1="116" x2="556" y2="116" marker-end="url(#ch-arrow-rej)"/>
+        <text x="510" y="108" class="sm m">empty</text>
+        <rect class="rejbox" x="560" y="98" width="200" height="36" rx="6"/>
+        <text x="574" y="121" class="mono sm rej">NO_RULES</text>
+        <line class="ln" x1="270" y1="138" x2="270" y2="162" marker-end="url(#ch-arrow)"/>
+
+        <rect class="b" x="40" y="164" width="460" height="46" rx="8"/>
+        <text x="60" y="184" class="mono bold">0  CredentialRule</text>
+        <text x="60" y="201" class="sm m">sender can leave, receiver holds an accepted credential</text>
+        <text x="430" y="192" class="mono sm m">after 0</text>
+        <line class="ln-rej" x1="500" y1="187" x2="576" y2="187" marker-end="url(#ch-arrow-rej)"/>
+        <text x="508" y="180" class="sm m">not OK</text>
+        <line class="ln" x1="270" y1="210" x2="270" y2="234" marker-end="url(#ch-arrow)"/>
+        <text x="280" y="227" class="sm m">OK</text>
+
+        <rect class="b" x="40" y="236" width="460" height="46" rx="8"/>
+        <text x="60" y="256" class="mono bold">1  MinPositionRule</text>
+        <text x="60" y="273" class="sm m">nobody left between zero and the minimum</text>
+        <text x="430" y="264" class="mono sm m">after 0</text>
+        <line class="ln-rej" x1="500" y1="259" x2="576" y2="259" marker-end="url(#ch-arrow-rej)"/>
+        <text x="508" y="252" class="sm m">not OK</text>
+        <line class="ln" x1="270" y1="282" x2="270" y2="306" marker-end="url(#ch-arrow)"/>
+        <text x="280" y="299" class="sm m">OK</text>
+
+        <rect class="b" x="40" y="308" width="460" height="46" rx="8"/>
+        <text x="60" y="328" class="mono bold">2  HolderRestrictionRule</text>
+        <text x="60" y="345" class="sm m">sender not frozen or locked, receiver not frozen</text>
+        <text x="430" y="336" class="mono sm m">after 0</text>
+        <line class="ln-rej" x1="500" y1="331" x2="576" y2="331" marker-end="url(#ch-arrow-rej)"/>
+        <text x="508" y="324" class="sm m">not OK</text>
+        <line class="ln" x1="270" y1="354" x2="270" y2="378" marker-end="url(#ch-arrow)"/>
+        <text x="280" y="371" class="sm m">OK</text>
+
+        <rect class="b" x="40" y="380" width="460" height="46" rx="8"/>
+        <text x="60" y="400" class="mono bold">3  SettlementWindowRule</text>
+        <text x="60" y="417" class="sm m">EXECUTED only: inside the token's window</text>
+        <text x="430" y="408" class="mono sm m">after 0</text>
+        <line class="ln-rej" x1="500" y1="403" x2="576" y2="403" marker-end="url(#ch-arrow-rej)"/>
+        <text x="508" y="396" class="sm m">not OK</text>
+        <line class="ln" x1="270" y1="426" x2="270" y2="450" marker-end="url(#ch-arrow)"/>
+        <text x="280" y="443" class="sm m">OK</text>
+
+        <rect class="b" x="40" y="452" width="460" height="46" rx="8"/>
+        <text x="60" y="472" class="mono bold">4  FundHoldersRule</text>
+        <text x="60" y="489" class="sm m">investor cap across the fund's classes</text>
+        <text x="430" y="480" class="mono sm acc-t bold">after 1</text>
+        <line class="ln-rej" x1="500" y1="475" x2="576" y2="475" marker-end="url(#ch-arrow-rej)"/>
+        <text x="508" y="468" class="sm m">not OK</text>
+
+        <rect class="rejbox" x="580" y="164" width="180" height="334" rx="8"/>
+        <text x="594" y="190" class="bold">Stop at the first</text>
+        <text x="594" y="208">reason other than</text>
+        <text x="594" y="226">TRANSFER_OK and</text>
+        <text x="594" y="244">return it. Later</text>
+        <text x="594" y="262">rules are not asked.</text>
+        <text x="594" y="300">The token reverts</text>
+        <text x="594" y="318">with</text>
+        <text x="594" y="340" class="mono sm rej">PolicyGated_</text>
+        <text x="594" y="356" class="mono sm rej">TransferRejected</text>
+        <text x="594" y="372" class="mono sm rej">(reason)</text>
+        <text x="594" y="410" class="sm m">Order decides which</text>
+        <text x="594" y="426" class="sm m">reason the caller sees.</text>
+
+        <line class="ln" x1="270" y1="498" x2="270" y2="524" marker-end="url(#ch-arrow)"/>
+        <text x="282" y="515" class="sm m">all OK: TRANSFER_OK</text>
+
+        <rect class="act" x="40" y="526" width="460" height="40" rx="8"/>
+        <text x="60" y="551">The token moves the balances</text>
+        <line class="ln" x1="270" y1="566" x2="270" y2="592" marker-end="url(#ch-arrow)"/>
+        <text x="282" y="583" class="sm m">wantsAfter() is true for this token</text>
+
+        <rect class="b2" x="40" y="594" width="460" height="50" rx="8"/>
+        <text x="60" y="615">afterTransfer(ctx), accepted only from ctx.token</text>
+        <text x="60" y="634" class="sm m">calls after_ only on rules whose bit is set in the after mask</text>
+        <line class="ln" x1="500" y1="619" x2="556" y2="619" marker-end="url(#ch-arrow)"/>
+        <rect class="act" x="560" y="596" width="200" height="46" rx="8"/>
+        <text x="574" y="615" class="mono sm">FundHoldersRule.after_</text>
+        <text x="574" y="633" class="sm m">updates the fund's count</text>
+      </svg>
+    </div>
+    <figcaption><b>First rejection wins.</b> The intent token's five rules in their deployed order. Each rule is asked in turn, and the first one that does not answer <code>TRANSFER_OK</code> ends the decision. Only <code>FundHoldersRule</code> asked for a call after the move when the list was installed, so its bit is the only one set in the token's after mask.</figcaption>
+  </figure>
+  <ol class="steps">
+    <li><div><b>The token checks first.</b> The token's own mechanical checks (pause, the unfrozen balance) run before the hook. The token reads its hook address once per movement, so the hook that approves a movement is the hook that sees its <code>afterTransfer</code>.</div></li>
+    <li><div><b>The list of this token.</b> <code>beforeTransfer(ctx)</code> looks up the list kept for <code>ctx.token</code>. A token with no rules gets <code>NO_RULES</code>, so every movement is refused until a list is installed.</div></li>
+    <li><div><b>Rules in order, read-only.</b> The hook calls <code>check(ctx)</code> on each rule in list order and returns the first reason that is not <code>TRANSFER_OK</code>. <code>beforeTransfer</code> and <code>check</code> are view functions, so the EVM runs them as static calls and a rule cannot change any state while it decides.</div></li>
+    <li><div><b>Balances move, then bookkeeping.</b> After the move the token asks <code>wantsAfter()</code>, which the hook answers for the calling token from its after mask. If any bit is set, the token calls <code>afterTransfer(ctx)</code>. The hook refuses that call from anyone but the token named in the context (<code>ComplianceHook_OnlyToken</code>), and calls <code>after_</code> in list order on the rules whose bit is set. This runs inside the token's reentrancy guard, so a rule cannot call back into a transfer.</div></li>
+  </ol>
+</section>
+
+<section id="lists">
+  <div class="prose">
+    <h2>The lists the deployment installs</h2>
+    <p>The deployment scripts pass each token its list in the token's setup data (<code>RULE_ORDER</code> in <code>ignition/modules/roles.ts</code>). The token installs the list on the hook while it is being set up, and <a href="ProxyDeployer.html"><code>ProxyDeployer</code></a> refuses to finish unless the hook ends up holding exactly that list for the new token.</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Token</th><th>Rules, in the order they are asked</th><th>After mask</th></tr></thead>
+      <tbody>
+        <tr><td><a href="IntentToken.html"><code>IntentToken</code></a> (INT)</td><td><a href="CredentialRule.html">CredentialRule</a>, <a href="MinPositionRule.html">MinPositionRule</a>, <a href="HolderRestrictionRule.html">HolderRestrictionRule</a>, <a href="SettlementWindowRule.html">SettlementWindowRule</a>, <a href="FundHoldersRule.html">FundHoldersRule</a></td><td>bit 4 (FundHoldersRule)</td></tr>
+        <tr><td><a href="Gated4626Vault.html"><code>Gated4626Vault</code></a> (gFUND)</td><td>CredentialRule, MinPositionRule, HolderRestrictionRule, FundHoldersRule</td><td>bit 3 (FundHoldersRule)</td></tr>
+        <tr><td><a href="Gated7540Vault.html"><code>Gated7540Vault</code></a> (gASYNC)</td><td>CredentialRule, MinPositionRule, HolderRestrictionRule, FundHoldersRule</td><td>bit 3 (FundHoldersRule)</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <p>The vaults have no window rule: they have no executed transfers to hold to a window. <code>MinPositionRule</code> comes right after the credential check so that, when a minimum is set, the rules after it see real positions. Because the first refusal wins, the order also decides which reason a caller sees: a sender with no credential who is also locked up gets <code>SENDER_NOT_VERIFIED</code>, not <code>LOCKED</code>.</p>
+  </div>
+</section>
+
+<section id="functions">
+  <div class="prose"><h2>What it can do</h2></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>setRules(token, rules)</code></td><td>The token itself, or an account holding <code>DEFAULT_ADMIN_ROLE</code> on that token</td><td>Replaces the token's whole ordered list in one step. Emits <code>RuleSetChanged(token, ruleIds)</code>. Reverts with <code>ComplianceHook_NotTokenAdmin</code>, <code>ComplianceHook_TooManyRules</code>, <code>ComplianceHook_NotAttested</code> or <code>ComplianceHook_DuplicateRule</code>, and then nothing changes.</td></tr>
+        <tr><td><code>beforeTransfer(ctx)</code></td><td>Anyone (read-only)</td><td>The decision for one movement: <code>TRANSFER_OK</code> or the first refusal of the list of <code>ctx.token</code>; <code>NO_RULES</code> for an empty list.</td></tr>
+        <tr><td><code>afterTransfer(ctx)</code></td><td>Only the token named in <code>ctx.token</code></td><td>Calls <code>after_</code> on the rules of that token whose bit is set in its after mask. Reverts with <code>ComplianceHook_OnlyToken</code> for any other caller.</td></tr>
+        <tr><td><code>checkSend(token, account)</code>, <code>checkReceive(token, account)</code></td><td>Anyone (read-only)</td><td>The account questions behind the token's <code>canSend</code> and <code>canReceive</code>. Same list, same order, first refusal wins, <code>NO_RULES</code> for an empty list.</td></tr>
+        <tr><td><code>wantsAfter()</code></td><td>Anyone (read-only)</td><td>True if the calling token's after mask has any bit set. It answers for the caller, so a shared hook answers each token for itself.</td></tr>
+        <tr><td><code>rules(token)</code>, <code>ruleCount(token)</code></td><td>Anyone (read-only)</td><td>A token's list in evaluation order, and its length.</td></tr>
+        <tr><td><code>REGISTRY()</code>, <code>MAX_RULES()</code></td><td>Anyone (read-only)</td><td>The registry the hook vets rules against, fixed at construction, and the cap of 16 rules per token.</td></tr>
+        <tr><td><code>supportsInterface(id)</code></td><td>Anyone (read-only)</td><td>ERC-165: true for <code>IPolicyHook</code>, <code>IComplianceHook</code> and <code>IERC165</code>.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small">The constructor takes the registry and refuses the zero address (<code>ComplianceHook_ZeroAddress</code>). There is no other setter.</p>
+</section>
+
+<section id="set-rules">
+  <div class="prose">
+    <h2>Changing a token's list</h2>
+    <p>A list is never edited in place. <code>setRules(token, rules)</code> replaces the whole list, and every check below runs before the call can succeed. One bad entry fails the whole call, so a token never ends up with half a list.</p>
+  </div>
+  <ol class="steps">
+    <li><div><b>Who is asking.</b> The caller is the token itself, or holds <code>DEFAULT_ADMIN_ROLE</code> on the token. The hook asks the token at call time (<code>hasRole</code>, a read-only call), so it keeps no admin list of its own and follows the token's role changes. An address with no code cannot be asked, so only that address itself could set its list. Otherwise: <code>ComplianceHook_NotTokenAdmin(token, caller)</code>.</div></li>
+    <li><div><b>How many.</b> At most 16 rules (<code>ComplianceHook_TooManyRules(count)</code>).</div></li>
+    <li><div><b>Reviewed rules only.</b> Each rule's code hash must be attested as <code>RULE</code> in the registry (<code>ComplianceHook_NotAttested(rule)</code>).</div></li>
+    <li><div><b>One of each kind.</b> No two rules may share a <code>ruleId()</code>, which names the rule type (<code>ComplianceHook_DuplicateRule(rule)</code>). The same contract listed twice fails the same way.</div></li>
+    <li><div><b>Store and announce.</b> The old list is cleared, the new one stored in order, and each rule's <code>wantsAfter()</code> is read once and recorded as a bit of the after mask. Emits <code>RuleSetChanged(token, ruleIds)</code> with the new rule ids in order.</div></li>
+  </ol>
+  <div class="prose">
+    <p>The token itself calls <code>setRules</code> only from its setup function, which installs the hook and then the initial list in the same call; that is why the hook accepts the token without asking for a role: the token is the caller, and it holds no role on itself. After the deployment hands each token to the main timelock, the timelock is the only holder of <code>DEFAULT_ADMIN_ROLE</code>, so every later change is a governance operation with its delay. The governance multisig calling the hook directly is refused. Passing an empty list is allowed and makes the token refuse every movement with <code>NO_RULES</code>.</p>
+    <p>Replacing the hook itself is the token's <code>setPolicyHook</code>, also under <code>DEFAULT_ADMIN_ROLE</code>. The token accepts only a hook attested as <code>HOOK</code> whose <code>REGISTRY()</code> is the token's own registry. A second hook built on the same registry has the same code hash, so the council's one attestation covers it. The token's list must be set on the new hook before the swap; otherwise the token refuses every movement with <code>NO_RULES</code> from the moment the swap takes effect.</p>
+  </div>
+</section>
+
+<section id="account">
+  <div class="prose">
+    <h2>The account questions</h2>
+    <p>ERC-7943, the standard the tokens implement, asks two questions that take no amount: may this account send at all, and may it receive at all. The token answers them with <code>canSend</code> and <code>canReceive</code>, which are false while the token is paused or has no hook, and otherwise ask the hook's <code>checkSend(token, account)</code> or <code>checkReceive(token, account)</code>. The hook walks the same list in the same order and calls each rule's own <code>checkSend</code> or <code>checkReceive</code>. A rule with no opinion about an account on its own, like the minimum position or the window, accepts every account there.</p>
+  </div>
+</section>
+
+<section id="why">
+  <div class="prose">
+    <h2>Why it is built this way</h2>
+    <ul class="plain">
+      <li><b>One hook, one review.</b> The registry is the hook's only fixed setting, so every hook built on the same registry has the same code hash. The council attests it once for the whole deployment, and a new token needs one <code>setRules</code>, not a new hook.</li>
+      <li><b>Everything is kept per token.</b> The lists and the after masks are stored by token address. A token can set its own list and no other, and one token's <code>afterTransfer</code> cannot run another token's rules (tests cover both).</li>
+      <li><b>It fails closed.</b> An empty list refuses everything. A rule that is not attested, or a duplicate, fails the whole <code>setRules</code> call.</li>
+      <li><b>The after mask is fixed at install.</b> Reading <code>wantsAfter()</code> once, when the list is installed, saves a call per rule on every movement, and a rule cannot start or stop asking for <code>after_</code> later. The count and the mask share one storage word.</li>
+      <li><b>Attestation is checked when a rule is installed, not on every transfer.</b> Withdrawing an attestation does not silently drop a rule from a running token; governance removes it with <code>setRules</code>, and the guardian can pause the token meanwhile.</li>
+      <li><b>A hard cap of 16.</b> Every loop in the hook runs over at most 16 rules, so the cost of a movement has a known upper bound.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="connected">
+  <div class="prose"><h2>Connected to</h2></div>
+  <div class="cards">
+    <a class="card" href="BaseRule.html"><span class="name">BaseRule</span><p>The parent every rule inherits, with the check that only a token's current hook may call <code>after_</code>.</p></a>
+    <a class="card" href="PolicyGatedERC20Upgradeable.html"><span class="name">PolicyGatedERC20Upgradeable</span><p>The token base that builds the context, asks the hook and reverts on a refusal.</p></a>
+    <a class="card" href="PolicyRegistry.html"><span class="name">PolicyRegistry</span><p>The list of reviewed code the hook checks every rule against.</p></a>
+    <a class="card" href="ProxyDeployer.html"><span class="name">ProxyDeployer</span><p>Reads the hook's list for each new token and refuses a token whose list is not the expected one.</p></a>
+    <a class="card" href="../movement.html"><span class="name">One movement</span><p>Every check a movement meets, from the token's own checks to the last rule.</p></a>
+    <a class="card" href="../deployment.html"><span class="name">Deployment and governance</span><p>How the lists are installed at deployment and changed through the timelock.</p></a>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose">
+    <h2>Source and tests</h2>
+    <ul class="plain">
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/hooks/ComplianceHook.sol"><code>contracts/hooks/ComplianceHook.sol</code></a>, interfaces <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/interfaces/IComplianceHook.sol"><code>IComplianceHook.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/interfaces/IPolicyHook.sol"><code>IPolicyHook.sol</code></a>, reason codes in <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/interfaces/Errors.sol"><code>Errors.sol</code></a></li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/hooks/ComplianceHook.t.sol"><code>ComplianceHook.t.sol</code></a> (unit tests with mocked rules and registry: who may set a list, the cap, attestation, duplicates, first refusal, the after mask, isolation between tokens), <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/hooks/rules/RuleSetIntegration.t.sol"><code>RuleSetIntegration.t.sol</code></a> (MinPositionRule, HolderRestrictionRule and SettlementWindowRule behind a test identity rule, on a real hook and a real IntentToken, with pre-flight parity), <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/test/nodejs/governance.test.ts"><code>test/nodejs/governance.test.ts</code></a> (list and hook changes only through the timelock) and <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/test/nodejs/deployment.test.ts"><code>test/nodejs/deployment.test.ts</code></a> (the deployed lists, and a second hook on the same registry sharing the attested code hash)</li>
+    </ul>
+  </div>
+</section>
+
+<footer>Describes the contracts at commit <code>2f8c2e7</code> on <code>main</code>.</footer>
+</main>
+</body>
+</html>

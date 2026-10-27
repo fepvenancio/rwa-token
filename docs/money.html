@@ -1,0 +1,550 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Where the money sits · Gated Token Stack</title>
+<meta name="description" content="For each flow, where the asset and the shares sit at each step, who can move them, and how prices and rounding are computed.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="index.html">Gated Token Stack</a>
+  <a href="index.html">Overview</a>
+  <a href="index.html#contracts">Contracts</a>
+  <a href="roles.html">Who can do what</a>
+  <a href="movement.html">One movement</a>
+  <a href="deployment.html">Deployment and governance</a>
+  <a href="money.html" aria-current="page">Where the money sits</a>
+  <a href="review.html">Security review</a>
+</nav>
+<main class="page">
+
+<header class="top">
+  <div class="crumbs"><a href="index.html">Overview</a> / Assets and settlement</div>
+  <h1>Where the money sits</h1>
+  <p class="lede">For each way value moves, this page shows where the asset and the shares are at every step, who can move them from there, and the exact formulas behind prices and rounding.</p>
+  <div class="facts">
+    <span class="fact">no fees, no oracle, <b>no yield code</b></span>
+    <span class="fact">asset transfers: <b>not seen by the hook</b></span>
+    <span class="fact">ETH: <b>only the two timelocks</b> accept it</span>
+    <span class="fact">7540 price: <b>set by the fulfiller</b></span>
+  </div>
+</header>
+
+<nav class="toc" aria-label="On this page">
+  <a href="#in-one-minute">In one minute</a>
+  <a href="#intent">Intent token</a>
+  <a href="#v4626">4626 vault</a>
+  <a href="#v7540">7540 vault</a>
+  <a href="#prices7540">7540 prices and rounding</a>
+  <a href="#dvp-gated">DvP, gated cash</a>
+  <a href="#dvp-3009">DvP, ERC-3009 cash</a>
+  <a href="#absent">What the code does not have</a>
+  <a href="#why">Why</a>
+</nav>
+
+<section id="in-one-minute">
+  <div class="callout">
+    <h3>In one minute</h3>
+    <p>Two kinds of value move here. <b>Token balances</b>: every template is a gated ERC-20, and each balance change asks the hook and its rules first. The <b>vault asset</b>: the two vaults take in and pay out an ordinary ERC-20 chosen at deployment, such as a stablecoin, and those transfers never go through the hook. The intent token has no asset behind it: its balances are the record. The 4626 vault keeps its asset itself and prices shares by formula. The 7540 vault passes deposits on to a custody address and lets a trusted fulfiller name the price. The DvP executor swaps a security against cash in one transaction and keeps nothing.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Flow</th><th>The asset sits</th><th>The shares or tokens sit</th><th>The price comes from</th></tr></thead>
+      <tbody>
+        <tr><td><code>IntentToken</code> transfer</td><td>no asset</td><td>holders' balances</td><td>no price: cash, if any, settles elsewhere</td></tr>
+        <tr><td><code>Gated4626Vault</code></td><td>in the vault</td><td>holders' balances</td><td>OpenZeppelin's formula on the vault's asset balance and share supply</td></tr>
+        <tr><td><code>Gated7540Vault</code></td><td>the vault while a deposit waits, then custody; redemption payouts in the vault until claimed</td><td>holders' balances, or in escrow at the vault while a redemption waits</td><td>the fulfiller, per fulfilment</td></tr>
+        <tr><td>DvP</td><td>moves straight between buyer and seller, or through the executor inside one call</td><td>moves from seller to buyer</td><td>agreed off-chain and signed by both parties</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="intent">
+  <div class="prose">
+    <h2>Intent token: the token is the instrument</h2>
+    <p><a href="contracts/IntentToken.html"><code>IntentToken</code></a> holds no asset and moves no payment. Its balances are the record of who owns what. An <b>intent</b> is a transfer the holder signs off-chain and an executor submits; its <code>ref</code> field ties the move to an off-chain payment message.</p>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 960 250" role="img" aria-label="Intent token flows. The minter mints new tokens to holder A, raising the supply. Holder A moves tokens to holder B by a transfer or by a signed intent that an executor contract runs. The agent can force-transfer holder A's tokens to a quarantine account that holds a credential. The burner burns from holder B, lowering the supply.">
+        <defs>
+          <marker id="mo-a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+        </defs>
+        <rect class="b2" x="20" y="40" width="130" height="56" rx="8"/>
+        <text x="85" y="64" class="bold" text-anchor="middle">Minter</text>
+        <text x="85" y="82" class="mono sm" text-anchor="middle">MINTER_ROLE</text>
+        <rect class="b" x="250" y="40" width="150" height="56" rx="8"/>
+        <text x="325" y="64" class="bold" text-anchor="middle">Holder A</text>
+        <text x="325" y="82" class="m sm" text-anchor="middle">a balance</text>
+        <rect class="b" x="530" y="40" width="150" height="56" rx="8"/>
+        <text x="605" y="64" class="bold" text-anchor="middle">Holder B</text>
+        <text x="605" y="82" class="m sm" text-anchor="middle">a balance</text>
+        <rect class="b2" x="800" y="40" width="140" height="56" rx="8"/>
+        <text x="870" y="64" class="bold" text-anchor="middle">Burned</text>
+        <text x="870" y="82" class="mono sm" text-anchor="middle">BURNER_ROLE</text>
+
+        <line class="ln c-mint" x1="150" y1="68" x2="248" y2="68" marker-end="url(#mo-a1)"/>
+        <text x="199" y="60" class="sm t-mint" text-anchor="middle">mint: supply up</text>
+        <line class="ln c-transfer" x1="400" y1="68" x2="528" y2="68" marker-end="url(#mo-a1)"/>
+        <text x="464" y="60" class="sm t-transfer" text-anchor="middle">transfer or intent</text>
+        <line class="ln c-burn" x1="680" y1="68" x2="798" y2="68" marker-end="url(#mo-a1)"/>
+        <text x="739" y="60" class="sm t-burn" text-anchor="middle">burn: supply down</text>
+
+        <rect class="b" x="250" y="176" width="150" height="56" rx="8"/>
+        <text x="325" y="200" class="bold" text-anchor="middle">Quarantine</text>
+        <text x="325" y="218" class="m sm" text-anchor="middle">holds a credential</text>
+        <line class="ln c-forced" x1="325" y1="96" x2="325" y2="174" marker-end="url(#mo-a1)"/>
+        <text x="317" y="140" class="sm t-forced" text-anchor="end">forcedTransfer by the agent</text>
+
+        <rect class="b2" x="425" y="176" width="130" height="56" rx="8"/>
+        <text x="490" y="200" class="bold" text-anchor="middle">IntentExecutor</text>
+        <text x="490" y="218" class="m sm" text-anchor="middle">or DvPExecutor</text>
+        <line class="ln dash" x1="490" y1="176" x2="490" y2="74" marker-end="url(#mo-a1)"/>
+        <text x="498" y="140" class="sm m">runs a holder-signed intent</text>
+      </svg>
+    </div>
+    <figcaption><b>No asset, no payment: only balances move.</b> Colours follow the movement kinds the rules see: <span class="k k-mint">MINT</span>, <span class="k k-transfer">TRANSFER</span> or <span class="k k-executed">EXECUTED</span>, <span class="k k-forced">FORCED</span>, <span class="k k-burn">BURN</span>. The executor contracts hold no tokens; they only submit the holder's signed intent.</figcaption>
+  </figure>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Who</th><th>Can move a holder's tokens by</th><th>Limits</th></tr></thead>
+      <tbody>
+        <tr><td>The holder</td><td><code>transfer</code></td><td>Only the unfrozen balance, and the rules judge both sides.</td></tr>
+        <tr><td>A spender</td><td><code>transferFrom</code>, with an allowance set by <code>approve</code> or by a signed <code>permit</code></td><td>As for the holder, plus the allowance.</td></tr>
+        <tr><td>An executor contract (<code>EXECUTOR_ROLE</code>)</td><td><code>executeTransfer(intent, sig)</code></td><td>Only with the holder's signature, once per nonce, inside its validity window, and only if the intent names this executor or none.</td></tr>
+        <tr><td>The agent (<code>AGENT_ROLE</code>)</td><td><code>forcedTransfer(from, to, amount)</code></td><td>Any amount up to the whole balance, frozen part included. The receiver must hold a credential the policy accepts and must not be address-frozen.</td></tr>
+        <tr><td>The burner (<code>BURNER_ROLE</code>)</td><td><code>burn(from, amount)</code></td><td>No allowance needed and may take frozen tokens. Refused for an address-frozen holder and while paused.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <p>An intent can state what its signer is to receive (<code>considerationToken</code>, <code>considerationAmount</code>). The token never moves it and never checks that it was paid. It only refuses a stated consideration that names no executor (<code>CONSIDERATION_NEEDS_EXECUTOR</code>), so that only the named executor can run it. <code>IntentExecutor</code> refuses every intent that states one (<code>IntentExecutor_ConsiderationNotSupported</code>), because it cannot enforce a payment. <code>DvPExecutor</code> is the one that does, below. Gas is paid by whoever sends the transaction, which for an intent is the operator, not the holder.</p>
+  </div>
+</section>
+
+<section id="v4626">
+  <div class="prose">
+    <h2><code>Gated4626Vault</code>: assets in, shares out</h2>
+    <p>A <b>vault</b> takes in an asset and issues <b>shares</b>, a claim on part of what it holds. <a href="contracts/Gated4626Vault.html"><code>Gated4626Vault</code></a> is OpenZeppelin's ERC-4626 vault with gated shares: it keeps the asset itself, and a deposit or a redemption happens in one call.</p>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 960 310" role="img" aria-label="4626 vault. Deposit: the caller's assets move into the vault by transferFrom, then new shares are minted to the receiver. Redemption: the owner's shares are burned, then assets move from the vault to the receiver by transfer. The vault holds the asset, and totalAssets is its balance.">
+        <defs>
+          <marker id="mo-a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+        </defs>
+        <text x="20" y="24" class="m">Deposit or mint</text>
+        <rect class="b" x="20" y="40" width="180" height="56" rx="8"/>
+        <text x="110" y="64" class="bold" text-anchor="middle">Caller</text>
+        <text x="110" y="82" class="m sm" text-anchor="middle">pays the assets</text>
+        <rect class="b" x="760" y="40" width="180" height="56" rx="8"/>
+        <text x="850" y="64" class="bold" text-anchor="middle">Receiver</text>
+        <text x="850" y="82" class="m sm" text-anchor="middle">gets new shares</text>
+
+        <rect class="act" x="380" y="40" width="200" height="216" rx="8"/>
+        <text x="480" y="126" class="bold" text-anchor="middle">Gated4626Vault</text>
+        <text x="480" y="146" class="m sm" text-anchor="middle">holds the asset</text>
+        <text x="480" y="164" class="m sm" text-anchor="middle">totalAssets = its balance</text>
+        <text x="480" y="182" class="m sm" text-anchor="middle">share decimals = asset + 6</text>
+
+        <line class="ln" x1="200" y1="68" x2="378" y2="68" marker-end="url(#mo-a2)"/>
+        <text x="289" y="60" class="m" text-anchor="middle">1  assets, transferFrom</text>
+        <line class="ln dash c-mint" x1="580" y1="68" x2="758" y2="68" marker-end="url(#mo-a2)"/>
+        <text x="669" y="60" class="sm t-mint" text-anchor="middle">2  new shares: MINT</text>
+
+        <text x="20" y="184" class="m">Withdraw or redeem</text>
+        <rect class="b" x="20" y="200" width="180" height="56" rx="8"/>
+        <text x="110" y="224" class="bold" text-anchor="middle">Owner</text>
+        <text x="110" y="242" class="m sm" text-anchor="middle">holds the shares</text>
+        <rect class="b" x="760" y="200" width="180" height="56" rx="8"/>
+        <text x="850" y="224" class="bold" text-anchor="middle">Receiver</text>
+        <text x="850" y="242" class="m sm" text-anchor="middle">gets the assets</text>
+
+        <line class="ln dash c-burn" x1="200" y1="228" x2="378" y2="228" marker-end="url(#mo-a2)"/>
+        <text x="289" y="220" class="sm t-burn" text-anchor="middle">3  shares burned: BURN</text>
+        <line class="ln" x1="580" y1="228" x2="758" y2="228" marker-end="url(#mo-a2)"/>
+        <text x="669" y="220" class="m" text-anchor="middle">4  assets, transfer</text>
+
+        <line class="ln" x1="20" y1="290" x2="70" y2="290"/>
+        <text x="78" y="294" class="sm m">the asset, not hooked</text>
+        <line class="ln dash c-mint" x1="230" y1="290" x2="280" y2="290"/>
+        <text x="288" y="294" class="sm m">shares, through the hook</text>
+      </svg>
+    </div>
+    <figcaption><b>The asset is pulled before shares are minted, and paid out after shares are burned.</b> If the hook rejects the share movement, the whole call reverts, the asset transfer included. On a deposit the hook judges the receiver of the shares; on a redemption, the owner. The party who pays the assets in and the one who receives them out are not checked.</figcaption>
+  </figure>
+  <div class="prose">
+    <h3>The price</h3>
+    <p>OpenZeppelin's formulas, with a decimals offset of 6. The offset adds a million virtual shares and one virtual unit of asset, which makes the first-depositor donation attack unprofitable. <code>totalAssets</code> is the vault's own balance of the asset.</p>
+  </div>
+  <div class="code-block">
+    <div class="code-label">OpenZeppelin ERC4626Upgradeable, _decimalsOffset() = 6</div>
+<pre>shares = assets × (totalSupply + 10^6) / (totalAssets + 1)
+assets = shares × (totalAssets + 1) / (totalSupply + 10^6)
+totalAssets = asset.balanceOf(vault)</pre>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Call</th><th>Converts</th><th>Rounds</th><th>Effect of rounding</th></tr></thead>
+      <tbody>
+        <tr><td><code>deposit(assets, receiver)</code></td><td>assets to shares</td><td>down</td><td>the receiver gets slightly fewer shares</td></tr>
+        <tr><td><code>mint(shares, receiver)</code></td><td>shares to assets</td><td>up</td><td>the caller pays slightly more</td></tr>
+        <tr><td><code>withdraw(assets, receiver, owner)</code></td><td>assets to shares</td><td>up</td><td>slightly more shares are burned</td></tr>
+        <tr><td><code>redeem(shares, receiver, owner)</code></td><td>shares to assets</td><td>down</td><td>slightly fewer assets are paid</td></tr>
+        <tr><td><code>maxWithdraw(owner)</code></td><td><code>maxRedeem(owner)</code> to assets</td><td>down</td><td>never promises more than <code>withdraw</code> can deliver</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <p>Every rounding favours the vault, and the dust stays in it, so it raises the value of every share a little. The price also moves when someone sends the asset straight to the vault, and if the asset's own balance changes. There is no strategy, fee or yield code.</p>
+    <p>Example with a 6-decimal asset and an empty vault, so shares have 12 decimals. A deposit of 1,000 assets (<code>1000e6</code>) mints <code>1000e6 × 10^6 / 1 = 1e15</code> raw shares, which is 1,000 shares. Redeeming all of them pays <code>1e15 × (1000e6 + 1) / (1e15 + 10^6) = 1000e6</code>: the 1,000 assets come back in full.</p>
+    <h3>Who can move what</h3>
+    <ul class="plain">
+      <li><b>The asset in the vault</b> leaves only through <code>withdraw</code> and <code>redeem</code>, which burn the owner's shares. The caller must be the owner or hold an allowance on its shares. No admin function moves it. An upgrade through the timelock, to reviewed code, could change that.</li>
+      <li><b>The shares</b> move like any gated balance: the holder, a spender, and the agent's <code>forcedTransfer</code>. The role <code>mint</code> and <code>burn</code> always revert on the vault (<code>Gated4626Vault_Unsupported</code>).</li>
+      <li><b>A frozen amount</b> cannot be redeemed: <code>maxRedeem</code> is the unfrozen balance.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="v7540">
+  <div class="prose">
+    <h2><code>Gated7540Vault</code>: request, fulfil, claim</h2>
+    <p><a href="contracts/Gated7540Vault.html"><code>Gated7540Vault</code></a> is asynchronous (ERC-7540): a holder requests, a bank with <code>FULFILLER_ROLE</code> fulfils later at a price it names, and the holder then claims. A request is booked under a <b>controller</b>, the account entitled to claim it; a controller's requests add up under one entry. The deposited asset does not stay in the vault: at fulfilment it goes to a <b>custody</b> address, a plain address set at initialisation that the main timelock can change with <code>setCustody</code>.</p>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 940 390" role="img" aria-label="7540 deposit. 1, the owner's assets move into the vault and are booked as pending. 2, the fulfiller calls fulfillDeposit naming the assets and the shares; they become claimable. 3, the vault sends those assets to custody. 4, the controller claims with deposit or mint. 5, new shares are minted to the receiver.">
+        <defs>
+          <marker id="mo-a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+        </defs>
+        <rect class="b2" x="15" y="16" width="150" height="44" rx="8"/>
+        <text x="90" y="43" class="bold" text-anchor="middle">Owner, controller</text>
+        <rect class="b2" x="195" y="16" width="150" height="44" rx="8"/>
+        <text x="270" y="43" class="bold" text-anchor="middle">Fulfiller</text>
+        <rect class="act" x="385" y="16" width="150" height="44" rx="8"/>
+        <text x="460" y="43" class="bold" text-anchor="middle">Gated7540Vault</text>
+        <rect class="b2" x="575" y="16" width="150" height="44" rx="8"/>
+        <text x="650" y="43" class="bold" text-anchor="middle">Custody</text>
+        <rect class="b2" x="775" y="16" width="150" height="44" rx="8"/>
+        <text x="850" y="43" class="bold" text-anchor="middle">Receiver</text>
+
+        <line class="life" x1="90" y1="60" x2="90" y2="370"/>
+        <line class="life" x1="270" y1="60" x2="270" y2="370"/>
+        <line class="life" x1="460" y1="60" x2="460" y2="370"/>
+        <line class="life" x1="650" y1="60" x2="650" y2="370"/>
+        <line class="life" x1="850" y1="60" x2="850" y2="370"/>
+
+        <line class="ln" x1="90" y1="100" x2="458" y2="100" marker-end="url(#mo-a3)"/>
+        <text x="100" y="92" class="m">1  requestDeposit: assets</text>
+        <text x="470" y="122" class="sm m">pendingAssets += assets</text>
+
+        <line class="ln dash" x1="270" y1="170" x2="458" y2="170" marker-end="url(#mo-a3)"/>
+        <text x="365" y="162" class="m" text-anchor="middle">2  fulfillDeposit(…)</text>
+        <text x="470" y="192" class="sm m">claimable assets and shares</text>
+
+        <line class="ln" x1="460" y1="230" x2="648" y2="230" marker-end="url(#mo-a3)"/>
+        <text x="555" y="222" class="m" text-anchor="middle">3  assets</text>
+
+        <line class="ln dash" x1="90" y1="290" x2="458" y2="290" marker-end="url(#mo-a3)"/>
+        <text x="100" y="282" class="m">4  claim: deposit, mint</text>
+
+        <line class="ln dash c-mint" x1="460" y1="340" x2="848" y2="340" marker-end="url(#mo-a3)"/>
+        <text x="470" y="332" class="sm t-mint">5  new shares: MINT</text>
+      </svg>
+    </div>
+    <figcaption><b>A deposit ends with the asset at custody and new shares at the receiver.</b> Solid lines carry the asset, the coloured line carries shares, and thin dashed lines are calls that move nothing themselves. The fulfiller names both numbers in step 2, which sets the price.</figcaption>
+  </figure>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 940 370" role="img" aria-label="7540 redemption. 1, the owner's shares move into escrow at the vault's own address, as a transfer. 2, the fulfiller calls fulfillRedeem and the escrowed shares are burned. 3, the fulfiller's assets move into the vault. 4, the controller claims with redeem or withdraw. 5, the assets move from the vault to the receiver.">
+        <defs>
+          <marker id="mo-a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+        </defs>
+        <rect class="b2" x="15" y="16" width="150" height="44" rx="8"/>
+        <text x="90" y="43" class="bold" text-anchor="middle">Owner, controller</text>
+        <rect class="b2" x="195" y="16" width="150" height="44" rx="8"/>
+        <text x="270" y="43" class="bold" text-anchor="middle">Fulfiller</text>
+        <rect class="act" x="385" y="16" width="150" height="44" rx="8"/>
+        <text x="460" y="43" class="bold" text-anchor="middle">Gated7540Vault</text>
+        <rect class="b2" x="775" y="16" width="150" height="44" rx="8"/>
+        <text x="850" y="43" class="bold" text-anchor="middle">Receiver</text>
+
+        <line class="life" x1="90" y1="60" x2="90" y2="350"/>
+        <line class="life" x1="270" y1="60" x2="270" y2="350"/>
+        <line class="life" x1="460" y1="60" x2="460" y2="350"/>
+        <line class="life" x1="850" y1="60" x2="850" y2="350"/>
+
+        <line class="ln dash c-transfer" x1="90" y1="100" x2="458" y2="100" marker-end="url(#mo-a4)"/>
+        <text x="100" y="92" class="sm t-transfer">1  shares into escrow: TRANSFER</text>
+        <text x="470" y="122" class="sm m">pendingShares += shares</text>
+
+        <path class="ln dash c-burn" d="M460,150 H500 V180 H464" marker-end="url(#mo-a4)"/>
+        <text x="508" y="170" class="sm t-burn">2  fulfillRedeem burns the escrow: BURN</text>
+
+        <line class="ln" x1="270" y1="226" x2="458" y2="226" marker-end="url(#mo-a4)"/>
+        <text x="365" y="218" class="m" text-anchor="middle">3  assets, transferFrom</text>
+
+        <line class="ln dash" x1="90" y1="270" x2="458" y2="270" marker-end="url(#mo-a4)"/>
+        <text x="100" y="262" class="m">4  claim: redeem, withdraw</text>
+
+        <line class="ln" x1="460" y1="320" x2="848" y2="320" marker-end="url(#mo-a4)"/>
+        <text x="470" y="312" class="m">5  assets</text>
+      </svg>
+    </div>
+    <figcaption><b>A redemption pays out of the fulfiller's own wallet.</b> The shares wait in escrow at the vault's address, which must hold a credential like any receiver. At fulfilment they are burned and the fulfiller's assets are pulled in with <code>transferFrom</code>, so the fulfiller must have approved the vault. They stay in the vault until the controller claims them.</figcaption>
+  </figure>
+  <div class="prose">
+    <h3>Where things sit, and who can move them</h3>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Stage</th><th>Asset</th><th>Shares</th><th>Who can move it next</th></tr></thead>
+      <tbody>
+        <tr><td>Deposit requested</td><td>in the vault, booked as the controller's <code>pendingAssets</code></td><td>none yet</td><td>Fulfiller: <code>fulfillDeposit</code> sends all or part of it to custody, or <code>rejectDepositRequest</code> returns all of it to the controller, not to the owner who paid. There is no cancel by the requester.</td></tr>
+        <tr><td>Deposit fulfilled</td><td>at custody, outside the vault's reach</td><td>not minted yet, booked as <code>claimableShares</code></td><td>Controller or its operator: claim with <code>deposit</code> or <code>mint</code>, choosing the receiver. Agent: <code>recoverClaimable(controller, to)</code> mints them to <code>to</code> as an enforcement mint.</td></tr>
+        <tr><td>Redemption requested</td><td>none yet</td><td>in escrow at the vault's own address, booked as <code>pendingShares</code></td><td>Fulfiller: <code>fulfillRedeem</code> burns them; <code>rejectRedeemRequest</code> sends them back to the controller as an ordinary transfer. Agent: <code>recoverRedeemRequest(controller, to)</code> moves them to <code>to</code> as a forced move.</td></tr>
+        <tr><td>Redemption fulfilled</td><td>in the vault, pulled from the fulfiller, booked as <code>claimableAssets</code></td><td>burned</td><td>Controller or its operator: claim with <code>redeem</code> or <code>withdraw</code>, to any receiver, which is not checked. Agent: <code>recoverClaimable(controller, to)</code> pays them to <code>to</code>.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <p>The escrow is one balance at the vault's address for every controller, while the bookkeeping is per controller. The agent's <code>forcedTransfer</code> can name the vault's address as <code>from</code>, but it does not update <code>pendingShares</code>; for escrowed shares the agent's tool is <code>recoverRedeemRequest</code>, which clears the controller's pending amount as it moves them. An <b>operator</b> approved with <code>setOperator</code> is a full delegate: it can open requests that pull the owner's assets or shares under any controller, and choose the receiver of a claim.</p>
+    <p>The vault checks people at each step: a deposit request and a deposit claim require that a mint to the controller would pass the rules, the claim's mint also judges the receiver, and a redemption claim requires that the controller could still send. The asset legs are never sent to the hook.</p>
+  </div>
+</section>
+
+<section id="prices7540">
+  <div class="prose">
+    <h2>7540 prices and rounding</h2>
+    <p>The fulfiller names both numbers of every fulfilment: how many assets and how many shares. Nothing on chain compares that price with any reference; <code>FULFILLER_ROLE</code> is a trusted role. Share decimals equal the asset's, with no offset. The vault records the price of the last fulfilment and emits it in <code>Fulfilled(controller, isDeposit, price, assets, shares, fulfiller)</code>.</p>
+  </div>
+  <div class="codes">
+    <div class="code-block">
+      <div class="code-label">Recorded at each fulfilment (_recordPrice)</div>
+<pre>lastPrice = floor(assets × 10^decimals / shares)
+            <span class="cm">and 1 if that is 0</span>
+<span class="cm">starts at 10^decimals, one asset per share</span></pre>
+    </div>
+    <div class="code-block">
+      <div class="code-label">Indicative views only</div>
+<pre>convertToShares(a) = floor(a × 10^decimals / lastPrice)
+convertToAssets(s) = floor(s × lastPrice / 10^decimals)
+totalAssets()      = convertToAssets(totalSupply)</pre>
+    </div>
+  </div>
+  <div class="prose">
+    <p>The views above use the last price of any controller, and the assets they describe sit in custody, so they are indicative. What a claim actually pays or mints comes from the controller's own claimable pair: each fulfilment adds its assets and shares to that pair, and each claim takes from it. A claim therefore uses the blended ratio of everything still claimable. <code>previewDeposit</code>, <code>previewMint</code>, <code>previewRedeem</code> and <code>previewWithdraw</code> always revert with <code>Gated7540Vault_AsyncOnly</code>, as ERC-7540 requires.</p>
+  </div>
+  <div class="code-block">
+    <div class="code-label">Claims: a full claim takes the whole pair exactly; a partial one rounds against the caller</div>
+<pre>deposit(assets)   shares = claimableShares                                  if assets == claimableAssets
+                  shares = floor(assets × claimableShares / claimableAssets)  otherwise
+mint(shares)      assets = claimableAssets                                  if shares == claimableShares
+                  assets = ceil(shares × claimableAssets / claimableShares)   otherwise
+redeem(shares)    assets = claimableAssets                                  if shares == claimableShares
+                  assets = floor(shares × claimableAssets / claimableShares)  otherwise
+withdraw(assets)  shares = claimableShares                                  if assets == claimableAssets
+                  shares = ceil(assets × claimableShares / claimableAssets)   otherwise</pre>
+  </div>
+  <div class="prose">
+    <p>The rounding difference stays in the controller's pair, and a claim of everything is exact, so over all its claims a controller gets exactly the fulfilled amounts and the vault keeps nothing. In raw units:</p>
+    <ul class="plain">
+      <li>A deposit pair of 1,000 assets and 800 shares. <code>deposit(333)</code> mints <code>floor(333 × 800 / 1000) = 266</code> shares and leaves 667 and 534. <code>mint(267)</code> then uses <code>ceil(267 × 667 / 534) = 334</code> assets.</li>
+      <li>A redemption pair of 7 shares and 10 assets. <code>redeem(3)</code> pays <code>floor(3 × 10 / 7) = 4</code> assets. From the same pair, <code>withdraw(4)</code> uses <code>ceil(4 × 7 / 10) = 3</code> shares.</li>
+    </ul>
+    <p>A zero input reverts with <code>Gated7540Vault_ZeroAmount</code> on all four claims, and so does a <code>deposit</code> that would mint 0 shares or a <code>redeem</code> that would pay 0 assets. Because <code>mint</code> and <code>withdraw</code> round up, they can use up one side of the pair before the other; the remainder is then delivered against 0, which does not revert, and the totals stay exact.</p>
+    <h3>A worked example</h3>
+    <p>A 6-decimal asset, amounts in whole units. Alice holds a credential and has approved the vault on the asset; the fulfiller has too. No minimum position is set.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Step</th><th>Alice assets</th><th>Vault assets</th><th>Custody</th><th>Fulfiller assets</th><th>Alice shares</th><th>Escrow</th><th>Supply</th></tr></thead>
+      <tbody>
+        <tr><td>start</td><td>1,000</td><td>0</td><td>0</td><td>500</td><td>0</td><td>0</td><td>0</td></tr>
+        <tr><td><code>requestDeposit(1000, alice, alice)</code></td><td>0</td><td>1,000</td><td>0</td><td>500</td><td>0</td><td>0</td><td>0</td></tr>
+        <tr><td><code>fulfillDeposit(alice, 1000, 800)</code></td><td>0</td><td>0</td><td>1,000</td><td>500</td><td>0</td><td>0</td><td>0</td></tr>
+        <tr><td><code>deposit(1000, alice, alice)</code></td><td>0</td><td>0</td><td>1,000</td><td>500</td><td>800</td><td>0</td><td>800</td></tr>
+        <tr><td><code>requestRedeem(400, alice, alice)</code></td><td>0</td><td>0</td><td>1,000</td><td>500</td><td>400</td><td>400</td><td>800</td></tr>
+        <tr><td><code>fulfillRedeem(alice, 400, 500)</code></td><td>0</td><td>500</td><td>1,000</td><td>0</td><td>400</td><td>0</td><td>400</td></tr>
+        <tr><td><code>redeem(400, alice, alice)</code></td><td>500</td><td>0</td><td>1,000</td><td>0</td><td>400</td><td>0</td><td>400</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <p>Both fulfilments record <code>lastPrice = 1,250,000</code>, which is 1.25 assets per share at 6 decimals. Custody keeps the 1,000 assets of the deposit; the 500 paid out on the redemption came from the fulfiller.</p>
+  </div>
+</section>
+
+<section id="dvp-gated">
+  <div class="prose">
+    <h2>Delivery versus payment, with gated cash</h2>
+    <p><b>Delivery versus payment</b> (DvP) means the security and the cash change hands together or not at all. <a href="contracts/DvPExecutor.html"><code>DvPExecutor</code></a> does it for a security that carries signed intents, such as <code>IntentToken</code>. In this form the cash is itself a gated token with intents. Each party signs an intent on the token it gives: the seller on the security, the buyer on the cash, each naming the DvP executor and stating what it is to receive.</p>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 56 960 290" role="img" aria-label="DvP with gated cash. The operator submits executeDvPGated to the DvP executor, which checks that the two signed legs mirror each other. It runs the cash leg first: the price moves from the buyer to the seller on the cash token. Then the securities leg: the shares move from the seller to the buyer on the security token. The executor holds nothing.">
+        <defs>
+          <marker id="mo-a5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+        </defs>
+        <text x="20" y="76" class="m">Cash token</text>
+        <rect class="b" x="20" y="92" width="170" height="56" rx="8"/>
+        <text x="105" y="116" class="bold" text-anchor="middle">Buyer</text>
+        <text x="105" y="134" class="m sm" text-anchor="middle">pays the price</text>
+        <rect class="b" x="770" y="92" width="170" height="56" rx="8"/>
+        <text x="855" y="116" class="bold" text-anchor="middle">Seller</text>
+        <text x="855" y="134" class="m sm" text-anchor="middle">receives the price</text>
+        <line class="ln c-executed" x1="190" y1="120" x2="768" y2="120" marker-end="url(#mo-a5)"/>
+        <text x="300" y="112" class="m" text-anchor="middle">1  the price, on the cash token</text>
+
+        <rect class="b2" x="20" y="182" width="170" height="56" rx="8"/>
+        <text x="105" y="206" class="bold" text-anchor="middle">Operator key</text>
+        <text x="105" y="224" class="mono sm" text-anchor="middle">OPERATOR_ROLE</text>
+        <line class="ln" x1="190" y1="210" x2="378" y2="210" marker-end="url(#mo-a5)"/>
+        <text x="284" y="203" class="m" text-anchor="middle">executeDvPGated(…)</text>
+        <rect class="act" x="380" y="185" width="200" height="50" rx="8"/>
+        <text x="480" y="206" class="bold" text-anchor="middle">DvPExecutor</text>
+        <text x="480" y="224" class="m sm" text-anchor="middle">legs must mirror</text>
+
+        <line class="ln dash" x1="480" y1="185" x2="480" y2="124" marker-end="url(#mo-a5)"/>
+        <text x="488" y="160" class="sm m">executeTransfer, cash leg first</text>
+        <line class="ln dash" x1="480" y1="235" x2="480" y2="296" marker-end="url(#mo-a5)"/>
+        <text x="488" y="270" class="sm m">then executeTransfer, securities leg</text>
+
+        <text x="20" y="266" class="m">Security token</text>
+        <rect class="b" x="20" y="272" width="170" height="56" rx="8"/>
+        <text x="105" y="296" class="bold" text-anchor="middle">Seller</text>
+        <text x="105" y="314" class="m sm" text-anchor="middle">delivers the shares</text>
+        <rect class="b" x="770" y="272" width="170" height="56" rx="8"/>
+        <text x="855" y="296" class="bold" text-anchor="middle">Buyer</text>
+        <text x="855" y="314" class="m sm" text-anchor="middle">receives the shares</text>
+        <line class="ln dash c-executed" x1="190" y1="300" x2="768" y2="300" marker-end="url(#mo-a5)"/>
+        <text x="310" y="292" class="sm t-executed" text-anchor="middle">2  the shares, on the security token</text>
+      </svg>
+    </div>
+    <figcaption><b>Both legs or neither, and the executor never holds either.</b> Each leg is an <span class="k k-executed">EXECUTED</span> move on its own token, under that token's own rules. If either fails, the whole transaction reverts with <code>DvPExecutor_LegFailed(leg, reason)</code>, where <code>reason</code> is the token's revert data.</figcaption>
+  </figure>
+  <div class="prose">
+    <p>The legs <b>mirror</b> when the parties are swapped, each amount is the other leg's stated consideration, each stated consideration token is the other leg's token, and the two tokens differ (<code>DvPExecutor_LegsDoNotMatch</code>). Each signature covers its own leg, so the operator chooses only which signed legs to pair and when to submit. A leg that states a payment cannot run alone: <code>IntentExecutor</code> refuses it, and the token refuses any executor but the one it names (<code>WRONG_EXECUTOR</code>). The DvP executor needs <code>EXECUTOR_ROLE</code> on the cash token, which that token's own administrator grants.</p>
+  </div>
+</section>
+
+<section id="dvp-3009">
+  <div class="prose">
+    <h2>Delivery versus payment, with ERC-3009 cash</h2>
+    <p>ERC-3009 is the standard behind USDC's signed transfers. Here the buyer signs a <code>receiveWithAuthorization</code> payable to the DvP executor, for the price, with a nonce that ties it to this one trade: <code>keccak256(abi.encode(securityToken, securityToken.intentHash(sellerIntent)))</code>. The cash passes through the executor inside the one call.</p>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 56 960 290" role="img" aria-label="DvP with ERC-3009 cash. The operator submits executeDvP3009. 1, the executor pulls the price from the buyer with receiveWithAuthorization. 2, it runs the seller's intent on the security token: the shares move from the seller to the buyer. 3, it transfers the price to the seller. 4, it checks that its own cash balance is back where it started and that the seller's rose by exactly the price.">
+        <defs>
+          <marker id="mo-a6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+        </defs>
+        <text x="20" y="76" class="m">ERC-3009 cash token</text>
+        <rect class="b" x="20" y="92" width="170" height="56" rx="8"/>
+        <text x="105" y="116" class="bold" text-anchor="middle">Buyer</text>
+        <text x="105" y="134" class="m sm" text-anchor="middle">signed authorization</text>
+        <rect class="act" x="380" y="92" width="200" height="56" rx="8"/>
+        <text x="480" y="116" class="bold" text-anchor="middle">DvPExecutor</text>
+        <text x="480" y="134" class="m sm" text-anchor="middle">holds it within the call</text>
+        <rect class="b" x="770" y="92" width="170" height="56" rx="8"/>
+        <text x="855" y="116" class="bold" text-anchor="middle">Seller</text>
+        <text x="855" y="134" class="m sm" text-anchor="middle">receives the price</text>
+        <line class="ln" x1="190" y1="120" x2="378" y2="120" marker-end="url(#mo-a6)"/>
+        <text x="284" y="112" class="m" text-anchor="middle">1  the price</text>
+        <text x="284" y="138" class="sm m" text-anchor="middle">receiveWithAuthorization</text>
+        <line class="ln" x1="580" y1="120" x2="768" y2="120" marker-end="url(#mo-a6)"/>
+        <text x="674" y="112" class="m" text-anchor="middle">3  the price</text>
+        <text x="674" y="138" class="sm m" text-anchor="middle">transfer to the seller</text>
+
+        <rect class="b2" x="20" y="182" width="170" height="56" rx="8"/>
+        <text x="105" y="206" class="bold" text-anchor="middle">Operator key</text>
+        <text x="105" y="224" class="mono sm" text-anchor="middle">OPERATOR_ROLE</text>
+        <path class="ln" d="M190,210 H440 V150" marker-end="url(#mo-a6)"/>
+        <text x="284" y="203" class="m" text-anchor="middle">executeDvP3009(…)</text>
+
+        <line class="ln dash" x1="520" y1="148" x2="520" y2="296" marker-end="url(#mo-a6)"/>
+        <text x="528" y="262" class="sm m">2  executeTransfer, securities leg</text>
+
+        <rect class="b2" x="600" y="168" width="340" height="68" rx="8"/>
+        <text x="614" y="188" class="sm bold">4  checks after the payout</text>
+        <text x="614" y="206" class="sm">executor's cash balance back where it started;</text>
+        <text x="614" y="222" class="sm">seller's balance up by exactly the price</text>
+
+        <text x="20" y="266" class="m">Security token</text>
+        <rect class="b" x="20" y="272" width="170" height="56" rx="8"/>
+        <text x="105" y="296" class="bold" text-anchor="middle">Seller</text>
+        <text x="105" y="314" class="m sm" text-anchor="middle">delivers the shares</text>
+        <rect class="b" x="770" y="272" width="170" height="56" rx="8"/>
+        <text x="855" y="296" class="bold" text-anchor="middle">Buyer</text>
+        <text x="855" y="314" class="m sm" text-anchor="middle">receives the shares</text>
+        <line class="ln dash c-executed" x1="190" y1="300" x2="768" y2="300" marker-end="url(#mo-a6)"/>
+        <text x="310" y="292" class="sm t-executed" text-anchor="middle">2  the shares, on the security token</text>
+      </svg>
+    </div>
+    <figcaption><b>The cash passes through the executor and must leave it the same call.</b> Any shortfall reverts the whole trade with <code>DvPExecutor_CashNotConserved(account, expected, actual)</code>, or earlier with the cash token's own error, so a fee-on-transfer cash token fails the trade.</figcaption>
+  </figure>
+  <div class="prose">
+    <p>The authorization must come from the seller's buyer (the intent's <code>to</code>), for the seller's stated consideration, in the stated cash token, with the nonce above, and the two tokens must differ (<code>DvPExecutor_LegsDoNotMatch</code>). The security token's address is in the nonce because the executor cannot tell an honest token's intent hash from a counterfeit's. A failing pull or delivery reverts with <code>DvPExecutor_LegFailed</code>. A failing payout to the seller is not wrapped: it reverts with the cash token's own error, or with <code>SafeERC20FailedOperation</code> if the token returns false.</p>
+    <p>The pre-flights <code>canExecuteDvPGated</code> and <code>canExecuteDvP3009</code> answer <code>(ok, reason)</code> without reverting: <code>PAUSED</code> for a paused executor, <code>LEGS_DO_NOT_MATCH</code>, then for ERC-3009 the authorization's window, nonce and the buyer's balance, then each leg's own <code>canExecute</code>.</p>
+  </div>
+</section>
+
+<section id="absent">
+  <div class="prose">
+    <h2>What the code does not have</h2>
+    <ul class="plain">
+      <li><b>Fees.</b> No contract charges or pays a fee on any flow.</li>
+      <li><b>Interest, yield, strategies or a price oracle.</b> The 4626 price moves only with the vault's asset balance and its share supply; the 7540 price is whatever the fulfiller names.</li>
+      <li><b>ETH handling, outside the timelocks.</b> No contract of the system defines <code>receive</code> or a payable function. Each token proxy has OpenZeppelin's payable <code>fallback</code>, but it forwards to an implementation whose only payable function is <code>upgradeToAndCall</code>. That refuses value without setup data (<code>ERC1967NonPayable</code>), and with setup data the call it makes is to a non-payable function, which reverts; the <code>*_Ether</code> tests pin this. OpenZeppelin's <code>TimelockController</code>, and so <code>GovernanceTimelock</code> and the recovery timelock, has <code>receive()</code> and a payable <code>execute</code>, so the two timelocks can hold ETH and send it with an operation.</li>
+      <li><b>A sweep.</b> Nothing recovers tokens sent to a contract by mistake. The DvP executor says so in its NatSpec. The 4626 vault counts any asset sent to it as part of <code>totalAssets</code>, so it raises the share price. The 7540 vault pays out only what its bookkeeping records, so an asset sent to it directly has no function that moves it.</li>
+      <li><b>A cancel for requests.</b> A 7540 requester cannot withdraw a pending request; the fulfiller can reject it, and that is why a deposit request is refused up front when the controller could not hold the shares.</li>
+      <li><b>DvP matching, partial fills or more than two legs.</b> The parties agree a DvP trade off-chain and sign fixed amounts.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="why">
+  <div class="prose">
+    <h2>Why it is built this way</h2>
+    <ul class="plain">
+      <li><b>The asset leg is not hooked.</b> The rules decide who may hold the gated token; the asset is an ordinary ERC-20 under its own issuer's rules. Gating the share movement is enough to gate entry and exit: a deposit is a <span class="k k-mint">MINT</span> to the receiver and a redemption a <span class="k k-burn">BURN</span> from the owner.</li>
+      <li><b>Asset in first, out last.</b> The 4626 vault pulls the asset before minting and burns before paying, OpenZeppelin's order, so a rejection or a re-entering asset token finds a consistent state.</li>
+      <li><b>The 7540 price is explicit.</b> The fulfiller sets it per fulfilment and it is published in an event; with no on-chain exchange rate to inflate, the vault needs no decimals offset. Claims use each controller's own pair, not the last price, which may come from another controller's fulfilment.</li>
+      <li><b>Rounding against the caller, exact in full.</b> Partial claims round so the vault never pays more than it received, and a full claim settles the pair exactly, so nothing is stranded.</li>
+      <li><b>The DvP executor keeps nothing.</b> Gated cash moves directly between the parties; ERC-3009 cash passes through within one call, and the balance checks make any leak revert the trade.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="connected">
+  <div class="prose"><h2>Connected to</h2></div>
+  <div class="cards">
+    <a class="card" href="contracts/Gated4626Vault.html"><span class="name">Gated4626Vault</span><p>The synchronous vault and its gating-aware <code>max*</code>.</p></a>
+    <a class="card" href="contracts/Gated7540Vault.html"><span class="name">Gated7540Vault</span><p>Requests, fulfilments, claims, rejects and recoveries.</p></a>
+    <a class="card" href="contracts/DvPExecutor.html"><span class="name">DvPExecutor</span><p>Atomic settlement of a security against cash.</p></a>
+    <a class="card" href="contracts/IntentToken.html"><span class="name">IntentToken</span><p>The token whose balances are the record.</p></a>
+    <a class="card" href="roles.html"><span class="name">Who can do what</span><p>The roles that move value, and what still works during a pause.</p></a>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose">
+    <h2>Source and tests</h2>
+    <ul class="plain">
+      <li>Contracts: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/vaults/Gated4626Vault.sol"><code>contracts/vaults/Gated4626Vault.sol</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/vaults/Gated7540Vault.sol"><code>Gated7540Vault.sol</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/intents/DvPExecutor.sol"><code>contracts/intents/DvPExecutor.sol</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/mixins/IntentSettledUpgradeable.sol"><code>contracts/mixins/IntentSettledUpgradeable.sol</code></a>; interfaces <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/interfaces/IGated7540Vault.sol"><code>IGated7540Vault.sol</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/interfaces/IDvPExecutor.sol"><code>IDvPExecutor.sol</code></a></li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/vaults/Gated4626Vault.t.sol"><code>Gated4626Vault.t.sol</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/vaults/Gated7540Vault.t.sol"><code>Gated7540Vault.t.sol</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/intents/DvPExecutor.t.sol"><code>DvPExecutor.t.sol</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/test/nodejs/vaults.test.ts"><code>test/nodejs/vaults.test.ts</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/test/nodejs/dvp.test.ts"><code>test/nodejs/dvp.test.ts</code></a></li>
+    </ul>
+  </div>
+</section>
+
+<footer>Describes the contracts at commit <code>2f8c2e7</code> on <code>main</code>.</footer>
+</main>
+</body>
+</html>

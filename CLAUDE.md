@@ -245,7 +245,7 @@ Semantics to spec in NatSpec and enforce in tests:
 2. `check` is called with `staticcall` semantics. A rule that mutates state in `check` fails tests.
 3. `after_` runs only for rules with `wantsAfter()`, after balances moved, inside the token's `ReentrancyGuardTransient`.
 4. Hard cap 16 rules per token. A token's initial rule set is passed to its initialiser, which installs the hook and then calls `hook.setRules(address(this), rules)`, so the token is live with its policy at deploy and the hook has no admin of its own. Later changes replace a token's whole ordered set atomically with `setRules(token, rules)`, callable by the token itself or by whoever holds the token's `DEFAULT_ADMIN_ROLE` (asked live: the timelock). Both paths emit `RuleSetChanged(token, ruleIds)` and revert unless every rule satisfies `registry.isAttested(rule, RULE)`. An empty set fails closed (`NO_RULES`). `afterTransfer` is accepted only from the token it names, and `ProxyDeployer.deploy` reverts unless the hook ends up holding exactly the rules the deployer expected for the new token.
-5. Rule list loaded into memory once per call.
+5. Each call reads the token's rules from storage inside the loop, one per pass.
 6. Rules may make view calls to the token (`balanceOf`, `hasRole`, `policyHook`, `getFrozenTokens`); the balances are in `extra`, so on the movement path no rule reads them from the token, though `after_` still asks `policyHook()` and a burn still asks for a role. State-changing calls are forbidden and blocked by the guard; `MockReentrantRule` proves it.
 7. `checkSend` / `checkReceive` iterate the same list and return on the first rejection; they serve `canSend` and `canReceive` only, and a rule's account answer must not encode a quantitative rule.
 

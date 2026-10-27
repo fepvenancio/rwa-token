@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gated4626Vault · Gated Token Stack</title>
+<meta name="description" content="How Gated4626Vault issues and redeems ERC-4626 shares in one transaction, sends every share movement through the policy hook, and shows refusals in advance through its max functions.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="../index.html">Gated Token Stack</a>
+  <a href="../index.html">Overview</a>
+  <a href="../index.html#contracts">Contracts</a>
+  <a href="../roles.html">Who can do what</a>
+  <a href="../movement.html">One movement</a>
+  <a href="../deployment.html">Deployment and governance</a>
+  <a href="../money.html">Where the money sits</a>
+  <a href="../review.html">Security review</a>
+</nav>
+<main class="page">
+
+<header class="top">
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Vaults</div>
+  <h1>Gated4626Vault</h1>
+  <p class="lede">A standard ERC-4626 vault. An investor pays in an asset and gets shares in the same transaction, and hands shares back for the asset the same way. The shares are a gated token, so only accounts the policy accepts can receive them, and the vault tells you in advance who would be refused.</p>
+  <div class="facts">
+    <span class="fact"><b>contracts/vaults/Gated4626Vault.sol</b></span>
+    <span class="fact">upgradeable: <b>UUPS</b> behind a TokenProxy</span>
+    <span class="fact">admin: <b>the main timelock</b></span>
+    <span class="fact">implementation attested as <b>IMPLEMENTATION</b></span>
+  </div>
+</header>
+
+<section id="in-one-minute">
+  <div class="callout">
+    <h3>In one minute</h3>
+    <p>A vault is a shared pot. You put an asset in, for example a stablecoin, and receive shares that stand for your part of the pot. You hand the shares back and take your part of the asset out. ERC-4626 is the common standard for such vaults, so wallets and other contracts already know how to use this one.</p>
+    <p>What is different here is the shares. They are a gated token: creating, moving and destroying them goes through the same compliance checks as every other token in the system. An account without an accepted credential cannot receive shares, and a holder who is locked up, frozen or blocked cannot redeem. The vault reports this up front: <code>maxDeposit</code> and <code>maxRedeem</code> return 0 for an account the policy would refuse. The asset itself moves as a plain ERC-20 transfer and is not checked.</p>
+  </div>
+</section>
+
+<section id="how">
+  <div class="prose">
+    <h2>How it works</h2>
+    <p>Deposits and redemptions are OpenZeppelin's <code>ERC4626Upgradeable</code> (version 5.6.1), unchanged. The vault adds two things. Every change to a share balance runs through the base token's single <code>_update</code> path, which asks the policy hook first. And the four <code>max*</code> functions ask the hook too.</p>
+    <p>The hook is the shared <a href="ComplianceHook.html"><code>ComplianceHook</code></a>. It runs the vault's ordered list of rules (small contracts that each check one thing, such as credentials or lockups) and answers <code>TRANSFER_OK</code> or a reason code. A deposit reaches it as a <span class="k k-mint">MINT</span> to the receiver, a redemption as a <span class="k k-burn">BURN</span> from the owner, and in both the caller is the operator, the account driving the movement.</p>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 800 846" role="img" aria-label="Sequence of a deposit and of a redemption. Deposit: the caller calls deposit with assets and a receiver. The vault checks that assets do not exceed maxDeposit of the receiver, else it reverts with ERC4626ExceededMaxDeposit. It computes shares with previewDeposit, pulls the assets from the caller into the vault, and calls the hook's beforeTransfer with kind MINT to the receiver, operator the caller. If the hook answers TRANSFER_OK it mints the shares to the receiver, otherwise it reverts with PolicyGated_TransferRejected. Then afterTransfer runs if a rule wants it, and the call returns the shares with a Deposit event. Redemption: the caller calls redeem with shares, a receiver and an owner. The vault checks shares against maxRedeem of the owner, else ERC4626ExceededMaxRedeem, computes assets with previewRedeem, spends the owner's share allowance if the caller is not the owner, calls beforeTransfer with kind BURN from the owner, burns the shares if the hook agrees, runs afterTransfer, pays the assets from the vault to the receiver, and emits Withdraw.">
+        <defs>
+          <marker id="v46a-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+        </defs>
+
+        <rect class="band" x="0" y="66" width="800" height="26" rx="4"/>
+        <text x="12" y="84" class="bold">Deposit</text>
+        <text x="84" y="84" class="m">deposit(assets, receiver); mint(shares, receiver) runs the same way</text>
+
+        <rect class="band" x="0" y="440" width="800" height="26" rx="4"/>
+        <text x="12" y="458" class="bold">Redemption</text>
+        <text x="104" y="458" class="m">redeem(shares, receiver, owner); withdraw(assets, receiver, owner) runs the same way</text>
+
+        <line class="life" x1="70" y1="54" x2="70" y2="840"/>
+        <line class="life" x1="300" y1="54" x2="300" y2="840"/>
+        <line class="life" x1="540" y1="54" x2="540" y2="840"/>
+        <line class="life" x1="720" y1="54" x2="720" y2="840"/>
+
+        <rect class="b" x="10" y="10" width="120" height="44" rx="8"/>
+        <text x="70" y="29" text-anchor="middle" class="bold">Caller</text>
+        <text x="70" y="45" text-anchor="middle" class="m">sends the call</text>
+        <rect class="act" x="210" y="10" width="180" height="44" rx="8"/>
+        <text x="300" y="29" text-anchor="middle" class="bold">Gated4626Vault</text>
+        <text x="300" y="45" text-anchor="middle" class="m">the share token</text>
+        <rect class="b" x="470" y="10" width="140" height="44" rx="8"/>
+        <text x="540" y="29" text-anchor="middle" class="bold">Asset</text>
+        <text x="540" y="45" text-anchor="middle" class="m">a plain ERC-20</text>
+        <rect class="b" x="650" y="10" width="140" height="44" rx="8"/>
+        <text x="720" y="29" text-anchor="middle" class="bold">Policy hook</text>
+        <text x="720" y="45" text-anchor="middle" class="m">runs the rules</text>
+
+        <!-- Deposit -->
+        <line class="ln" x1="70" y1="118" x2="298" y2="118" marker-end="url(#v46a-arrow)"/>
+        <text x="80" y="111" class="mono sm">deposit(assets, receiver)</text>
+
+        <rect class="b" x="150" y="132" width="300" height="44" rx="6"/>
+        <text x="164" y="150">1. assets ≤ maxDeposit(receiver)?</text>
+        <text x="164" y="168" class="mono sm rej">no: ERC4626ExceededMaxDeposit</text>
+
+        <rect class="b2" x="150" y="186" width="300" height="30" rx="6"/>
+        <text x="164" y="206">2. shares = previewDeposit(assets)</text>
+
+        <line class="ln" x1="300" y1="240" x2="538" y2="240" marker-end="url(#v46a-arrow)"/>
+        <text x="310" y="233">3. assets: caller → vault</text>
+
+        <line class="ln" x1="300" y1="272" x2="718" y2="272" marker-end="url(#v46a-arrow)"/>
+        <text x="550" y="265">4. beforeTransfer <tspan class="t-mint bold">MINT</tspan></text>
+        <text x="310" y="287" class="m">to: receiver, operator: caller</text>
+
+        <line class="ln dash" x1="720" y1="304" x2="302" y2="304" marker-end="url(#v46a-arrow)"/>
+        <text x="550" y="297" class="mono sm">TRANSFER_OK or a reason</text>
+
+        <rect class="b" x="150" y="318" width="300" height="44" rx="6"/>
+        <text x="164" y="336">5. OK: mint shares to receiver</text>
+        <text x="164" y="354" class="mono sm rej">else PolicyGated_TransferRejected</text>
+
+        <line class="ln" x1="300" y1="386" x2="718" y2="386" marker-end="url(#v46a-arrow)"/>
+        <text x="550" y="379">6. afterTransfer</text>
+        <text x="550" y="400" class="m">if a rule wants it</text>
+
+        <line class="ln dash" x1="300" y1="420" x2="72" y2="420" marker-end="url(#v46a-arrow)"/>
+        <text x="80" y="413">shares; event Deposit</text>
+
+        <!-- Redemption -->
+        <line class="ln" x1="70" y1="492" x2="298" y2="492" marker-end="url(#v46a-arrow)"/>
+        <text x="80" y="485" class="mono sm">redeem(shares, receiver, owner)</text>
+
+        <rect class="b" x="150" y="506" width="300" height="44" rx="6"/>
+        <text x="164" y="524">1. shares ≤ maxRedeem(owner)?</text>
+        <text x="164" y="542" class="mono sm rej">no: ERC4626ExceededMaxRedeem</text>
+
+        <rect class="b2" x="150" y="560" width="300" height="30" rx="6"/>
+        <text x="164" y="580">2. assets = previewRedeem(shares)</text>
+
+        <rect class="b2" x="150" y="600" width="300" height="30" rx="6"/>
+        <text x="164" y="620">3. not the owner? spend its allowance</text>
+
+        <line class="ln" x1="300" y1="654" x2="718" y2="654" marker-end="url(#v46a-arrow)"/>
+        <text x="550" y="647">4. beforeTransfer <tspan class="t-burn bold">BURN</tspan></text>
+        <text x="310" y="669" class="m">from: owner, operator: caller</text>
+
+        <line class="ln dash" x1="720" y1="686" x2="302" y2="686" marker-end="url(#v46a-arrow)"/>
+        <text x="550" y="679" class="mono sm">TRANSFER_OK or a reason</text>
+
+        <rect class="b" x="150" y="700" width="300" height="44" rx="6"/>
+        <text x="164" y="718">5. OK: burn the owner's shares</text>
+        <text x="164" y="736" class="mono sm rej">else PolicyGated_TransferRejected</text>
+
+        <line class="ln" x1="300" y1="768" x2="718" y2="768" marker-end="url(#v46a-arrow)"/>
+        <text x="550" y="761">6. afterTransfer</text>
+        <text x="550" y="782" class="m">if a rule wants it</text>
+
+        <line class="ln" x1="300" y1="800" x2="538" y2="800" marker-end="url(#v46a-arrow)"/>
+        <text x="310" y="793">7. assets: vault → receiver</text>
+
+        <line class="ln dash" x1="300" y1="830" x2="72" y2="830" marker-end="url(#v46a-arrow)"/>
+        <text x="80" y="823">assets; event Withdraw</text>
+      </svg>
+    </div>
+    <figcaption><b>One transaction each way.</b> The asset comes in before the shares are minted and goes out after they are burned, in OpenZeppelin's order. Red text is a revert, and a revert undoes the whole call, the asset transfer included.</figcaption>
+  </figure>
+  <ol class="steps">
+    <li><div><b>The max check comes first.</b> <code>deposit</code> refuses an amount above <code>maxDeposit(receiver)</code> with <code>ERC4626ExceededMaxDeposit(receiver, assets, max)</code>. <code>mint</code>, <code>withdraw</code> and <code>redeem</code> do the same with <code>maxMint</code>, <code>maxWithdraw</code> and <code>maxRedeem</code> and their own <code>ERC4626ExceededMax…</code> errors. For an account the policy refuses, the max is 0, so any amount above zero stops here.</div></li>
+    <li><div><b>Who pays and who receives.</b> On a deposit the caller pays the asset (it must have approved the vault on the asset) and <code>receiver</code> gets the shares. On a redemption the shares come from <code>owner</code>, a caller that is not the owner spends the owner's share allowance, and <code>receiver</code> gets the asset.</div></li>
+    <li><div><b>The hook decides on the shares.</b> The base token builds the movement's context (kind, sender, receiver, amount, operator and both balances before the move) and calls <code>beforeTransfer</code>. A rule's reason code reverts the call with <code>PolicyGated_TransferRejected(reason)</code>. This is where a check that depends on the amount shows up, such as a minimum position (<code>BELOW_MIN_POSITION</code>), which the max functions do not see.</div></li>
+    <li><div><b>After the move.</b> If a rule asks for it, the hook's <code>afterTransfer</code> runs once the balances have changed. <a href="FundHoldersRule.html"><code>FundHoldersRule</code></a> uses it to keep the fund's investor count.</div></li>
+  </ol>
+</section>
+
+<section id="functions">
+  <div class="prose"><h2>What it can do</h2></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>deposit(assets, receiver)</code></td><td>Anyone who has approved the vault on the asset</td><td>Takes <code>assets</code> from the caller and mints the shares they buy, rounded down, to <code>receiver</code>. Emits <code>Deposit</code>. Reverts <code>ERC4626ExceededMaxDeposit</code> above the max.</td></tr>
+        <tr><td><code>mint(shares, receiver)</code></td><td>Same</td><td>Mints exactly <code>shares</code> to <code>receiver</code> and takes what they cost, rounded up. Reverts <code>ERC4626ExceededMaxMint</code> above the max.</td></tr>
+        <tr><td><code>withdraw(assets, receiver, owner)</code></td><td>The owner, or a spender with the owner's share allowance</td><td>Burns the shares worth <code>assets</code>, rounded up, from <code>owner</code> and pays <code>assets</code> to <code>receiver</code>. Emits <code>Withdraw</code>. Reverts <code>ERC4626ExceededMaxWithdraw</code> above the max.</td></tr>
+        <tr><td><code>redeem(shares, receiver, owner)</code></td><td>Same</td><td>Burns <code>shares</code> from <code>owner</code> and pays what they are worth, rounded down, to <code>receiver</code>. Reverts <code>ERC4626ExceededMaxRedeem</code> above the max.</td></tr>
+        <tr><td><code>maxDeposit</code>, <code>maxMint</code>, <code>maxWithdraw</code>, <code>maxRedeem</code></td><td>Anyone (read-only)</td><td>What the policy allows right now, <a href="#max">below</a>.</td></tr>
+        <tr><td><code>previewDeposit</code>, <code>previewMint</code>, <code>previewWithdraw</code>, <code>previewRedeem</code>, <code>convertToShares</code>, <code>convertToAssets</code></td><td>Anyone (read-only)</td><td>Arithmetic on the vault's asset balance and share supply. They never ask the hook.</td></tr>
+        <tr><td><code>totalAssets()</code>, <code>asset()</code></td><td>Anyone (read-only)</td><td>The vault's balance of the asset, and the asset's address.</td></tr>
+        <tr><td><code>mint(address, uint256)</code>, <code>burn(address, uint256)</code></td><td>Nobody</td><td>The base token's issuer functions. They always revert with <code>Gated4626Vault_Unsupported</code>, even for a holder of <code>MINTER_ROLE</code> or <code>BURNER_ROLE</code>.</td></tr>
+        <tr><td><code>transfer</code>, <code>transferFrom</code>, <code>approve</code>, <code>permit</code></td><td>Share holders</td><td>Ordinary share transfers and allowances. <code>transfer</code> and <code>transferFrom</code> are each a <span class="k k-transfer">TRANSFER</span> through the hook; <code>approve</code> and <code>permit</code> only set allowances.</td></tr>
+        <tr><td><code>forcedTransfer</code>, <code>setFrozenTokens</code></td><td><code>AGENT_ROLE</code></td><td>The base token's enforcement tools, on shares: move shares from any holder, and freeze part of a balance.</td></tr>
+        <tr><td><code>pause()</code>, <code>unpause()</code></td><td><code>GUARDIAN_ROLE</code>; the main timelock or the recovery timelock</td><td>Stop and restart every share movement except a forced transfer.</td></tr>
+        <tr><td><code>initialize(asset, name, symbol, admin, guardian, registry, hook, rules)</code></td><td>Once, in the transaction that creates the proxy</td><td>Sets the asset and the base token, installs the hook and the vault's rule list. <a href="ProxyDeployer.html"><code>ProxyDeployer</code></a> makes this call.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small">The rest is the base token's: roles, <code>setPolicyHook</code>, upgrades, <code>canTransfer</code>, <code>canTransferWithReason</code>, <code>canSend</code>, <code>canReceive</code> and <code>multicall</code>. See <a href="PolicyGatedERC20Upgradeable.html"><code>PolicyGatedERC20Upgradeable</code></a>.</p>
+</section>
+
+<section id="max">
+  <div class="prose">
+    <h2>The max functions: refusals you can see in advance</h2>
+    <p>ERC-4626 lets a vault say how much an account may deposit or redeem right now. Integrators are expected to read these numbers before they call, and the vault's own deposit and redeem functions check them too. Here they carry the policy. Each one runs a pre-flight, the same path a real movement takes without the write, and returns 0 if it would be refused.</p>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 800 360" role="img" aria-label="How the max functions decide. maxDeposit and maxMint of a receiver probe a mint of type(uint128).max shares to the receiver: if the vault is paused, or the hook would refuse that mint, they return 0; otherwise type(uint256).max, no limit from the vault. maxRedeem of an owner probes a burn of 0 shares from the owner: if paused or refused it returns 0; otherwise the unfrozen balance, balance minus frozen amount, or 0. maxWithdraw is maxRedeem converted to assets, rounded down. The amount of the real call is judged only when it runs.">
+        <defs>
+          <marker id="v46b-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+          <marker id="v46b-arrow-rej" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="rej"/></marker>
+        </defs>
+
+        <!-- Deposit side -->
+        <rect class="act" x="20" y="14" width="360" height="48" rx="8"/>
+        <text x="36" y="34" class="mono bold">maxDeposit(receiver), maxMint(receiver)</text>
+        <text x="36" y="52" class="m">probe: a mint of type(uint128).max shares to receiver</text>
+        <line class="ln" x1="150" y1="62" x2="150" y2="84" marker-end="url(#v46b-arrow)"/>
+
+        <rect class="b" x="20" y="86" width="260" height="40" rx="6"/>
+        <text x="36" y="111">Is the vault paused?</text>
+        <line class="ln-rej" x1="280" y1="106" x2="318" y2="106" marker-end="url(#v46b-arrow-rej)"/>
+        <text x="288" y="99" class="sm m">yes</text>
+        <rect class="rejbox" x="322" y="90" width="58" height="32" rx="6"/>
+        <text x="351" y="111" text-anchor="middle" class="bold rej">0</text>
+        <line class="ln" x1="150" y1="126" x2="150" y2="148" marker-end="url(#v46b-arrow)"/>
+        <text x="158" y="141" class="sm m">no</text>
+
+        <rect class="b" x="20" y="150" width="260" height="50" rx="6"/>
+        <text x="36" y="171">Would the hook accept it?</text>
+        <text x="36" y="189" class="m">every rule in the vault's list</text>
+        <line class="ln-rej" x1="280" y1="175" x2="318" y2="175" marker-end="url(#v46b-arrow-rej)"/>
+        <text x="288" y="168" class="sm m">no</text>
+        <rect class="rejbox" x="322" y="159" width="58" height="32" rx="6"/>
+        <text x="351" y="180" text-anchor="middle" class="bold rej">0</text>
+        <line class="ln" x1="150" y1="200" x2="150" y2="222" marker-end="url(#v46b-arrow)"/>
+        <text x="158" y="215" class="sm m">yes</text>
+
+        <rect class="act" x="20" y="224" width="360" height="48" rx="8"/>
+        <text x="36" y="244" class="mono bold">type(uint256).max</text>
+        <text x="36" y="262" class="m">no limit from the vault</text>
+
+        <rect class="b2" x="20" y="296" width="360" height="48" rx="8"/>
+        <text x="36" y="316" class="m">The real call's amount is judged when it runs:</text>
+        <text x="36" y="334" class="m">a deposit that leaves dust reverts BELOW_MIN_POSITION</text>
+
+        <!-- Redeem side -->
+        <rect class="act" x="420" y="14" width="360" height="48" rx="8"/>
+        <text x="436" y="34" class="mono bold">maxRedeem(owner)</text>
+        <text x="436" y="52" class="m">probe: a burn of 0 shares from owner</text>
+        <line class="ln" x1="550" y1="62" x2="550" y2="84" marker-end="url(#v46b-arrow)"/>
+
+        <rect class="b" x="420" y="86" width="260" height="40" rx="6"/>
+        <text x="436" y="111">Is the vault paused?</text>
+        <line class="ln-rej" x1="680" y1="106" x2="718" y2="106" marker-end="url(#v46b-arrow-rej)"/>
+        <text x="688" y="99" class="sm m">yes</text>
+        <rect class="rejbox" x="722" y="90" width="58" height="32" rx="6"/>
+        <text x="751" y="111" text-anchor="middle" class="bold rej">0</text>
+        <line class="ln" x1="550" y1="126" x2="550" y2="148" marker-end="url(#v46b-arrow)"/>
+        <text x="558" y="141" class="sm m">no</text>
+
+        <rect class="b" x="420" y="150" width="260" height="50" rx="6"/>
+        <text x="436" y="171">Would the hook accept it?</text>
+        <text x="436" y="189" class="m">every rule in the vault's list</text>
+        <line class="ln-rej" x1="680" y1="175" x2="718" y2="175" marker-end="url(#v46b-arrow-rej)"/>
+        <text x="688" y="168" class="sm m">no</text>
+        <rect class="rejbox" x="722" y="159" width="58" height="32" rx="6"/>
+        <text x="751" y="180" text-anchor="middle" class="bold rej">0</text>
+        <line class="ln" x1="550" y1="200" x2="550" y2="222" marker-end="url(#v46b-arrow)"/>
+        <text x="558" y="215" class="sm m">yes</text>
+
+        <rect class="act" x="420" y="224" width="360" height="48" rx="8"/>
+        <text x="436" y="244" class="bold">the unfrozen balance</text>
+        <text x="436" y="262" class="m">balance minus frozen amount, or 0 if frozen is larger</text>
+        <line class="ln" x1="600" y1="272" x2="600" y2="294" marker-end="url(#v46b-arrow)"/>
+
+        <rect class="b" x="420" y="296" width="360" height="48" rx="8"/>
+        <text x="436" y="316" class="mono bold">maxWithdraw(owner)</text>
+        <text x="436" y="334" class="m">maxRedeem converted to assets, rounded down</text>
+      </svg>
+    </div>
+    <figcaption><b>Fixed probe amounts, not the call's amount.</b> The deposit side asks about a very large mint, the redeem side about a burn of nothing. Each answers whether the account can take part at all. The amount of the real call is judged when the call runs.</figcaption>
+  </figure>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Function</th><th>Returns</th></tr></thead>
+      <tbody>
+        <tr><td><code>maxDeposit(receiver)</code>, <code>maxMint(receiver)</code></td><td>0 if the vault is paused or the hook would refuse a mint of <code>type(uint128).max</code> shares to <code>receiver</code>. Otherwise <code>type(uint256).max</code>.</td></tr>
+        <tr><td><code>maxRedeem(owner)</code></td><td>0 if the vault is paused or the hook would refuse a burn of 0 shares from <code>owner</code>. Otherwise the unfrozen balance, <code>balanceOf(owner) − getFrozenTokens(owner)</code>, or 0 when the frozen amount is the larger.</td></tr>
+        <tr><td><code>maxWithdraw(owner)</code></td><td><code>maxRedeem(owner)</code> converted to assets, rounded down.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <h3>Why those amounts</h3>
+    <ul class="plain">
+      <li><b>A very large mint, not one share.</b> The amount is not zero, so the fund's investor cap sees a new investor and refuses one when the fund is full. And it is above any minimum position up to <code>type(uint128).max</code>, so a minimum does not make an empty account look blocked, as a one-unit probe would.</li>
+      <li><b>A burn of nothing.</b> Burning one share would leave a remainder, which a minimum position rejects, and would hide a holder who can redeem everything. The size of a real redemption is judged when it burns.</li>
+      <li><b>Rounding down for <code>maxWithdraw</code>.</b> <code>withdraw</code> rounds the shares it burns up. Deriving <code>maxWithdraw</code> from <code>maxRedeem</code> with floor rounding means the vault never promises assets that <code>withdraw</code> could not deliver. A fuzz test moves the share price and checks that <code>withdraw(maxWithdraw(owner))</code> always succeeds.</li>
+      <li><b>The limit of the large probe.</b> A rule that capped the size of a position, such as a maximum balance or a supply cap, would refuse the probe and turn <code>maxDeposit</code> and <code>maxMint</code> to 0. None of the deployed rules does that.</li>
+      <li><b>Where <code>maxRedeem</code> can overstate.</b> With a minimum position set, if a frozen amount below the minimum would stay behind, <code>redeem(maxRedeem(owner))</code> reverts with <code>PolicyGated_TransferRejected(BELOW_MIN_POSITION)</code>: the minimum judges the whole balance, <code>maxRedeem</code> only the unfrozen part. Redeeming less, so that at least the minimum stays, works. A test pins this case.</li>
+      <li><b>Whose call it is.</b> The mint probe treats the caller of <code>maxDeposit</code> as the operator, and the burn probe treats the owner as the operator, while a real redemption's operator is its caller. Only a <code>BURNER_ROLE</code> holder could make the two differ, and the deployment grants that role on no vault.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="checks">
+  <div class="prose">
+    <h2>Who is checked</h2>
+    <p>The deployed rule list for this vault is <a href="CredentialRule.html"><code>CredentialRule</code></a>, <a href="MinPositionRule.html"><code>MinPositionRule</code></a>, <a href="HolderRestrictionRule.html"><code>HolderRestrictionRule</code></a> and <a href="FundHoldersRule.html"><code>FundHoldersRule</code></a>, in that order. With that list, each call checks these accounts:</p>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Call</th><th>Account</th><th>What must hold</th></tr></thead>
+      <tbody>
+        <tr><td><code>deposit</code>, <code>mint</code></td><td>receiver of the shares</td><td>An <code>ACTIVE</code> credential that the vault's policy accepts. Its address not frozen. At least the minimum position afterwards, if one is set. Room in the fund if it would be a new investor.</td></tr>
+        <tr><td><code>deposit</code>, <code>mint</code></td><td>caller, who pays</td><td>Nothing from the policy. It needs an allowance on the asset for the vault.</td></tr>
+        <tr><td><code>withdraw</code>, <code>redeem</code></td><td>owner of the shares</td><td>A credential that is not blocked: a lapsed or exit-only one can still redeem. Its address not frozen and not locked up. Nothing or at least the minimum left. No more than its unfrozen balance.</td></tr>
+        <tr><td><code>withdraw</code>, <code>redeem</code></td><td>caller</td><td>The owner's share allowance, unless it is the owner.</td></tr>
+        <tr><td><code>withdraw</code>, <code>redeem</code></td><td>receiver of the asset</td><td>Nothing. It gets an ordinary asset transfer.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small"><code>FundHoldersRule</code> never caps a redemption. It refuses every movement, in either direction, with <code>NOT_FUND_CLASS</code> if the vault is not a registered class of the <a href="Fund.html"><code>Fund</code></a> or its list names a fund rule the fund has replaced.</p>
+</section>
+
+<section id="pause-freeze">
+  <div class="prose">
+    <h2>Pause and freeze</h2>
+    <p>Three tools stop shares from moving, and each shows up differently. The guardian pauses the whole vault. The agent can freeze an amount of one holder's shares on the token itself, or freeze or lock a holder's address in <code>HolderRestrictionRule</code>.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Situation</th><th>Deposit, mint</th><th>Withdraw, redeem</th><th>Share transfer</th></tr></thead>
+      <tbody>
+        <tr><td>Paused (<code>pause()</code> by <code>GUARDIAN_ROLE</code>)</td><td>The max is 0: <code>ERC4626ExceededMaxDeposit(receiver, assets, 0)</code> or <code>ERC4626ExceededMaxMint(receiver, shares, 0)</code></td><td>The max is 0: <code>ERC4626ExceededMaxRedeem(owner, shares, 0)</code> or <code>ERC4626ExceededMaxWithdraw(owner, assets, 0)</code></td><td><code>PolicyGated_TransferRejected(PAUSED)</code></td></tr>
+        <tr><td>An amount frozen on the owner (<code>setFrozenTokens</code>)</td><td>Not affected</td><td>Only the unfrozen part: above it, <code>ERC4626ExceededMaxRedeem(owner, shares, max)</code> or <code>ERC4626ExceededMaxWithdraw(owner, assets, max)</code></td><td>Above the unfrozen balance: <code>ERC7943InsufficientUnfrozenBalance(account, amount, unfrozen)</code>; above the whole balance: <code>ERC20InsufficientBalance(sender, balance, needed)</code></td></tr>
+        <tr><td>Address frozen (<code>setFrozen</code> in the rule)</td><td>As receiver, the max is 0 (<code>RECEIVER_FROZEN</code>)</td><td>As owner, the max is 0 (<code>SENDER_FROZEN</code>)</td><td><code>PolicyGated_TransferRejected(SENDER_FROZEN)</code> or <code>(RECEIVER_FROZEN)</code></td></tr>
+        <tr><td>Locked up (<code>setLockup</code> in the rule)</td><td>Not affected</td><td>The max is 0 (<code>LOCKED</code>)</td><td><code>PolicyGated_TransferRejected(LOCKED)</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small">The agent's <code>forcedTransfer</code> still works while paused, and so does <code>setFrozenTokens</code>.</p>
+</section>
+
+<section id="price">
+  <div class="prose">
+    <h2>Price, previews and the decimals offset</h2>
+    <p>The vault holds the asset itself. <code>totalAssets()</code> is its balance of the asset, and the share price follows from OpenZeppelin's formulas, which add 10<sup>6</sup> virtual shares and one virtual unit of the asset that nobody owns:</p>
+  </div>
+  <pre>shares = assets × (totalSupply + 10^6) / (totalAssets + 1)
+assets = shares × (totalAssets + 1) / (totalSupply + 10^6)</pre>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Call</th><th>Converts</th><th>Rounds</th></tr></thead>
+      <tbody>
+        <tr><td><code>deposit</code>, <code>previewDeposit</code></td><td>assets to shares</td><td>down: the receiver gets slightly fewer shares</td></tr>
+        <tr><td><code>mint</code>, <code>previewMint</code></td><td>shares to assets</td><td>up: the caller pays slightly more</td></tr>
+        <tr><td><code>withdraw</code>, <code>previewWithdraw</code></td><td>assets to shares</td><td>up: slightly more shares are burned</td></tr>
+        <tr><td><code>redeem</code>, <code>previewRedeem</code></td><td>shares to assets</td><td>down: slightly fewer assets are paid</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <p>The previews are arithmetic only. They tell you what the formula gives, and the max functions tell you what the policy allows. The price moves only with the vault's asset balance and share supply: deposits, redemptions, their rounding, and any asset sent straight to the vault. There is no fee, yield or strategy code.</p>
+    <p><b>Why an offset of 6.</b> <code>_decimalsOffset()</code> returns 6, which gives the formula its 10<sup>6</sup> virtual shares. Without them, the first depositor could deposit one unit, then send assets straight to the vault so that one share is worth so much that the next deposit rounds down to zero shares and its assets fall to the existing shares. The virtual shares make that attack cost the attacker more than it gains. A fuzz test runs it: the attacker never gets back more than it put in, and the victim loses at most about the donation divided by 10<sup>6</sup>.</p>
+    <p><b>Shares have 6 more decimals than the asset.</b> With a 6-decimal asset, shares have 12. A first deposit of 1,000 asset units (<code>1000e6</code>) into an empty vault mints <code>1e15</code> raw shares, which is 1,000 shares, and redeeming them returns exactly <code>1000e6</code>. A minimum position is set in shares, so it counts in those 12 decimals.</p>
+  </div>
+</section>
+
+<section id="why">
+  <div class="prose">
+    <h2>Why it is built this way</h2>
+    <ul class="plain">
+      <li><b>OpenZeppelin's vault, unchanged.</b> Deposits, redemptions, rounding and events come from <code>ERC4626Upgradeable</code>. The vault's own code is <code>initialize</code>, the <code>max*</code> functions, the decimals offset, the reverting issuer functions, <code>supportsInterface</code> (which adds ERC-4626), <code>templateId</code>, and <code>_update</code>, which both parents define and which the vault resolves explicitly to the base token's version, so every share movement takes the hooked path.</li>
+      <li><b>The policy shows through <code>max*</code>.</b> ERC-4626 expresses limits through these functions, and integrators read them before calling. Putting the policy there means a blocked account sees 0 instead of an unexplained revert, and the vault's own functions enforce the same answer.</li>
+      <li><b>Shares only through deposits and redemptions.</b> The base token's issuer <code>mint</code> and <code>burn</code> revert, so the share supply cannot grow without assets coming in. An invariant test checks that the whole share supply converts to no more assets than the vault holds.</li>
+      <li><b>The asset leg is not hooked.</b> The policy is about who holds shares. The asset is an ordinary ERC-20 and moves with OpenZeppelin's <code>SafeERC20</code> calls.</li>
+      <li><b>Reviewed code only.</b> The vault is a proxy: a small contract that keeps the address and the balances and runs shared code, its implementation. An upgrade (<code>UPGRADER_ROLE</code>, which the deployment gives to the main timelock) must target an implementation that the <a href="PolicyRegistry.html"><code>PolicyRegistry</code></a> attests, meaning the security council reviewed its code and recorded its code hash, and that reports the same template id, <code>keccak256("Gated4626Vault")</code>. Tests show the vault refusing attested <code>IntentToken</code> and <code>Gated7540Vault</code> implementations with <code>Templated_WrongTemplate</code>. An implementation that is not attested is refused before that, with <code>PolicyGated_NotAttested</code>.</li>
+      <li><b>No ETH.</b> There is no <code>receive</code> function. The only payable function is the inherited <code>upgradeToAndCall</code>, which only <code>UPGRADER_ROLE</code> can call and which refuses ETH when the upgrade carries no call. Tests show a plain ETH send reverting.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="connected">
+  <div class="prose"><h2>Connected to</h2></div>
+  <div class="cards">
+    <a class="card" href="PolicyGatedERC20Upgradeable.html"><span class="name">PolicyGatedERC20Upgradeable</span><p>The base token the shares are: roles, freezes, pause and the hooked <code>_update</code>.</p></a>
+    <a class="card" href="ComplianceHook.html"><span class="name">ComplianceHook</span><p>Runs the vault's rule list on every share movement and every probe.</p></a>
+    <a class="card" href="CredentialRule.html"><span class="name">CredentialRule</span><p>Who may receive shares, and who may still redeem.</p></a>
+    <a class="card" href="MinPositionRule.html"><span class="name">MinPositionRule</span><p>The minimum position a deposit or redemption must respect.</p></a>
+    <a class="card" href="HolderRestrictionRule.html"><span class="name">HolderRestrictionRule</span><p>Lockups and address freezes the agent sets per holder.</p></a>
+    <a class="card" href="FundHoldersRule.html"><span class="name">FundHoldersRule</span><p>The fund-wide investor cap behind a <code>maxDeposit</code> of 0 for a new investor.</p></a>
+    <a class="card" href="Gated7540Vault.html"><span class="name">Gated7540Vault</span><p>The asynchronous vault, where the fulfiller sets the price.</p></a>
+    <a class="card" href="../money.html"><span class="name">Where the money sits</span><p>Every place an asset can be, across both vaults.</p></a>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose">
+    <h2>Source and tests</h2>
+    <ul class="plain">
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/vaults/Gated4626Vault.sol"><code>contracts/vaults/Gated4626Vault.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/interfaces/IGated4626Vault.sol"><code>IGated4626Vault.sol</code></a>. The vault logic it inherits is OpenZeppelin's <code>ERC4626Upgradeable</code> from <code>@openzeppelin/contracts-upgradeable</code> 5.6.1.</li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/vaults/Gated4626Vault.t.sol"><code>Gated4626Vault.t.sol</code></a> (unit tests with a mocked hook, integration tests with the real hook, lockups and a minimum position, the donation attack, and invariants), <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/hooks/rules/CredentialRuleVaults.t.sol"><code>CredentialRuleVaults.t.sol</code></a> (the vault behind the real <code>CredentialRule</code>: a lapsed holder redeems but cannot deposit), <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/fund/FundIntegration.t.sol"><code>FundIntegration.t.sol</code></a> (the vault as a fund class at a full cap), and <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/test/nodejs/vaults.test.ts"><code>test/nodejs/vaults.test.ts</code></a> (a deposit and <code>withdraw(maxWithdraw)</code> from TypeScript)</li>
+    </ul>
+  </div>
+</section>
+
+<footer>Describes the contracts at commit <code>2f8c2e7</code> on <code>main</code>.</footer>
+</main>
+</body>
+</html>

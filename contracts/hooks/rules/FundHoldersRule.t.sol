@@ -167,7 +167,7 @@ contract FundHoldersRuleUnit_Check is FundHoldersRuleUnitTest {
     bool _burn,
     address _installed
   ) external {
-    vm.assume(_installed != address(_rule));
+    if (_installed == address(_rule)) _installed = address(uint160(_installed) ^ 1); // remap rather than vm.assume
     IPolicyHook.TransferKind _kind = IPolicyHook.TransferKind(bound(_kindSeed, 0, 4));
     address _receiver = _burn ? address(0) : _to;
     // A registered class, an uncapped fund and a receiver who already holds a class: only the retired rule is wrong.
@@ -718,7 +718,7 @@ contract FundHoldersRuleUnit_AccountChecks is FundHoldersRuleUnitTest {
   function testFuzz_WhenTheRuleIsNotTheFundsInstalledOne_BothReturnNotFundClass(
     address _installed
   ) external {
-    vm.assume(_installed != address(_rule));
+    if (_installed == address(_rule)) _installed = address(uint160(_installed) ^ 1); // remap rather than vm.assume
     vm.mockCall(_fund, abi.encodeCall(IFund.admission, (_token, _to)), abi.encode(_INDEX, 0, false, 0, 5, _installed));
     assertEq(_rule.checkSend(_token, _to), Reasons.NOT_FUND_CLASS);
     assertEq(_rule.checkReceive(_token, _to), Reasons.NOT_FUND_CLASS);

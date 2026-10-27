@@ -19,7 +19,7 @@ import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
  *      the only immutable, so one attestation of the codehash serves every token. A token's rules are set by whoever holds
  *      that token's DEFAULT_ADMIN_ROLE (asked live, as the rules do for their own configuration) or by the token itself,
  *      so that its initialiser can install the hook and the initial rules in one call. All state is keyed by token, so a
- *      token can set its own rules and nobody else's. A rule list and its after mask share one storage word
+ *      token can set its own rules and nobody else's. A rule list's count and its after mask share one storage word
  */
 contract ComplianceHook is ERC165, IComplianceHook {
   /**

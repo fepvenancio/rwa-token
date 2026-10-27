@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>IntentExecutor · Gated Token Stack</title>
+<meta name="description" content="How IntentExecutor lets an operator submit holders' signed transfer intents, one at a time or in all-or-nothing batches, and why it refuses any intent that states a payment.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="../index.html">Gated Token Stack</a>
+  <a href="../index.html">Overview</a>
+  <a href="../index.html#contracts">Contracts</a>
+  <a href="../roles.html">Who can do what</a>
+  <a href="../movement.html">One movement</a>
+  <a href="../deployment.html">Deployment and governance</a>
+  <a href="../money.html">Where the money sits</a>
+  <a href="../review.html">Security review</a>
+</nav>
+<main class="page">
+
+<header class="top">
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Settlement</div>
+  <h1>IntentExecutor</h1>
+  <p class="lede">The contract an operator uses to put holders' signed transfer instructions on-chain. It adds one check of its own, then hands each instruction to the token unchanged and lets the token decide.</p>
+  <div class="facts">
+    <span class="fact"><b>contracts/intents/IntentExecutor.sol</b></span>
+    <span class="fact">immutable, <b>not a proxy</b></span>
+    <span class="fact">admin: <b>the main timelock</b></span>
+    <span class="fact">not attested: a token trusts it by granting <b>EXECUTOR_ROLE</b></span>
+  </div>
+</header>
+
+<section id="in-one-minute">
+  <div class="callout">
+    <h3>In one minute</h3>
+    <p>A holder can sign a transfer instruction, called an intent, without sending a transaction or paying gas: who receives, how much, until when, and a single-use number (the nonce). Someone else has to submit it. On an <a href="IntentToken.html">IntentToken</a> only an account with <code>EXECUTOR_ROLE</code> may do that, and in the deployment that is this contract and the <a href="DvPExecutor.html">DvPExecutor</a>. The bank's or relayer's keys hold <code>OPERATOR_ROLE</code> here and call it. The executor never holds tokens or money and never changes an intent. Its one check: it refuses any intent that says the signer is to be paid something in return, because it cannot make that payment happen. Operators can submit one intent, or a batch that settles all or nothing. The guardian can stop it at once.</p>
+  </div>
+</section>
+
+<section id="how">
+  <div class="prose">
+    <h2>How an intent is executed</h2>
+    <p>The operator calls <code>execute(token, intent, sig)</code>. The executor checks its own conditions and forwards the call. Everything about the intent itself is checked by the token, which runs the transfer through the compliance hook as an <span class="k k-executed">EXECUTED</span> movement.</p>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 860 580" role="img" aria-label="The holder signs an intent off-chain and gives it to the operator. The operator calls execute on the IntentExecutor. The executor checks that the caller holds OPERATOR_ROLE, that it is not paused, and that the intent states no consideration, otherwise it reverts. It forwards the same intent to the token with executeTransfer. The token checks, in order, the caller's EXECUTOR_ROLE, the deadline, the nonce, the executor binding, validAfter and the holder's signature, then marks the nonce used. It asks the hook with beforeTransfer, kind EXECUTED; the hook answers TRANSFER_OK or the token reverts. Balances move, afterTransfer runs, IntentExecuted is emitted, and the intent hash returns to the executor and the operator.">
+        <defs>
+          <marker id="ie-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+          <marker id="ie-arrow-ex" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="t-executed"/></marker>
+        </defs>
+        <rect class="b" x="10" y="16" width="120" height="44" rx="8"/>
+        <text x="24" y="35" class="bold">Holder</text>
+        <text x="24" y="52" class="sm m">signs off-chain</text>
+        <rect class="b" x="170" y="16" width="140" height="44" rx="8"/>
+        <text x="184" y="35" class="bold">Operator key</text>
+        <text x="184" y="52" class="mono sm m">OPERATOR_ROLE</text>
+        <rect class="act" x="365" y="16" width="150" height="44" rx="8"/>
+        <text x="379" y="35" class="bold">IntentExecutor</text>
+        <text x="379" y="52" class="sm m">this contract</text>
+        <rect class="b" x="570" y="16" width="140" height="44" rx="8"/>
+        <text x="584" y="35" class="bold">IntentToken</text>
+        <text x="584" y="52" class="sm m">checks and moves</text>
+        <rect class="b" x="730" y="16" width="120" height="44" rx="8"/>
+        <text x="744" y="35" class="bold">Hook</text>
+        <text x="744" y="52" class="sm m">the token's rules</text>
+        <line class="life" x1="70" y1="60" x2="70" y2="570"/>
+        <line class="life" x1="240" y1="60" x2="240" y2="570"/>
+        <line class="life" x1="440" y1="60" x2="440" y2="570"/>
+        <line class="life" x1="640" y1="60" x2="640" y2="570"/>
+        <line class="life" x1="790" y1="60" x2="790" y2="570"/>
+
+        <line class="ln dash" x1="70" y1="92" x2="236" y2="92" marker-end="url(#ie-arrow)"/>
+        <text x="80" y="84" class="sm">signed intent, off-chain</text>
+
+        <line class="ln" x1="240" y1="130" x2="436" y2="130" marker-end="url(#ie-arrow)"/>
+        <text x="250" y="122" class="mono sm">execute(token, intent, sig)</text>
+        <rect class="b2" x="350" y="144" width="180" height="62" rx="6"/>
+        <text x="360" y="162" class="sm">OPERATOR_ROLE, not paused</text>
+        <text x="360" y="178" class="sm">no consideration stated</text>
+        <text x="360" y="196" class="sm rej">else it reverts</text>
+
+        <line class="ln" x1="440" y1="228" x2="636" y2="228" marker-end="url(#ie-arrow)"/>
+        <text x="448" y="220" class="mono sm">executeTransfer(intent, sig)</text>
+        <text x="448" y="244" class="sm m">the same intent, unchanged</text>
+        <rect class="b2" x="548" y="258" width="184" height="108" rx="6"/>
+        <text x="558" y="276" class="sm bold">In order, else it reverts:</text>
+        <text x="558" y="294" class="sm">EXECUTOR_ROLE of the caller</text>
+        <text x="558" y="310" class="sm">deadline, then nonce</text>
+        <text x="558" y="326" class="sm">executor binding, validAfter</text>
+        <text x="558" y="342" class="sm">the holder's signature</text>
+        <text x="558" y="358" class="sm">then: nonce marked used</text>
+
+        <line class="ln c-executed" x1="640" y1="392" x2="786" y2="392" marker-end="url(#ie-arrow-ex)"/>
+        <text x="650" y="384" class="mono sm">beforeTransfer</text>
+        <text x="650" y="408" class="sm t-executed">kind EXECUTED</text>
+        <line class="ln dash" x1="790" y1="442" x2="644" y2="442" marker-end="url(#ie-arrow)"/>
+        <text x="650" y="436" class="sm">TRANSFER_OK, or revert</text>
+        <rect class="act" x="548" y="456" width="184" height="46" rx="6"/>
+        <text x="558" y="474" class="sm">balances move; afterTransfer</text>
+        <text x="558" y="492" class="mono sm">emit IntentExecuted</text>
+
+        <line class="ln dash" x1="640" y1="526" x2="444" y2="526" marker-end="url(#ie-arrow)"/>
+        <text x="450" y="518" class="mono sm">intentHash</text>
+        <line class="ln dash" x1="440" y1="554" x2="244" y2="554" marker-end="url(#ie-arrow)"/>
+        <text x="250" y="546" class="mono sm">intentHash</text>
+      </svg>
+    </div>
+    <figcaption><b>The executor forwards; the token decides.</b> A revert anywhere undoes the whole call, the nonce write included, so a refused intent can be submitted again once whatever refused it has changed, until its deadline. <code>execute</code> passes the token's revert data through unchanged, for example <code>PolicyGated_TransferRejected(reason)</code>.</figcaption>
+  </figure>
+  <ol class="steps">
+    <li><div><b>Executor checks.</b> The caller holds <code>OPERATOR_ROLE</code> (<code>AccessControlUnauthorizedAccount</code>), the executor is not paused (<code>EnforcedPause</code>), and the intent states no consideration (<code>IntentExecutor_ConsiderationNotSupported(0)</code>). The role check comes first. If any fails, the token is never called.</div></li>
+    <li><div><b>Token checks.</b> <code>executeTransfer</code> requires <code>EXECUTOR_ROLE</code>, then checks the deadline (<code>INTENT_EXPIRED</code>), the nonce (<code>NONCE_USED</code>), that a stated consideration names an executor (<code>CONSIDERATION_NEEDS_EXECUTOR</code>), that a named executor is the caller (<code>WRONG_EXECUTOR</code>), <code>validAfter</code> (<code>INTENT_NOT_YET_VALID</code>) and the signature (<code>BAD_SIGNATURE</code>).</div></li>
+    <li><div><b>Policy.</b> The movement goes through the token's pause and frozen-balance checks and its hook as <span class="k k-executed">EXECUTED</span>, so the settlement window, credentials, holder restrictions, minimum position and the fund-wide holder cap all apply (<a href="../movement.html">One movement</a>).</div></li>
+    <li><div><b>Record.</b> The token emits <code>IntentExecuted(intentHash, from, to, amount, executor, ref)</code>, where <code>executor</code> is the account that called the token: this contract's address.</div></li>
+  </ol>
+</section>
+
+<section id="functions">
+  <div class="prose"><h2>What it can do</h2></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th><th>Reverts</th></tr></thead>
+      <tbody>
+        <tr><td><code>execute(token, intent, sig)</code></td><td><code>OPERATOR_ROLE</code>, while not paused</td><td>Submits one signed intent to <code>token</code> and returns its EIP-712 hash.</td><td><code>IntentExecutor_ConsiderationNotSupported(0)</code>; otherwise the token's own revert, unchanged</td></tr>
+        <tr><td><code>executeBatch(token, intents, sigs)</code></td><td><code>OPERATOR_ROLE</code>, while not paused</td><td>Submits several intents on one token, in array order, all or none. Returns each hash in order. An empty batch does nothing.</td><td><code>IntentExecutor_LengthMismatch(intents, sigs)</code>; <code>IntentExecutor_ConsiderationNotSupported(i)</code>; <code>IntentExecutor_BatchItemFailed(i, reason)</code></td></tr>
+        <tr><td><code>pause()</code></td><td><code>GUARDIAN_ROLE</code></td><td>Stops <code>execute</code> and <code>executeBatch</code> at once.</td><td><code>EnforcedPause</code> if already paused</td></tr>
+        <tr><td><code>unpause()</code></td><td><code>DEFAULT_ADMIN_ROLE</code> (the main timelock) or <code>RECOVERY_ROLE</code> (the recovery timelock)</td><td>Resumes settlement.</td><td><code>AccessControlUnauthorizedAccount(caller, DEFAULT_ADMIN_ROLE)</code>; <code>ExpectedPause</code> if not paused</td></tr>
+        <tr><td><code>grantRole</code>, <code>revokeRole</code></td><td><code>DEFAULT_ADMIN_ROLE</code>; <code>RECOVERY_ROLE</code> may revoke <code>GUARDIAN_ROLE</code> only</td><td>Manages operators and the guardian.</td><td><code>AccessControlUnauthorizedAccount</code></td></tr>
+        <tr><td><code>supportsInterface(id)</code></td><td>Anyone (read-only)</td><td>ERC-165: <code>IIntentExecutor</code>, <code>IIntentExecutorBatch</code> and the <code>AccessControl</code> interfaces.</td><td></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small">The constructor takes the admin and the guardian and refuses a zero address for either (<code>IntentExecutor_ZeroAddress</code>). It grants nothing else; operators are granted afterwards.</p>
+</section>
+
+<section id="consideration">
+  <div class="prose">
+    <h2>Why it refuses an intent that states a payment</h2>
+    <p>An intent has two fields, <code>considerationToken</code> and <code>considerationAmount</code>, for what the signer is to receive in return. The holder signs them, so they appear in the message the wallet shows. The token never enforces them: it only requires that an intent stating one names the executor allowed to run it. Enforcing the payment is the named executor's job.</p>
+    <p>This executor moves one token and nothing else, so it cannot pay anyone. If it ran such an intent, the shares would move and the payment the holder read in the message would not happen. So it refuses any intent with a non-zero consideration token or amount, whoever the intent names, before calling the token. A trade with a payment goes through the <a href="DvPExecutor.html">DvPExecutor</a>, which moves both sides.</p>
+    <p>The refusal holds at two layers. This executor refuses before the token is called. And the token refuses such an intent from any executor other than the one it names (<code>WRONG_EXECUTOR</code>), or from every executor if it names none (<code>CONSIDERATION_NEEDS_EXECUTOR</code>).</p>
+  </div>
+</section>
+
+<section id="batch">
+  <div class="prose">
+    <h2>Batches: all or nothing</h2>
+    <p><code>executeBatch</code> runs the intents in array order inside one transaction. The first one that fails reverts the batch and names its position, carrying the token's revert data inside.</p>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 780 244" role="img" aria-label="A batch of three intents. Intent 0 settles, intent 1 is refused by the token, intent 2 never runs. The batch reverts with IntentExecutor_BatchItemFailed(1, reason), so intent 0 is undone and its nonce stays unused. The operator then drops intent 1 and resubmits intents 0 and 2, which both settle.">
+        <defs>
+          <marker id="ie-arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+        </defs>
+        <text x="20" y="24" class="sm bold">1. The operator submits three intents</text>
+        <rect class="b" x="20" y="36" width="170" height="46" rx="8"/>
+        <text x="34" y="56">intent 0</text>
+        <text x="34" y="73" class="sm m">settles</text>
+        <line class="ln" x1="190" y1="59" x2="216" y2="59" marker-end="url(#ie-arrow2)"/>
+        <rect class="rejbox" x="220" y="36" width="170" height="46" rx="8"/>
+        <text x="234" y="56">intent 1</text>
+        <text x="234" y="73" class="sm rej">the token refuses it</text>
+        <line class="ln dash" x1="390" y1="59" x2="416" y2="59" marker-end="url(#ie-arrow2)"/>
+        <rect class="b2" x="420" y="36" width="170" height="46" rx="8"/>
+        <text x="434" y="56" class="m">intent 2</text>
+        <text x="434" y="73" class="sm m">never runs</text>
+
+        <rect class="rejbox" x="20" y="96" width="570" height="46" rx="8"/>
+        <text x="34" y="115" class="mono sm rej">IntentExecutor_BatchItemFailed(1, reason)</text>
+        <text x="34" y="132" class="sm">the whole batch reverts: intent 0 is undone and its nonce stays unused</text>
+
+        <text x="20" y="176" class="sm bold">2. The operator drops intent 1 and resubmits</text>
+        <rect class="act" x="20" y="188" width="170" height="46" rx="8"/>
+        <text x="34" y="208">intent 0</text>
+        <text x="34" y="225" class="sm m">settles</text>
+        <line class="ln" x1="190" y1="211" x2="216" y2="211" marker-end="url(#ie-arrow2)"/>
+        <rect class="act" x="220" y="188" width="170" height="46" rx="8"/>
+        <text x="234" y="208">intent 2</text>
+        <text x="234" y="225" class="sm m">settles</text>
+        <text x="410" y="215" class="sm m">returns both intent hashes, in order</text>
+      </svg>
+    </div>
+    <figcaption><b>A batch is one accounting event.</b> It settles every intent or none. The error names the failing position so the operator can drop it and submit the rest again; the dropped intent's nonce is still unused, so it can be resubmitted later.</figcaption>
+  </figure>
+  <div class="prose">
+    <ul class="plain">
+      <li>The arrays must have the same length (<code>IntentExecutor_LengthMismatch</code>).</li>
+      <li>The consideration check runs on each intent just before it is submitted. An intent that states one reverts the batch with <code>IntentExecutor_ConsiderationNotSupported(i)</code>.</li>
+      <li>Intents run in order, so an earlier intent can change what a later one sees: a balance, a minimum position, or the fund's investor count.</li>
+      <li>A batch is for one token. Several tokens need several calls.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="preflight">
+  <div class="prose">
+    <h2>Checking before submitting</h2>
+    <p>The executor has no pre-flight function of its own. An operator asks the token: <code>canExecute(intent, sig)</code> returns <code>(ok, reason)</code> without reverting, and runs the same checks as <code>executeTransfer</code>, the signature and the hook included. Call it from the executor's address (an <code>eth_call</code> with the executor as sender), because the executor binding compares the caller: from any other address, an intent that names this executor reads <code>WRONG_EXECUTOR</code>.</p>
+    <p>The token's pre-flight cannot see what belongs to the executor: <code>OPERATOR_ROLE</code>, the executor's pause, and the consideration refusal. It also does not check that the caller holds <code>EXECUTOR_ROLE</code>, so after a token revokes this executor the pre-flight still says yes and the real call fails.</p>
+  </div>
+</section>
+
+<section id="pause">
+  <div class="prose">
+    <h2>Pause and recovery</h2>
+    <p>The guardian pauses the executor with no delay. Pausing it stops this route only: the token itself is not paused, and the DvP executor, which holds its own <code>EXECUTOR_ROLE</code> on the token, keeps working. The token has its own pause for stopping every movement.</p>
+    <p>Unpausing takes the main timelock or the recovery timelock, each after its delay. The recovery timelock holds <code>RECOVERY_ROLE</code> here, which allows exactly two things: <code>unpause()</code> and revoking <code>GUARDIAN_ROLE</code>. It cannot grant <code>OPERATOR_ROLE</code> or any other role (<a href="GovernanceTimelock.html">GovernanceTimelock</a>).</p>
+  </div>
+</section>
+
+<section id="deployed">
+  <div class="prose">
+    <h2>As deployed</h2>
+    <dl class="kv">
+      <dt>Created by</dt><dd><code>Components</code>, as <code>IntentExecutor(deployer, guardian)</code></dd>
+      <dt>OPERATOR_ROLE</dt><dd>The operator account (parameter <code>operator</code>), the same as on the DvP executor</dd>
+      <dt>GUARDIAN_ROLE</dt><dd>The guardian multisig</dd>
+      <dt>RECOVERY_ROLE</dt><dd>The recovery timelock</dd>
+      <dt>DEFAULT_ADMIN_ROLE</dt><dd>The main timelock; the deployer renounces at the end of <code>Activate</code></dd>
+      <dt>EXECUTOR_ROLE</dt><dd>Granted to it on the intent token only. The vault templates carry no intents.</dd>
+    </dl>
+  </div>
+</section>
+
+<section id="why">
+  <div class="prose">
+    <h2>Why it is built this way</h2>
+    <ul class="plain">
+      <li><b>Forward only.</b> The token is the single source of truth for the signature, nonce, deadline, executor binding, freeze, pause and policy. The executor checks none of them, so nothing is checked twice and the two can never disagree.</li>
+      <li><b>No funds, no state.</b> It stores its roles and its pause flag, nothing else: no intents, no nonces, no balances.</li>
+      <li><b>Replaceable.</b> It is a plain contract, not a proxy. Replacing it means deploying a new one and moving the token's <code>EXECUTOR_ROLE</code>, which is a timelock operation.</li>
+      <li><b>Operators are separate from the token.</b> A bank or relayer key holds a role on the executor, not on the token, and the guardian can stop that route alone.</li>
+      <li><b>Refuse rather than half-settle.</b> An intent that states a payment is refused outright, so a holder never sees shares leave without what the message promised.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="connected">
+  <div class="prose"><h2>Connected to</h2></div>
+  <div class="cards">
+    <a class="card" href="IntentSettledUpgradeable.html"><span class="name">IntentSettledUpgradeable</span><p>The token side: signatures, nonces, the executor binding and <code>canExecute</code>.</p></a>
+    <a class="card" href="IntentToken.html"><span class="name">IntentToken</span><p>The token that grants this executor <code>EXECUTOR_ROLE</code>.</p></a>
+    <a class="card" href="DvPExecutor.html"><span class="name">DvPExecutor</span><p>The executor for intents that state a payment: it settles both sides.</p></a>
+    <a class="card" href="GovernanceTimelock.html"><span class="name">GovernanceTimelock</span><p>Its admin, and the recovery timelock that can unpause it.</p></a>
+    <a class="card" href="../movement.html"><span class="name">One movement</span><p>What the token and its rules check on an executed transfer.</p></a>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose">
+    <h2>Source and tests</h2>
+    <ul class="plain">
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/intents/IntentExecutor.sol"><code>contracts/intents/IntentExecutor.sol</code></a>, interfaces <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/interfaces/IIntentExecutor.sol"><code>IIntentExecutor.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/interfaces/IIntentExecutorBatch.sol"><code>IIntentExecutorBatch.sol</code></a></li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/intents/IntentExecutor.t.sol"><code>IntentExecutor.t.sol</code></a> (unit tests with a mocked token, recovery included, and integration tests on a real <code>IntentToken</code>: the consideration refusal, batches and pause) and <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/test/nodejs/intents.test.ts"><code>test/nodejs/intents.test.ts</code></a> (wallet signatures, the executor binding from each address, a failed batch decoded)</li>
+    </ul>
+  </div>
+</section>
+
+<footer>Describes the contracts at commit <code>2f8c2e7</code> on <code>main</code>.</footer>
+</main>
+</body>
+</html>

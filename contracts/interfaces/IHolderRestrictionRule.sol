@@ -6,7 +6,7 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 /**
  * @title IHolderRestrictionRule
  * @notice Per-(token, holder) restrictions set by the token's AGENT_ROLE: a lockup and an address freeze, packed in one
- *         storage word so a movement costs one read per side. Replaces `ILockupRule`
+ *         storage word so a movement costs one read per side
  * @dev Lockup: TRANSFER, EXECUTED and holder-initiated BURN (e.g. an ERC-4626 redeem) from a locked holder are rejected
  *      with `Reasons.LOCKED` until the unlock time; FORCED, MINT and BURN driven by the token's BURNER_ROLE are exempt.
  *      The lock covers the whole balance. `checkSend` returns `Reasons.LOCKED` for a holder whose lockup is running, so

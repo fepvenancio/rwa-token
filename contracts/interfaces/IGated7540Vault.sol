@@ -12,7 +12,8 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
  * @dev Deposit flow: `requestDeposit` takes the assets into the vault (the controller must be able to hold shares);
  *      `fulfillDeposit` sends them to custody and makes shares claimable; the claim MINTs shares to the receiver
  *      through the hook. Redeem flow: `requestRedeem` escrows the shares into the vault as a TRANSFER through the
- *      hook (lockup, frozen, identity and pause apply; the vault is registered as a verified, holder-exempt account);
+ *      hook (pause, the frozen amount and the rules apply; the vault needs a credential that the token's policy accepts,
+ *      and the fund never counts it, since it is the class itself);
  *      `fulfillRedeem` pulls the assets from the fulfiller and BURNs the escrowed shares; the claim pays the assets.
  *      Rejects return what was requested to the controller. Partial claims round in the vault's favour and full claims
  *      clear exactly. `preview*` revert, as ERC-7540 requires. Issuer `mint` / `burn` revert
