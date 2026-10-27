@@ -197,4 +197,25 @@ describe("deployment with a tampered Activate", async function () {
     assert.equal(await components.timelock.read.hasRole([ROLES.CANCELLER, wallets.guardian.account.address]), false);
     assert.ok(isAddressEqual(await pd.read.owner(), wallets.deployer.account.address), "ownership not yet handed over");
   });
+
+  it("an implementation the council did not attest stops Activate before any role is granted", async function () {
+    const { activate, parameters, components, wallets } = await connection.networkHelpers.loadFixture(stages);
+    const client = await connection.viem.getPublicClient();
+    // A second IntentToken: the same source with its own codehash (UUPS keeps the contract's address in its code), so
+    // the council's attestation of the first one does not cover it.
+    const unreviewed = await connection.viem.deployContract("IntentToken");
+    // `ProxyDeployer_ImplementationNotAttested(address)` from `ProxyDeployer.deploy` itself, before any proxy exists.
+    await assert.rejects(
+      activate({ ...parameters, intentImpl: unreviewed.address }),
+      /ProxyDeployer_ImplementationNotAttested/,
+    );
+
+    const pd = components.proxyDeployer;
+    const predicted = await pd.read.predict([TOKENS.intent.symbol, unreviewed.address]);
+    assert.equal(await client.getCode({ address: predicted }), undefined, "no proxy was created");
+    assert.equal(await pd.read.saltUsed([keccak256(toHex(TOKENS.intent.symbol))]), false);
+    assert.equal(await components.executor.read.hasRole([ROLES.OPERATOR, wallets.operator.account.address]), false);
+    assert.equal(await components.timelock.read.hasRole([ROLES.CANCELLER, wallets.guardian.account.address]), false);
+    assert.ok(isAddressEqual(await pd.read.owner(), wallets.deployer.account.address), "ownership not yet handed over");
+  });
 });

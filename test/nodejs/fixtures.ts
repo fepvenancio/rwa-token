@@ -576,7 +576,7 @@ export async function deployGatedCashToken(connection: NetworkConnection, s: Sta
   };
   const implementation = await viem.deployContract("IntentToken");
   await attest(implementation.address, ATTEST.IMPLEMENTATION);
-  const proxyDeployer = await viem.deployContract("ProxyDeployer", [deployer]);
+  const proxyDeployer = await viem.deployContract("ProxyDeployer", [deployer, s.registry.address]);
   const symbol = "gUSD";
   const predicted = await proxyDeployer.read.predict([symbol, implementation.address]);
   const rules = [s.rules.identityRule.address];

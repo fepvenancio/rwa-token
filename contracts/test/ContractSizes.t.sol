@@ -51,7 +51,7 @@ contract ContractSizesTest is Test {
     _assertFits('SettlementWindowRule', address(new SettlementWindowRule()));
     _assertFits('MaxHoldersRule', address(new MaxHoldersRule()));
     _assertFits('IdentityRule', address(new IdentityRule(IIdentityRegistry(address(this)))));
-    _assertFits('ProxyDeployer', address(new ProxyDeployer(address(this))));
+    _assertFits('ProxyDeployer', address(new ProxyDeployer(address(this), IPolicyRegistry(_registry))));
     Fund _fund = new Fund(address(this), IPolicyRegistry(_registry));
     _assertFits('Fund', address(_fund));
     _assertFits('FundHoldersRule', address(new FundHoldersRule(IFund(address(_fund)))));

@@ -393,7 +393,7 @@ contract Gated4626VaultIntegrationTest is Test {
     _rules[1] = _restrictionRule;
     _rules[2] = _maxHoldersRule;
     // CREATE2 through ProxyDeployer, as in production: the address does not depend on this contract's nonce.
-    ProxyDeployer _proxyDeployer = new ProxyDeployer(address(this));
+    ProxyDeployer _proxyDeployer = new ProxyDeployer(address(this), _registry);
     ComplianceHook _hook = new ComplianceHook(_registry);
     _registry.attest(address(_hook).codehash, IPolicyRegistry.AttestKind.HOOK, '');
     _registry.attest(address(_impl).codehash, IPolicyRegistry.AttestKind.IMPLEMENTATION, '');

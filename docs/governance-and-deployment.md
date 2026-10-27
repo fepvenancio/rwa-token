@@ -54,7 +54,7 @@ sequenceDiagram
 | Register a class, set the fund's cap, exempt an account | `fund.registerClass(token)`, `fund.setHolderCap(cap)`, `fund.setExempt(account, exempt)` | `registerClass`: the token reports ERC-165 support for `IPolicyGated`, its hook lists the fund's rule, its total supply is zero, and the fund has room (32 classes). `setHolderCap`: at most `type(uint48).max`. `setExempt`: a non-zero account |
 | Replace the fund's rule | `fund.setRule(newRule)`, with `hook.setRules(class, list)` for every class in the same batch | `newRule` is attested as `RULE` ([below](#changing-the-funds-rule)) |
 | Unpause an executor | `executor.unpause()`, `dvpExecutor.unpause()` | the executor must be paused |
-| Place a new token | `proxyDeployer.deploy(symbol, implementation, initData, hook, expectedRules)` | see below. The token's rules go in `initData`, so a new token needs no new hook and no hook attestation. A new implementation is attested by the council as a runbook step, since `deploy` does not check it, and a token that joins the fund still needs `fund.registerClass` |
+| Place a new token | `proxyDeployer.deploy(symbol, implementation, initData, hook, expectedRules)` | see below. The token's rules go in `initData`, so a new token needs no new hook and no hook attestation. `deploy` reverts unless the implementation is attested as `IMPLEMENTATION`, so a new implementation needs the council's attestation first, and a token that joins the fund still needs `fund.registerClass` |
 | Change the main timelock's delay | `timelock.updateDelay(newDelay)` | only the timelock itself can call it. OpenZeppelin sets no lower bound |
 
 The main timelock's operations can be cancelled by the guardian and by governance until they are executed.
@@ -312,7 +312,7 @@ Code: `PolicyGatedERC20Upgradeable.pause`, `unpause`, `forcedTransfer`, `burn`, 
 
 Everything the council attests exists after `Components`: the hook, the rules and the implementations. The hook's only immutable is the registry, and it holds no rules for a token until that token installs them, so its codehash depends on no token. The council therefore attests once, before any token exists, and `Activate` then deploys the tokens against attestations that already exist. A token is initialised with the attested hook and its rule list, and installs the list on the hook itself in the same call: the hook accepts `setRules` from the token for its own address.
 
-`ProxyDeployer` still places each token proxy, with CREATE2, init code `TokenProxy(implementation, "")` and salt `keccak256(bytes(symbol))`. The address depends on the `ProxyDeployer` contract's own address, the symbol and the implementation. It does not depend on the init data, which carries the admin, the hook and the rules. `predict(symbol, implementation)` is a view on the deployed `ProxyDeployer`: once it and the implementation exist, it returns the address before the proxy exists. `ProxyDeployer` also checks that the token came up with the shared hook and exactly the reviewed rules.
+`ProxyDeployer` still places each token proxy, with CREATE2, init code `TokenProxy(implementation, "")` and salt `keccak256(bytes(symbol))`. The address depends on the `ProxyDeployer` contract's own address, the symbol and the implementation. It does not depend on the init data, which carries the admin, the hook and the rules. `predict(symbol, implementation)` is a view on the deployed `ProxyDeployer`: once it and the implementation exist, it returns the address before the proxy exists. `ProxyDeployer` also refuses an implementation its registry has not attested, and checks that the token came up on that registry with the shared hook and exactly the reviewed rules.
 
 `deploy(symbol, implementation, initData, hook, expectedRules)` does these steps, and any revert undoes all of them, including the symbol being marked used:
 
@@ -320,9 +320,14 @@ Everything the council attests exists after `Components`: the hook, the rules an
 flowchart TD
   A["deploy(symbol, implementation, initData, hook, expectedRules), owner only"] --> B{"salt already used?"}
   B -->|yes| X1["revert ProxyDeployer_SaltUsed"]
-  B -->|no| C["mark salt used, create TokenProxy at the CREATE2 address with empty init data"]
-  C --> D["call initData on the proxy: initialize, same transaction.<br/>The token installs the hook, then its rules on the hook"]
-  D --> E{"token.policyHook() equals hook?"}
+  B -->|no| C["mark salt used"]
+  C --> I{"REGISTRY attests implementation as IMPLEMENTATION?"}
+  I -->|no| X5["revert ProxyDeployer_ImplementationNotAttested"]
+  I -->|yes| P["create TokenProxy at the CREATE2 address with empty init data"]
+  P --> D["call initData on the proxy: initialize, same transaction.<br/>The token installs the hook, then its rules on the hook"]
+  D --> R{"token.registry() equals REGISTRY?"}
+  R -->|no| X6["revert ProxyDeployer_RegistryMismatch"]
+  R -->|yes| E{"token.policyHook() equals hook?"}
   E -->|no| X2["revert ProxyDeployer_HookNotInstalled"]
   E -->|yes| F{"hook.rules(token) equals expectedRules, in order?"}
   F -->|no| X3["revert ProxyDeployer_RulesMismatch"]
@@ -331,11 +336,11 @@ flowchart TD
   G -->|yes| H["emit ProxyDeployed"]
 ```
 
-`deploy` is owner-only. The address does not cover the init data, so without the gate anyone could take it with the same symbol and implementation but their own admin. A symbol can be used once, with any implementation. `deploy` does not check that `implementation` is attested. The token's `initialize` checks that the hook is attested as `HOOK` and names the token's registry, and the hook's `setRules` checks every rule as `RULE`. On chain, an implementation's attestation is enforced only when a token is upgraded, so for a first deployment it is a council step in the runbook.
+`deploy` is owner-only. The address does not cover the init data, so without the gate anyone could take it with the same symbol and implementation but their own admin. A symbol can be used once, with any implementation. Before it creates the proxy, `deploy` asks its registry, fixed at construction (`REGISTRY()`), whether `implementation` is attested as `IMPLEMENTATION`, and reverts with `ProxyDeployer_ImplementationNotAttested` if not. The check has to be in the deployer: the token's initialiser is the implementation's own code, so an implementation nobody reviewed would not run a check of its own. After the initialiser, `deploy` requires the token's `registry()` to be its own registry (`ProxyDeployer_RegistryMismatch`), because a token on another registry could have its hook and rules attested there. The token's `initialize` checks that the hook is attested as `HOOK` and names the token's registry, and the hook's `setRules` checks every rule as `RULE`. Like the other gates, `deploy` reads the registry only at that moment: revoking an implementation's attestation later does not change a token already deployed over it.
 
 `TokenProxy` is OpenZeppelin's `ERC1967Proxy` with one override, `_unsafeAllowUninitialized`, so it can be created without init data. `ProxyDeployer` initialises it in the same transaction.
 
-Code: `ProxyDeployer.deploy`, `predict`, `TokenProxy`, `ComplianceHook.setRules`.
+Code: `ProxyDeployer.deploy`, `predict`, `TokenProxy`, `PolicyRegistry.isAttested`, `ComplianceHook.setRules`.
 
 ## The deployment sequence
 
@@ -354,7 +359,7 @@ sequenceDiagram
   D->>Ch: IdentityRule(identityRegistry), MinPositionRule, HolderRestrictionRule, SettlementWindowRule, MaxHoldersRule
   D->>Ch: Fund(deployer, registry), FundHoldersRule(fund)
   D->>Ch: IntentToken, Gated4626Vault, Gated7540Vault implementations
-  D->>Ch: ProxyDeployer(deployer), IntentExecutor(deployer, guardian), DvPExecutor(deployer, guardian)
+  D->>Ch: ProxyDeployer(deployer, registry), IntentExecutor(deployer, guardian), DvPExecutor(deployer, guardian)
 
   Note over D,Ch: Council step
   Co->>Ch: read the fund's code and owner, and the hook's REGISTRY()
@@ -363,7 +368,7 @@ sequenceDiagram
   Note over D,Ch: Stage 2, Activate
   loop IntentToken, Gated4626Vault, Gated7540Vault
     D->>Ch: ProxyDeployer.deploy(symbol, implementation, initData, hook, rules in RULE_ORDER)
-    Note over Ch: the token installs the hook and then its rules on the hook, and ProxyDeployer checks both
+    Note over Ch: ProxyDeployer checks the implementation is attested, the token installs the hook and then its rules on the hook, and ProxyDeployer checks the registry, the hook and the rules
   end
   D->>Ch: Fund.setRule and setHolderCap, then registerClass for the three tokens in order
   D->>Ch: configure (window, minimum positions). Grant roles, which waits for the registrations
@@ -383,9 +388,9 @@ sequenceDiagram
 - Five shared rules: `IdentityRule`, with the identity registry address as its constructor argument, `MinPositionRule`, `HolderRestrictionRule`, `SettlementWindowRule` and `MaxHoldersRule`.
 - `Fund(deployer, registry)`, owned by the deployer until `Activate`, and `FundHoldersRule(fund)`, the sixth rule. The fund and its rule need each other, so the rule takes the fund at construction and `Activate` installs the rule in the fund.
 - One implementation per template: `IntentToken`, `Gated4626Vault`, `Gated7540Vault`.
-- `ProxyDeployer(deployer)`, `IntentExecutor(deployer, guardian)` and `DvPExecutor(deployer, guardian)`. Neither executor is attested: neither is a hook, a rule or an implementation, and each token authorises an executor by granting it `EXECUTOR_ROLE`.
+- `ProxyDeployer(deployer, registry)`, `IntentExecutor(deployer, guardian)` and `DvPExecutor(deployer, guardian)`. Neither executor is attested: neither is a hook, a rule or an implementation, and each token authorises an executor by granting it `EXECUTOR_ROLE`.
 
-The council step attests six rules as `RULE` (the five shared ones and `FundHoldersRule`), the hook as `HOOK` and the three implementations as `IMPLEMENTATION`, in one step. `MaxHoldersRule` is attested although no demo class lists it, so governance can add it later without another council step. Before attesting `FundHoldersRule` the council reads the fund's code and owner, and before attesting the hook it reads its `REGISTRY()`. `Activate` is where the attestations are checked (the token's `initialize` for the hook, the hook's `setRules` for the rules, `Fund.setRule` for the fund's rule), so the step comes before it.
+The council step attests six rules as `RULE` (the five shared ones and `FundHoldersRule`), the hook as `HOOK` and the three implementations as `IMPLEMENTATION`, in one step. `MaxHoldersRule` is attested although no demo class lists it, so governance can add it later without another council step. Before attesting `FundHoldersRule` the council reads the fund's code and owner, and before attesting the hook it reads its `REGISTRY()`. `Activate` is where the attestations are checked (`ProxyDeployer.deploy` for the implementations, the token's `initialize` for the hook, the hook's `setRules` for the rules, `Fund.setRule` for the fund's rule), so the step comes before it.
 
 `Activate` gives each token its rule list from `RULE_ORDER` in `roles.ts`, in the token's init data:
 
@@ -401,7 +406,7 @@ The symbols above, and the token names in `TOKENS` ("Intent Token", "Gated Fund"
 
 `Activate` runs in these stages. Ignition orders calls by their dependencies: the futures they use, plus the `after` lists in this module:
 
-1. Deploy the three tokens through `ProxyDeployer`, each with its rule list in its init data. The tokens are initialised with the deployer as admin and the guardian as guardian, and each installs its own rules on the hook. Every later call waits for all three deploys, so a token that does not come up with the shared hook and exactly its rule list stops the whole stage before anything is configured or granted.
+1. Deploy the three tokens through `ProxyDeployer`, each with its rule list in its init data. The tokens are initialised with the deployer as admin and the guardian as guardian, and each installs its own rules on the hook. Every later call waits for all three deploys, so an implementation that is not attested, or a token that does not come up with the shared hook and exactly its rule list, stops the whole stage before anything is configured or granted.
 2. Configure, after the deploys and while the deployer still holds `DEFAULT_ADMIN_ROLE` on the tokens: `SettlementWindowRule.setWindow` for `IntentToken` (`windowOpen`, `windowClose`, `windowDays`), and `MinPositionRule.setMinPosition` for each token (`intentMinPosition`, `fundMinPosition`, `asyncFundMinPosition`, each 0 by default, which switches the rule off). There is no per-class holder cap and no escrow exemption to set: the fund counts investors across its classes, and the 7540 vault is the token itself, which `FundHoldersRule` does not count and `MinPositionRule` exempts.
    The fund is configured in the same stage, while the deployer owns it: `Fund.setRule(fundHoldersRule)` and `Fund.setHolderCap(fundHolderCap)`, then `Fund.registerClass` for `IntentToken`, `Gated4626Vault` and `Gated7540Vault`, each after the one before, so they are classes 1, 2 and 3. Registration checks that the token's hook lists the rule and that its supply is zero, so a rule list without the fund's rule stops `Activate` here. No role has been granted by then, and `Fund` ownership has not moved. The `ProxyDeployer` ownership transfer and the recovery timelock calls wait only for the deploys, so they may already have run.
 3. Grant roles: `MINTER_ROLE` and `BURNER_ROLE` on `IntentToken`; `EXECUTOR_ROLE` on `IntentToken` to the intent executor and to the DvP executor, and to no one else; `FULFILLER_ROLE` on the 7540 vault; `AGENT_ROLE` on all three tokens; `UPGRADER_ROLE` on all three tokens to the main timelock; `OPERATOR_ROLE` on both executors; `CANCELLER_ROLE` on the main timelock to the guardian; `RECOVERY_ROLE` on all three tokens and on both executors to the recovery timelock. The grants wait for the deploys and for the three registrations, so no operational role exists on a class the fund has not registered. The window and minimum-position calls of step 2 and these grants have no order between them.

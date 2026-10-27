@@ -2227,6 +2227,98 @@ Decision 2 of the second outside review, built as the second of the two separate
 
 A `JurisdictionRule`, amount-level lockups, an ERC-3643 read adapter, ERC-1066 style reason codes, a recovery address for identity re-keying. The assessment calls them secondary, and none of them changes what the items above build.
 
+## `ProxyDeployer` checks the first implementation (planned 2026-10-26, built and committed 2026-10-27)
+
+Source: finding 1 of the audit of the token, hook and policy contracts (2026-10-26, rated low; the page is `docs/gated-token.html`, section "Audit"). On 2026-10-26 the owner asked for this plan. On 2026-10-27 the owner approved D1 to D4 as recommended and confirmed that no `ProxyDeployer` is live; the work is built and described under "Result" at the end of this section.
+
+### Goal
+
+`ProxyDeployer.deploy` creates a token proxy over any `_implementation` and then trusts the token's own answers: `policyHook()`, `rules(token)` and `symbol()`. An implementation the council never reviewed can give all three correctly. Today an implementation's attestation is enforced on chain only when a token is upgraded (`_authorizeUpgrade`). For a first deployment it is a council step in the runbook, which `docs/governance-and-deployment.md` says in two places ("Place a new token" row, and the `deploy` section).
+
+Only the owner can call `deploy`: the deployer account until `Activate`, the timelock after it. The aim is that "only attested code runs" also holds at the first deployment, with the same registry question the other three gates ask (hook, rules, upgrade).
+
+The check cannot live in the token. The initialiser is the implementation's own code, so a hostile implementation would simply not run it. Only the deployer can ask the registry before the proxy exists.
+
+### What changes
+
+1. `ProxyDeployer` gets an immutable `REGISTRY`. The constructor becomes `(initialOwner, registry)`, and a zero registry reverts.
+2. `deploy` reverts with `ProxyDeployer_ImplementationNotAttested(implementation)` unless `REGISTRY.isAttested(_implementation, IMPLEMENTATION)`. Order inside `deploy`: the salt check and the salt write, both as today, then this check, then CREATE2 and everything after it. That keeps the salt error first for an already used symbol, keeps every write before every external call (so it should not need a new Aderyn suppression; C-1 confirms with a run), and a revert still undoes the salt write.
+3. Only if D2 is accepted: after initialisation `deploy` also requires `IPolicyGated(_proxy).registry() == REGISTRY`, else `ProxyDeployer_RegistryMismatch(expected, actual)`.
+4. Nothing else moves. `predict` and the CREATE2 address do not change: they depend on the deployer's address, the symbol and the implementation, and the deployer's own address comes from its sender and nonce, not its code. The check reads the registry at deploy time only, like the other gates: revoking an attestation later leaves running tokens alone.
+
+### Decisions for the owner (recommendation first)
+
+| # | Question | Recommendation | Alternative |
+|---|---|---|---|
+| D1 | `IProxyDeployer.sol` is frozen (rule 4). Reopen it to add the getter `REGISTRY()` and the errors `ProxyDeployer_ImplementationNotAttested`, `ProxyDeployer_ZeroAddress` (and `ProxyDeployer_RegistryMismatch` with D2), and re-pin the interface id in `InterfaceFreeze.t.sol` (now `0xcedb15bb`)? | Yes. The getter matches `IComplianceHook` and `IFund`, and lets the post-deploy check read it. Errors do not change the id; the getter does, and the new id is taken from the selectors with `cast` and checked against solc's value, as for the other pins. | Errors only, no getter. The id stays. The registry is public on the contract but not in the interface. |
+| D2 | Also require the new token's `registry()` to equal `REGISTRY`? | Yes. Without it the owner could pass the implementation check and still initialise the token against another registry that attests its own hook and rules. One view call and one error. | No. The finding is only about the implementation. |
+| D3 | Is the registry fixed at construction? | Fixed, as in `ComplianceHook` and `Fund`. | A setter is one more power for the timelock to hold. |
+| D4 | Migration. | None, because the repo records no live `ProxyDeployer` (this file, "Finding: bytecode depends on the compile job": "none exists yet"). Please confirm none is live. | If one is, deploy a new one owned by the timelock and leave the old one unused. Its token addresses are unaffected. |
+
+### Files touched (why rule 3 applies)
+
+- Contracts: `contracts/deploy/ProxyDeployer.sol`, `contracts/interfaces/IProxyDeployer.sol` (D1).
+- Pins and sizes: `contracts/test/InterfaceFreeze.t.sol`, `contracts/test/ContractSizes.t.sol`.
+- Unit tests: `contracts/deploy/ProxyDeployer.t.sol`.
+- Call sites of the constructor, each passing its registry and, where the test deploys through the deployer without having attested the implementation, attesting it first: `DvPExecutor.t.sol`, `IntentToken.t.sol`, `Gated4626Vault.t.sol`, `Gated7540Vault.t.sol`, `MaxHoldersRule.t.sol`, `FundIntegration.t.sol`.
+- Deployment: `ignition/modules/Components.ts` (the module already has `registry`), `test/nodejs/fixtures.ts` (`deployGatedCashToken`), `test/nodejs/deployment.test.ts`.
+- Docs and notes: `docs/governance-and-deployment.md` (the "Place a new token" row, the `deploy` section, the runbook's attestation step), `SECURITY.md` (section 3 item 1, and a mutation row in section 5), `docs/gated-token.html` (finding 1, the glossary line on "attested", the note under the registry figure), `docs/README.md` ("Checked against"). `README.md` line 71 ("Attested code only") becomes true as written and needs no edit.
+
+About 19 files, 11 of them Solidity. The deployment flow itself is unchanged: the council already attests the implementations after `Components` and before `Activate`.
+
+### Tests first (red run shown before the implementation)
+
+In `ProxyDeployer.t.sol`:
+1. `test_WhenTheImplementationIsNotAttested_ItRevertsAndNothingIsDeployed`, and the symbol is still free afterwards.
+2. `testFuzz_WhenTheImplementationIsAttestedAsAnotherKind_ItReverts`, with the kind bounded to `NONE`, `HOOK` and `RULE`.
+3. `test_WhenTheImplementationHasNoCode_ItRevertsAsNotAttested` (today it reverts inside the proxy constructor, with another error).
+4. `test_WhenTheSymbolWasUsedAndTheImplementationIsNotAttested_SaltUsedWins`.
+5. `test_WhenTheImplementationIsAttested_ItDeploysAsBefore`. The existing tests keep passing with the registry passed in.
+6. `test_WhenTheRegistryIsZero_ItReverts` and `test_ItRecordsTheRegistry`.
+7. With D2: `test_WhenTheTokenNamesAnotherRegistry_ItRevertsAndNothingIsDeployed`.
+
+In `deployment.test.ts`: an `Activate` over an implementation the council did not attest stops before any role is granted, in the shape of the existing test for an unattested rule.
+
+Mutants, recorded in `SECURITY.md` section 5: the check removed; the check after CREATE2; the wrong kind compared; the check placed before the salt check; the constructor ignoring its registry; with D2, the registry check removed.
+
+### Verification
+
+`npx hardhat test` in both runners (baseline at `a148d2f`: 1011 passing, 915 Solidity and 96 Node, plus the new tests), `npm run lint:sol`, `slither .`, `npm run aderyn`, and `npm run verify:reproducible`. `ProxyDeployer`'s creation code changes, so its reference build changes with it. `ContractSizes` should stay far under the limit. `npm run validate:upgrades` and Halmos are unaffected: `ProxyDeployer` is not upgradeable and has no symbolic property.
+
+### What it does not solve
+
+- An owner that can grant itself `ATTESTER_ROLE`. After `Activate` that is the timelock, so it is delayed and visible, not prevented.
+- What attestation means. It covers one deployed implementation's code (UUPS puts `address(this)` in the code), not the quality of the council's review.
+- Tokens already deployed. The check runs at deploy time only.
+- `Fund` is still not attested (`SECURITY.md` section 2).
+
+### Order of work after approval
+
+1. Owner answers D1 to D4.
+2. Interface and pin (D1), then the tests above, with the red run shown.
+3. Implementation, then the call sites and the Ignition module.
+4. Both runners, lint, Slither, Aderyn, reproducibility, the mutants.
+5. Docs and notes, and finding 1 on `docs/gated-token.html` marked fixed with the commit.
+6. Stop for review. Nothing is committed or pushed without an instruction.
+
+### Result (2026-10-27)
+
+Built as planned with D1 to D4 as recommended. `ProxyDeployer` holds an immutable `REGISTRY` (constructor `(initialOwner, registry)`, zero reverts with `ProxyDeployer_ZeroAddress`). `deploy` asks `REGISTRY.isAttested(implementation, IMPLEMENTATION)` after the salt check and the salt write and before CREATE2, and right after the initialiser it requires `token.registry() == REGISTRY` (D2), before the hook, rule and symbol checks. `IProxyDeployer` gained `REGISTRY()` and the three errors; its id is re-pinned to `0xc8982ea0` (was `0xcedb15bb`; the old id XOR `REGISTRY()`'s selector `0x06433b1b`, from `cast sig`, matched by solc).
+
+Red run first, against a signature-only stub (constructor and getter, no check) so the tests compiled: Solidity 917 passing and 10 failing, Node 96 passing and 1 failing, each failure the missing check. The pin was run red on its own before the interface changed.
+
+Where it differs from the plan:
+- The wrong-kind fuzz covers `HOOK` and `RULE` only. The registry refuses to attest `NONE`, so `NONE` is the unattested test.
+- The real-registry cases (unattested, wrong kind, no code, a second unattested instance of the template, and an attested happy path) are a second contract in `ProxyDeployer.t.sol`, `ProxyDeployerIntegration_RealRegistry`. The unit contract also checks that `deploy` asks the registry about the implementation as `IMPLEMENTATION` (`vm.expectCall`) and that the symbol deploys once the implementation is attested.
+- Two existing unit tests that made the registry refuse everything now refuse the hook only, since a blanket refusal now stops at the implementation first.
+- `DvPExecutor.t.sol` had two more deploys through a deployer built elsewhere (`DvPExecutorFundIntegration`), over implementations nobody attested. The first full run caught them; they now attest first, as the deployment does.
+- `docs/architecture.md` (the `ProxyDeployer` row) was also updated, so that `docs/README.md`'s "Checked against" line stays true.
+
+Verification: `npx hardhat test` 1024 passing (927 Solidity, 97 Node), `npm run lint:sol` and `forge fmt --check` clean, `slither .` 0 results with no new suppression, `npm run aderyn` 0 findings, `npm run verify:reproducible` passes (17 contracts identical across the builds, `TokenProxy` matches the code `ProxyDeployer` embeds; `ProxyDeployer` now has one immutable slot in the manifest, the registry). Mutants: 8 of 8 caught, recorded in `SECURITY.md` section 5. The check moved after CREATE2 is caught by one test only, the implementation with no code, because a revert removes the proxy either way.
+
+Left as they are: `README.md` line 71 ("Attested code only") is now true as written, but the runbook's step 3 and the "Deployment contracts" deviation list what `deploy` checks without the new check (incomplete, not wrong). The brief's §4 list of where attestation is enforced does not name `ProxyDeployer.deploy`; the brief is the owner's to change. `docs/explainer.html` in the docs worktree was not touched.
+
 ## Open questions for the owner
 1. DvP: decisions D1 to D8 are recorded in the DvP section (D8: Option B; D6 revised for the `IntentExecutor` refusal). I-1, E-1, E-2 and the refusal are built and wait for your review.
 2. Nothing on `fund-layer` is pushed, and the DvP section is not committed. Push, or open a pull request, only when you say. The branch carries PR #2's commit `d3574df` until PR #2 merges.
+3. `ProxyDeployer` implementation check (audit finding 1): D1 to D4 approved on 2026-10-27 and built; see "Result" in its section.

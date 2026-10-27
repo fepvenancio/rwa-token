@@ -9,13 +9,18 @@ import {IERC20Metadata} from '@openzeppelin/contracts/token/ERC20/extensions/IER
 
 import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {IProxyDeployer} from 'interfaces/IProxyDeployer.sol';
 
 import {ProxyDeployer} from 'contracts/deploy/ProxyDeployer.sol';
 import {TokenProxy} from 'contracts/deploy/TokenProxy.sol';
+import {PolicyRegistry} from 'contracts/governance/PolicyRegistry.sol';
+import {ComplianceHook} from 'contracts/hooks/ComplianceHook.sol';
+import {IdentityRule} from 'contracts/hooks/rules/IdentityRule.sol';
 import {Helpers} from 'contracts/test/Helpers.sol';
+import {MockIdentityRegistry} from 'contracts/test/MockIdentityRegistry.sol';
 import {IntentToken} from 'contracts/tokens/IntentToken.sol';
 
 contract ProxyDeployerUnitTest is Helpers {
@@ -30,9 +35,9 @@ contract ProxyDeployerUnitTest is Helpers {
   IComplianceRule[] internal _rules;
 
   function setUp() public virtual {
-    _deployer = new ProxyDeployer(_owner);
-    _impl = new IntentToken();
     _registry = _mockContract('registry');
+    _deployer = new ProxyDeployer(_owner, IPolicyRegistry(_registry));
+    _impl = new IntentToken();
     _hook = _mockContract('hook');
     _otherHook = _mockContract('otherHook');
     vm.mockCall(_registry, abi.encodeWithSelector(IPolicyRegistry.isAttested.selector), abi.encode(true));
@@ -62,6 +67,17 @@ contract ProxyDeployerUnitTest is Helpers {
     vm.mockCall(_target, abi.encodeWithSelector(IComplianceHook.setRules.selector), '');
   }
 
+  /// @dev Overrides the registry's answer for one (target, kind) pair; the blanket `true` of `setUp` still covers the
+  ///      rest. The reads prove the exact mock wins, so a test that relies on it cannot pass for the wrong reason
+  function _setAttested(
+    address _target,
+    IPolicyRegistry.AttestKind _kind,
+    bool _attested
+  ) internal {
+    vm.mockCall(_registry, abi.encodeCall(IPolicyRegistry.isAttested, (_target, _kind)), abi.encode(_attested));
+    assertEq(IPolicyRegistry(_registry).isAttested(_target, _kind), _attested, 'the exact mock is in force');
+  }
+
   function _init(
     string memory _symbol,
     address _withHook
@@ -84,11 +100,20 @@ contract ProxyDeployerUnitTest is Helpers {
 contract ProxyDeployerUnit_Constructor is ProxyDeployerUnitTest {
   function test_WhenTheOwnerIsZero_ItReverts() external {
     vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableInvalidOwner.selector, address(0)));
-    new ProxyDeployer(address(0));
+    new ProxyDeployer(address(0), IPolicyRegistry(_registry));
+  }
+
+  function test_WhenTheRegistryIsZero_ItReverts() external {
+    vm.expectRevert(IProxyDeployer.ProxyDeployer_ZeroAddress.selector);
+    new ProxyDeployer(_owner, IPolicyRegistry(address(0)));
   }
 
   function test_ItRecordsTheOwner() external view {
     assertEq(_deployer.owner(), _owner);
+  }
+
+  function test_ItRecordsTheRegistry() external view {
+    assertEq(address(_deployer.REGISTRY()), _registry);
   }
 }
 
@@ -211,7 +236,7 @@ contract ProxyDeployerUnit_Deploy is ProxyDeployerUnitTest {
 
   function test_WhenInitialisationReverts_NothingIsDeployed() external {
     address _predicted = _deployer.predict('INT', address(_impl));
-    vm.mockCall(_registry, abi.encodeWithSelector(IPolicyRegistry.isAttested.selector), abi.encode(false));
+    _setAttested(_hook, IPolicyRegistry.AttestKind.HOOK, false);
     vm.expectRevert(
       abi.encodeWithSelector(IPolicyGated.PolicyGated_NotAttested.selector, _hook, IPolicyRegistry.AttestKind.HOOK)
     );
@@ -224,13 +249,13 @@ contract ProxyDeployerUnit_Deploy is ProxyDeployerUnitTest {
   ///      address and does not burn the salt, so a bad configuration does not strand the symbol
   function test_WhenInitialisationReverts_TheSameSymbolDeploysAfterTheFix() external {
     address _predicted = _deployer.predict('INT', address(_impl));
-    vm.mockCall(_registry, abi.encodeWithSelector(IPolicyRegistry.isAttested.selector), abi.encode(false));
+    _setAttested(_hook, IPolicyRegistry.AttestKind.HOOK, false);
     vm.expectRevert(
       abi.encodeWithSelector(IPolicyGated.PolicyGated_NotAttested.selector, _hook, IPolicyRegistry.AttestKind.HOOK)
     );
     _deploy('INT', _init('INT', _hook), _hook);
 
-    vm.mockCall(_registry, abi.encodeWithSelector(IPolicyRegistry.isAttested.selector), abi.encode(true));
+    _setAttested(_hook, IPolicyRegistry.AttestKind.HOOK, true);
     assertEq(_deploy('INT', _init('INT', _hook), _hook), _predicted);
     assertEq(IPolicyGated(_predicted).policyHook(), _hook);
   }
@@ -251,5 +276,145 @@ contract ProxyDeployerUnit_Deploy is ProxyDeployerUnitTest {
   function test_ItReportsTheSymbolItWasKeyedOn() external {
     address _proxy = _deploy('INT', _init('INT', _hook), _hook);
     assertEq(IERC20Metadata(_proxy).symbol(), 'INT');
+  }
+
+  function test_WhenDeploying_ItAsksTheRegistryAboutTheImplementationAsAnImplementation() external {
+    vm.expectCall(
+      _registry, abi.encodeCall(IPolicyRegistry.isAttested, (address(_impl), IPolicyRegistry.AttestKind.IMPLEMENTATION))
+    );
+    _deploy('INT', _init('INT', _hook), _hook);
+  }
+
+  function test_WhenTheImplementationIsNotAttested_ItRevertsAndNothingIsDeployed() external {
+    address _predicted = _deployer.predict('INT', address(_impl));
+    _setAttested(address(_impl), IPolicyRegistry.AttestKind.IMPLEMENTATION, false);
+    vm.expectRevert(
+      abi.encodeWithSelector(IProxyDeployer.ProxyDeployer_ImplementationNotAttested.selector, address(_impl))
+    );
+    _deploy('INT', _init('INT', _hook), _hook);
+    assertEq(_predicted.code.length, 0);
+    assertFalse(_deployer.saltUsed(keccak256('INT')));
+  }
+
+  function test_WhenTheImplementationIsNotAttested_TheSameSymbolDeploysAfterTheAttestation() external {
+    address _predicted = _deployer.predict('INT', address(_impl));
+    _setAttested(address(_impl), IPolicyRegistry.AttestKind.IMPLEMENTATION, false);
+    vm.expectRevert(
+      abi.encodeWithSelector(IProxyDeployer.ProxyDeployer_ImplementationNotAttested.selector, address(_impl))
+    );
+    _deploy('INT', _init('INT', _hook), _hook);
+
+    _setAttested(address(_impl), IPolicyRegistry.AttestKind.IMPLEMENTATION, true);
+    assertEq(_deploy('INT', _init('INT', _hook), _hook), _predicted);
+  }
+
+  /// @dev The salt check keeps its place ahead of the registry question: a used symbol is reported as used
+  function test_WhenTheSymbolWasUsedAndTheImplementationIsNotAttested_SaltUsedWins() external {
+    _deploy('INT', _init('INT', _hook), _hook);
+    IntentToken _otherImpl = new IntentToken();
+    _setAttested(address(_otherImpl), IPolicyRegistry.AttestKind.IMPLEMENTATION, false);
+    vm.expectRevert(abi.encodeWithSelector(IProxyDeployer.ProxyDeployer_SaltUsed.selector, keccak256('INT')));
+    vm.prank(_owner);
+    _deployer.deploy('INT', address(_otherImpl), _init('INT', _otherHook), _otherHook, _rules);
+  }
+
+  /// @dev A token initialised against another registry, which attests its own hook and rules, is refused
+  function test_WhenTheTokenNamesAnotherRegistry_ItRevertsAndNothingIsDeployed() external {
+    address _predicted = _deployer.predict('INT', address(_impl));
+    address _otherRegistry = _mockContract('otherRegistry');
+    vm.mockCall(_otherRegistry, abi.encodeWithSelector(IPolicyRegistry.isAttested.selector), abi.encode(true));
+    _hookNamesRegistry(_otherHook, _otherRegistry);
+    _hookHolds(_otherHook, _predicted, _rules);
+
+    bytes memory _data = abi.encodeCall(
+      IntentToken.initialize, ('Intent Token', 'INT', _admin, _guardian, _otherRegistry, _otherHook, _rules)
+    );
+    vm.expectRevert(
+      abi.encodeWithSelector(IProxyDeployer.ProxyDeployer_RegistryMismatch.selector, _registry, _otherRegistry)
+    );
+    _deploy('INT', _data, _otherHook);
+    assertEq(_predicted.code.length, 0);
+    assertFalse(_deployer.saltUsed(keccak256('INT')));
+  }
+}
+
+/// @notice Integration: the real registry answers the implementation question, so what counts as attested is the
+///         registry's own rule (kind and runtime codehash), not a mocked answer
+contract ProxyDeployerIntegration_RealRegistry is Helpers {
+  PolicyRegistry internal _registry;
+  ProxyDeployer internal _deployer;
+  ComplianceHook internal _hook;
+  IdentityRule internal _rule;
+  IntentToken internal _impl;
+  address internal _admin = makeAddr('admin');
+  address internal _guardian = makeAddr('guardian');
+  IComplianceRule[] internal _rules;
+
+  function setUp() public virtual {
+    // This test is the registry admin, the attester and the deployer's owner, as the deploy module is while it runs.
+    _registry = new PolicyRegistry(address(this), address(this));
+    _deployer = new ProxyDeployer(address(this), _registry);
+    _hook = new ComplianceHook(_registry);
+    _rule = new IdentityRule(IIdentityRegistry(address(new MockIdentityRegistry())));
+    _impl = new IntentToken();
+    _registry.attest(address(_rule).codehash, IPolicyRegistry.AttestKind.RULE, '');
+    _registry.attest(address(_hook).codehash, IPolicyRegistry.AttestKind.HOOK, '');
+    _rules.push(_rule);
+  }
+
+  function _deployOver(
+    address _implementation
+  ) internal returns (address _proxy) {
+    bytes memory _data = abi.encodeCall(
+      IntentToken.initialize, ('Intent Token', 'INT', _admin, _guardian, address(_registry), address(_hook), _rules)
+    );
+    _proxy = _deployer.deploy('INT', _implementation, _data, address(_hook), _rules);
+  }
+
+  function test_WhenTheImplementationIsAttested_ItDeploys() external {
+    _registry.attest(address(_impl).codehash, IPolicyRegistry.AttestKind.IMPLEMENTATION, '');
+    address _predicted = _deployer.predict('INT', address(_impl));
+    assertEq(_deployOver(address(_impl)), _predicted);
+    assertEq(IPolicyGated(_predicted).registry(), address(_registry));
+  }
+
+  function test_WhenTheImplementationIsNotAttested_ItReverts() external {
+    vm.expectRevert(
+      abi.encodeWithSelector(IProxyDeployer.ProxyDeployer_ImplementationNotAttested.selector, address(_impl))
+    );
+    _deployOver(address(_impl));
+  }
+
+  /// @dev A kind other than `IMPLEMENTATION` on the same codehash does not open the gate. `NONE` cannot be attested:
+  ///      it is the unattested case above
+  function testFuzz_WhenTheImplementationIsAttestedAsAnotherKind_ItReverts(
+    uint8 _seed
+  ) external {
+    IPolicyRegistry.AttestKind _kind = IPolicyRegistry.AttestKind(bound(_seed, 1, 2)); // HOOK or RULE
+    _registry.attest(address(_impl).codehash, _kind, '');
+    vm.expectRevert(
+      abi.encodeWithSelector(IProxyDeployer.ProxyDeployer_ImplementationNotAttested.selector, address(_impl))
+    );
+    _deployOver(address(_impl));
+  }
+
+  /// @dev Another instance of the same template has its own codehash (UUPS keeps `address(this)` in the code), so the
+  ///      council's attestation of one deployment does not cover a second one
+  function test_WhenAnotherInstanceOfTheTemplateIsNotAttested_ItReverts() external {
+    _registry.attest(address(_impl).codehash, IPolicyRegistry.AttestKind.IMPLEMENTATION, '');
+    IntentToken _second = new IntentToken();
+    vm.expectRevert(
+      abi.encodeWithSelector(IProxyDeployer.ProxyDeployer_ImplementationNotAttested.selector, address(_second))
+    );
+    _deployOver(address(_second));
+  }
+
+  /// @dev Without the check this reverts inside the proxy constructor, with the proxy's own error, not the deployer's
+  function test_WhenTheImplementationHasNoCode_ItRevertsAsNotAttested(
+    address _nothing
+  ) external {
+    if (_nothing.code.length != 0) _nothing = address(uint160(_nothing) ^ type(uint160).max); // remap, not vm.assume
+    vm.expectRevert(abi.encodeWithSelector(IProxyDeployer.ProxyDeployer_ImplementationNotAttested.selector, _nothing));
+    _deployOver(_nothing);
   }
 }

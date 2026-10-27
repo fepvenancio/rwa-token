@@ -694,7 +694,7 @@ contract DvPExecutorIntegrationTest is RuleSetIntegrationTest {
     IntentToken _cashImpl = new IntentToken();
     vm.prank(_attester);
     _registry.attest(address(_cashImpl).codehash, IPolicyRegistry.AttestKind.IMPLEMENTATION, '');
-    ProxyDeployer _proxyDeployer = new ProxyDeployer(address(this));
+    ProxyDeployer _proxyDeployer = new ProxyDeployer(address(this), _registry);
     IComplianceRule[] memory _cashRules = _one(_identityRule);
     _cashToken = IntentToken(
       _proxyDeployer.deploy(
@@ -1419,6 +1419,7 @@ contract DvPExecutorFundIntegrationTest is FundIntegrationTest {
 
   function _deployCashToken() internal {
     address _cashImpl = address(new IntentToken());
+    _attestImplementation(_cashImpl);
     IComplianceRule[] memory _list = new IComplianceRule[](1);
     _list[0] = _identityRule;
     _cashToken = IntentToken(
@@ -1498,6 +1499,7 @@ contract DvPExecutorFundIntegration_TwoClasses is DvPExecutorFundIntegrationTest
   function setUp() public override {
     super.setUp();
     address _impl = address(new IntentToken());
+    _attestImplementation(_impl);
     IComplianceRule[] memory _list = new IComplianceRule[](2);
     _list[0] = _identityRule;
     _list[1] = _fundRule;

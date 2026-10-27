@@ -55,9 +55,13 @@ Build: solc 0.8.30, `evmVersion: cancun`, optimizer 200 runs, no metadata hash, 
    only on the deployer, the symbol and the implementation, and the council can compute it off-chain. `deploy`:
    - is owner-only. The address does not cover the init data, so anyone else could otherwise occupy it with their own
      admin. Ownership moves to the timelock in `Activate`;
+   - refuses, before it creates the proxy, an implementation that its registry (fixed at construction) has not attested
+     as `IMPLEMENTATION` (`ProxyDeployer_ImplementationNotAttested`). The token cannot check this itself: its
+     initialiser is the implementation's own code;
    - initialises in the same transaction (the token installs its rule list on the shared hook in its initialiser);
-   - checks that the hook is installed, that it holds exactly the rules the deployer expected for the new token
-     (`ProxyDeployer_RulesMismatch`), and the symbol;
+   - checks that the token names the deployer's registry (`ProxyDeployer_RegistryMismatch`), that the hook is installed,
+     that it holds exactly the rules the deployer expected for the new token (`ProxyDeployer_RulesMismatch`), and the
+     symbol;
    - allows each symbol once.
 
    A reverted deploy leaves no proxy and does not use up the symbol. Tests: `contracts/deploy/ProxyDeployer.t.sol`,
@@ -276,6 +280,7 @@ Each row is a bug deliberately planted, the run that caught it, then restored fr
 | `Gated7540Vault` | withdraw shares rounded down; mint assets rounded down; reject keeps pending; recovery keeps pending; operator guard removed | 1+ tests each; invariant `escrow == Σ pending` |
 | Phase 6 (TS) | executor hand-over skipped; `canExecute` skips the hook; NAV price rounds up; deadline exclusive | 46 / 8 / 1 / 1 failing |
 | `ProxyDeployer` | no hook-binding check; no salt check | unit test + Ignition tamper test; unit test |
+| `ProxyDeployer` implementation check (2026-10-27, audit finding 1) | the check removed; the check moved after CREATE2; the wrong kind asked (`HOOK`); the check moved before the salt check; the constructor not storing its registry; the zero-registry check removed; the token-registry check removed; `Components` passing the timelock as the registry | 8 of 8. The seven contract bugs fail 7, 1, 5, 1, 25, 1 and 1 of the 30 `ProxyDeployer.t.sol` tests. `deployment.test.ts` fails 1, 9, 10 and 10 of its 10 tests for the check removed, the wrong kind, the registry not stored and the timelock in `Components`. The check moved after CREATE2 is caught only by the implementation with no code: a revert undoes the proxy either way, so the order shows only in the error a bad implementation gets |
 | Ignition `Activate` | UPGRADER to an ops account; deployer keeps timelock admin; deployer keeps `ProxyDeployer` ownership; hooks built with rules reversed | 54 / 54 / 55 / 55 failing |
 | upgrades-core | upgrade-unsafe state initialiser | `validate` FAILED |
 | Aderyn gate | one inline suppression removed | `npm run aderyn` fails (1 high) |

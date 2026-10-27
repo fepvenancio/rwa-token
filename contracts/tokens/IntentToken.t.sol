@@ -80,7 +80,7 @@ contract IntentTokenIntegrationTest is Test {
     _registry.attest(address(_identityRule).codehash, IPolicyRegistry.AttestKind.RULE, 'ipfs://rule-review');
 
     // CREATE2 through ProxyDeployer, as in production: the address does not depend on this contract's nonce.
-    ProxyDeployer _proxyDeployer = new ProxyDeployer(address(this));
+    ProxyDeployer _proxyDeployer = new ProxyDeployer(address(this), _registry);
     address _predictedProxy = _proxyDeployer.predict('GNOTE', address(_impl));
     _hook = new ComplianceHook(_registry);
     IComplianceRule[] memory _initialRules = _withRules ? _one(_identityRule) : _none();

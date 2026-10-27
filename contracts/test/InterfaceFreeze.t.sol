@@ -83,7 +83,9 @@ contract InterfaceFreezeTest is Test {
     assertEq(type(IIdentityRegistry).interfaceId, bytes4(0xb9209e33), 'IIdentityRegistry');
     // Added in Phase 7 (2026-10-17), after ProxyDeployer moved to OZ Ownable
     // Re-pinned in S1 of the review items (2026-10-24): `deploy` takes and checks the expected rules (was 0x886d8cd8)
-    assertEq(type(IProxyDeployer).interfaceId, bytes4(0xcedb15bb), 'IProxyDeployer');
+    // Re-pinned 2026-10-27 on owner instruction (PLAN.md, D1): `REGISTRY` added, so `deploy` can check the first
+    // implementation (was 0xcedb15bb). Computed from the signatures with `cast sig`: 0xcedb15bb ^ 0x06433b1b
+    assertEq(type(IProxyDeployer).interfaceId, bytes4(0xc8982ea0), 'IProxyDeployer');
     // Added in v0.2.0 (owner decision M-1)
     assertEq(type(IGovernanceTimelock).interfaceId, bytes4(0x31993a1c), 'IGovernanceTimelock');
     // Added in the fund layer (2026-10-22), ids computed from the signatures with `cast sig`

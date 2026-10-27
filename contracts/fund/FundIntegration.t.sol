@@ -70,7 +70,7 @@ contract FundIntegrationTest is Test {
     _registry = new PolicyRegistry(address(this), address(this));
     _identity = new MockIdentityRegistry();
     _asset = new MockAsset(6);
-    _deployer = new ProxyDeployer(address(this));
+    _deployer = new ProxyDeployer(address(this), _registry);
 
     _identityRule = new IdentityRule(IIdentityRegistry(address(_identity)));
     _restrictionRule = new HolderRestrictionRule();

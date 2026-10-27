@@ -51,7 +51,7 @@ export default buildModule("Components", (m) => {
   const fundImpl = m.contract("Gated4626Vault");
   const asyncFundImpl = m.contract("Gated7540Vault");
 
-  const proxyDeployer = m.contract("ProxyDeployer", [deployer]);
+  const proxyDeployer = m.contract("ProxyDeployer", [deployer, registry]);
   const executor = m.contract("IntentExecutor", [deployer, guardian]);
   const dvpExecutor = m.contract("DvPExecutor", [deployer, guardian]);
 

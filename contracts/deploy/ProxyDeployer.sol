@@ -9,6 +9,7 @@ import {Create2} from '@openzeppelin/contracts/utils/Create2.sol';
 import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
+import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {IProxyDeployer} from 'interfaces/IProxyDeployer.sol';
 
 import {TokenProxy} from 'contracts/deploy/TokenProxy.sol';
@@ -16,12 +17,18 @@ import {TokenProxy} from 'contracts/deploy/TokenProxy.sol';
 /**
  * @title ProxyDeployer
  * @notice Places each token proxy at an address the council can compute from the symbol and the implementation alone,
- *         and refuses to finish unless the token came up with the shared hook and exactly the reviewed rule set
+ *         refuses an implementation the council did not attest, and refuses to finish unless the token came up on the
+ *         same registry with the shared hook and exactly the reviewed rule set
  * @dev Immutable code, owner-gated. The owner gate matters: the address does not cover the init data, so anyone else
  *      could otherwise occupy it with the same symbol and implementation but their own admin. The deployer owns it only
- *      during deployment; `Activate` transfers ownership to the timelock, so any later token goes through governance
+ *      during deployment; `Activate` transfers ownership to the timelock, so any later token goes through governance.
+ *      The implementation is checked here because the token cannot check it: its initialiser is the implementation's own
+ *      code. The registry is read at deploy time only, like the other gates; a later revocation leaves tokens alone
  */
 contract ProxyDeployer is Ownable, IProxyDeployer {
+  /// @inheritdoc IProxyDeployer
+  IPolicyRegistry public immutable REGISTRY;
+
   /// @inheritdoc IProxyDeployer
   mapping(bytes32 _salt => bool _used) public saltUsed;
 
@@ -29,10 +36,15 @@ contract ProxyDeployer is Ownable, IProxyDeployer {
    * @notice Deploys the helper
    * @param _initialOwner The deployer account, the only one allowed to deploy proxies until ownership moves to the
    *        timelock
+   * @param _registry The registry that attests the implementations and that every token must name as its own
    */
   constructor(
-    address _initialOwner
-  ) Ownable(_initialOwner) {}
+    address _initialOwner,
+    IPolicyRegistry _registry
+  ) Ownable(_initialOwner) {
+    if (address(_registry) == address(0)) revert ProxyDeployer_ZeroAddress();
+    REGISTRY = _registry;
+  }
 
   /// @inheritdoc IProxyDeployer
   function deploy(
@@ -47,12 +59,21 @@ contract ProxyDeployer is Ownable, IProxyDeployer {
     if (saltUsed[_salt]) revert ProxyDeployer_SaltUsed(_salt);
     saltUsed[_salt] = true;
 
+    // The token cannot ask this itself: its initialiser is the implementation's own code.
+    if (!REGISTRY.isAttested(_implementation, IPolicyRegistry.AttestKind.IMPLEMENTATION)) {
+      revert ProxyDeployer_ImplementationNotAttested(_implementation);
+    }
+
     // Empty init data keeps the address independent of the hook; initialising here leaves no window to front-run.
     _proxy = address(new TokenProxy{salt: _salt}(_implementation, ''));
     // `initialize` returns nothing; its success is all that matters, and it is checked below.
     // Aderyn's form of the Slither finding below; initialize returns nothing.
     // slither-disable-next-line unused-return
     Address.functionCall(_proxy, _initData); // aderyn-ignore(unchecked-return)
+
+    // A token on another registry could pass the implementation check and still have its own hook and rules attested.
+    address _tokenRegistry = IPolicyGated(_proxy).registry();
+    if (_tokenRegistry != address(REGISTRY)) revert ProxyDeployer_RegistryMismatch(address(REGISTRY), _tokenRegistry);
 
     address _installed = IPolicyGated(_proxy).policyHook();
     if (_installed != _hook) revert ProxyDeployer_HookNotInstalled(_hook, _installed);
