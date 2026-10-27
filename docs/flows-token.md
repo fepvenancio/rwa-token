@@ -115,6 +115,7 @@ sequenceDiagram
   end
   Op->>Ex: execute(token, intent, sig)
   Ex->>Ex: onlyRole(OPERATOR_ROLE), whenNotPaused
+  Ex->>Ex: intent states a consideration? IntentExecutor_ConsiderationNotSupported(0)
   Ex->>T: executeTransfer(intent, sig)
   T->>T: onlyRole(EXECUTOR_ROLE)
   T->>T: block.timestamp over deadline? INTENT_EXPIRED

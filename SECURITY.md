@@ -38,7 +38,7 @@ In scope, all under `contracts/` (`.t.sol` files and `contracts/test/` are test 
 | Governance | `governance/PolicyRegistry`, `governance/GovernanceTimelock` (the main timelock: OZ `TimelockController` plus a revoke-`CANCELLER_ROLE`-only `RECOVERY_ROLE`) |
 | Settlement | `intents/IntentExecutor`, `intents/DvPExecutor` (neither is a proxy, and neither is attested: each token authorises an executor by granting it `EXECUTOR_ROLE`) |
 | Deployment | `deploy/ProxyDeployer`, `deploy/TokenProxy` |
-| Interfaces | `interfaces/*` (frozen; ERC-165 ids, event topics and reason codes pinned by `contracts/test/InterfaceFreeze.t.sol`; the owner reopened them once, 2026-10-23 to 24, for the review items, and they are frozen again) |
+| Interfaces | `interfaces/*` (frozen; ERC-165 ids, event topics and reason codes pinned by `contracts/test/InterfaceFreeze.t.sol`; the owner has reopened them on instruction, most recently 2026-10-23 to 24 for the review items and 2026-10-27 for `IProxyDeployer`, and they are frozen again) |
 
 Also in scope: `ignition/modules/{Components,Activate,roles}.ts`, which carry the deployment order, role grants,
 the hand-over to the timelock and each token's rule list (`RULE_ORDER`).
@@ -261,7 +261,7 @@ Inline acknowledgements (reason on the line above each `aderyn-ignore`):
 | `abi-encode-packed-hash-collision` (high) | `ProxyDeployer._initCodeHash` | False positive: only the second operand varies; the first is fixed creation code | Fuzzed `predict` formula test; off-chain CREATE2 test |
 | `storage-array-memory-edit` (high) | `SettlementWindowRule.check`, `isOpen` | False positive: a read-only copy of a storage struct into memory | Window tests |
 | `unused-state-variable` | `Gated7540Vault` ERC-7201 location | False positive: read in assembly | `Gated7540VaultUnit_Storage`: the formula equals the constant and the slot holds custody and `lastPrice` |
-| `unchecked-return` | `_grantRole` in constructors and initialisers (`CredentialRegistry` included), and `_revokeRole` in `CredentialRegistry.revokeRole` (it returns false only if the role was not held, and either way the account ends up without it); `Address.functionCall` in `ProxyDeployer`; `_executeLeg` in `DvPExecutor` | `_grantRole` returns false only if the role is already held; `initialize` returns nothing; the cash leg's digest is not needed and the securities leg's digest was read before the call | Role, deploy and DvP tests |
+| `unchecked-return` | `_grantRole` in constructors and initialisers (`CredentialRegistry` included), and `_revokeRole` in the `revokeRole` overrides of the base, `GovernanceTimelock`, both executors and `CredentialRegistry` (it returns false only if the role was not held, and either way the account ends up without it); `Address.functionCall` in `ProxyDeployer`; `_executeLeg` in `DvPExecutor` | `_grantRole` returns false only if the role is already held; `initialize` returns nothing; the cash leg's digest is not needed and the securities leg's digest was read before the call | Role, deploy and DvP tests |
 | `costly-loop`, `require-revert-in-loop` | `ComplianceHook._setRules`, `IntentExecutor.executeBatch`, `MaxHoldersRule.seedHolderCountFromHolders` | By design: at most 16 rules, and invalid rules must fail closed; batches are atomic; an unsorted holder list must fail the whole seed | Hook, batch and seed tests |
 | `literal-instead-of-constant` | calendar arithmetic; `10 ** decimals()` | Calendar constants; `decimals()` is read at runtime | Window and vault tests |
 | `empty-block`, `modifier-used-only-once` | `BaseRule.after_`, `__IntentSettled_init`, `Fund.onlyRule`, the two empty `catch` blocks of `Fund._listsInstalledRule` | By design; in the fund views a token or a hook that fails is a broken class, and the answer is `false` | `FundUnit_ClassIntegrity` |
@@ -332,7 +332,7 @@ Everything CI fetches at run time is pinned, and verified wherever the distribut
 | GitHub Actions (`checkout`, `setup-node`, `setup-python`) | Full commit SHA, release tag in a comment | Git object identity |
 | Node, Python | Exact versions (24.21.0, 3.12.15) | Fetched by the SHA-pinned setup actions |
 | npm packages | `package-lock.json` | Lockfile integrity (sha512); `npm ci --ignore-scripts`, so no package install script runs; forge-std pinned to a git commit |
-| Slither, Halmos and all 61 Python dependencies | `ci/requirements.txt` | `pip install --require-hashes` |
+| Slither, Halmos and their dependencies, 61 Python packages in all | `ci/requirements.txt` | `pip install --require-hashes` |
 | forge 1.8.1 | `tools.lock` | sha256 checked by `scripts/fetch-tool.sh`; also checked once against GitHub's asset digest, Foundry's `.sha256` and its sigstore attestation (`gh attestation verify`) |
 | Aderyn 0.6.8 | `tools.lock` | sha256 checked by `scripts/fetch-tool.sh`; also checked once against GitHub's asset digest and Aderyn's `.sha256`. Aderyn publishes no attestation. The npm package, whose installer downloaded the binary unverified, was removed |
 | solc 0.8.30 | `hardhat.config.ts`, `foundry.toml` | Downloaded by Hardhat, forge and Aderyn, each verifying against soliditylang.org's published hashes |
@@ -379,6 +379,6 @@ npm run verify:reproducible
 ```
 
 Tool versions: Node 24.21.0, Python 3.12.15, Hardhat 3.20.0, Foundry v1.8.1, slither 0.11.5, Aderyn 0.6.8, halmos 0.3.3,
-`@openzeppelin/upgrades-core` 1.46.0. CI (`.github/workflows/ci.yml`) runs all of them on every push, except `verify:reproducible`, which runs on
+`@openzeppelin/upgrades-core` 1.46.0. CI (`.github/workflows/ci.yml`) runs all of them on every pull request and every push to `main`, except `verify:reproducible`, which runs on
 pull requests into `main` and, through `release.yml`, on every `v*` tag. Mythril is not used: it has no Cancun support
 (TSTORE/TLOAD/MCOPY).

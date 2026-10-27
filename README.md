@@ -45,7 +45,7 @@ DvPExecutor (immutable)                          role-gated: settles a share tra
 | `contracts/vaults/` | `Gated4626Vault`, `Gated7540Vault` |
 | `contracts/test/` | Test helpers and mocks, interface-freeze and contract-size guards, Halmos properties |
 
-Every contract has its `.t.sol` next to it. [`PLAN.md`](PLAN.md) tracks phases and decisions;
+Every contract except the abstract `BaseRule` has its `.t.sol` next to it. [`PLAN.md`](PLAN.md) tracks phases and decisions;
 [`CLAUDE.md`](CLAUDE.md) is the build brief.
 
 ## Security model
@@ -63,7 +63,7 @@ The audit package (scope, suppressions, mutation results, findings an auditor sh
 | `AGENT_ROLE` | issuer | none | `forcedTransfer` (clawback; bypasses pause, frozen tokens and the sender's address freeze, still policy-checked: an address-frozen receiver refuses it), `setFrozenTokens`; on the 7540 vault, `recoverRedeemRequest` (escrow → recovery account whose credential the token's policy accepts) and `recoverClaimable` (claimable assets and shares → recovery account whose credential the token's policy accepts, even while paused or at a full cap) |
 | `EXECUTOR_ROLE` | `IntentExecutor` and `DvPExecutor` contracts | none | settle holder-signed intents that name no executor or name that executor. `IntentExecutor` settles only intents that state no consideration; `DvPExecutor` settles trades. Neither can alter an intent |
 | `OPERATOR_ROLE` (executors) | bank / relayer keys | none | submit intents via `execute` / `executeBatch` (all-or-nothing), or trades via `executeDvPGated` / `executeDvP3009` (both legs or neither) |
-| `GUARDIAN_ROLE` (executors) | multisig | none | pause an executor only; the timelock unpauses |
+| `GUARDIAN_ROLE` (executors) | multisig | none | pause an executor only; the timelock or the recovery timelock unpauses |
 | `ATTESTER_ROLE` (registry) | security council | none | attest / revoke codehashes |
 | `GUARDIAN_ROLE` (credential registry) | multisig | none | block an address or kill an attester, and nothing else; the main or recovery timelock undoes it |
 | attester (credential registry) | KYC provider, an account in the registry (≤ 64) | none | write a credential for an address within the qualification bits it may assert, or sign one that anyone submits; it can overwrite only an empty address, a record it wrote, or a killed attester's, and change the status only of records it wrote. The compromise limits are in [`docs/credentials.md`](docs/credentials.md) |
@@ -94,8 +94,8 @@ The audit package (scope, suppressions, mutation results, findings an auditor sh
   reads true when the hook accepts it and no frozen amount is in the way (nothing frozen, or a burn by a sender that
   holds `BURNER_ROLE`), and the write reverts with `ERC20InsufficientBalance`.
   Use `canTransferWithReason` to learn whether a movement will succeed. `canSend` and `canReceive` are the
-  account-level questions (ERC-7943): `canSend` is false while paused, for an account with no credential or a blocked one, an address-frozen account
-  and a locked holder (a lapsed holder can send); `canReceive` is false while paused, for an account without an active
+  account-level questions (ERC-7943): `canSend` is false while paused, for an account with no credential or a blocked one, an address-frozen account,
+  a locked holder (a lapsed holder can send) and a token that is not a fund class; `canReceive` is false while paused, for an account without an active
   credential that the token's policy accepts, an address-frozen account and a token that is not a fund class. The holder caps are not in them: ERC-7943 says the
   account questions must not encode quantitative rules (it names balance checks and amount limits), and we read a cap the
   same way, so a cap decides a movement only. For a plain transfer through the shipped rules `canTransfer` is not true
@@ -107,14 +107,16 @@ The audit package (scope, suppressions, mutation results, findings an auditor sh
   in `docs/`).
 - **Fund monitor.** `Fund.firstBrokenClass()` names the first class whose hook no longer lists the fund's rule, which the
   hook cannot know; the post-deploy check asserts it is the zero address.
-- **Reentrancy.** `_update` is `nonReentrant` (transient storage); rules cannot call back into the token.
+- **Reentrancy.** `_update` is `nonReentrant` (transient storage), so no hook or rule can move balances during a
+  movement; `check` is called as a view, and rules are attested.
 - **Reproducible builds.** solc 0.8.30, cancun, optimizer 200 runs, and no metadata hash, in both Hardhat and forge.
   Every codehash and CREATE2 address can be recomputed from the source at a tag; CI fails if two clean builds disagree.
 - **Deployment.** One implementation per template, deployed and attested once, with one proxy per token. Each
   implementation deployment has its own codehash, because UUPS stores `address(this)` in an immutable. Each proxy sits
-  at a CREATE2 address fixed before it exists, `ProxyDeployer` initialises it in the same transaction, and it refuses to
-  finish unless the shared hook is installed and holds exactly the rules the deployer expected for that token (see the
-  runbook below).
+  at a CREATE2 address fixed before it exists. `ProxyDeployer` refuses an implementation its registry has not attested
+  as `IMPLEMENTATION`, initialises the proxy in the same transaction, and refuses to finish unless the token names that
+  registry and the hook is installed and holds exactly the rules the deployer expected for that token (see the runbook
+  below).
 
 ## Deployment runbook
 
@@ -131,7 +133,7 @@ council and the KYC attester, and ends with the post-deploy checks below.
    - the `CredentialRegistry` (admin = deployer until `Activate`, guardian = the guardian multisig);
    - the shared rules: `CredentialRule` (reads that registry), `MinPositionRule`, `HolderRestrictionRule`, `SettlementWindowRule`, `MaxHoldersRule`
      (the last is deployed and attested, listed on no token) and the `FundHoldersRule` that points at the fund;
-   - one implementation per template, `ProxyDeployer` (owner = deployer), `IntentExecutor` and `DvPExecutor` (neither is attested);
+   - one implementation per template, `ProxyDeployer` (owner = deployer, registry = the `PolicyRegistry`), `IntentExecutor` and `DvPExecutor` (neither is attested);
    - the `Fund` (owner = deployer).
 
    Parameters: `governance`, `council`, `guardian`, `minDelay`.
@@ -160,15 +162,17 @@ council and the KYC attester, and ends with the post-deploy checks below.
 
    Also compute where each token will live, before it exists:
    `CREATE2(ProxyDeployer, salt = keccak256(utf8(symbol)), initCode = TokenProxy.creationCode ++ abi.encode(implementation, ""))`,
-   with `TokenProxy.creationCode` from the manifest's `TokenProxy.creation`. `ProxyDeployer.predict(symbol,
+   with `TokenProxy.creationCode` from `TokenProxy`'s build-info in `release-build/build-info/`, whose keccak256 is the
+   manifest's `TokenProxy.creationKeccak`. `ProxyDeployer.predict(symbol,
    implementation)` returns the same address. Builds carry no metadata hash, so this code is the same in every clean
    build at the tag, and `verify:reproducible` checks that `ProxyDeployer` embeds exactly it.
 3. **`Activate`** (deployer):
    - `ProxyDeployer.deploy(symbol, implementation, initData, hook, expectedRules)` for each token. The init data carries the
-     token's rule list, which the token installs on the shared hook itself; `deploy` initialises in the same transaction,
-     then checks that the hook is installed, that it holds exactly `expectedRules` for the new token, and the symbol. A
-     symbol can be used once; a reverted deploy (a hook that names another registry, an unattested rule, a failed
-     `initialize`) leaves no proxy and does not use up the symbol. Every later call waits for all three deploys, so one
+     token's rule list, which the token installs on the shared hook itself. `deploy` first refuses an implementation
+     that its registry has not attested as `IMPLEMENTATION`. It initialises in the same transaction, then checks that the
+     token names that registry, that the hook is installed, that it holds exactly `expectedRules` for the new token, and
+     the symbol. A symbol can be used once; a reverted deploy (an unattested implementation, a token or hook that names
+     another registry, an unattested rule, a failed `initialize`) leaves no proxy and does not use up the symbol. Every later call waits for all three deploys, so one
      token that fails its checks grants nothing anywhere;
    - configure the credential layer (parameter `kycAttester`, the KYC provider's account, and optionally `kycAllowedQuals`,
      255 by default): add it to the registry as attester 0, and give each token the policy "`KYC` from attester 0 and
@@ -180,10 +184,12 @@ council and the KYC attester, and ends with the post-deploy checks below.
    - configure the fund (parameter `fundHolderCap`): install its rule, set its cap, then register the three tokens as
      classes 1 to 3, one after another. Registration refuses a hook that does not list the rule and a token that has
      supply, so a mis-built list stops `Activate` before any role is granted;
-   - grant roles: MINTER, BURNER and AGENT to the issuer's accounts, EXECUTOR on `IntentToken` to `IntentExecutor` and `DvPExecutor`, FULFILLER to the
-     bank, OPERATOR on both executors to the relayer, **UPGRADER to the timelock only**, CANCELLER on the timelock to the guardian;
+   - grant roles: MINTER and BURNER on `IntentToken` and AGENT on every token to the issuer's accounts, EXECUTOR on
+     `IntentToken` to `IntentExecutor` and `DvPExecutor`, FULFILLER to the bank, OPERATOR on both executors to the
+     relayer, **UPGRADER to the timelock only**, CANCELLER on the timelock to the guardian, RECOVERY on every token, on
+     the credential registry and on both executors to the recovery timelock;
    - hand over: DEFAULT_ADMIN_ROLE to the timelock on every token, on the credential registry and on both executors; the deployer renounces it there
-     and on the timelock; `ProxyDeployer` and `Fund` ownership move to the timelock, so any later token is placed, and
+     and on both timelocks; `ProxyDeployer` and `Fund` ownership move to the timelock, so any later token is placed, and
      any later class registered, through governance (schedule `deploy`, wait out the delay, execute).
 4. **KYC attester:** credential the 7540 vault, which escrows pending redemptions, and then every holder
    (`CredentialRegistry.set`, or a signed credential that anyone submits).
@@ -253,7 +259,7 @@ pip install --require-hashes -r ci/requirements.txt   # slither + halmos with ev
 ```
 
 ```bash
-npm run test:halmos   # symbolic properties: nonce/signature, frozen-balance, intent executor-binding, fund and DvP paths
+npm run test:halmos   # symbolic properties: nonce/signature, frozen-balance, intent executor-binding, minimum-position, credential registry, fund and DvP paths
 ```
 
 ```bash
@@ -268,8 +274,8 @@ CI runs the reproducibility check on pull requests into `main`. On a `v*` tag, `
 and attaches `release-build-<tag>.tar.gz` (manifest plus in-scope build-info, with its sha256) to the release as the
 council's reference.
 
-CI (`.github/workflows/ci.yml`) runs all of the above on every push and pull request, except the reproducibility check
-(pull requests into `main` and tags only).
+CI (`.github/workflows/ci.yml`) runs all of the above on every pull request and every push to `main`, except the
+reproducibility check, which runs on pull requests into `main` and, through `release.yml`, on `v*` tags.
 
 ## Deviations from the brief
 
@@ -277,9 +283,10 @@ The brief is in [`CLAUDE.md`](CLAUDE.md). Where the code intentionally differs, 
 
 - **More interface files.** Brief §3 names the core ones and says the rest follow: Wonderland standards give every
   contract an interface. Structs and enums live inside their interfaces, so there is no `Types.sol`.
-- **Interfaces reopened once.** The owner reopened `contracts/interfaces/` on 2026-10-23 for the review items (a shared
-  hook, balances in `TransferContext.extra`, ERC-7943 Final, the template id, two new rules). They are frozen again at the
-  ids and topics pinned in `InterfaceFreeze.t.sol`; [`PLAN.md`](PLAN.md) records each change.
+- **Interfaces reopened.** The owner has reopened `contracts/interfaces/` on instruction several times, and
+  `InterfaceFreeze.t.sol` dates each re-pin. The largest was the review items (2026-10-23 to 24: a shared hook, balances
+  in `TransferContext.extra`, ERC-7943 Final, the template id, two new rules); the latest is `IProxyDeployer.REGISTRY()`
+  (2026-10-27). They are frozen again at the ids and topics pinned there; [`PLAN.md`](PLAN.md) records each change.
 - **Error naming.** Errors follow `<Contract>_<Name>`, e.g. `PolicyGated_TransferRejected(bytes32)`. Event
   parameters are `_camelCase`; topics are unaffected.
 - **ERC-7943 Final.** `IPolicyGated` inherits `IERC7943Fungible` and the token advertises its id (`0x3edbb4c4`). The
@@ -288,8 +295,6 @@ The brief is in [`CLAUDE.md`](CLAUDE.md). Where the code intentionally differs, 
   `ERC7943InsufficientUnfrozenBalance`, and an amount above the balance the base's `ERC20InsufficientBalance`; policy
   rejections keep `PolicyGated_TransferRejected`.
 - **Extra reason codes.** `NO_HOOK`, `NO_RULES` and `NOT_FUND_CLASS` are appended.
-- **Fund layer.** `Fund`, `FundHoldersRule`, `IFund` and `IFundHoldersRule` are not in the brief. [`PLAN.md`](PLAN.md)
-  records the design and the proposed brief edits.
 - **`canTransfer` follows the standard where `canTransferWithReason` does not.** ERC-7943 (Final, checked 2026-10-24)
   says `canTransfer` must not return false on a balance check and must validate the unfrozen amount. It does not say
   which clause wins for an amount above the balance while something is frozen; `canTransfer` reads it as the draft ERC's
@@ -307,7 +312,9 @@ The brief is in [`CLAUDE.md`](CLAUDE.md). Where the code intentionally differs, 
 - **7540 operators are full delegates** (review L-5, owner decision): the code follows ERC-7540, so an approved
   operator can also create requests that pull the owner's assets or shares under any controller. Owners should approve
   only custodians they would trust with the assets. The brief previously said "claims only" and was corrected.
-- **Deployment contracts.** `ProxyDeployer` and `TokenProxy` (in `contracts/deploy/`) are not in the brief. `TokenProxy`
+- **Deployment contracts.** Brief §3 lists `ProxyDeployer` and `TokenProxy` (in `contracts/deploy/`) without
+  describing them, and brief §4 does not list `ProxyDeployer.deploy` among the places attestation is checked: it refuses
+  an implementation not attested as `IMPLEMENTATION` and a token that names another registry. `TokenProxy`
   is OZ's `ERC1967Proxy` with only OZ's documented `_unsafeAllowUninitialized` override, so that it can be created
   without init data. That keeps its CREATE2 address independent of the hook; `ProxyDeployer` initialises it in the same
   transaction.

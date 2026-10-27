@@ -113,6 +113,7 @@ Things that wait for neither timelock: a guardian pause, a `cancel` on the main 
 | `setPolicyHook` | `HOOK` | when the hook is replaced |
 | `ComplianceHook.setRules` | `RULE` for each rule | when a token's rule list is installed: by its initialiser at deployment, and when governance replaces it |
 | `Fund.setRule` | `RULE` | when the fund's rule is set |
+| `ProxyDeployer.deploy` | `IMPLEMENTATION` | when a token is placed |
 | `_authorizeUpgrade` | `IMPLEMENTATION` | when a token is upgraded |
 
 Attestation is checked at install time only. `revoke(codehash)` does not change a token that already runs the revoked code. The guardian can pause meanwhile, and the main timelock can then remove the component. Pause does not stop `FORCED` movements, and those still run the hook and its rules. Removal is a scheduled operation of the main timelock, which the guardian can cancel. If it does, the recovery timelock can strip the guardian of that cancel right first ([roles.md](roles.md#what-the-guardian-can-do)).
@@ -207,7 +208,7 @@ No demo class lists `MaxHoldersRule`: the investor count that matters for a fund
 2. `setExemptHolder(token, account, true)` for every account that must not count. On `Gated7540Vault` that includes the vault itself, which escrows the shares of pending redemptions at its own address. Unlike `FundHoldersRule` and `MinPositionRule`, `MaxHoldersRule` does not treat the token as exempt, so without this call the escrow counts as a holder.
 3. The seed, if the class already has holders. The rule has no count for a token it has not served, so the count must be seeded while the rule is out of the list. A class with no supply needs no seed.
 
-The seeds, their limits and the paused procedure are in the next section. Without the seed on a class that has holders, the count starts at 0 and the cap admits holders past its limit.
+The seeds, their limits and the paused procedure are in the next section. Without the seed on a class that has holders, the count starts at 0. The cap then admits holders past its limit, and a movement that empties a holder's balance while the count is 0 reverts, because the count cannot go below 0.
 
 Code: `MaxHoldersRule.setCap`, `setExemptHolder`, `seedHolderCountFromHolders`, `check`; `ComplianceHook.setRules`; `ignition/modules/Components.ts`.
 
@@ -317,7 +318,7 @@ Code: `PolicyGatedERC20Upgradeable.pause`, `unpause`, `forcedTransfer`, `burn`, 
 
 Everything the council attests exists after `Components`: the hook, the rules and the implementations. The hook's only immutable is the registry, and it holds no rules for a token until that token installs them, so its codehash depends on no token. The council therefore attests once, before any token exists, and `Activate` then deploys the tokens against attestations that already exist. A token is initialised with the attested hook and its rule list, and installs the list on the hook itself in the same call: the hook accepts `setRules` from the token for its own address.
 
-`ProxyDeployer` still places each token proxy, with CREATE2, init code `TokenProxy(implementation, "")` and salt `keccak256(bytes(symbol))`. The address depends on the `ProxyDeployer` contract's own address, the symbol and the implementation. It does not depend on the init data, which carries the admin, the hook and the rules. `predict(symbol, implementation)` is a view on the deployed `ProxyDeployer`: once it and the implementation exist, it returns the address before the proxy exists. `ProxyDeployer` also refuses an implementation its registry has not attested, and checks that the token came up on that registry with the shared hook and exactly the reviewed rules.
+`ProxyDeployer` still places each token proxy, with CREATE2, init code `TokenProxy(implementation, "")` and salt `keccak256(bytes(symbol))`. The address depends on the `ProxyDeployer` contract's own address, the symbol and the implementation. It does not depend on the init data, which carries the admin, the hook and the rules. `predict(symbol, implementation)` is a view on the deployed `ProxyDeployer`: once it and the implementation exist, it returns the address before the proxy exists. `ProxyDeployer` also refuses an implementation its registry has not attested, and checks that the token came up on that registry with the hook and the rules named in the call. The post-deploy check is what pins the hook the council reviewed and `RULE_ORDER`.
 
 `deploy(symbol, implementation, initData, hook, expectedRules)` does these steps, and any revert undoes all of them, including the symbol being marked used:
 
@@ -356,7 +357,7 @@ sequenceDiagram
   participant KA as KYC attester
   participant Ch as Chain
 
-  Note over D,Ch: Stage 1, Components. Ignition batches independent deployments. The fixed orders are recovery timelock, then GovernanceTimelock, then PolicyRegistry, and PolicyRegistry then ComplianceHook, CredentialRegistry then CredentialRule, and PolicyRegistry then Fund then FundHoldersRule
+  Note over D,Ch: Stage 1, Components. Ignition batches independent deployments. The fixed orders are recovery timelock, then GovernanceTimelock, then PolicyRegistry, and PolicyRegistry then ComplianceHook, ProxyDeployer and Fund, and Fund then FundHoldersRule, and CredentialRegistry then CredentialRule
   D->>Ch: recovery TimelockController(minDelay, governance, governance, deployer)
   D->>Ch: GovernanceTimelock(minDelay, governance, governance, deployer, recovery timelock)
   D->>Ch: PolicyRegistry(main timelock, council)

@@ -55,6 +55,7 @@ flowchart LR
   Proxy -.->|"isAttested, at install and upgrade"| Reg["PolicyRegistry"]
   Hook -.->|"isAttested for each rule, when a list is installed"| Reg
   Fund -.->|"isAttested for the rule, when it is set"| Reg
+  PD -.->|"isAttested for the implementation, at deploy"| Reg
 ```
 
 Solid arrows are calls, except `CREATE2`, which is a deployment, and `delegatecall`, which runs the implementation's code against the proxy's storage. Dotted arrows are registry checks that run when something is installed, not on every transfer. The hook is shared: every token's proxy points at the same one, and it keeps one rule list for each token. The rules are shared the same way, so one rule instance can sit in the lists of several tokens. The two executors appear only for `IntentToken`, which is the only template with `executeTransfer`. `DvPExecutor` also calls a second token for the cash leg, a gated cash token or an ERC-3009 token, which is not drawn.
@@ -74,6 +75,7 @@ sequenceDiagram
   participant H as ComplianceHook
   participant R as Each rule, in order
   participant X as Credential registry
+  participant F as Fund
 
   C->>T: transfer, mint, burn, deposit ...
   T->>T: lock reentrancy guard, build TransferContext, balances before the move in extra
@@ -83,12 +85,14 @@ sequenceDiagram
     H->>R: check(ctx), view
     R->>X: profileOf(addr), view
     R->>T: hasRole, view
+    R->>F: admission(token, account), view (FundHoldersRule)
   end
   H-->>T: TRANSFER_OK or a reason code
   T->>T: move balances
-  T->>H: afterTransfer(ctx), only if a rule in the token's list wants it
+  T->>H: wantsAfter(), then afterTransfer(ctx) if it says yes
   H->>R: after_(ctx), rules that want it
   R->>T: policyHook(), view
+  R->>F: join or leave (FundHoldersRule)
   T-->>C: done, or revert PolicyGated_TransferRejected(reason) or a balance error
 ```
 
@@ -96,7 +100,7 @@ The balance error is the token's own check, made before the hook is asked. It is
 
 `beforeTransfer` and `check` are `view` functions, so they are called with `STATICCALL` and cannot write state. A rule that needs to write state does it in `after_`, which runs after the balances have moved. `afterTransfer` and `after_` run while the token's reentrancy guard is still held. `_update` is `nonReentrant`, so a rule that calls back into any function that moves balances reverts. `afterTransfer` accepts only a call from the token named in the context (`ComplianceHook_OnlyToken`), and `wantsAfter()` answers for the token that asks.
 
-The hook address is read once at the start of `_update` into a local variable. If the stored hook changed during the call, the hook that approved the movement would still be the one that receives `afterTransfer`.
+The hook address is read once in `_update`, after the context is built and before the checks, into a local variable. If the stored hook changed during the call, the hook that approved the movement would still be the one that receives `afterTransfer`.
 
 `TransferContext` has no `ref` or `deadline` field. Its `extra` field carries `abi.encode(fromBalance, toBalance)`, the balances before the move, each zero for the zero address. For an executed intent it continues with the intent's `ref` and `deadline`. One function in the token, `_context`, builds it for the write and for every pre-flight, so a pre-flight sees what the write would. A rule that needs a balance reads it from `extra` and works out the balance after the move from `amount`, so on the movement path it makes no call back into the token to read one.
 
@@ -113,7 +117,7 @@ A rule's account answer must agree with its `check` for the kinds the rule does 
 - `FundHoldersRule` answers `NOT_FUND_CLASS`, for a sender and a receiver alike, when the token is not a registered class of the fund or when it is not the fund's installed rule, and accepts otherwise. It leaves the investor cap to `check`.
 - `MinPositionRule`, `SettlementWindowRule` and `MaxHoldersRule` have no account-level opinion and accept.
 
-Because the answer does not depend on an amount, true does not mean that a given transfer will pass. The unfrozen balance, the minimum position and the holder and investor caps are judged only on a movement. `canTransferWithReason(from, to, amount)` runs the whole movement path without the write and returns the reason code. `canTransfer`, the ERC-7943 bool, does the same except that it does not fail on a balance shortfall with no frozen amount in the way, which ERC-7943 forbids. With nothing frozen, an amount above the balance reads true in `canTransfer` when the hook accepts it, while `canTransferWithReason` says `INSUFFICIENT_UNFROZEN` and the write reverts with `ERC20InsufficientBalance`. Once the sender has a frozen amount, an amount above its unfrozen balance reads false in both, except for a burn by a sender that holds `BURNER_ROLE`, which may take frozen tokens, so its burn above the balance reads true in `canTransfer` too ([transfer-checks.md](transfer-checks.md#pre-flight-calls)). The vaults do not use `canReceive` for their `max*` functions. `Gated4626Vault.maxDeposit` and `maxMint`, and `Gated7540Vault.maxDeposit`, `maxMint`, `requestDeposit` and the check at a deposit claim, pre-flight a mint of a very large amount to the receiver (`type(uint128).max` shares), the same path as `canTransfer(address(0), receiver, amount)`. The amount is not zero, so a cap sees a new holder and refuses it, and it is above any minimum position up to `type(uint128).max`, so such a minimum does not read as a block. A rule that bounded the size of a position, such as a supply cap or a maximum balance, would refuse that probe and take those functions to 0. None of the deployed rules does. `maxRedeem`, `maxWithdraw` and the redemption payout of `Gated7540Vault` ask a zero-amount burn instead ([flows-vaults.md](flows-vaults.md)).
+Because the answer does not depend on an amount, true does not mean that a given transfer will pass. The unfrozen balance, the minimum position and the holder and investor caps are judged only on a movement. `canTransferWithReason(from, to, amount)` runs the whole movement path without the write and returns the reason code. `canTransfer`, the ERC-7943 bool, does the same except that it does not fail on a balance shortfall with no frozen amount in the way, which ERC-7943 forbids. With nothing frozen, an amount above the balance reads true in `canTransfer` when the hook accepts it, while `canTransferWithReason` says `INSUFFICIENT_UNFROZEN` and the write reverts with `ERC20InsufficientBalance`. Once the sender has a frozen amount, an amount above its unfrozen balance reads false in both, except for a burn by a sender that holds `BURNER_ROLE`, which may take frozen tokens, so its burn above the balance reads true in `canTransfer` too ([transfer-checks.md](transfer-checks.md#pre-flight-calls)). The vaults do not use `canReceive` for their `max*` functions. `Gated4626Vault.maxDeposit` and `maxMint` pre-flight a mint of a very large amount to the receiver (`type(uint128).max` shares), the same path as `canTransfer(address(0), receiver, amount)`. `Gated7540Vault.maxDeposit`, `maxMint`, `requestDeposit` and the check at a deposit claim pre-flight the same mint to the controller; at a claim, the mint to the receiver still goes through the hook. The amount is not zero, so a cap sees a new holder and refuses it when it is full, and it is above any minimum position up to `type(uint128).max`, so such a minimum does not read as a block. A rule that bounded the size of a position, such as a supply cap or a maximum balance, would refuse that probe and take those functions to 0. None of the deployed rules does. `maxRedeem`, `maxWithdraw` and the redemption payout of `Gated7540Vault` ask a zero-amount burn instead ([flows-vaults.md](flows-vaults.md)).
 
 Code: `PolicyGatedERC20Upgradeable.canSend`, `canReceive`, `canTransfer`, `canTransferWithReason`, `_mintProbe`; `ComplianceHook.checkSend`, `checkReceive`.
 

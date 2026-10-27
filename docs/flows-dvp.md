@@ -72,6 +72,7 @@ sequenceDiagram
   participant S as Security token
 
   Op->>D: executeDvP3009(S, C, seller intent and sig, buyer authorization)
+  D->>D: nonReentrant, onlyRole(OPERATOR_ROLE), whenNotPaused
   D->>S: intentHash(seller intent)
   D->>D: the authorization matches the intent and its nonce ties it to S? else DvPExecutor_LegsDoNotMatch
   D->>C: receiveWithAuthorization(buyer, D, value, times, nonce, sig)
@@ -85,7 +86,7 @@ sequenceDiagram
 
 The authorization matches when it is from the seller's receiver, for the seller's stated consideration in the stated cash token, with the nonce above, and the two tokens differ. Only the payee can call `receiveWithAuthorization`, and the executor calls it only inside this function, so nobody can front-run it with `transferWithAuthorization`, which has a different typehash.
 
-The executor ends with the balance it started with, and the payout raises the seller's balance by exactly the price, or the call reverts with `DvPExecutor_CashNotConserved(account, expected, actual)`. A fee-on-transfer cash token fails the trade. Usually the payout reverts with the cash token's own `ERC20InsufficientBalance`, because the executor received less than it must pay. `DvPExecutor_CashNotConserved` is the error when a stray balance in the executor covers the shortfall, or when the fee falls on the payout alone. A seller who is also the payer is paid back what the pull took, and the net change is zero. A failing pull or delivery reverts with `DvPExecutor_LegFailed`. A failing payout to the seller (a blocklisted seller, a re-entering token) reverts with the cash token's own error.
+The executor ends with the balance it started with, and the payout raises the seller's balance by exactly the price, or the call reverts with `DvPExecutor_CashNotConserved(account, expected, actual)`. A fee-on-transfer cash token fails the trade. Usually the payout reverts with the cash token's own `ERC20InsufficientBalance`, because the executor received less than it must pay. `DvPExecutor_CashNotConserved` is the error when a stray balance in the executor covers the shortfall, or when the fee falls on the payout alone. A seller who is also the payer is paid back what the pull took, and the net change is zero. A failing pull or delivery reverts with `DvPExecutor_LegFailed`. A failing payout to the seller is not wrapped in `DvPExecutor_LegFailed`: it reverts with what the cash token reverts with. For a blocklisted seller that is the token's own error. For a token that calls back into the executor it is the executor's `ReentrancyGuardReentrantCall`. For a token that returns false instead of reverting it is `SafeERC20FailedOperation(token)`.
 
 The executor does not map or touch the authorization's times. The intent's deadline is inclusive (valid at the deadline second) and Circle's `validBefore` is exclusive. A buyer who signs the authorization with `validBefore` equal to the intent's deadline loses the intent's last second, and the trade reverts as a whole in that second. With `validBefore` one second later, both are valid on the deadline.
 
@@ -101,7 +102,7 @@ The executor does not map or touch the authorization's times. The intent's deadl
 What it does not see:
 
 - `OPERATOR_ROLE`, and whether the executor holds `EXECUTOR_ROLE` on the tokens. The tokens' own `canExecute` checks neither role. After a token revokes the executor, pre-flight says yes and the real call fails.
-- For the ERC-3009 form, the buyer's signature, and a pause or blocklist on the cash token.
+- For the ERC-3009 form, the buyer's signature, a pause or blocklist on the cash token, and a fee on its transfers, which makes the trade revert.
 - Two legs on tokens that share policy state, such as two classes of one fund. Each leg is asked against the state before either has run, and the first leg's movement can change the second's answer. Example: a fund whose cap was lowered below its investor count, and an investor who swaps their only class for another. The investor leaves the fund on the first leg and counts as a new investor on the second, which the lowered cap refuses (`MAX_HOLDERS`), though pre-flight said yes. A simulation of `executeDvPGated` with `eth_call` shows the real outcome.
 
 ## Cancel, pause and time
