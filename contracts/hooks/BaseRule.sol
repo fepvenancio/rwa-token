@@ -3,6 +3,8 @@ pragma solidity ^0.8.28;
 
 import {ERC165} from '@openzeppelin/contracts/utils/introspection/ERC165.sol';
 
+import {Reasons} from 'interfaces/Errors.sol';
+
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
@@ -34,6 +36,22 @@ abstract contract BaseRule is ERC165, IComplianceRule {
   function after_(
     IPolicyHook.TransferContext calldata _ctx
   ) external virtual onlyHook(_ctx) {}
+
+  /// @inheritdoc IComplianceRule
+  function checkReceive(
+    address,
+    address
+  ) external view virtual returns (bytes32 _reason) {
+    _reason = Reasons.TRANSFER_OK;
+  }
+
+  /// @inheritdoc IComplianceRule
+  function checkSend(
+    address,
+    address
+  ) external view virtual returns (bytes32 _reason) {
+    _reason = Reasons.TRANSFER_OK;
+  }
 
   /// @inheritdoc ERC165
   function supportsInterface(

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import {IERC20Errors} from '@openzeppelin/contracts/interfaces/draft-IERC6093.sol';
 import {ERC1967Utils} from '@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol';
 import {Errors} from '@openzeppelin/contracts/utils/Errors.sol';
 import {ReentrancyGuardTransient} from '@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol';
@@ -9,25 +10,29 @@ import {Test} from 'forge-std/Test.sol';
 import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+import {IERC7943Fungible} from 'interfaces/IERC7943Fungible.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
+import {ITemplated} from 'interfaces/ITemplated.sol';
 import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
 
 import {ProxyDeployer} from 'contracts/deploy/ProxyDeployer.sol';
 import {PolicyRegistry} from 'contracts/governance/PolicyRegistry.sol';
 import {ComplianceHook} from 'contracts/hooks/ComplianceHook.sol';
-import {IdentityRule} from 'contracts/hooks/rules/IdentityRule.sol';
 import {MockIdentityRegistry} from 'contracts/test/MockIdentityRegistry.sol';
+import {MockIdentityRule} from 'contracts/test/MockIdentityRule.sol';
 import {MockReentrantRule} from 'contracts/test/MockReentrantRule.sol';
 import {IntentToken} from 'contracts/tokens/IntentToken.sol';
+import {Gated4626Vault} from 'contracts/vaults/Gated4626Vault.sol';
+import {Gated7540Vault} from 'contracts/vaults/Gated7540Vault.sol';
 
 /// @notice Integration: real registry, compliance hook and identity rule, wired in deployment order
 contract IntentTokenIntegrationTest is Test {
   PolicyRegistry internal _registry;
   MockIdentityRegistry internal _identity;
   ComplianceHook internal _hook;
-  IdentityRule internal _identityRule;
+  MockIdentityRule internal _identityRule;
   IntentToken internal _impl;
   IntentToken internal _token;
 
@@ -58,9 +63,10 @@ contract IntentTokenIntegrationTest is Test {
   }
 
   /**
-   * @dev Production order. Registry → implementation → rules → attest rules → hook with its initial rules (bound to the
-   *      predicted proxy) → attest hook and implementation → proxy. Rules are hook-agnostic, so they can be deployed
-   *      first and shared across tokens. The token is live with its policy at deploy; the timelock only governs changes
+   * @dev Production order. Registry → implementation → rules → attest rules → one shared hook → attest hook and
+   *      implementation → proxy, initialised with the hook and its rules. Rules and the hook are token-agnostic, so they
+   *      are deployed and attested once and shared across tokens. The token is live with its policy at deploy; the
+   *      timelock only governs changes
    */
   function _deployStack(
     bool _withRules
@@ -69,14 +75,15 @@ contract IntentTokenIntegrationTest is Test {
     _identity = new MockIdentityRegistry();
     _impl = new IntentToken();
 
-    _identityRule = new IdentityRule(IIdentityRegistry(address(_identity)));
+    _identityRule = new MockIdentityRule(IIdentityRegistry(address(_identity)));
     vm.prank(_attester);
     _registry.attest(address(_identityRule).codehash, IPolicyRegistry.AttestKind.RULE, 'ipfs://rule-review');
 
     // CREATE2 through ProxyDeployer, as in production: the address does not depend on this contract's nonce.
-    ProxyDeployer _proxyDeployer = new ProxyDeployer(address(this));
+    ProxyDeployer _proxyDeployer = new ProxyDeployer(address(this), _registry);
     address _predictedProxy = _proxyDeployer.predict('GNOTE', address(_impl));
-    _hook = new ComplianceHook(_admin, _registry, _predictedProxy, _withRules ? _one(_identityRule) : _none());
+    _hook = new ComplianceHook(_registry);
+    IComplianceRule[] memory _initialRules = _withRules ? _one(_identityRule) : _none();
 
     vm.startPrank(_attester);
     _registry.attest(address(_hook).codehash, IPolicyRegistry.AttestKind.HOOK, 'ipfs://hook-review');
@@ -89,9 +96,11 @@ contract IntentTokenIntegrationTest is Test {
           'GNOTE',
           address(_impl),
           abi.encodeCall(
-            IntentToken.initialize, ('Gated Note', 'GNOTE', _admin, _guardian, address(_registry), address(_hook))
+            IntentToken.initialize,
+            ('Gated Note', 'GNOTE', _admin, _guardian, address(_registry), address(_hook), _initialRules)
           ),
-          address(_hook)
+          address(_hook),
+          _initialRules
         )
       )
     );
@@ -102,7 +111,7 @@ contract IntentTokenIntegrationTest is Test {
     IComplianceRule[] memory _ruleSet
   ) internal {
     vm.prank(_admin);
-    _hook.setRules(_ruleSet);
+    _hook.setRules(address(_token), _ruleSet);
   }
 
   function _grantRoles() internal {
@@ -137,13 +146,29 @@ contract IntentTokenIntegrationTest is Test {
     uint256 _amount,
     bytes32 _nonce
   ) internal view returns (ITransferIntent.TransferIntent memory _i, bytes memory _sig) {
+    (_i, _sig) = _signedIntentFor(_to, _amount, _nonce, address(0), address(0), 0);
+  }
+
+  /// @dev An intent from alice that names `_boundTo` as its only executor and states what she is to receive
+  function _signedIntentFor(
+    address _to,
+    uint256 _amount,
+    bytes32 _nonce,
+    address _boundTo,
+    address _considerationToken,
+    uint256 _considerationAmount
+  ) internal view returns (ITransferIntent.TransferIntent memory _i, bytes memory _sig) {
     _i = ITransferIntent.TransferIntent({
       from: _alice,
       to: _to,
       amount: _amount,
       nonce: _nonce,
       deadline: block.timestamp + 1 days,
-      ref: bytes32('ISO20022:MSG-1')
+      ref: bytes32('ISO20022:MSG-1'),
+      executor: _boundTo,
+      validAfter: 0,
+      considerationToken: _considerationToken,
+      considerationAmount: _considerationAmount
     });
     (uint8 _v, bytes32 _r, bytes32 _s) = vm.sign(_alicePk, _token.intentHash(_i));
     _sig = abi.encodePacked(_r, _s, _v);
@@ -152,9 +177,9 @@ contract IntentTokenIntegrationTest is Test {
 
 contract IntentTokenIntegration_Deployment is IntentTokenIntegrationTest {
   function test_WhenDeployed_ThePolicyIsAlreadyInstalled() external view {
-    assertEq(_hook.ruleCount(), 1);
-    assertEq(address(_hook.rules()[0]), address(_identityRule));
-    (bool _ok, bytes32 _reason) = _token.canTransfer(_alice, _eve, 1);
+    assertEq(_hook.ruleCount(address(_token)), 1);
+    assertEq(address(_hook.rules(address(_token))[0]), address(_identityRule));
+    (bool _ok, bytes32 _reason) = _token.canTransferWithReason(_alice, _eve, 1);
     assertFalse(_ok);
     assertEq(_reason, Reasons.RECEIVER_NOT_VERIFIED);
   }
@@ -168,9 +193,9 @@ contract IntentTokenIntegration_Deployment is IntentTokenIntegrationTest {
     _token.mint(_eve, 1);
   }
 
-  /// @dev Regression: a clone of the attested hook with an attacker as admin was itself attested
-  function test_WhenAHookCloneHasAnotherAdmin_ItIsNotAttested() external {
-    ComplianceHook _clone = new ComplianceHook(makeAddr('attacker'), _registry, address(_token), _none());
+  /// @dev A hook that vets rules against another registry has another codehash, so it is not the attested one
+  function test_WhenAHookNamesAnotherRegistry_ItIsNotAttested() external {
+    ComplianceHook _clone = new ComplianceHook(IPolicyRegistry(makeAddr('otherRegistry')));
     assertFalse(_registry.isAttested(address(_clone), IPolicyRegistry.AttestKind.HOOK));
     vm.expectRevert(
       abi.encodeWithSelector(
@@ -182,7 +207,7 @@ contract IntentTokenIntegration_Deployment is IntentTokenIntegrationTest {
   }
 
   function test_WhenAnIdenticalHookIsInstalled_ItIsAccepted() external {
-    ComplianceHook _twin = new ComplianceHook(_admin, _registry, address(_token), _one(_identityRule));
+    ComplianceHook _twin = new ComplianceHook(_registry);
     vm.prank(_admin);
     _token.setPolicyHook(address(_twin));
     assertEq(_token.policyHook(), address(_twin));
@@ -197,7 +222,7 @@ contract IntentTokenIntegration_Identity is IntentTokenIntegrationTest {
   }
 
   function test_WhenBothPartiesAreVerified_TheTransferSucceedsAndPreflightAgrees() external {
-    (bool _ok, bytes32 _reason) = _token.canTransfer(_alice, _bob, 10 ether);
+    (bool _ok, bytes32 _reason) = _token.canTransferWithReason(_alice, _bob, 10 ether);
     assertTrue(_ok);
     assertEq(_reason, Reasons.TRANSFER_OK);
     vm.prank(_alice);
@@ -206,7 +231,7 @@ contract IntentTokenIntegration_Identity is IntentTokenIntegrationTest {
   }
 
   function test_WhenTheReceiverIsUnverified_TheTransferFailsAndPreflightAgrees() external {
-    (bool _ok, bytes32 _reason) = _token.canTransfer(_alice, _eve, 1);
+    (bool _ok, bytes32 _reason) = _token.canTransferWithReason(_alice, _eve, 1);
     assertFalse(_ok);
     assertEq(_reason, Reasons.RECEIVER_NOT_VERIFIED);
     vm.expectRevert(_rejected(Reasons.RECEIVER_NOT_VERIFIED));
@@ -215,17 +240,69 @@ contract IntentTokenIntegration_Identity is IntentTokenIntegrationTest {
   }
 }
 
+/// @notice ERC-7943's account-level answers agree with the identity rule's, and `canTransfer` is never more generous
+contract IntentTokenIntegration_Erc7943 is IntentTokenIntegrationTest {
+  function test_WhenAnAccountIsVerified_CanSendAndCanReceiveAreTrue() external view {
+    assertTrue(_token.canSend(_alice));
+    assertTrue(_token.canReceive(_alice));
+    assertTrue(_token.canSend(_bob));
+    assertTrue(_token.canReceive(_bob));
+  }
+
+  function test_WhenAnAccountIsNotVerified_CanSendAndCanReceiveAreFalse() external view {
+    assertFalse(_token.canSend(_eve));
+    assertFalse(_token.canReceive(_eve));
+  }
+
+  function test_WhenAnAccountIsDeverified_BothTurnFalse() external {
+    _identity.set(_bob, false);
+    assertFalse(_token.canSend(_bob));
+    assertFalse(_token.canReceive(_bob));
+  }
+
+  /// @dev "canTransfer MUST check canSend on the sender and canReceive on the receiver": over every pair of the four
+  ///      accounts, a transfer of one unit reads true exactly when both sides pass. Whether the sender holds the unit is
+  ///      the balance's question, which `canTransfer` leaves to the base standard and the reasoned answer does not
+  function test_WhenAnyPairIsAsked_CanTransferIsCanSendAndCanReceive() external view {
+    address[4] memory _accounts = [_alice, _bob, _eve, _treasury];
+    for (uint256 _i; _i < 4; ++_i) {
+      for (uint256 _j; _j < 4; ++_j) {
+        bool _accountsPass = _token.canSend(_accounts[_i]) && _token.canReceive(_accounts[_j]);
+        assertEq(_token.canTransfer(_accounts[_i], _accounts[_j], 1), _accountsPass);
+        (bool _ok,) = _token.canTransferWithReason(_accounts[_i], _accounts[_j], 1);
+        assertEq(_ok, _accountsPass && _token.balanceOf(_accounts[_i]) >= 1);
+      }
+    }
+  }
+
+  function test_WhenQueried_ItAdvertisesTheStandardsId() external view {
+    assertTrue(_token.supportsInterface(0x3edbb4c4));
+    assertTrue(_token.supportsInterface(type(IERC7943Fungible).interfaceId));
+  }
+
+  function test_WhenAForcedTransferMovesFrozenTokens_FrozenComesBeforeTransferAndBothForcedEventsFollow() external {
+    vm.prank(_agent);
+    _token.setFrozenTokens(_alice, 1000 ether);
+    vm.expectEmit(address(_token));
+    emit IERC7943Fungible.Frozen(_alice, 0);
+    vm.expectEmit(address(_token));
+    emit IERC7943Fungible.ForcedTransfer(_alice, _treasury, 1000 ether);
+    vm.prank(_agent);
+    assertTrue(_token.forcedTransfer(_alice, _treasury, 1000 ether));
+  }
+}
+
 contract IntentTokenIntegration_Enforcement is IntentTokenIntegrationTest {
   /// @dev Regression: a frozen, de-verified holder's tokens could be neither clawed back nor burned
   function test_WhenAHolderIsDeverified_TheirTokensCanBeClawedBackThenBurned() external {
     vm.prank(_agent);
-    _token.setFrozen(_alice, 1000 ether);
+    _token.setFrozenTokens(_alice, 1000 ether);
     _identity.set(_alice, false);
 
     vm.prank(_agent);
     _token.forcedTransfer(_alice, _treasury, 1000 ether);
     assertEq(_token.balanceOf(_treasury), 1000 ether);
-    assertEq(_token.getFrozen(_alice), 0);
+    assertEq(_token.getFrozenTokens(_alice), 0);
 
     vm.prank(_burner);
     _token.burn(_treasury, 1000 ether);
@@ -261,7 +338,7 @@ contract IntentTokenIntegration_Intents is IntentTokenIntegrationTest {
   function test_WhenTheReceiverIsVerified_TheIntentSettles() external {
     (ITransferIntent.TransferIntent memory _i, bytes memory _sig) = _signedIntent(_bob, 50 ether, keccak256('n1'));
     vm.prank(_executor);
-    (bool _ok,) = _token.canExecute(_i);
+    (bool _ok,) = _token.canExecute(_i, _sig);
     assertTrue(_ok);
     vm.prank(_executor);
     _token.executeTransfer(_i, _sig);
@@ -270,7 +347,7 @@ contract IntentTokenIntegration_Intents is IntentTokenIntegrationTest {
 
   function test_WhenTheReceiverIsUnverified_TheIntentFailsAndPreflightAgrees() external {
     (ITransferIntent.TransferIntent memory _i, bytes memory _sig) = _signedIntent(_eve, 1, keccak256('n2'));
-    (bool _ok, bytes32 _reason) = _token.canExecute(_i);
+    (bool _ok, bytes32 _reason) = _token.canExecute(_i, _sig);
     assertFalse(_ok);
     assertEq(_reason, Reasons.RECEIVER_NOT_VERIFIED);
     vm.expectRevert(_rejected(Reasons.RECEIVER_NOT_VERIFIED));
@@ -278,13 +355,43 @@ contract IntentTokenIntegration_Intents is IntentTokenIntegrationTest {
     _token.executeTransfer(_i, _sig);
   }
 
+  function test_WhenTheSignatureIsBad_PreflightAgreesWithTheRealStack() external {
+    (ITransferIntent.TransferIntent memory _i,) = _signedIntent(_bob, 1, keccak256('n4'));
+    (, uint256 _evePk) = makeAddrAndKey('eve');
+    (uint8 _v, bytes32 _r, bytes32 _s) = vm.sign(_evePk, _token.intentHash(_i));
+    bytes memory _badSig = abi.encodePacked(_r, _s, _v);
+
+    vm.prank(_executor);
+    (bool _ok, bytes32 _reason) = _token.canExecute(_i, _badSig);
+    assertFalse(_ok);
+    assertEq(_reason, Reasons.BAD_SIGNATURE);
+    vm.expectRevert(_rejected(Reasons.BAD_SIGNATURE));
+    vm.prank(_executor);
+    _token.executeTransfer(_i, _badSig);
+  }
+
   function test_WhenTheSenderIsFrozen_TheIntentFailsAndPreflightAgrees() external {
     vm.prank(_agent);
-    _token.setFrozen(_alice, 1000 ether);
-    (ITransferIntent.TransferIntent memory _i,) = _signedIntent(_bob, 1, keccak256('n3'));
-    (bool _ok, bytes32 _reason) = _token.canExecute(_i);
+    _token.setFrozenTokens(_alice, 1000 ether);
+    (ITransferIntent.TransferIntent memory _i, bytes memory _sig) = _signedIntent(_bob, 1, keccak256('n3'));
+    (bool _ok, bytes32 _reason) = _token.canExecute(_i, _sig);
     assertFalse(_ok);
     assertEq(_reason, Reasons.INSUFFICIENT_UNFROZEN);
+  }
+
+  /// @dev An amount above the balance is the balance's failure, so the write reverts with the base standard's error,
+  ///      while `canExecute`, which carries a reason, still says the intent cannot run
+  function test_WhenTheAmountExceedsTheBalance_TheIntentRevertsWithTheBaseErrorAndPreflightAgrees() external {
+    (ITransferIntent.TransferIntent memory _i, bytes memory _sig) = _signedIntent(_bob, 1001 ether, keccak256('n6'));
+    vm.prank(_executor);
+    (bool _ok, bytes32 _reason) = _token.canExecute(_i, _sig);
+    assertFalse(_ok);
+    assertEq(_reason, Reasons.INSUFFICIENT_UNFROZEN);
+    vm.expectRevert(
+      abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, _alice, 1000 ether, 1001 ether)
+    );
+    vm.prank(_executor);
+    _token.executeTransfer(_i, _sig);
   }
 }
 
@@ -308,6 +415,40 @@ contract IntentTokenIntegration_Safety is IntentTokenIntegrationTest {
     IntentToken _next = new IntentToken();
     assertNotEq(address(_next).codehash, address(_impl).codehash);
     assertFalse(_registry.isAttested(address(_next), IPolicyRegistry.AttestKind.IMPLEMENTATION));
+  }
+
+  function test_WhenQueried_ItNamesItsTemplate() external view {
+    assertEq(_token.templateId(), keccak256('IntentToken'));
+  }
+
+  /// @dev The reproduction of the review finding: a vault implementation the council attested for vaults, offered to a
+  ///      token proxy, used to be accepted and left the token with the vault's code on its own storage
+  function test_WhenUpgradedToAVaultImplementationThatIsAttested_ItIsRefused() external {
+    address _vaultImpl = address(new Gated4626Vault());
+    vm.prank(_attester);
+    _registry.attest(_vaultImpl.codehash, IPolicyRegistry.AttestKind.IMPLEMENTATION, 'ipfs://vault-impl');
+    vm.expectRevert(
+      abi.encodeWithSelector(
+        ITemplated.Templated_WrongTemplate.selector, _vaultImpl, keccak256('IntentToken'), keccak256('Gated4626Vault')
+      )
+    );
+    vm.prank(_admin);
+    _token.upgradeToAndCall(_vaultImpl, '');
+    assertEq(_token.balanceOf(_alice), 1000 ether);
+    assertEq(_token.decimals(), 18);
+  }
+
+  function test_WhenUpgradedToAnAsyncVaultImplementationThatIsAttested_ItIsRefused() external {
+    address _vaultImpl = address(new Gated7540Vault());
+    vm.prank(_attester);
+    _registry.attest(_vaultImpl.codehash, IPolicyRegistry.AttestKind.IMPLEMENTATION, 'ipfs://vault-impl');
+    vm.expectRevert(
+      abi.encodeWithSelector(
+        ITemplated.Templated_WrongTemplate.selector, _vaultImpl, keccak256('IntentToken'), keccak256('Gated7540Vault')
+      )
+    );
+    vm.prank(_admin);
+    _token.upgradeToAndCall(_vaultImpl, '');
   }
 
   function test_WhenUpgradedToAnAttestedImplementation_StateIsPreserved() external {

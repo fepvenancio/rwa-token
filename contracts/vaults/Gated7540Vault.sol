@@ -9,6 +9,7 @@ import {Math} from '@openzeppelin/contracts/utils/math/Math.sol';
 
 import {Reasons} from 'interfaces/Errors.sol';
 
+import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IERC7540Deposit} from 'interfaces/IERC7540Deposit.sol';
 import {IERC7540Operator} from 'interfaces/IERC7540Operator.sol';
 import {IERC7540Redeem} from 'interfaces/IERC7540Redeem.sol';
@@ -18,6 +19,7 @@ import {IGated7540Vault} from 'interfaces/IGated7540Vault.sol';
 // solhint-disable-next-line no-unused-vars
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
+import {ITemplated} from 'interfaces/ITemplated.sol';
 
 import {PolicyGatedERC20Upgradeable} from 'contracts/base/PolicyGatedERC20Upgradeable.sol';
 
@@ -104,12 +106,13 @@ contract Gated7540Vault is
   /// @inheritdoc IGated7540Vault
   function initialize(
     IERC20 _asset,
-    string calldata _name,
-    string calldata _symbol,
+    string memory _name,
+    string memory _symbol,
     address _admin,
     address _guardian,
     address _registry,
     address _hook,
+    IComplianceRule[] memory _initialRules,
     address _custody
   ) external initializer {
     if (_custody == address(0)) revert Gated7540Vault_ZeroAddress();
@@ -119,13 +122,19 @@ contract Gated7540Vault is
     __ERC20Permit_init(_name);
     __AccessControl_init();
     __Pausable_init();
-    __PolicyGatedERC20_init_unchained(_admin, _guardian, _registry, _hook);
+    __Multicall_init();
+    __PolicyGatedERC20_init_unchained(_admin, _guardian, _registry, _hook, _initialRules);
+    // The call above installs the rules on the hook, which the registry attested and which cannot re-enter
+    // `initialize` (the `initializer` modifier) or use a role: only the admin and the guardian hold one yet. What
+    // follows is the vault's own initial state, which the hook never reads.
+    // slither-disable-start reentrancy-benign,reentrancy-events
     Gated7540Storage storage $ = _getGated7540Storage();
     $.custody = _custody;
     // 10 ** decimals() is one whole share; decimals() is read at runtime, so there is no literal to hoist.
     // aderyn-ignore-next-line(literal-instead-of-constant)
     $.lastPrice = 10 ** decimals();
     emit CustodyChanged(address(0), _custody);
+    // slither-disable-end reentrancy-benign,reentrancy-events
   }
 
   /// @inheritdoc IERC7540Deposit
@@ -140,7 +149,7 @@ contract Gated7540Vault is
     address _sender = _msgSender();
     if (_owner != _sender && !$.operators[_owner][_sender]) revert Gated7540Vault_Unauthorized(_sender);
     // No cancellation exists, so refuse assets from a controller that could not hold the shares.
-    bytes32 _reason = _canTransfer(address(0), _controller, 1);
+    bytes32 _reason = _mintProbe(_controller);
     if (_reason != Reasons.TRANSFER_OK) revert Gated7540Vault_ControllerNotEligible(_reason);
 
     $.deposits[_controller].pendingAssets += _assets;
@@ -463,7 +472,8 @@ contract Gated7540Vault is
     if (_assets == 0) revert Gated7540Vault_ZeroAmount();
     RedeemState storage _state = _getGated7540Storage().redeems[_controller];
     if (_assets > _state.claimableAssets) revert Gated7540Vault_ExceedsClaimable(_assets, _state.claimableAssets);
-    // Ceil on the shares deducted: assets can never be drained for zero shares.
+    // Shares deducted round up, so a partial claim never takes fewer than its pro-rata share. That can use the shares
+    // up before the assets; the remaining assets then pay out against zero shares, and they are owed either way.
     _shares = _assets == _state.claimableAssets
       ? _state.claimableShares
       : Math.mulDiv(_assets, _state.claimableShares, _state.claimableAssets, Math.Rounding.Ceil);
@@ -482,7 +492,7 @@ contract Gated7540Vault is
   function maxDeposit(
     address _controller
   ) public view override returns (uint256 _maxAssets) {
-    if (_canTransfer(address(0), _controller, 1) != Reasons.TRANSFER_OK) return 0;
+    if (_mintProbe(_controller) != Reasons.TRANSFER_OK) return 0;
     _maxAssets = _getGated7540Storage().deposits[_controller].claimableAssets;
   }
 
@@ -493,7 +503,7 @@ contract Gated7540Vault is
   function maxMint(
     address _controller
   ) public view override returns (uint256 _maxShares) {
-    if (_canTransfer(address(0), _controller, 1) != Reasons.TRANSFER_OK) return 0;
+    if (_mintProbe(_controller) != Reasons.TRANSFER_OK) return 0;
     _maxShares = _getGated7540Storage().deposits[_controller].claimableShares;
   }
 
@@ -576,6 +586,11 @@ contract Gated7540Vault is
     revert Gated7540Vault_AsyncOnly();
   }
 
+  /// @inheritdoc ITemplated
+  function templateId() public pure override returns (bytes32 _id) {
+    _id = keccak256('Gated7540Vault');
+  }
+
   /**
    * @notice Claims fulfilled deposit assets for shares; Floor on the shares, exact on a full claim
    * @param _assets The claimable assets to consume
@@ -617,7 +632,8 @@ contract Gated7540Vault is
     if (_shares == 0) revert Gated7540Vault_ZeroAmount();
     DepositState storage _state = _getGated7540Storage().deposits[_controller];
     if (_shares > _state.claimableShares) revert Gated7540Vault_ExceedsClaimable(_shares, _state.claimableShares);
-    // Ceil on the assets consumed: shares can never be minted for zero assets.
+    // Assets consumed round up, so a partial claim never takes fewer than its pro-rata share. That can use the assets
+    // up before the shares; the remaining shares are then minted against zero assets, and they are owed either way.
     _assets = _shares == _state.claimableShares
       ? _state.claimableAssets
       : Math.mulDiv(_shares, _state.claimableAssets, _state.claimableShares, Math.Rounding.Ceil);
@@ -736,7 +752,7 @@ contract Gated7540Vault is
   function _requireDepositClaimEligible(
     address _controller
   ) private view {
-    bytes32 _reason = _canTransfer(address(0), _controller, 1);
+    bytes32 _reason = _mintProbe(_controller);
     if (_reason != Reasons.TRANSFER_OK) revert Gated7540Vault_ControllerNotEligible(_reason);
   }
 

@@ -3,6 +3,8 @@ pragma solidity ^0.8.28;
 
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 
+import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+
 /**
  * @title IGated7540Vault
  * @notice ERC-7540 asynchronous vault whose shares are a policy-gated token. Requests aggregate per controller
@@ -174,17 +176,19 @@ interface IGated7540Vault {
    * @param _admin The timelock, granted DEFAULT_ADMIN_ROLE
    * @param _guardian The guardian multisig, granted GUARDIAN_ROLE
    * @param _registry The policy registry
-   * @param _hook The initial policy hook; must be attested as HOOK
+   * @param _hook The initial policy hook; must be attested as HOOK and name the same registry
+   * @param _initialRules The rule set installed on the hook for this token in the same call; empty installs none
    * @param _custody The custody address that receives fulfilled deposit assets
    */
   function initialize(
     IERC20 _asset,
-    string calldata _name,
-    string calldata _symbol,
+    string memory _name,
+    string memory _symbol,
     address _admin,
     address _guardian,
     address _registry,
     address _hook,
+    IComplianceRule[] memory _initialRules,
     address _custody
   ) external;
 

@@ -7,25 +7,33 @@ import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+import {ICredentialRegistry} from 'interfaces/ICredentialRegistry.sol';
+import {ICredentialRule} from 'interfaces/ICredentialRule.sol';
+import {IDvPExecutor} from 'interfaces/IDvPExecutor.sol';
+import {IERC3009} from 'interfaces/IERC3009.sol';
 import {IERC7540Deposit} from 'interfaces/IERC7540Deposit.sol';
 import {IERC7540Operator} from 'interfaces/IERC7540Operator.sol';
 import {IERC7540Redeem} from 'interfaces/IERC7540Redeem.sol';
 import {IERC7575} from 'interfaces/IERC7575.sol';
+import {IERC7943Fungible} from 'interfaces/IERC7943Fungible.sol';
+import {IFund} from 'interfaces/IFund.sol';
+import {IFundHoldersRule} from 'interfaces/IFundHoldersRule.sol';
 import {IGated4626Vault} from 'interfaces/IGated4626Vault.sol';
 import {IGated7540Vault} from 'interfaces/IGated7540Vault.sol';
 import {IGovernanceTimelock} from 'interfaces/IGovernanceTimelock.sol';
+import {IHolderRestrictionRule} from 'interfaces/IHolderRestrictionRule.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
-import {IIdentityRule} from 'interfaces/IIdentityRule.sol';
 import {IIntentExecutor} from 'interfaces/IIntentExecutor.sol';
 import {IIntentExecutorBatch} from 'interfaces/IIntentExecutorBatch.sol';
-import {ILockupRule} from 'interfaces/ILockupRule.sol';
-import {IMaxHoldersRule} from 'interfaces/IMaxHoldersRule.sol';
+import {IMinPositionRule} from 'interfaces/IMinPositionRule.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {IProxyDeployer} from 'interfaces/IProxyDeployer.sol';
 import {ISettlementWindowRule} from 'interfaces/ISettlementWindowRule.sol';
+import {ITemplated} from 'interfaces/ITemplated.sol';
 import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
+import {Quals} from 'interfaces/Quals.sol';
 
 /**
  * @notice Freeze guard for `contracts/interfaces/` (CLAUDE.md rules 4 and 14). Interfaces were frozen on 2026-10-16.
@@ -33,24 +41,35 @@ import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
  */
 contract InterfaceFreezeTest is Test {
   function test_WhenInterfacesCompile_TheirErc165IdsArePinned() external pure {
-    assertEq(type(IPolicyGated).interfaceId, bytes4(0xf517b40d), 'IPolicyGated');
-    assertEq(type(IPolicyHook).interfaceId, bytes4(0xb7723023), 'IPolicyHook');
-    assertEq(type(IComplianceRule).interfaceId, bytes4(0x93d5c2be), 'IComplianceRule');
-    assertEq(type(IComplianceHook).interfaceId, bytes4(0x2604e338), 'IComplianceHook');
+    // Re-pinned in S2 of the review items (2026-10-24) on owner instruction (RD3): `IPolicyGated` inherits the ERC-7943
+    // Final interface, so `forcedTransfer`, `setFrozenTokens`, `getFrozenTokens`, `canSend`, `canReceive` and the
+    // boolean `canTransfer` live in `IERC7943Fungible`. What is left in `IPolicyGated` is mint, burn, pause, unpause,
+    // setPolicyHook, canTransferWithReason, policyHook and registry (was 0xf517b40d; `setFrozen`, `getFrozen`,
+    // `isUserAllowed` and the tuple `canTransfer` are gone)
+    assertEq(type(IPolicyGated).interfaceId, bytes4(0x02331726), 'IPolicyGated');
+    // Re-pinned in S1 of the review items (2026-10-24) on owner instruction (RD1 to RD3): `TransferContext` lost `ref` and
+    // `deadline`, `IPolicyHook` and `IComplianceRule` gained `checkSend` and `checkReceive`, and `IComplianceHook` became
+    // the shared hook (per-token `setRules`, `rules` and `ruleCount`; no `ADMIN` or `TOKEN`). Ids computed from the
+    // compiled interfaces' signatures with `cast sig` (were 0xb7723023, 0x93d5c2be and 0x2604e338)
+    assertEq(type(IPolicyHook).interfaceId, bytes4(0x4f7b9fbb), 'IPolicyHook');
+    assertEq(type(IComplianceRule).interfaceId, bytes4(0x837a7ec1), 'IComplianceRule');
+    assertEq(type(IComplianceHook).interfaceId, bytes4(0xa8f3d563), 'IComplianceHook');
     assertEq(type(IPolicyRegistry).interfaceId, bytes4(0x947f9fc8), 'IPolicyRegistry');
-    assertEq(type(ITransferIntent).interfaceId, bytes4(0x7a2b1b79), 'ITransferIntent');
-    assertEq(type(IIntentExecutor).interfaceId, bytes4(0xd2319653), 'IIntentExecutor');
+    // Re-pinned 2026-10-23 on owner instruction (intent revision I-1): `TransferIntent` gained executor, validAfter,
+    // considerationToken and considerationAmount, and `canExecute` takes the signature. Ids computed from the
+    // signatures with `cast sig` (was 0x7a2b1b79, 0xd2319653 and 0x117727cb)
+    assertEq(type(ITransferIntent).interfaceId, bytes4(0x51128254), 'ITransferIntent');
+    assertEq(type(IIntentExecutor).interfaceId, bytes4(0x4e8890b4), 'IIntentExecutor');
     // Added in Phase 3 (2026-10-16): executeBatch, pause, unpause
-    assertEq(type(IIntentExecutorBatch).interfaceId, bytes4(0x117727cb), 'IIntentExecutorBatch');
+    assertEq(type(IIntentExecutorBatch).interfaceId, bytes4(0x58c0d550), 'IIntentExecutorBatch');
     // Added in Phase 4 (2026-10-16)
-    assertEq(type(ILockupRule).interfaceId, bytes4(0xaafb038e), 'ILockupRule');
     assertEq(type(ISettlementWindowRule).interfaceId, bytes4(0xf2058aff), 'ISettlementWindowRule');
     // Re-pinned in Phase 5b (2026-10-17) on owner instruction R1: setExemptHolder / isExemptHolder added (was 0xa13cb93c)
     // Re-pinned 2026-10-22 on owner instruction: seedHolderCountFromHolders / seedHolderCountFromRule added (was
     // 0x0e091382)
-    assertEq(type(IMaxHoldersRule).interfaceId, bytes4(0x360b3dad), 'IMaxHoldersRule');
     // Added in Phase 5a (2026-10-17)
-    assertEq(type(IGated4626Vault).interfaceId, bytes4(0xb008690c), 'IGated4626Vault');
+    // Re-pinned in S1 of the review items (2026-10-24): `initialize` takes the token's initial rules (was 0xb008690c)
+    assertEq(type(IGated4626Vault).interfaceId, bytes4(0x6208cbc1), 'IGated4626Vault');
     // Added in Phase 5b (2026-10-17). The four ERC-7540 / ERC-7575 ids are the standard's own values.
     assertEq(type(IERC7540Operator).interfaceId, bytes4(0xe3bc4e65), 'IERC7540Operator');
     assertEq(type(IERC7540Deposit).interfaceId, bytes4(0xce3bbe50), 'IERC7540Deposit');
@@ -58,18 +77,41 @@ contract InterfaceFreezeTest is Test {
     assertEq(type(IERC7575).interfaceId, bytes4(0x2f0a18c5), 'IERC7575');
     // Re-pinned 2026-10-17 on owner instruction: recoverRedeemRequest added (was 0x34aae296)
     // Re-pinned in v0.2.0 (2026-10-17): recoverClaimable added, the one post-freeze change (owner decision M-3)
-    assertEq(type(IGated7540Vault).interfaceId, bytes4(0x75f5b0db), 'IGated7540Vault');
-    assertEq(type(IIdentityRule).interfaceId, bytes4(0x150c4aea), 'IIdentityRule');
+    // Re-pinned in S1 of the review items (2026-10-24): `initialize` takes the token's initial rules (was 0x75f5b0db)
+    assertEq(type(IGated7540Vault).interfaceId, bytes4(0x8f0b8793), 'IGated7540Vault');
     assertEq(type(IIdentityRegistry).interfaceId, bytes4(0xb9209e33), 'IIdentityRegistry');
     // Added in Phase 7 (2026-10-17), after ProxyDeployer moved to OZ Ownable
-    assertEq(type(IProxyDeployer).interfaceId, bytes4(0x886d8cd8), 'IProxyDeployer');
+    // Re-pinned in S1 of the review items (2026-10-24): `deploy` takes and checks the expected rules (was 0x886d8cd8)
+    // Re-pinned 2026-10-27 on owner instruction (PLAN.md, D1): `REGISTRY` added, so `deploy` can check the first
+    // implementation (was 0xcedb15bb). Computed from the signatures with `cast sig`: 0xcedb15bb ^ 0x06433b1b
+    assertEq(type(IProxyDeployer).interfaceId, bytes4(0xc8982ea0), 'IProxyDeployer');
     // Added in v0.2.0 (owner decision M-1)
     assertEq(type(IGovernanceTimelock).interfaceId, bytes4(0x31993a1c), 'IGovernanceTimelock');
+    // Added in the fund layer (2026-10-22), ids computed from the signatures with `cast sig`
+    // Re-pinned in S4 of the review items (2026-10-24): `isClassIntact` and `firstBrokenClass` (was 0x44c4a64f)
+    assertEq(type(IFund).interfaceId, bytes4(0x2d89d7d8), 'IFund');
+    assertEq(type(IFundHoldersRule).interfaceId, bytes4(0x5c275a39), 'IFundHoldersRule');
+    // Added in the DvP executor (E-1, 2026-10-23), ids computed from the signatures with `cast sig`. `IERC3009` is the
+    // subset of ERC-3009 that the executor calls; its id is the XOR of those two selectors, not a standard id
+    assertEq(type(IDvPExecutor).interfaceId, bytes4(0xe68774e8), 'IDvPExecutor');
+    assertEq(type(IERC3009).interfaceId, bytes4(0x61fdaa61), 'IERC3009');
+    // Added in S0 of the review items (2026-10-23), ids computed from the signatures with `cast sig`.
+    // `IERC7943Fungible` is the Final text of ERC-7943, so its id is the standard's own value
+    assertEq(type(IERC7943Fungible).interfaceId, bytes4(0x3edbb4c4), 'IERC7943Fungible');
+    assertEq(type(ITemplated).interfaceId, bytes4(0x7aa77f29), 'ITemplated');
+    assertEq(type(IHolderRestrictionRule).interfaceId, bytes4(0x3abb7c85), 'IHolderRestrictionRule');
+    assertEq(type(IMinPositionRule).interfaceId, bytes4(0x44ac9195), 'IMinPositionRule');
+    // Added in the credential layer (C-1, 2026-10-23), ids computed from the signatures with `cast sig`. The enum
+    // `Status` is `uint8` in a signature and `Credential` a tuple
+    assertEq(type(ICredentialRegistry).interfaceId, bytes4(0x4573f2ef), 'ICredentialRegistry');
+    assertEq(type(ICredentialRule).interfaceId, bytes4(0x35778007), 'ICredentialRule');
   }
 
   function test_WhenInterfacesCompile_TheirEventTopicsArePinned() external pure {
-    assertEq(IPolicyGated.ForcedTransfer.selector, 0x31a05a6a55253f32ca1a2eae200ad7ddf38d17e9f6e0535e9a85ab4a218aeaa3);
-    assertEq(IPolicyGated.Frozen.selector, 0x68e0d8c112165d0949ce87205b719ed7d98c7401866c34a159f7c67c6f5620e7);
+    // Changed in S2 of the review items (2026-10-24): the four-argument `ForcedTransfer` (topic 0x31a05a6a...) is gone,
+    // replaced by the standard's three-argument one (pinned below) and `ForcedTransferBy`, which keeps the agent;
+    // `Frozen` is the standard's, with the same topic as before
+    assertEq(IPolicyGated.ForcedTransferBy.selector, 0x9820680c613c6b8b74bedc929c1ffd105ced2cf11b34457bb8b06bd8ecb15978);
     assertEq(
       IPolicyGated.PolicyHookChanged.selector, 0x964de01ec9270e869e61cc2efab9db5a19eac89859423a5963b19266cef000ca
     );
@@ -84,23 +126,14 @@ contract InterfaceFreezeTest is Test {
     assertEq(
       IPolicyRegistry.AttestationRevoked.selector, 0x59d1b98a5da8bbc1db92f7d8d2e21c3067da65edbe08f4ae23df11487ee4c8b0
     );
+    // Re-pinned in S1 of the review items (2026-10-24): the event names the token, `RuleSetChanged(address indexed,
+    // bytes32[])` (was 0x1a22bda7b05ed1fb294fe52899bc63d685e2b75bb9f93e1e840f5016038b3893)
     assertEq(
-      IComplianceHook.RuleSetChanged.selector, 0x1a22bda7b05ed1fb294fe52899bc63d685e2b75bb9f93e1e840f5016038b3893
+      IComplianceHook.RuleSetChanged.selector, 0x052ffefccfad2a8a01111e4860d2a689b1f4b6e9d3a42f3d03311bbad21ed820
     );
     // Added in Phase 4 (2026-10-16)
-    assertEq(ILockupRule.LockupSet.selector, 0xd3de67b8116f1abe42856d12f29c6dd6798dc57c837e1d2083e129b58d2e323a);
     assertEq(
       ISettlementWindowRule.WindowSet.selector, 0xcfbaf2575cd70ccd40d11716312d33d4c45312c933586af58b3ccc959f81b96c
-    );
-    assertEq(IMaxHoldersRule.CapSet.selector, 0x113914a326da83d9b14b874c5cc74c6602b1ef1dc38916f0a4b3f618952f77ab);
-    assertEq(
-      IMaxHoldersRule.HolderCountSeeded.selector, 0x3b207bf9da27269642fda4f809efc7efaa06f42ec179fcf59ca932eb094bda34
-    );
-    assertEq(
-      IMaxHoldersRule.HolderCountUpdated.selector, 0x3b44d433ae622a035b92513dcb4121b917fffdfa7ee90319d0e224a265504819
-    );
-    assertEq(
-      IMaxHoldersRule.HolderExemptionSet.selector, 0x76f53701a110e481b9beccc51135df840459b6ca21581f88b3ee10235891f5e5
     );
     // Added in Phase 5b (2026-10-17)
     assertEq(
@@ -129,6 +162,63 @@ contract InterfaceFreezeTest is Test {
     assertEq(
       IGated7540Vault.ClaimableRecovered.selector, 0x0c540b8a1efd2cc0ebc90a5c128ab14cb8011c0c1021a7a9acfdffd478e42c04
     );
+    // Added in the fund layer (2026-10-22), topics computed with `cast keccak`
+    assertEq(IFund.ClassRegistered.selector, 0xf7aa1688f2f49ca390ca9db30a49ef1701d5823ad13c1d18946e798c371d82e9);
+    assertEq(IFund.RuleSet.selector, 0xad94ea837b15ca544ad01b8e325c9c2ce361fdb551d2c8c6a23d652709f23017);
+    assertEq(IFund.HolderCapSet.selector, 0xa18fd2e9ea8c6d87fce8efb5b336dbfb3af26ec55e3d02dd9bbb04274e4f8130);
+    assertEq(IFund.ExemptSet.selector, 0xf33950bf7aa3300efb48f7896f309484c287418977abeba9f08f12cbe451d36a);
+    assertEq(IFund.HolderCountUpdated.selector, 0x8ac0638de66e0910c02cbd2be8467a89277dac49177d5811c91422a8f475ba75);
+    assertEq(IFund.HolderClassesUpdated.selector, 0x020767ac8d9f815f24bcaa5228933945b8766fe5dff7fe83d918163bcfd787fa);
+    // Added in the DvP executor (E-1, 2026-10-23), topic computed with `cast keccak`
+    assertEq(IDvPExecutor.DvPSettled.selector, 0xf86f6efd1a86b116715d573898aa1ed9745de3ea96e91eb7d0eb96b775182845);
+    // Added in S0 of the review items (2026-10-23), topics computed with `cast keccak`. ERC-7943's `Frozen` has the
+    // signature of ours, so its topic is the one pinned above; its three-argument `ForcedTransfer` is a new topic
+    assertEq(IERC7943Fungible.Frozen.selector, 0x68e0d8c112165d0949ce87205b719ed7d98c7401866c34a159f7c67c6f5620e7);
+    assertEq(
+      IERC7943Fungible.ForcedTransfer.selector, 0x7b3ce50c216d2ccf9919c6b9f1bfb33f0350a33010f188750b4af38e00448138
+    );
+    assertEq(
+      IHolderRestrictionRule.LockupSet.selector, 0xd3de67b8116f1abe42856d12f29c6dd6798dc57c837e1d2083e129b58d2e323a
+    );
+    assertEq(
+      IHolderRestrictionRule.HolderFrozenSet.selector,
+      0x833d9460c464a61e1259eee77549545d4e1483cf3d029bbdb8abcb44828d66ea
+    );
+    assertEq(
+      IMinPositionRule.MinPositionSet.selector, 0x21af437ac0dfb7856224d1ee482b5a1a9955b346e2052abcc0da07d488917720
+    );
+    assertEq(
+      IMinPositionRule.MinPositionExemptionSet.selector,
+      0x938633e92689b6d84f33389b7d3f4f49175261a456e19fcbf4e423f8d095fc07
+    );
+    // Added in the credential layer (C-1, 2026-10-23), topics computed with `cast keccak`
+    assertEq(
+      ICredentialRegistry.CredentialSet.selector, 0xd789f338d152d3d12ec115f96ae3af3aba999e7e254fb41a4b3f62f0dd903412
+    );
+    assertEq(ICredentialRegistry.StatusSet.selector, 0xe07c9ed653206f6d019e37fbf43c2610409800ac75a0178854d7a6ec8974a61b);
+    assertEq(
+      ICredentialRegistry.SubjectBlocked.selector, 0xf8e7a7c3298f51e1686201ded81cdc69cde53159622a0620bc94c69bce4ab0b3
+    );
+    assertEq(
+      ICredentialRegistry.SubjectUnblocked.selector, 0xe1ef50d52db3764eed26458645193b75dddc7c21fda345136344477e1ae7d4f0
+    );
+    assertEq(
+      ICredentialRegistry.AttesterAdded.selector, 0x347cac8b384a3552298ea649f27dfef8faa49e42e44a90756c8963e71bdf9219
+    );
+    assertEq(
+      ICredentialRegistry.AttesterAccountSet.selector,
+      0x126a98f664550ef552f7d1ccb188e342eeef9d47571dc28fa7595bd48bd65517
+    );
+    assertEq(
+      ICredentialRegistry.AttesterQualsSet.selector, 0x7c05a7be122c2ff08dcb7b70aacd1d79b8e6f0ca2edfd25ddcf1e4c288ed8034
+    );
+    assertEq(
+      ICredentialRegistry.AttesterKilled.selector, 0xb7f7a33c95d88e6a5f56a073b3056f10e2eaa7be2b33945a03a9b4feec632ee4
+    );
+    assertEq(
+      ICredentialRegistry.AttesterRevived.selector, 0xc7732850c902d4cc0faee5c1a6e5606c7a3c0151bd2f933b46ec7ebb9074a9df
+    );
+    assertEq(ICredentialRule.PolicySet.selector, 0xf9fded0e2c7053e53ea59d9519aeffbc2e928990390f779721d6484d985b503e);
   }
 
   function test_WhenReasonsCompile_TheirValuesArePinned() external pure {
@@ -145,5 +235,33 @@ contract InterfaceFreezeTest is Test {
     assertEq(Reasons.BAD_SIGNATURE, keccak256('BAD_SIGNATURE'));
     assertEq(Reasons.NO_HOOK, keccak256('NO_HOOK'));
     assertEq(Reasons.NO_RULES, keccak256('NO_RULES'));
+    // Appended in the fund layer (2026-10-22)
+    assertEq(Reasons.NOT_FUND_CLASS, keccak256('NOT_FUND_CLASS'));
+    // Appended in the intent revision (2026-10-23)
+    assertEq(Reasons.WRONG_EXECUTOR, keccak256('WRONG_EXECUTOR'));
+    assertEq(Reasons.INTENT_NOT_YET_VALID, keccak256('INTENT_NOT_YET_VALID'));
+    assertEq(Reasons.CONSIDERATION_NEEDS_EXECUTOR, keccak256('CONSIDERATION_NEEDS_EXECUTOR'));
+    // Appended in the DvP executor (2026-10-23)
+    assertEq(Reasons.LEGS_DO_NOT_MATCH, keccak256('LEGS_DO_NOT_MATCH'));
+    // Appended in S0 of the review items (2026-10-23)
+    assertEq(Reasons.BELOW_MIN_POSITION, keccak256('BELOW_MIN_POSITION'));
+    assertEq(Reasons.SENDER_FROZEN, keccak256('SENDER_FROZEN'));
+    assertEq(Reasons.RECEIVER_FROZEN, keccak256('RECEIVER_FROZEN'));
+    // Appended in the credential layer (2026-10-23)
+    assertEq(Reasons.CREDENTIAL_EXPIRED, keccak256('CREDENTIAL_EXPIRED'));
+    assertEq(Reasons.RECEIVER_NOT_ELIGIBLE, keccak256('RECEIVER_NOT_ELIGIBLE'));
+  }
+
+  /// @dev The qualification bits are part of the frozen vocabulary: a record written under one meaning must never be read
+  ///      under another. Bits 8 to 15 are reserved and 16 to 31 belong to a deployment
+  function test_WhenQualsCompile_TheirBitsArePinned() external pure {
+    assertEq(Quals.KYC, uint32(1));
+    assertEq(Quals.PROFESSIONAL, uint32(2));
+    assertEq(Quals.QUALIFIED, uint32(4));
+    assertEq(Quals.INSTITUTIONAL, uint32(8));
+    assertEq(Quals.FUND, uint32(16));
+    assertEq(Quals.BANK, uint32(32));
+    assertEq(Quals.CUSTOMER, uint32(64));
+    assertEq(Quals.INFRA, uint32(128));
   }
 }

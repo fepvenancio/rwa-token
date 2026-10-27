@@ -31,6 +31,14 @@ interface IIntentExecutorBatch {
   /// @notice Thrown when a constructor argument is the zero address
   error IntentExecutor_ZeroAddress();
 
+  /**
+   * @notice Thrown when an intent states a consideration (a non-zero `considerationToken` or `considerationAmount`).
+   *         This executor moves one token and cannot enforce a payment, so it will not settle an intent that states
+   *         one. Only an executor that enforces the payment, such as `DvPExecutor`, can
+   * @param _index The position of the intent in the batch; zero for `execute`
+   */
+  error IntentExecutor_ConsiderationNotSupported(uint256 _index);
+
   /*///////////////////////////////////////////////////////////////
                             LOGIC
   //////////////////////////////////////////////////////////////*/
@@ -38,7 +46,8 @@ interface IIntentExecutorBatch {
   /**
    * @notice Settles several signed intents on one token, atomically
    * @dev Only OPERATOR_ROLE, and only while not paused. Reverts with `IntentExecutor_BatchItemFailed` at the first
-   *      failing intent, undoing the whole batch
+   *      failing intent, undoing the whole batch, and with `IntentExecutor_ConsiderationNotSupported` at the first
+   *      intent that states a consideration
    * @param _token The token, which must have granted this executor EXECUTOR_ROLE
    * @param _intents The intents, in settlement order
    * @param _sigs The holders' signatures, one per intent

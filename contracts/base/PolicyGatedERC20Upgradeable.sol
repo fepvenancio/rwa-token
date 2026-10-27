@@ -6,17 +6,23 @@ import {UUPSUpgradeable} from '@openzeppelin/contracts-upgradeable/proxy/utils/U
 import {
   ERC20PermitUpgradeable
 } from '@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol';
+import {MulticallUpgradeable} from '@openzeppelin/contracts-upgradeable/utils/MulticallUpgradeable.sol';
 import {PausableUpgradeable} from '@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol';
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {IERC20Permit} from '@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol';
 import {ReentrancyGuardTransient} from '@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol';
 import {TransientSlot} from '@openzeppelin/contracts/utils/TransientSlot.sol';
+import {IERC165} from '@openzeppelin/contracts/utils/introspection/IERC165.sol';
 
 import {Reasons} from 'interfaces/Errors.sol';
 
+import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
+import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+import {IERC7943Fungible} from 'interfaces/IERC7943Fungible.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
+import {ITemplated} from 'interfaces/ITemplated.sol';
 
 /**
  * @title PolicyGatedERC20Upgradeable
@@ -30,9 +36,11 @@ abstract contract PolicyGatedERC20Upgradeable is
   ERC20PermitUpgradeable,
   AccessControlUpgradeable,
   PausableUpgradeable,
+  MulticallUpgradeable,
   UUPSUpgradeable,
   ReentrancyGuardTransient,
-  IPolicyGated
+  IPolicyGated,
+  ITemplated
 {
   using TransientSlot for *;
 
@@ -40,7 +48,7 @@ abstract contract PolicyGatedERC20Upgradeable is
    * @notice ERC-7201 namespaced storage of the base
    * @param registry The policy registry, fixed at initialization
    * @param hook The current policy hook
-   * @param frozen The absolute frozen amount of each account; never above its balance
+   * @param frozen The absolute frozen amount of each account; it may exceed the balance (ERC-7943)
    * @custom:storage-location erc7201:gated.storage.PolicyGatedERC20
    */
   struct PolicyGatedStorage {
@@ -75,6 +83,10 @@ abstract contract PolicyGatedERC20Upgradeable is
   /// @notice Transient slot holding the announced `deadline`
   bytes32 private constant _DEADLINE_SLOT = keccak256('gated.transient.deadline');
 
+  /// @notice The amount of the mint a template's `max*` and eligibility checks probe: above any minimum position up to
+  ///         this value
+  uint256 internal constant _MINT_PROBE = type(uint128).max;
+
   /// @inheritdoc IPolicyGated
   function mint(
     address _to,
@@ -92,28 +104,30 @@ abstract contract PolicyGatedERC20Upgradeable is
     _burn(_from, _amount);
   }
 
-  /// @inheritdoc IPolicyGated
+  /// @inheritdoc IERC7943Fungible
   function forcedTransfer(
     address _from,
     address _to,
     uint256 _amount
-  ) external onlyRole(AGENT_ROLE) {
+  ) external onlyRole(AGENT_ROLE) returns (bool _result) {
     _releaseFrozen(_from, _amount);
     _moveAs(_from, _to, _amount, IPolicyHook.TransferKind.FORCED, bytes32(0), 0);
     // Emitted after the hook's afterTransfer: re-entry is blocked by `_update`'s guard and the hook is attested.
-    // slither-disable-next-line reentrancy-events
-    emit ForcedTransfer(_from, _to, _amount, _msgSender());
+    // slither-disable-start reentrancy-events
+    emit ForcedTransfer(_from, _to, _amount);
+    emit ForcedTransferBy(_from, _to, _amount, _msgSender());
+    // slither-disable-end reentrancy-events
+    _result = true;
   }
 
-  /// @inheritdoc IPolicyGated
-  function setFrozen(
-    address _user,
+  /// @inheritdoc IERC7943Fungible
+  function setFrozenTokens(
+    address _account,
     uint256 _amount
-  ) external onlyRole(AGENT_ROLE) {
-    uint256 _balance = balanceOf(_user);
-    if (_amount > _balance) revert PolicyGated_FrozenExceedsBalance(_user, _amount, _balance);
-    _getPolicyGatedStorage().frozen[_user] = _amount;
-    emit Frozen(_user, _amount);
+  ) external onlyRole(AGENT_ROLE) returns (bool _result) {
+    _getPolicyGatedStorage().frozen[_account] = _amount;
+    emit Frozen(_account, _amount);
+    _result = true;
   }
 
   /// @inheritdoc IPolicyGated
@@ -142,7 +156,7 @@ abstract contract PolicyGatedERC20Upgradeable is
   }
 
   /// @inheritdoc IPolicyGated
-  function canTransfer(
+  function canTransferWithReason(
     address _from,
     address _to,
     uint256 _amount
@@ -153,17 +167,37 @@ abstract contract PolicyGatedERC20Upgradeable is
     _ok = _reason == Reasons.TRANSFER_OK;
   }
 
-  /// @inheritdoc IPolicyGated
-  function isUserAllowed(
-    address _user
+  /// @inheritdoc IERC7943Fungible
+  function canReceive(
+    address _account
   ) external view returns (bool _allowed) {
-    IPolicyHook _hook = _policyHook();
-    if (address(_hook) == address(0)) return false;
+    _allowed = _accountAllowed(_account, false);
+  }
+
+  /// @inheritdoc IERC7943Fungible
+  function canSend(
+    address _account
+  ) external view returns (bool _allowed) {
+    _allowed = _accountAllowed(_account, true);
+  }
+
+  /**
+   * @inheritdoc IERC7943Fungible
+   * @dev ERC-7943 says this MUST NOT return false for a balance check and MUST return false when a frozen amount keeps
+   *      the amount from the unfrozen balance, so a shortfall counts here only while a frozen amount is in the way.
+   *      With nothing frozen on `_from`, or for a burn by a sender that holds BURNER_ROLE (which may take frozen
+   *      tokens), an amount above the balance reads true if the hook accepts it, and the write reverts with
+   *      `ERC20InsufficientBalance`. `canTransferWithReason` does not make that exception, so it says the write would
+   *      revert
+   */
+  function canTransfer(
+    address _from,
+    address _to,
+    uint256 _amount
+  ) external view returns (bool _allowed) {
     // Compares a reason code with a constant, not a balance.
     // slither-disable-next-line incorrect-equality
-    _allowed = _hook.beforeTransfer(
-      _context(address(0), _user, 0, _msgSender(), IPolicyHook.TransferKind.MINT, bytes32(0), 0)
-    ) == Reasons.TRANSFER_OK;
+    _allowed = _canTransfer(_from, _to, _amount, false) == Reasons.TRANSFER_OK;
   }
 
   /// @inheritdoc IPolicyGated
@@ -193,20 +227,24 @@ abstract contract PolicyGatedERC20Upgradeable is
     super.revokeRole(_role, _account);
   }
 
-  /// @inheritdoc IPolicyGated
-  function getFrozen(
-    address _user
+  /// @inheritdoc IERC7943Fungible
+  function getFrozenTokens(
+    address _account
   ) public view returns (uint256 _amount) {
-    _amount = _getPolicyGatedStorage().frozen[_user];
+    _amount = _getPolicyGatedStorage().frozen[_account];
   }
 
   /// @inheritdoc AccessControlUpgradeable
   function supportsInterface(
     bytes4 _interfaceId
-  ) public view virtual override returns (bool _supported) {
-    _supported = _interfaceId == type(IPolicyGated).interfaceId || _interfaceId == type(IERC20).interfaceId
-      || _interfaceId == type(IERC20Permit).interfaceId || super.supportsInterface(_interfaceId);
+  ) public view virtual override(AccessControlUpgradeable, IERC165) returns (bool _supported) {
+    _supported = _interfaceId == type(IPolicyGated).interfaceId || _interfaceId == type(IERC7943Fungible).interfaceId
+      || _interfaceId == type(IERC20).interfaceId || _interfaceId == type(IERC20Permit).interfaceId
+      || super.supportsInterface(_interfaceId);
   }
+
+  /// @inheritdoc ITemplated
+  function templateId() public pure virtual override returns (bytes32 _id);
 
   /**
    * @notice Initializes the base and its OpenZeppelin parents
@@ -215,7 +253,8 @@ abstract contract PolicyGatedERC20Upgradeable is
    * @param _admin The timelock, granted DEFAULT_ADMIN_ROLE
    * @param _guardian The guardian multisig, granted GUARDIAN_ROLE
    * @param _registry The policy registry
-   * @param _hook The initial policy hook; must be attested as HOOK
+   * @param _hook The initial policy hook; must be attested as HOOK and name the same registry
+   * @param _initialRules The rule set installed on the hook for this token in the same call; empty installs none
    */
   // solhint-disable-next-line style-guide-casing
   function __PolicyGatedERC20_init(
@@ -224,13 +263,15 @@ abstract contract PolicyGatedERC20Upgradeable is
     address _admin,
     address _guardian,
     address _registry,
-    address _hook
+    address _hook,
+    IComplianceRule[] memory _initialRules
   ) internal onlyInitializing {
     __ERC20_init(_name, _symbol);
     __ERC20Permit_init(_name);
     __AccessControl_init();
     __Pausable_init();
-    __PolicyGatedERC20_init_unchained(_admin, _guardian, _registry, _hook);
+    __Multicall_init();
+    __PolicyGatedERC20_init_unchained(_admin, _guardian, _registry, _hook, _initialRules);
   }
 
   /**
@@ -238,14 +279,16 @@ abstract contract PolicyGatedERC20Upgradeable is
    * @param _admin The timelock, granted DEFAULT_ADMIN_ROLE
    * @param _guardian The guardian multisig, granted GUARDIAN_ROLE
    * @param _registry The policy registry
-   * @param _hook The initial policy hook; must be attested as HOOK
+   * @param _hook The initial policy hook; must be attested as HOOK and name the same registry
+   * @param _initialRules The rule set installed on the hook for this token in the same call; empty installs none
    */
   // solhint-disable-next-line style-guide-casing
   function __PolicyGatedERC20_init_unchained(
     address _admin,
     address _guardian,
     address _registry,
-    address _hook
+    address _hook,
+    IComplianceRule[] memory _initialRules
   ) internal onlyInitializing {
     if (_admin == address(0) || _guardian == address(0) || _registry == address(0)) revert PolicyGated_ZeroAddress();
     _getPolicyGatedStorage().registry = IPolicyRegistry(_registry);
@@ -256,6 +299,9 @@ abstract contract PolicyGatedERC20Upgradeable is
     // aderyn-ignore-next-line(unchecked-return)
     _grantRole(GUARDIAN_ROLE, _guardian);
     _setHook(_hook);
+    // A shared hook accepts the rules of a token from the token itself, so the token is live with its policy as soon as
+    // it is initialised. Nothing to install means the hook's own state stands: no rules, every movement rejected.
+    if (_initialRules.length != 0) IComplianceHook(_hook).setRules(address(this), _initialRules);
   }
 
   /**
@@ -276,7 +322,19 @@ abstract contract PolicyGatedERC20Upgradeable is
     // Read once: the hook that approves the movement is the hook that sees `afterTransfer`.
     IPolicyHook _hook = _policyHook();
     bytes32 _reason = _check(_ctx, _hook);
-    if (_reason != Reasons.TRANSFER_OK) revert PolicyGated_TransferRejected(_reason);
+    if (_reason != Reasons.TRANSFER_OK) {
+      // The token's own balance checks revert with the standard's error for an amount within the balance, which a frozen
+      // amount keeps from moving, and with the base's for an amount above it; every policy decision keeps the typed
+      // rejection that carries its reason, even one that borrows the code without a shortfall behind it.
+      // Compares a reason code with a constant, not a balance.
+      // slither-disable-next-line incorrect-equality
+      if (_reason == Reasons.INSUFFICIENT_UNFROZEN && _from != address(0) && _availableToMove(_ctx) < _value) {
+        uint256 _balance = balanceOf(_from);
+        if (_value > _balance) revert ERC20InsufficientBalance(_from, _balance, _value);
+        revert ERC7943InsufficientUnfrozenBalance(_from, _value, _unfrozenBalance(_from));
+      }
+      revert PolicyGated_TransferRejected(_reason);
+    }
 
     super._update(_from, _to, _value);
 
@@ -328,9 +386,11 @@ abstract contract PolicyGatedERC20Upgradeable is
   }
 
   /**
-   * @notice Lowers an account's frozen amount so an enforcement action can take `_amount` from it
-   * @dev Keeps `frozen <= balance` after the action. Emits `Frozen` before the token `Transfer`, as ERC-7943 requires.
-   *      Internal so templates' own enforcement moves (e.g. the 7540 escrow returns) keep the same invariant
+   * @notice Lowers an account's frozen amount by the part of an enforcement action that comes out of it
+   * @dev The unfrozen balance is what an action can take without touching the frozen amount; only the rest of `_amount`
+   *      is released, so a frozen amount above the balance (ERC-7943 allows it) loses exactly what leaves. Emits `Frozen`
+   *      before the token `Transfer`, as ERC-7943 requires. Internal so templates' own enforcement moves (e.g. the 7540
+   *      escrow returns) release the same way
    * @param _account The account losing tokens
    * @param _amount The amount it loses
    */
@@ -341,16 +401,32 @@ abstract contract PolicyGatedERC20Upgradeable is
     uint256 _balance = balanceOf(_account);
     if (_amount > _balance) revert ERC20InsufficientBalance(_account, _balance, _amount);
     PolicyGatedStorage storage $ = _getPolicyGatedStorage();
-    uint256 _remaining = _balance - _amount;
-    if ($.frozen[_account] > _remaining) {
-      $.frozen[_account] = _remaining;
-      emit Frozen(_account, _remaining);
+    uint256 _frozen = $.frozen[_account];
+    uint256 _unfrozen = _balance > _frozen ? _balance - _frozen : 0;
+    if (_amount > _unfrozen) {
+      uint256 _newFrozen = _frozen - (_amount - _unfrozen);
+      $.frozen[_account] = _newFrozen;
+      emit Frozen(_account, _newFrozen);
     }
   }
 
   /**
+   * @notice The part of an account's balance that is not frozen; zero when the frozen amount is the larger
+   * @param _account The account
+   * @return _unfrozen The unfrozen balance
+   */
+  function _unfrozenBalance(
+    address _account
+  ) internal view returns (uint256 _unfrozen) {
+    uint256 _balance = balanceOf(_account);
+    uint256 _frozen = _getPolicyGatedStorage().frozen[_account];
+    _unfrozen = _balance > _frozen ? _balance - _frozen : 0;
+  }
+
+  /**
    * @notice Authorizes a UUPS upgrade
-   * @dev Only UPGRADER_ROLE, and the new implementation must be attested as IMPLEMENTATION
+   * @dev Only UPGRADER_ROLE; the new implementation must be attested as IMPLEMENTATION and must belong to the same
+   *      template: an implementation that reports another template id, or none, is refused
    * @param _newImplementation The new implementation
    */
   function _authorizeUpgrade(
@@ -359,11 +435,14 @@ abstract contract PolicyGatedERC20Upgradeable is
     if (!_getPolicyGatedStorage().registry.isAttested(_newImplementation, IPolicyRegistry.AttestKind.IMPLEMENTATION)) {
       revert PolicyGated_NotAttested(_newImplementation, IPolicyRegistry.AttestKind.IMPLEMENTATION);
     }
+    bytes32 _expected = templateId();
+    bytes32 _actual = ITemplated(_newImplementation).templateId();
+    if (_actual != _expected) revert Templated_WrongTemplate(_newImplementation, _expected, _actual);
   }
 
   /**
-   * @notice The pre-flight behind `canTransfer`, shared with templates (e.g. vault `max*`)
-   * @dev Simulates a holder-driven movement: the operator is `_from`, or the caller for a mint
+   * @notice The pre-flight behind `canTransferWithReason`, shared with templates (e.g. vault `max*`)
+   * @dev Simulates a holder-driven movement: the operator is `_from`, or the caller for a mint. Every shortfall counts
    * @param _from The sender, or address(0) for a mint
    * @param _to The receiver, or address(0) for a burn
    * @param _amount The amount
@@ -374,8 +453,44 @@ abstract contract PolicyGatedERC20Upgradeable is
     address _to,
     uint256 _amount
   ) internal view returns (bytes32 _reason) {
+    _reason = _canTransfer(_from, _to, _amount, true);
+  }
+
+  /**
+   * @notice The pre-flight behind `canTransfer` and `canTransferWithReason`
+   * @dev Simulates a holder-driven movement: the operator is `_from`, or the caller for a mint
+   * @param _from The sender, or address(0) for a mint
+   * @param _to The receiver, or address(0) for a burn
+   * @param _amount The amount
+   * @param _balanceCounts False to leave a shortfall that is only the balance's to the base standard (see `_check`)
+   * @return _reason The reason code
+   */
+  function _canTransfer(
+    address _from,
+    address _to,
+    uint256 _amount,
+    bool _balanceCounts
+  ) internal view returns (bytes32 _reason) {
     address _operator = _from == address(0) ? _msgSender() : _from;
-    _reason = _check(_context(_from, _to, _amount, _operator, _inferKind(_from, _to), bytes32(0), 0), _policyHook());
+    _reason = _check(
+      _context(_from, _to, _amount, _operator, _inferKind(_from, _to), bytes32(0), 0), _policyHook(), _balanceCounts
+    );
+  }
+
+  /**
+   * @notice The pre-flight of a mint to `_receiver`, for templates' `max*` and eligibility checks
+   * @dev The amount is `_MINT_PROBE`: it is not zero, so a rule that caps holders sees a new holder, and it is above
+   *      any minimum position up to `type(uint128).max`, so such a minimum does not read as a block (one wei would; a
+   *      minimum set above that would refuse the probe). A rule that bounds the size of a position, such as a supply
+   *      cap or a maximum balance, would refuse it and zero the `max*` that use it. The operator is the caller, as in
+   *      `_canTransfer`
+   * @param _receiver The account that would receive the shares
+   * @return _reason TRANSFER_OK, or the reason a mint to `_receiver` would be rejected
+   */
+  function _mintProbe(
+    address _receiver
+  ) internal view returns (bytes32 _reason) {
+    _reason = _canTransfer(address(0), _receiver, _MINT_PROBE);
   }
 
   /**
@@ -388,12 +503,33 @@ abstract contract PolicyGatedERC20Upgradeable is
     IPolicyHook.TransferContext memory _ctx,
     IPolicyHook _hook
   ) internal view returns (bytes32 _reason) {
+    _reason = _check(_ctx, _hook, true);
+  }
+
+  /**
+   * @notice Mechanical checks then the hook decision, with the choice of whether a balance shortfall counts
+   * @dev The amount must fit in the unfrozen balance, which is zero when the frozen amount is the larger (ERC-7943). A
+   *      forced transfer and an enforcement burn (the operator holds BURNER_ROLE, as the holder restriction rule defines
+   *      it) may take frozen tokens, since `_releaseFrozen` lowers the frozen amount by the part that comes out of it, but
+   *      never more than the balance: that bound holds for the write and for the pre-flights that count every
+   *      shortfall. With `_balanceCounts` false a shortfall counts only while a frozen amount is in the way of a holder:
+   *      ERC-7943 leaves a plain balance shortfall to the base standard, whose error the write reverts with
+   * @param _ctx The movement context
+   * @param _hook The hook to consult, read once by the caller
+   * @param _balanceCounts Whether a balance shortfall with no frozen amount in the way counts as a failure
+   * @return _reason The reason code
+   */
+  function _check(
+    IPolicyHook.TransferContext memory _ctx,
+    IPolicyHook _hook,
+    bool _balanceCounts
+  ) internal view returns (bytes32 _reason) {
     if (paused() && _ctx.kind != IPolicyHook.TransferKind.FORCED) return Reasons.PAUSED;
 
-    if (_ctx.from != address(0) && _ctx.kind != IPolicyHook.TransferKind.FORCED) {
-      uint256 _balance = balanceOf(_ctx.from);
-      uint256 _frozen = _getPolicyGatedStorage().frozen[_ctx.from];
-      if (_balance < _frozen || _balance - _frozen < _ctx.amount) return Reasons.INSUFFICIENT_UNFROZEN;
+    if (_ctx.from != address(0) && _availableToMove(_ctx) < _ctx.amount) {
+      if (_balanceCounts || (!_takesFrozenTokens(_ctx) && _getPolicyGatedStorage().frozen[_ctx.from] > 0)) {
+        return Reasons.INSUFFICIENT_UNFROZEN;
+      }
     }
 
     if (address(_hook) == address(0)) return Reasons.NO_HOOK;
@@ -428,6 +564,10 @@ abstract contract PolicyGatedERC20Upgradeable is
     bytes32 _ref,
     uint256 _deadline
   ) internal view returns (IPolicyHook.TransferContext memory _ctx) {
+    // The balances before the move, so rules never call back into the token. Zero for the zero address, which holds
+    // nothing. EXECUTED continues with the intent's reference and deadline.
+    uint256 _fromBalance = _from == address(0) ? 0 : balanceOf(_from);
+    uint256 _toBalance = _to == address(0) ? 0 : balanceOf(_to);
     _ctx = IPolicyHook.TransferContext({
       token: address(this),
       from: _from,
@@ -436,9 +576,9 @@ abstract contract PolicyGatedERC20Upgradeable is
       amount: _amount,
       operator: _operator,
       kind: _kind,
-      ref: _ref,
-      deadline: _deadline,
-      extra: ''
+      extra: _kind == IPolicyHook.TransferKind.EXECUTED
+        ? abi.encode(_fromBalance, _toBalance, _ref, _deadline)
+        : abi.encode(_fromBalance, _toBalance)
     });
   }
 
@@ -469,6 +609,11 @@ abstract contract PolicyGatedERC20Upgradeable is
     if (!$.registry.isAttested(_newHook, IPolicyRegistry.AttestKind.HOOK)) {
       revert PolicyGated_NotAttested(_newHook, IPolicyRegistry.AttestKind.HOOK);
     }
+    // A hook shared by several tokens vets their rules against its own registry, so it must be the token's.
+    address _hookRegistry = address(IComplianceHook(_newHook).REGISTRY());
+    if (_hookRegistry != address($.registry)) {
+      revert PolicyGated_HookRegistryMismatch(_hookRegistry, address($.registry));
+    }
     address _oldHook = address($.hook);
     $.hook = IPolicyHook(_newHook);
     emit PolicyHookChanged(_oldHook, _newHook);
@@ -494,6 +639,52 @@ abstract contract PolicyGatedERC20Upgradeable is
     _KIND_SLOT.asUint256().tstore(0);
     _REF_SLOT.asBytes32().tstore(bytes32(0));
     _DEADLINE_SLOT.asUint256().tstore(0);
+  }
+
+  /**
+   * @notice Whether the hook lets an account send, or receive, at all; the account-level question of ERC-7943
+   * @dev False while paused and when the token has no hook. Never reverts of its own: a reverting hook or rule, which
+   *      attested ones do not, would revert it
+   * @param _account The account
+   * @param _sending True to ask about sending, false about receiving
+   * @return _allowed True if the account may
+   */
+  function _accountAllowed(
+    address _account,
+    bool _sending
+  ) private view returns (bool _allowed) {
+    IPolicyHook _hook = _policyHook();
+    if (paused() || address(_hook) == address(0)) return false;
+    bytes32 _reason = _sending ? _hook.checkSend(address(this), _account) : _hook.checkReceive(address(this), _account);
+    // Compares a reason code with a constant, not a balance.
+    // slither-disable-next-line incorrect-equality
+    _allowed = _reason == Reasons.TRANSFER_OK;
+  }
+
+  /**
+   * @notice How much of the sender's balance a movement may take: all of it for an enforcement action, the unfrozen part
+   *         for everything else
+   * @param _ctx The movement context
+   * @return _available The amount the sender can move
+   */
+  function _availableToMove(
+    IPolicyHook.TransferContext memory _ctx
+  ) private view returns (uint256 _available) {
+    _available = _takesFrozenTokens(_ctx) ? balanceOf(_ctx.from) : _unfrozenBalance(_ctx.from);
+  }
+
+  /**
+   * @notice Whether a movement is an enforcement action that may take frozen tokens
+   * @param _ctx The movement context
+   * @return _takes True for FORCED, and for a BURN driven by an account holding BURNER_ROLE
+   */
+  function _takesFrozenTokens(
+    IPolicyHook.TransferContext memory _ctx
+  ) private view returns (bool _takes) {
+    // Compares movement kinds, not balances.
+    // slither-disable-next-line incorrect-equality
+    _takes = _ctx.kind == IPolicyHook.TransferKind.FORCED
+      || (_ctx.kind == IPolicyHook.TransferKind.BURN && hasRole(BURNER_ROLE, _ctx.operator));
   }
 
   /**

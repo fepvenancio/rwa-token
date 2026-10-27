@@ -72,9 +72,7 @@ contract SettlementWindowRuleUnitTest is Helpers {
       amount: 1,
       operator: address(0xE0),
       kind: _kind,
-      ref: bytes32('ref'),
-      deadline: type(uint256).max,
-      extra: ''
+      extra: abi.encode(uint256(0), uint256(0))
     });
   }
 

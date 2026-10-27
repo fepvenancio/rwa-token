@@ -5,27 +5,30 @@ import {
   BaseError,
   ContractFunctionRevertedError,
   decodeErrorResult,
+  encodeAbiParameters,
+  encodeFunctionData,
+  hashTypedData,
   isAddressEqual,
   keccak256,
   toHex,
   type Abi,
   type Address,
   type Hex,
+  zeroAddress,
 } from "viem";
 
 import Activate from "../../ignition/modules/Activate.js";
 import Components from "../../ignition/modules/Components.js";
-import { ROLES, RULE_ORDER } from "../../ignition/modules/roles.js";
-import Tokens from "../../ignition/modules/Tokens.js";
+import { QUALS, ROLES, RULE_ORDER } from "../../ignition/modules/roles.js";
 
 /**
  * Runs the production deployment: the three Ignition modules, which are where deployment order lives (Phase 6 Q2),
  * with this file playing the parties Ignition cannot sign for:
  *
- *   Components → council attests rules + implementations → Tokens → council attests hooks → Activate
- *   → identity provider verifies holders and the 7540 escrow vault → hand-over check.
+ *   Components → council attests rules, the hook and implementations → Activate
+ *   → the KYC attester vouches for holders and the 7540 escrow vault → hand-over check.
  *
- * Each stage gets the previous stages' addresses as parameters, as a live deployment does between council steps
+ * Each stage gets the previous stage's addresses as parameters, as a live deployment does between council steps
  * (Ignition is also ephemeral per `deploy` call on the in-process network, so stages cannot share a journal here).
  */
 
@@ -43,6 +46,16 @@ const REASON_NAMES = [
   "BAD_SIGNATURE",
   "NO_HOOK",
   "NO_RULES",
+  "NOT_FUND_CLASS",
+  "WRONG_EXECUTOR",
+  "INTENT_NOT_YET_VALID",
+  "CONSIDERATION_NEEDS_EXECUTOR",
+  "LEGS_DO_NOT_MATCH",
+  "BELOW_MIN_POSITION",
+  "SENDER_FROZEN",
+  "RECEIVER_FROZEN",
+  "CREDENTIAL_EXPIRED",
+  "RECEIVER_NOT_ELIGIBLE",
 ] as const;
 
 /** `Errors.sol` reason codes, keyed by name; `reasonName` maps a code back for readable assertions. */
@@ -54,12 +67,22 @@ export const reasonName = (code: Hex) => REASON_NAMES.find((name) => REASONS[nam
 
 /** Mon 2026-10-12 00:00 UTC plus 260 weeks: a Monday in 2031, safely after the local chain's wall clock. */
 export const MONDAY = 1_791_763_200n + 260n * 7n * 86_400n;
-export const MONDAY_10AM = MONDAY + 10n * 3_600n;
+const MONDAY_10AM = MONDAY + 10n * 3_600n;
 export const WINDOW_OPEN = 9 * 3_600;
 export const WINDOW_CLOSE = 17 * 3_600;
-export const HOLDER_CAP = 3n;
+/** The fund-wide investor cap, one number for the three demo classes. */
+export const FUND_HOLDER_CAP = 3n;
 
 const ATTEST = { HOOK: 1, RULE: 2, IMPLEMENTATION: 3 } as const;
+
+/** The qualification bits, from the deployment's own copy of `Quals.sol` (`InterfaceFreeze` pins the Solidity side). */
+export { QUALS };
+/** `ICredentialRegistry.Status`, as the registry returns it. `LAPSED` is only ever returned, never stored. */
+export const STATUS = { NONE: 0, ACTIVE: 1, EXIT_ONLY: 2, BLOCKED: 3, LAPSED: 4 } as const;
+/** ISO 3166-1 numeric: Switzerland, the country every demo credential carries. */
+export const COUNTRY = 756;
+/** How long the demo credentials last: far past anything a test does with the clock. Tests of expiry write their own. */
+export const DEMO_VALIDITY = 3_650n * 86_400n;
 
 export async function deployStack(connection: NetworkConnection) {
   const { activate, parameters } = await deployUntilActivate(connection);
@@ -67,8 +90,8 @@ export async function deployStack(connection: NetworkConnection) {
 }
 
 /**
- * Stages 1–2 and both council steps. Returns `Activate`'s parameters and a function that runs stage 3 with them and
- * finishes the deployment, so a test can run stage 3 on tampered parameters and inspect what was left behind.
+ * Stage 1 and the council step. Returns `Activate`'s parameters and a function that runs stage 2 with them and
+ * finishes the deployment, so a test can run stage 2 on tampered parameters and inspect what was left behind.
  */
 export async function deployUntilActivate(connection: NetworkConnection) {
   const { viem, networkHelpers, ignition } = connection;
@@ -90,14 +113,14 @@ export async function deployUntilActivate(connection: NetworkConnection) {
     carol,
     dave,
     eve,
+    kyc,
   ] = await viem.getWalletClients();
   const address = (w: typeof deployer) => w.account.address;
 
   // Deterministic calendar: everything below happens inside the settlement window (Mon 10:00 UTC onwards).
   await networkHelpers.time.increaseTo(MONDAY_10AM);
 
-  // External to the stack: the identity provider's registry and the vaults' asset.
-  const identity = await viem.deployContract("MockIdentityRegistry");
+  // External to the stack: the vaults' asset.
   const asset = await viem.deployContract("MockAsset", [6]);
 
   const components = await ignition.deploy(Components, {
@@ -106,7 +129,6 @@ export async function deployUntilActivate(connection: NetworkConnection) {
         governance: address(governance),
         council: address(attester),
         guardian: address(guardian),
-        identityRegistry: identity.address,
       },
     },
   });
@@ -114,63 +136,66 @@ export async function deployUntilActivate(connection: NetworkConnection) {
     timelock,
     recoveryTimelock,
     registry,
-    identityRule,
-    lockupRule,
+    hook,
+    credentialRegistry,
+    credentialRule,
+    minPositionRule,
+    holderRestrictionRule,
     windowRule,
-    maxHoldersRule,
+    fundContract,
+    fundHoldersRule,
     proxyDeployer,
     executor,
-  } =
-    components;
+    dvpExecutor,
+  } = components;
   const attest = async (target: Address, kind: number, uri: string) => {
     const code = await publicClient.getCode({ address: target });
     await registry.write.attest([keccak256(code!), kind, uri], { account: attester.account });
   };
 
-  // Council step 1.
-  for (const rule of [identityRule, lockupRule, windowRule, maxHoldersRule]) {
+  // Council step: the rules, the one shared hook and the implementations. The credential rule's codehash covers the
+  // registry's address and not its code, so the council reads the registry first (its admin, its attesters, its code).
+  for (const rule of [credentialRule, minPositionRule, holderRestrictionRule, windowRule, fundHoldersRule]) {
     await attest(rule.address, ATTEST.RULE, `ipfs://rule-review/${rule.address}`);
   }
+  await attest(hook.address, ATTEST.HOOK, `ipfs://hook-review/${hook.address}`);
   for (const impl of [components.intentImpl, components.fundImpl, components.asyncFundImpl]) {
     await attest(impl.address, ATTEST.IMPLEMENTATION, `ipfs://impl-review/${impl.address}`);
   }
 
-  const addresses = {
+  const parameters = {
     timelock: timelock.address,
     registry: registry.address,
     proxyDeployer: proxyDeployer.address,
-    identityRule: identityRule.address,
-    lockupRule: lockupRule.address,
+    hook: hook.address,
+    credentialRegistry: credentialRegistry.address,
+    credentialRule: credentialRule.address,
+    kycAttester: address(kyc),
+    minPositionRule: minPositionRule.address,
+    holderRestrictionRule: holderRestrictionRule.address,
     windowRule: windowRule.address,
-    maxHoldersRule: maxHoldersRule.address,
+    fundHoldersRule: fundHoldersRule.address,
     intentImpl: components.intentImpl.address,
     fundImpl: components.fundImpl.address,
     asyncFundImpl: components.asyncFundImpl.address,
-  };
-  const hooks = await ignition.deploy(Tokens, { parameters: { Tokens: addresses } });
-
-  // Council step 2.
-  for (const hook of Object.values(hooks)) {
-    await attest(hook.address, ATTEST.HOOK, `ipfs://hook-review/${hook.address}`);
-  }
-
-  const parameters = {
-    ...addresses,
     executor: executor.address,
+    dvpExecutor: dvpExecutor.address,
     guardian: address(guardian),
     governance: address(governance),
     recoveryTimelock: recoveryTimelock.address,
     asset: asset.address,
     custody: address(custody),
-    intentHook: hooks.intentHook.address,
-    fundHook: hooks.fundHook.address,
-    asyncFundHook: hooks.asyncFundHook.address,
     minter: address(minter),
     burner: address(burner),
     agent: address(agent),
     operator: address(operator),
     fulfiller: address(fulfiller),
-    holderCap: HOLDER_CAP,
+    // The minimum position of each token; 0 switches the rule off, as in every deployment that sets none.
+    intentMinPosition: 0n,
+    fundMinPosition: 0n,
+    asyncFundMinPosition: 0n,
+    fundContract: fundContract.address,
+    fundHolderCap: FUND_HOLDER_CAP,
     windowOpen: WINDOW_OPEN,
     windowClose: WINDOW_CLOSE,
     windowDays: await windowRule.read.MON_TO_FRI(),
@@ -182,26 +207,31 @@ export async function deployUntilActivate(connection: NetworkConnection) {
     const vault4626 = tokens.fund;
     const vault7540 = tokens.asyncFund;
 
-    // Identity provider: the holders used by the tests, the recovery account and the 7540 escrow vault.
-    for (const w of [alice, bob, carol, dave, recovery]) await identity.write.set([address(w), true]);
-    await identity.write.set([vault7540.address, true]);
+    // The KYC attester vouches for the holders used by the tests, the recovery account and the 7540 escrow vault.
+    const validUntil = (await publicClient.getBlock()).timestamp + DEMO_VALIDITY;
+    for (const w of [alice, bob, carol, dave, recovery]) {
+      await credentialRegistry.write.set([address(w), validUntil, QUALS.KYC, COUNTRY], { account: kyc.account });
+    }
+    await credentialRegistry.write.set([vault7540.address, validUntil, QUALS.KYC | QUALS.INFRA, COUNTRY], { account: kyc.account });
 
     const stack = {
       publicClient,
-      wallets: { deployer, governance, attester, guardian, minter, burner, agent, operator, fulfiller, custody, recovery },
+      wallets: { deployer, governance, attester, guardian, minter, burner, agent, operator, fulfiller, custody, recovery, kyc },
       holders: { alice, bob, carol, dave, eve },
       timelock,
       recoveryTimelock,
       registry,
-      identity,
-      rules: { identityRule, lockupRule, windowRule, maxHoldersRule },
+      credentials: credentialRegistry,
+      rules: { credentialRule, minPositionRule, holderRestrictionRule, windowRule, fundHoldersRule },
+      fund: fundContract,
       proxyDeployer,
       asset,
       token,
       vault4626,
       vault7540,
       executor,
-      hooks: { token: hooks.intentHook, vault4626: hooks.fundHook, vault7540: hooks.asyncFundHook },
+      dvpExecutor,
+      hook,
       implementations: {
         token: components.intentImpl,
         vault4626: components.fundImpl,
@@ -211,7 +241,7 @@ export async function deployUntilActivate(connection: NetworkConnection) {
     await assertHandedOver(stack);
     return stack;
   };
-  return { activate, parameters, components, hooks, wallets: { deployer, agent, operator, governance, guardian } };
+  return { activate, parameters, components, wallets: { deployer, agent, operator, governance, guardian } };
 }
 
 export type Stack = Awaited<ReturnType<typeof deployStack>>;
@@ -219,16 +249,21 @@ export type Stack = Awaited<ReturnType<typeof deployStack>>;
 /**
  * Hand-over check, the same one the runbook prescribes after a live deployment:
  * - the deployer holds no role (every `*_ROLE()` getter, so later roles are covered) on the timelock, registry,
- *   tokens or executor, while the timelock holds DEFAULT_ADMIN_ROLE on each, so the check is not vacuous;
+ *   tokens or either executor, while the timelock holds DEFAULT_ADMIN_ROLE on each, so the check is not vacuous;
+ * - the DvP executor's operator is the stack's operator and its guardian the stack's guardian, and EXECUTOR_ROLE on the
+ *   intent token is held by the intent executor and the DvP executor and by no account the stack knows about;
  * - UPGRADER_ROLE is held by the timelock and nobody else that the stack knows about;
- * - every token runs the hook the council reviewed, bound to it, administered by the timelock, with the intended
- *   ordered rule list (`RULE_ORDER`); rules have no access control of their own;
+ * - every token runs the one shared hook the council reviewed, which names the stack's registry and holds the intended
+ *   ordered rule list for that token (`RULE_ORDER`); rules have no access control of their own;
  * - the guardian can cancel timelock operations but cannot propose or execute them;
  * - `ProxyDeployer` is owned by the timelock, so no token can be placed outside governance;
- * - the recovery timelock holds exactly RECOVERY_ROLE on each token, the executor and the main timelock (nothing else,
- *   nowhere else), has no cancellers, and the guardian holds nothing on it.
+ * - the fund is owned by the timelock, runs the attested rule that points back at it, has the intended cap, and holds
+ *   the three tokens as its classes, in that order, each intact (its hook lists the fund's rule: `firstBrokenClass()`
+ *   is the zero address);
+ * - the recovery timelock holds exactly RECOVERY_ROLE on each token, both executors and the main timelock (nothing
+ *   else, nowhere else), has no cancellers, and the guardian holds nothing on it.
  */
-async function assertHandedOver(s: Omit<Stack, "holders" | "identity" | "asset" | "implementations">) {
+export async function assertHandedOver(s: Omit<Stack, "holders" | "asset" | "implementations">) {
   const deployer = s.wallets.deployer.account.address;
   const timelock = s.timelock.address;
   const known = Object.values(s.wallets).map((w) => w.account.address);
@@ -256,10 +291,10 @@ async function assertHandedOver(s: Omit<Stack, "holders" | "identity" | "asset" 
     }
     return held.sort();
   };
-  for (const c of [s.timelock, s.recoveryTimelock, s.registry, s.token, s.vault4626, s.vault7540, s.executor]) {
+  for (const c of [s.timelock, s.recoveryTimelock, s.registry, s.credentials, s.token, s.vault4626, s.vault7540, s.executor, s.dvpExecutor]) {
     assert.deepEqual(await heldBy(c, deployer), [], `deployer holds roles on ${c.address}`);
   }
-  for (const c of [s.timelock, s.registry, s.token, s.vault4626, s.vault7540, s.executor]) {
+  for (const c of [s.timelock, s.registry, s.credentials, s.token, s.vault4626, s.vault7540, s.executor, s.dvpExecutor]) {
     assert.ok((await heldBy(c, timelock)).includes(ROLES.DEFAULT_ADMIN), `timelock lacks DEFAULT_ADMIN_ROLE on ${c.address}`);
   }
   // M-1: the recovery timelock's complete role set, pinned so a change that widens it fails the deploy.
@@ -270,7 +305,9 @@ async function assertHandedOver(s: Omit<Stack, "holders" | "identity" | "asset" 
     [s.vault4626, [ROLES.RECOVERY]],
     [s.vault7540, [ROLES.RECOVERY]],
     [s.executor, [ROLES.RECOVERY]],
+    [s.dvpExecutor, [ROLES.RECOVERY]],
     [s.registry, []],
+    [s.credentials, [ROLES.RECOVERY]], // it may clear a guardian block, revive an attester and remove the guardian
     [s.recoveryTimelock, [ROLES.DEFAULT_ADMIN]], // OZ makes every timelock its own admin
   ];
   for (const [c, roles] of expectedRecoveryRoles) {
@@ -284,32 +321,71 @@ async function assertHandedOver(s: Omit<Stack, "holders" | "identity" | "asset" 
   assert.equal(await s.recoveryTimelock.read.hasRole([await s.recoveryTimelock.read.PROPOSER_ROLE(), governance]), true);
   assert.equal(await s.recoveryTimelock.read.hasRole([await s.recoveryTimelock.read.EXECUTOR_ROLE(), governance]), true);
   assert.ok((await s.recoveryTimelock.read.getMinDelay()) >= 7n * 86_400n, "recovery timelock delay below 7 days");
+  // The DvP executor: the stack's operator submits through it and the guardian can pause it.
+  assert.deepEqual(await heldBy(s.dvpExecutor, s.wallets.operator.account.address), [ROLES.OPERATOR], "DvP executor operator");
+  assert.deepEqual(await heldBy(s.dvpExecutor, s.wallets.guardian.account.address), [ROLES.GUARDIAN], "DvP executor guardian");
+  // EXECUTOR_ROLE on the intent token: the two executor contracts and no account the stack knows about, so nothing
+  // can run a signed intent without going through one of them.
+  for (const executor of [s.executor, s.dvpExecutor]) {
+    assert.equal(await s.token.read.hasRole([ROLES.EXECUTOR, executor.address]), true, `${executor.address} lacks EXECUTOR_ROLE on the intent token`);
+  }
+  for (const account of known) {
+    assert.equal(await s.token.read.hasRole([ROLES.EXECUTOR, account]), false, `${account} holds EXECUTOR_ROLE on the intent token`);
+  }
   for (const t of [s.token, s.vault4626, s.vault7540]) {
     assert.equal(await t.read.hasRole([ROLES.UPGRADER, timelock]), true, `timelock lacks UPGRADER_ROLE on ${t.address}`);
     for (const account of known) assert.equal(await t.read.hasRole([ROLES.UPGRADER, account]), false, `${account} can upgrade`);
   }
-  // `s.hooks` are the hooks the council reviewed (stage 2). A twin with the same immutables shares their attested
-  // codehash whatever its rules, so check the token runs that exact hook and that its rule list is the intended one.
+  // `s.hook` is the hook the council reviewed. A second instance on the same registry shares its attested codehash, so
+  // check each token runs that exact instance and that the token's rule list on it is the intended one.
+  assert.ok(isAddressEqual(await s.hook.read.REGISTRY(), s.registry.address), `hook ${s.hook.address} names another registry`);
   const bound = [
-    [s.hooks.token, s.token, RULE_ORDER.intent],
-    [s.hooks.vault4626, s.vault4626, RULE_ORDER.fund],
-    [s.hooks.vault7540, s.vault7540, RULE_ORDER.asyncFund],
+    [s.token, RULE_ORDER.intent],
+    [s.vault4626, RULE_ORDER.fund],
+    [s.vault7540, RULE_ORDER.asyncFund],
   ] as const;
-  for (const [hook, t, order] of bound) {
-    assert.ok(isAddressEqual(await hook.read.TOKEN(), t.address), `hook ${hook.address} bound elsewhere`);
-    assert.ok(isAddressEqual(await t.read.policyHook(), hook.address), `token ${t.address} runs another hook`);
-    assert.ok(isAddressEqual(await hook.read.ADMIN(), timelock), `hook ${hook.address} admin`);
+  for (const [t, order] of bound) {
+    assert.ok(isAddressEqual(await t.read.policyHook(), s.hook.address), `token ${t.address} runs another hook`);
     const expected = order.map((name) => s.rules[name].address);
-    const actual = await hook.read.rules();
-    assert.equal(actual.length, expected.length, `hook ${hook.address} rule count`);
-    actual.forEach((rule, i) => assert.ok(isAddressEqual(rule, expected[i]), `hook ${hook.address} rule ${i}`));
+    const actual = await s.hook.read.rules([t.address]);
+    assert.equal(actual.length, expected.length, `token ${t.address} rule count`);
+    actual.forEach((rule, i) => assert.ok(isAddressEqual(rule, expected[i]), `token ${t.address} rule ${i}`));
   }
   for (const rule of Object.values(s.rules)) {
     const names = (rule.abi as Abi).flatMap((item) => (item.type === "function" ? [item.name] : []));
     assert.ok(!names.includes("hasRole") && !names.includes("owner"), `rule ${rule.address} has its own access control`);
   }
   assert.ok(isAddressEqual(await s.proxyDeployer.read.owner(), timelock), "ProxyDeployer is not owned by the timelock");
+  assert.ok(isAddressEqual(await s.fund.read.owner(), timelock), "the fund is not owned by the timelock");
+  assert.ok(isAddressEqual(await s.fund.read.rule(), s.rules.fundHoldersRule.address), "the fund runs another rule");
+  assert.ok(isAddressEqual(await s.rules.fundHoldersRule.read.FUND(), s.fund.address), "the fund rule points at another fund");
+  assert.equal(await s.registry.read.isAttested([s.rules.fundHoldersRule.address, ATTEST.RULE]), true, "the fund rule is not attested");
+  assert.equal(await s.fund.read.holderCap(), FUND_HOLDER_CAP, "fund cap");
+  const classes = [s.token, s.vault4626, s.vault7540];
+  assert.equal(await s.fund.read.classCount(), BigInt(classes.length), "class count");
+  for (const [i, t] of classes.entries()) {
+    assert.ok(isAddressEqual(await s.fund.read.classAt([BigInt(i + 1)]), t.address), `class ${i + 1} is not ${t.address}`);
+    assert.equal(await s.fund.read.isClassIntact([t.address]), true, `class ${i + 1} no longer lists the fund's rule`);
+  }
+  assert.ok(isAddressEqual(await s.fund.read.firstBrokenClass(), zeroAddress), "the fund has a broken class");
+  // The credential layer: the guardian can stop (block, kill) and nothing else; one attester, the demo KYC provider, and
+  // every token trusts it and asks for KYC and nothing more; the rule reads this registry and the council attested it.
   const guardian = s.wallets.guardian.account.address;
+  assert.deepEqual(await heldBy(s.credentials, guardian), [ROLES.GUARDIAN], "credential registry guardian");
+  assert.equal(await s.credentials.read.attesterCount(), 1n, "attester count");
+  const kycAttester = await s.credentials.read.attesterAt([0]);
+  assert.ok(isAddressEqual(kycAttester.account, s.wallets.kyc.account.address), "attester 0 is not the KYC provider");
+  assert.equal(kycAttester.killed, false, "the KYC attester is killed");
+  assert.ok(isAddressEqual(await s.rules.credentialRule.read.REGISTRY(), s.credentials.address), "the credential rule reads another registry");
+  assert.equal(await s.registry.read.isAttested([s.rules.credentialRule.address, ATTEST.RULE]), true, "the credential rule is not attested");
+  for (const t of [s.token, s.vault4626, s.vault7540]) {
+    const policy = await s.rules.credentialRule.read.policyOf([t.address]);
+    assert.deepEqual(
+      [policy.requireAll, policy.requireAny, policy.forbidAny, policy.attesters],
+      [QUALS.KYC, 0, 0, 1n],
+      `policy of ${t.address}`,
+    );
+  }
   assert.equal(await s.timelock.read.hasRole([await s.timelock.read.CANCELLER_ROLE(), guardian]), true);
   assert.equal(await s.timelock.read.hasRole([await s.timelock.read.PROPOSER_ROLE(), guardian]), false);
   assert.equal(await s.timelock.read.hasRole([await s.timelock.read.EXECUTOR_ROLE(), guardian]), false);
@@ -324,23 +400,56 @@ export const INTENT_TYPES = {
     { name: "nonce", type: "bytes32" },
     { name: "deadline", type: "uint256" },
     { name: "ref", type: "bytes32" },
+    { name: "executor", type: "address" },
+    { name: "validAfter", type: "uint256" },
+    { name: "considerationToken", type: "address" },
+    { name: "considerationAmount", type: "uint256" },
   ],
 } as const;
 
-export type Intent = { from: Address; to: Address; amount: bigint; nonce: Hex; deadline: bigint; ref: Hex };
+export type Intent = {
+  from: Address;
+  to: Address;
+  amount: bigint;
+  nonce: Hex;
+  deadline: bigint;
+  ref: Hex;
+  executor: Address;
+  validAfter: bigint;
+  considerationToken: Address;
+  considerationAmount: bigint;
+};
+
+/** Anything that reports its EIP-712 domain through ERC-5267, as every token and the ERC-3009 mock here does. */
+type DomainSource = {
+  read: { eip712Domain: () => Promise<readonly [Hex, string, string, bigint, Address, Hex, readonly bigint[]]> };
+};
 
 /** The token's EIP-712 domain as the chain reports it (ERC-5267), so signing never re-derives it off-chain. */
-export async function intentDomain(token: Stack["token"]) {
+async function intentDomain(token: DomainSource) {
   const [, name, version, chainId, verifyingContract] = await token.read.eip712Domain();
   return { name, version, chainId, verifyingContract };
 }
 
-/** A fresh intent from `signer`: random nonce (as the signer's HSM would choose), one-hour deadline, random ref. */
+/**
+ * A fresh intent from `signer`: random nonce (as the signer's HSM would choose), one-hour deadline, random ref, and by
+ * default no executor binding, no `validAfter` and no consideration.
+ */
 export async function signIntent(
   s: Stack,
   signer: Stack["holders"]["alice"],
-  fields: { to: Address; amount: bigint; deadline?: bigint },
+  fields: {
+    to: Address;
+    amount: bigint;
+    deadline?: bigint;
+    executor?: Address;
+    validAfter?: bigint;
+    considerationToken?: Address;
+    considerationAmount?: bigint;
+  },
   domainOverride: Partial<Awaited<ReturnType<typeof intentDomain>>> = {},
+  /** The token the intent is for: its domain is the one signed. Defaults to the stack's intent token. */
+  token: DomainSource = s.token,
 ) {
   const now = (await s.publicClient.getBlock()).timestamp;
   const intent: Intent = {
@@ -350,8 +459,12 @@ export async function signIntent(
     nonce: toHex(crypto.getRandomValues(new Uint8Array(32))),
     deadline: fields.deadline ?? now + 3_600n,
     ref: toHex(crypto.getRandomValues(new Uint8Array(32))),
+    executor: fields.executor ?? zeroAddress,
+    validAfter: fields.validAfter ?? 0n,
+    considerationToken: fields.considerationToken ?? zeroAddress,
+    considerationAmount: fields.considerationAmount ?? 0n,
   };
-  const domain = { ...(await intentDomain(s.token)), ...domainOverride };
+  const domain = { ...(await intentDomain(token)), ...domainOverride };
   const sig = await signer.signTypedData({ domain, types: INTENT_TYPES, primaryType: "TransferIntent", message: intent });
   return { intent, sig, domain };
 }
@@ -370,4 +483,168 @@ export async function revertOf(call: Promise<unknown>, abi: Abi) {
     const { errorName, args } = decodeErrorResult({ abi, data: reverted.raw });
     return { errorName, args: (args ?? []) as readonly unknown[] };
   }
+}
+
+// ---- DvP ---------------------------------------------------------------------------------------------------------------
+
+/** The typed data of an ERC-3009 `receiveWithAuthorization`, as Circle's FiatToken and the test mock define it. */
+const RECEIVE_AUTHORIZATION_TYPES = {
+  ReceiveWithAuthorization: [
+    { name: "from", type: "address" },
+    { name: "to", type: "address" },
+    { name: "value", type: "uint256" },
+    { name: "validAfter", type: "uint256" },
+    { name: "validBefore", type: "uint256" },
+    { name: "nonce", type: "bytes32" },
+  ],
+} as const;
+
+/** The buyer's authorization as `DvPExecutor.executeDvP3009` takes it; its payee is always the executor. */
+type Authorization = { from: Address; value: bigint; validAfter: bigint; validBefore: bigint; nonce: Hex; signature: Hex };
+
+/**
+ * The nonce that ties a buyer's ERC-3009 authorization to one securities intent on one security token:
+ * `keccak256(abi.encode(securityToken, intentHash))`. The token's address is in it, so an operator cannot pair the
+ * authorization with another token that merely reports the same hash.
+ */
+export function dvpNonce(securityToken: Address, securitiesIntentHash: Hex): Hex {
+  return keccak256(encodeAbiParameters([{ type: "address" }, { type: "bytes32" }], [securityToken, securitiesIntentHash]));
+}
+
+type Trader = Stack["holders"]["alice"];
+type TokenHandle = DomainSource & { address: Address };
+
+/**
+ * A gated trade: the seller signs the securities intent (executor = the DvP executor, stating the cash it is to
+ * receive), the buyer signs the cash intent on the cash token (stating the shares it is to receive).
+ */
+export async function signGatedTrade(
+  s: Stack,
+  trade: { seller: Trader; buyer: Trader; securityToken: TokenHandle; cashToken: TokenHandle; shares: bigint; cash: bigint; deadline?: bigint },
+) {
+  const { seller, buyer, securityToken, cashToken, shares, cash, deadline } = trade;
+  const dvp = s.dvpExecutor.address;
+  const securities = await signIntent(
+    s,
+    seller,
+    { to: buyer.account.address, amount: shares, deadline, executor: dvp, considerationToken: cashToken.address, considerationAmount: cash },
+    {},
+    securityToken,
+  );
+  const payment = await signIntent(
+    s,
+    buyer,
+    { to: seller.account.address, amount: cash, deadline, executor: dvp, considerationToken: securityToken.address, considerationAmount: shares },
+    {},
+    cashToken,
+  );
+  return { securities, payment };
+}
+
+/**
+ * An ERC-3009 trade: the seller signs the securities intent; the buyer signs an authorization to the executor whose
+ * nonce is `dvpNonce(securityToken, intentHash)`, computed here from the typed data and not read from the chain.
+ */
+export async function sign3009Trade(
+  s: Stack,
+  trade: {
+    seller: Trader;
+    buyer: Trader;
+    securityToken: TokenHandle;
+    cashToken: TokenHandle;
+    shares: bigint;
+    cash: bigint;
+    deadline?: bigint;
+    validBefore?: bigint;
+    /** Replaces the nonce the helper would compute, to build the authorizations that must be refused. */
+    nonce?: (intentHash: Hex) => Hex;
+  },
+) {
+  const { seller, buyer, securityToken, cashToken, shares, cash, deadline } = trade;
+  const securities = await signIntent(
+    s,
+    seller,
+    { to: buyer.account.address, amount: shares, deadline, executor: s.dvpExecutor.address, considerationToken: cashToken.address, considerationAmount: cash },
+    {},
+    securityToken,
+  );
+  const intentHash = hashTypedData({ domain: securities.domain, types: INTENT_TYPES, primaryType: "TransferIntent", message: securities.intent });
+  const now = (await s.publicClient.getBlock()).timestamp;
+  const message = {
+    from: buyer.account.address,
+    to: s.dvpExecutor.address,
+    value: cash,
+    validAfter: 0n,
+    validBefore: trade.validBefore ?? now + 3_600n,
+    nonce: trade.nonce ? trade.nonce(intentHash) : dvpNonce(securityToken.address, intentHash),
+  };
+  const signature = await buyer.signTypedData({
+    domain: await intentDomain(cashToken),
+    types: RECEIVE_AUTHORIZATION_TYPES,
+    primaryType: "ReceiveWithAuthorization",
+    message,
+  });
+  const authorization: Authorization = {
+    from: message.from,
+    value: message.value,
+    validAfter: message.validAfter,
+    validBefore: message.validBefore,
+    nonce: message.nonce,
+    signature,
+  };
+  return { securities, authorization, intentHash };
+}
+
+/**
+ * A gated cash token for tests: an `IntentToken` behind a fresh `ProxyDeployer`, on the stack's shared hook with the
+ * stack's credential rule as its only rule, administered by the deployer (a live deployment would use the timelock), with
+ * the DvP executor holding EXECUTOR_ROLE. The council attests its implementation as it would for any token; the hook
+ * is the one already attested.
+ */
+export async function deployGatedCashToken(connection: NetworkConnection, s: Stack) {
+  const { viem } = connection;
+  const deployer = s.wallets.deployer.account.address;
+  const attest = async (target: Address, kind: number) => {
+    const code = await s.publicClient.getCode({ address: target });
+    await s.registry.write.attest([keccak256(code!), kind, "ipfs://review"], { account: s.wallets.attester.account });
+  };
+  const implementation = await viem.deployContract("IntentToken");
+  await attest(implementation.address, ATTEST.IMPLEMENTATION);
+  const proxyDeployer = await viem.deployContract("ProxyDeployer", [deployer, s.registry.address]);
+  const symbol = "gUSD";
+  const predicted = await proxyDeployer.read.predict([symbol, implementation.address]);
+  const rules = [s.rules.credentialRule.address];
+  const data = encodeFunctionData({
+    abi: implementation.abi,
+    functionName: "initialize",
+    args: ["Gated USD", symbol, deployer, s.wallets.guardian.account.address, s.registry.address, s.hook.address, rules],
+  });
+  await proxyDeployer.write.deploy([symbol, implementation.address, data, s.hook.address, rules]);
+  const token = await viem.getContractAt("IntentToken", predicted);
+  // The deployer administers this token, so it sets the policy the deployment sets on the others: KYC from attester 0.
+  await s.rules.credentialRule.write.setPolicy([token.address, QUALS.KYC, 0, 0, 1n]);
+  await token.write.grantRole([ROLES.EXECUTOR, s.dvpExecutor.address]);
+  await token.write.grantRole([ROLES.MINTER, s.wallets.minter.account.address]);
+  return token;
+}
+
+// ---- Credentials -------------------------------------------------------------------------------------------------------
+
+type Who = Address | { account: { address: Address } };
+const addressOf = (who: Who) => (typeof who === "string" ? who : who.account.address);
+
+/**
+ * The demo KYC attester vouches for `who`: a credential from now, valid for `validFor` seconds (far past any test by
+ * default) with `quals`. Writes over an earlier credential of the same attester.
+ */
+export async function verify(s: Stack, who: Who, opts: { quals?: number; validFor?: bigint } = {}) {
+  const now = (await s.publicClient.getBlock()).timestamp;
+  await s.credentials.write.set([addressOf(who), now + (opts.validFor ?? DEMO_VALIDITY), opts.quals ?? QUALS.KYC, COUNTRY], {
+    account: s.wallets.kyc.account,
+  });
+}
+
+/** The KYC attester blocks `who`: it can no longer send or receive. (The old "de-verified".) */
+export async function deverify(s: Stack, who: Who) {
+  await s.credentials.write.setStatus([addressOf(who), STATUS.BLOCKED], { account: s.wallets.kyc.account });
 }

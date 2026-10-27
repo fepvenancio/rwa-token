@@ -19,10 +19,11 @@ import { keccak256, type Hex } from "viem";
 
 /** Contracts whose codehash is attested, then everything else the deployment puts on-chain. */
 const ATTESTED = {
-  IdentityRule: "hooks/rules",
-  LockupRule: "hooks/rules",
+  HolderRestrictionRule: "hooks/rules",
+  MinPositionRule: "hooks/rules",
+  CredentialRule: "hooks/rules",
   SettlementWindowRule: "hooks/rules",
-  MaxHoldersRule: "hooks/rules",
+  FundHoldersRule: "hooks/rules",
   ComplianceHook: "hooks",
   IntentToken: "tokens",
   Gated4626Vault: "vaults",
@@ -30,9 +31,12 @@ const ATTESTED = {
 } as const;
 const DEPLOYED = {
   PolicyRegistry: "governance",
+  CredentialRegistry: "identity",
   GovernanceTimelock: "governance",
   IntentExecutor: "intents",
+  DvPExecutor: "intents",
   ProxyDeployer: "deploy",
+  Fund: "fund",
   TokenProxy: "deploy",
 } as const;
 const CONTRACTS: Record<string, string> = { ...ATTESTED, ...DEPLOYED };

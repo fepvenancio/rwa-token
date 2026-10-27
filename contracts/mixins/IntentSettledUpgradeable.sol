@@ -14,7 +14,10 @@ import {PolicyGatedERC20Upgradeable} from 'contracts/base/PolicyGatedERC20Upgrad
  * @title IntentSettledUpgradeable
  * @notice Mixin: the holder signs an EIP-712 `TransferIntent`, EXECUTOR_ROLE executes it
  * @dev Shares the EIP-712 domain with ERC-2612 permit. Signatures are checked with OZ `SignatureChecker`, so EOAs
- *      (ECDSA, low-s only) and ERC-1271 smart accounts are supported. Nonces are random and tracked per signer
+ *      (ECDSA, low-s only) and ERC-1271 smart accounts are supported. Nonces are random and tracked per signer.
+ *      Besides the deadline and the nonce, the mixin checks the intent's own fields against each other and the caller:
+ *      `executor` (zero means any EXECUTOR_ROLE holder), `validAfter`, and that a stated consideration comes with an
+ *      executor. It never enforces the consideration itself: only the executor an intent names can do that
  */
 abstract contract IntentSettledUpgradeable is PolicyGatedERC20Upgradeable, ITransferIntent {
   /**
@@ -30,8 +33,9 @@ abstract contract IntentSettledUpgradeable is PolicyGatedERC20Upgradeable, ITran
   bytes32 public constant EXECUTOR_ROLE = keccak256('EXECUTOR_ROLE');
 
   /// @notice EIP-712 typehash of `TransferIntent`
-  bytes32 public constant TRANSFER_INTENT_TYPEHASH =
-    keccak256('TransferIntent(address from,address to,uint256 amount,bytes32 nonce,uint256 deadline,bytes32 ref)');
+  bytes32 public constant TRANSFER_INTENT_TYPEHASH = keccak256(
+    'TransferIntent(address from,address to,uint256 amount,bytes32 nonce,uint256 deadline,bytes32 ref,address executor,uint256 validAfter,address considerationToken,uint256 considerationAmount)'
+  );
 
   /// @notice keccak256(abi.encode(uint256(keccak256('gated.storage.IntentSettled')) - 1)) & ~bytes32(uint256(0xff))
   bytes32 private constant _INTENT_SETTLED_STORAGE_LOCATION =
@@ -70,9 +74,15 @@ abstract contract IntentSettledUpgradeable is PolicyGatedERC20Upgradeable, ITran
 
   /// @inheritdoc ITransferIntent
   function canExecute(
-    TransferIntent calldata _intent
+    TransferIntent calldata _intent,
+    bytes calldata _sig
   ) external view returns (bool _ok, bytes32 _reason) {
     _reason = _intentPreflight(_intent);
+    if (
+      _reason == Reasons.TRANSFER_OK && !SignatureChecker.isValidSignatureNow(_intent.from, intentHash(_intent), _sig)
+    ) {
+      _reason = Reasons.BAD_SIGNATURE;
+    }
     if (_reason == Reasons.TRANSFER_OK) {
       _reason = _check(
         _context(
@@ -102,19 +112,9 @@ abstract contract IntentSettledUpgradeable is PolicyGatedERC20Upgradeable, ITran
   function intentHash(
     TransferIntent calldata _intent
   ) public view returns (bytes32 _intentHash) {
-    _intentHash = _hashTypedDataV4(
-      keccak256(
-        abi.encode(
-          TRANSFER_INTENT_TYPEHASH,
-          _intent.from,
-          _intent.to,
-          _intent.amount,
-          _intent.nonce,
-          _intent.deadline,
-          _intent.ref
-        )
-      )
-    );
+    // A struct of static fields encodes in place, so this is the typehash followed by the fields in declaration order,
+    // which is what EIP-712 hashes.
+    _intentHash = _hashTypedDataV4(keccak256(abi.encode(TRANSFER_INTENT_TYPEHASH, _intent)));
   }
 
   /// @inheritdoc PolicyGatedERC20Upgradeable
@@ -130,7 +130,8 @@ abstract contract IntentSettledUpgradeable is PolicyGatedERC20Upgradeable, ITran
   function __IntentSettled_init() internal onlyInitializing {} // aderyn-ignore(empty-block)
 
   /**
-   * @notice Checks that do not depend on the signature: deadline (inclusive) and nonce
+   * @notice Checks that do not depend on the signature, in this order: the deadline (inclusive), the nonce, that a
+   *         stated consideration has an executor, that the caller is the named executor, and `validAfter` (inclusive)
    * @param _intent The intent
    * @return _reason The reason code
    */
@@ -139,6 +140,14 @@ abstract contract IntentSettledUpgradeable is PolicyGatedERC20Upgradeable, ITran
   ) private view returns (bytes32 _reason) {
     if (block.timestamp > _intent.deadline) return Reasons.INTENT_EXPIRED;
     if (_getIntentSettledStorage().nonces[_intent.from][_intent.nonce]) return Reasons.NONCE_USED;
+    if (_intent.executor == address(0)) {
+      if (_intent.considerationToken != address(0) || _intent.considerationAmount != 0) {
+        return Reasons.CONSIDERATION_NEEDS_EXECUTOR;
+      }
+    } else if (_intent.executor != _msgSender()) {
+      return Reasons.WRONG_EXECUTOR;
+    }
+    if (block.timestamp < _intent.validAfter) return Reasons.INTENT_NOT_YET_VALID;
     _reason = Reasons.TRANSFER_OK;
   }
 

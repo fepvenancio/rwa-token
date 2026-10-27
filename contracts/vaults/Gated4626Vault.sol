@@ -9,10 +9,12 @@ import {Math} from '@openzeppelin/contracts/utils/math/Math.sol';
 
 import {Reasons} from 'interfaces/Errors.sol';
 
+import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IGated4626Vault} from 'interfaces/IGated4626Vault.sol';
 // Needed by the compiler to resolve `@inheritdoc IPolicyGated`; solhint does not see NatSpec usage.
 // solhint-disable-next-line no-unused-vars
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
+import {ITemplated} from 'interfaces/ITemplated.sol';
 
 import {PolicyGatedERC20Upgradeable} from 'contracts/base/PolicyGatedERC20Upgradeable.sol';
 
@@ -41,7 +43,8 @@ contract Gated4626Vault is ERC4626Upgradeable, PolicyGatedERC20Upgradeable, IGat
     address _admin,
     address _guardian,
     address _registry,
-    address _hook
+    address _hook,
+    IComplianceRule[] memory _initialRules
   ) external initializer {
     // Parent initializers in linearized order (OZ upgrades-core): the base's composite init is expanded around ERC4626.
     __ERC20_init(_name, _symbol);
@@ -49,7 +52,8 @@ contract Gated4626Vault is ERC4626Upgradeable, PolicyGatedERC20Upgradeable, IGat
     __ERC20Permit_init(_name);
     __AccessControl_init();
     __Pausable_init();
-    __PolicyGatedERC20_init_unchained(_admin, _guardian, _registry, _hook);
+    __Multicall_init();
+    __PolicyGatedERC20_init_unchained(_admin, _guardian, _registry, _hook, _initialRules);
   }
 
   /**
@@ -81,35 +85,38 @@ contract Gated4626Vault is ERC4626Upgradeable, PolicyGatedERC20Upgradeable, IGat
 
   /**
    * @inheritdoc ERC4626Upgradeable
-   * @dev 0 when paused or when the policy would reject a mint to `_receiver`
+   * @dev 0 when paused or when a mint of a very large amount to `_receiver` would be rejected (identity, freeze, the
+   *      holder caps). The amount is above any minimum position up to `type(uint128).max`, so such a minimum does not read as a block
    */
   function maxDeposit(
     address _receiver
   ) public view override returns (uint256 _maxAssets) {
-    if (_canTransfer(address(0), _receiver, 1) != Reasons.TRANSFER_OK) return 0;
+    if (_mintProbe(_receiver) != Reasons.TRANSFER_OK) return 0;
     _maxAssets = super.maxDeposit(_receiver);
   }
 
   /**
    * @inheritdoc ERC4626Upgradeable
-   * @dev 0 when paused or when the policy would reject a mint to `_receiver`
+   * @dev 0 when paused or when a mint to `_receiver` would be rejected, as `maxDeposit`
    */
   function maxMint(
     address _receiver
   ) public view override returns (uint256 _maxShares) {
-    if (_canTransfer(address(0), _receiver, 1) != Reasons.TRANSFER_OK) return 0;
+    if (_mintProbe(_receiver) != Reasons.TRANSFER_OK) return 0;
     _maxShares = super.maxMint(_receiver);
   }
 
   /**
    * @inheritdoc ERC4626Upgradeable
-   * @dev The unfrozen balance; 0 when paused or when the policy would reject a burn from `_owner`
+   * @dev The unfrozen balance; 0 when paused or when the policy would reject a burn from `_owner` (identity, freeze,
+   *      lockup). The probe burns nothing: one share would leave a remainder, which a minimum position rejects, and
+   *      hide a holder who can redeem everything. The size of a real redemption is judged when it burns
    */
   function maxRedeem(
     address _owner
   ) public view override returns (uint256 _maxShares) {
-    if (_canTransfer(_owner, address(0), 1) != Reasons.TRANSFER_OK) return 0;
-    _maxShares = balanceOf(_owner) - getFrozen(_owner);
+    if (_canTransfer(_owner, address(0), 0) != Reasons.TRANSFER_OK) return 0;
+    _maxShares = _unfrozenBalance(_owner);
   }
 
   /**
@@ -127,6 +134,11 @@ contract Gated4626Vault is ERC4626Upgradeable, PolicyGatedERC20Upgradeable, IGat
     bytes4 _interfaceId
   ) public view override returns (bool _supported) {
     _supported = _interfaceId == type(IERC4626).interfaceId || super.supportsInterface(_interfaceId);
+  }
+
+  /// @inheritdoc ITemplated
+  function templateId() public pure override returns (bytes32 _id) {
+    _id = keccak256('Gated4626Vault');
   }
 
   /**

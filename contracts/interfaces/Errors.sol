@@ -37,5 +37,26 @@ library Reasons {
   bytes32 internal constant NO_HOOK = keccak256('NO_HOOK');
   /// @notice The policy hook has an empty rule set; an unconfigured hook rejects everything
   bytes32 internal constant NO_RULES = keccak256('NO_RULES');
+  /// @notice The token is not a registered class of the fund, or the fund rule in its hook is not the fund's installed
+  ///         rule; every movement is rejected
+  bytes32 internal constant NOT_FUND_CLASS = keccak256('NOT_FUND_CLASS');
+  /// @notice The transfer intent names an executor and the caller is another account
+  bytes32 internal constant WRONG_EXECUTOR = keccak256('WRONG_EXECUTOR');
+  /// @notice The transfer intent's `validAfter` has not been reached
+  bytes32 internal constant INTENT_NOT_YET_VALID = keccak256('INTENT_NOT_YET_VALID');
+  /// @notice The transfer intent states a consideration but names no executor, so nothing could enforce it
+  bytes32 internal constant CONSIDERATION_NEEDS_EXECUTOR = keccak256('CONSIDERATION_NEEDS_EXECUTOR');
+  /// @notice The two legs of a DvP trade do not describe the same trade: parties, amounts, tokens or nonce disagree
+  bytes32 internal constant LEGS_DO_NOT_MATCH = keccak256('LEGS_DO_NOT_MATCH');
+  /// @notice The movement would leave an account holding a balance above zero and below the token's minimum position
+  bytes32 internal constant BELOW_MIN_POSITION = keccak256('BELOW_MIN_POSITION');
+  /// @notice The sender is frozen on this token
+  bytes32 internal constant SENDER_FROZEN = keccak256('SENDER_FROZEN');
+  /// @notice The receiver is frozen on this token
+  bytes32 internal constant RECEIVER_FROZEN = keccak256('RECEIVER_FROZEN');
+  /// @notice The receiver's credential has lapsed: it can still send, burn and redeem, but not receive
+  bytes32 internal constant CREDENTIAL_EXPIRED = keccak256('CREDENTIAL_EXPIRED');
+  /// @notice The receiver holds an active credential that the token's policy does not accept, or the token has no policy
+  bytes32 internal constant RECEIVER_NOT_ELIGIBLE = keccak256('RECEIVER_NOT_ELIGIBLE');
 }
 // solhint-enable private-vars-leading-underscore

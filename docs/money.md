@@ -5,11 +5,11 @@ Two kinds of value move in this repo:
 - **Token balances.** Every template is a gated ERC-20, and its balances move through the hook ([transfer-checks.md](transfer-checks.md)).
 - **The vault asset.** `Gated4626Vault` and `Gated7540Vault` hold and pay out an ordinary ERC-20 chosen at deployment. The hook never sees these transfers.
 
-What the code does not have: fees of any kind, interest or yield logic, a price oracle, or ETH handling. No contract written for this repo defines a `receive` or payable function, and none charges or pays a fee. `IntentToken` has no asset leg at all. (OpenZeppelin's `upgradeToAndCall` is payable but rejects value, as [SECURITY.md](../SECURITY.md) explains. The token proxy's `fallback` is payable, but the implementation behind it has no `receive`, no payable fallback, and no payable function other than `upgradeToAndCall`, so value sent through the proxy is rejected too. OpenZeppelin's `TimelockController`, and `GovernanceTimelock`, which extends it, can receive ETH.)
+What the code does not have: fees of any kind, interest or yield logic, a price oracle, or ETH handling. No contract outside `contracts/test` defines a `receive` or payable function, and none charges or pays a fee. The test cash token `MockERC3009Token` can take a fee on its transfers, so the DvP tests can try a fee-on-transfer token. `IntentToken` has no asset leg at all. (OpenZeppelin's `upgradeToAndCall` is payable but rejects value, as [SECURITY.md](../SECURITY.md) explains. The token proxy's `fallback` is payable, but the implementation behind it has no `receive`, no payable fallback, and no payable function other than `upgradeToAndCall`, so value sent through the proxy is rejected too. OpenZeppelin's `TimelockController`, and `GovernanceTimelock`, which extends it, can receive ETH.)
 
 ## `IntentToken`: the token is the instrument
 
-There is no asset behind the token and no payment inside the contracts. The token's balances are the record. Settlement of cash, if any, happens outside the chain, and the intent's `ref` ties the on-chain move to that off-chain message.
+There is no asset behind the token and no payment inside the token. The token's balances are the record. Settlement of cash, if any, happens outside the chain, and the intent's `ref` ties the on-chain move to that off-chain message. When the cash is itself a token, `DvPExecutor` can settle the shares and the cash in one transaction ([flows-dvp.md](flows-dvp.md)). An intent can state what its signer is to receive (`considerationToken`, `considerationAmount`). The token never moves it or checks that it was paid; it only rejects a stated consideration that names no executor. Only the executor the intent names can enforce the payment, if its code does. `DvPExecutor` is the one that does: it settles the share leg and the cash leg together ([flows-dvp.md](flows-dvp.md)).
 
 | Event | Who calls | Effect on balances | Effect on `totalSupply` |
 |---|---|---|---|
@@ -17,13 +17,14 @@ There is no asset behind the token and no payment inside the contracts. The toke
 | Redeem or destroy | burner: `burn(from, amount)` | `from` down | down |
 | Transfer | holder or spender | `from` down, `to` up | none |
 | Settle an intent | operator through the executor | `from` down, `to` up | none |
+| Settle a trade ([flows-dvp.md](flows-dvp.md)) | operator through the DvP executor | the seller's shares down and the buyer's up, and the buyer's cash down and the seller's up, together or not at all | none |
 | Clawback | agent: `forcedTransfer` | `from` down, `to` up | none |
 
 ```mermaid
 flowchart LR
   Minter["Minter"] -->|"mint: new tokens"| A["Holder A"]
   A -->|"transfer or signed intent"| B["Holder B"]
-  A -->|"forcedTransfer by the agent, to a verified account"| R["Verified account"]
+  A -->|"forcedTransfer by the agent, to an account with an active credential"| R["Credentialed account"]
   B -->|"burn by the burner"| D["Tokens destroyed"]
 ```
 
@@ -59,7 +60,7 @@ The vault does not change the price on a schedule. The price moves through the r
 
 Example, a 6-decimal asset and an empty vault. A deposit of 1,000 assets (`1000e6`) mints `1000e6 x 10^6 / 1 = 1e15` raw shares, which is 1,000 shares at 12 decimals. Redeeming all of them pays `1e15 x (1000e6 + 1) / (1e15 + 10^6) = 1000e6`, so the full 1,000 assets come back.
 
-Who is checked: the receiver of shares on a deposit (`IdentityRule`, `MaxHoldersRule`), and the owner of shares on a redemption (`IdentityRule`, `LockupRule`, frozen amount). The party who pays assets in, and the party who receives assets out, are not checked.
+Who is checked: the receiver of shares on a deposit (`CredentialRule`, the address freeze of `HolderRestrictionRule`, `MinPositionRule`, `FundHoldersRule`), and the owner of shares on a redemption (`CredentialRule`, `HolderRestrictionRule` for the address freeze and the lockup, `MinPositionRule`, the frozen amount). The party who pays assets in, and the party who receives assets out, are not checked. The lists `Activate` deploys include `MinPositionRule`, and its minimum defaults to 0, which is off ([flows-vaults.md](flows-vaults.md#a-minimum-position)).
 
 Code: OpenZeppelin `ERC4626Upgradeable._convertToShares`, `_convertToAssets`, `totalAssets`; `Gated4626Vault._decimalsOffset`.
 
@@ -97,7 +98,7 @@ Solid arrows are the asset. Dotted arrows are shares.
 | `fulfillDeposit` | the `custody` address |
 | `rejectDepositRequest` | the controller of the request |
 | `redeem`, `withdraw` | the `receiver` chosen by the controller or its operator |
-| `recoverClaimable` | `to`, the recovery account the agent names, which must pass the vault's policy as the receiver of a `FORCED` move (with the deployed rules, only `IdentityRule` can refuse it) |
+| `recoverClaimable` | `to`, the recovery account the agent names, which must pass the vault's policy as the receiver of a `FORCED` move (with the deployed rules, `CredentialRule` can refuse an account without an `ACTIVE` credential that the policy accepts, `HolderRestrictionRule` an address-frozen one, and `FundHoldersRule` everything for a token that is not a registered class or whose rule is retired) |
 
 These are the vault's own functions. Two other things can also move the asset: an upgrade to another attested implementation, and powers held by the asset's own issuer.
 
@@ -115,7 +116,7 @@ Share decimals equal the asset's decimals. There is no offset.
 
 ### Worked example
 
-A 6-decimal asset, so shares also have 6 decimals. Amounts below are whole units. Alice starts with 1,000 assets and has approved the vault on the asset. The fulfiller starts with 500 assets and has also approved the vault. Alice is verified. The identity provider has verified the vault, and `Activate` has exempted the vault from `MaxHoldersRule` and set a holder cap with room for Alice.
+A 6-decimal asset, so shares also have 6 decimals. Amounts below are whole units. Alice starts with 1,000 assets and has approved the vault on the asset. The fulfiller starts with 500 assets and has also approved the vault. Alice holds an active credential. The KYC attester has credentialed the vault. The fund's investor cap has room for her, and no minimum position is set, which is the `Activate` default.
 
 | Step | Alice assets | Vault assets | Custody assets | Fulfiller assets | Alice shares | Vault shares | Share supply |
 |---|---|---|---|---|---|---|---|
@@ -127,7 +128,7 @@ A 6-decimal asset, so shares also have 6 decimals. Amounts below are whole units
 | 5. `fulfillRedeem(alice, 400, 500)` | 0 | 500 | 1,000 | 0 | 400 | 0 | 400 |
 | 6. `redeem(400, alice, alice)` | 500 | 0 | 1,000 | 0 | 400 | 0 | 400 |
 
-In step 2 the stored price is `1000 x 10^6 / 800 = 1,250,000`, which is 1.25 assets per share. Step 5 fulfils at the same price. After step 6, Alice has 500 assets and 400 shares, and custody holds 1,000 assets.
+In step 2 the stored price is `1000 x 10^6 / 800 = 1,250,000`, which is 1.25 assets per share. Step 5 fulfils at the same price. After step 6, Alice has 500 assets and 400 shares, and custody holds 1,000 assets. With a minimum position above 800 shares, step 3 would revert with `BELOW_MIN_POSITION` and the claimable amounts would stay ([flows-vaults.md](flows-vaults.md#a-minimum-position-requests-and-claims)).
 
 ### Rounding in partial claims
 

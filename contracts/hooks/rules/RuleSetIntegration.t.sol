@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import {IERC20Errors} from '@openzeppelin/contracts/interfaces/draft-IERC6093.sol';
+
 import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
@@ -8,22 +10,23 @@ import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
 
 import {ComplianceHook} from 'contracts/hooks/ComplianceHook.sol';
-import {LockupRule} from 'contracts/hooks/rules/LockupRule.sol';
-import {MaxHoldersRule} from 'contracts/hooks/rules/MaxHoldersRule.sol';
+import {HolderRestrictionRule} from 'contracts/hooks/rules/HolderRestrictionRule.sol';
+import {MinPositionRule} from 'contracts/hooks/rules/MinPositionRule.sol';
 import {SettlementWindowRule} from 'contracts/hooks/rules/SettlementWindowRule.sol';
 import {IntentTokenIntegrationTest} from 'contracts/tokens/IntentToken.t.sol';
 
 /**
  * @notice Brief §6 step 5: every Phase 4 rule registered in a real ComplianceHook, in the recommended order
- *         Identity → Lockup → SettlementWindow → MaxHolders, with pre-flight parity against the state-changing calls
+ *         Identity → MinPosition → HolderRestriction → SettlementWindow, with pre-flight parity against the state-changing
+ *         calls. The holder cap is the fund's, tested with a fund in `FundIntegration.t.sol`
  */
 contract RuleSetIntegrationTest is IntentTokenIntegrationTest {
   uint256 internal constant _MONDAY_10AM = 1_791_763_200 + 10 hours; // Mon 2026-10-12 10:00 UTC
   uint256 internal constant _SATURDAY_10AM = 1_791_763_200 + 5 days + 10 hours;
 
-  LockupRule internal _lockupRule;
+  MinPositionRule internal _minPositionRule;
+  HolderRestrictionRule internal _restrictionRule;
   SettlementWindowRule internal _windowRule;
-  MaxHoldersRule internal _maxHoldersRule;
   address internal _carol = makeAddr('carol');
   address internal _dave = makeAddr('dave');
 
@@ -33,28 +36,25 @@ contract RuleSetIntegrationTest is IntentTokenIntegrationTest {
     _identity.set(_carol, true);
     _identity.set(_dave, true);
 
-    _lockupRule = new LockupRule();
+    _minPositionRule = new MinPositionRule();
+    _restrictionRule = new HolderRestrictionRule();
     _windowRule = new SettlementWindowRule();
-    _maxHoldersRule = new MaxHoldersRule();
     vm.startPrank(_attester);
-    _registry.attest(address(_lockupRule).codehash, IPolicyRegistry.AttestKind.RULE, 'ipfs://lockup');
+    _registry.attest(address(_minPositionRule).codehash, IPolicyRegistry.AttestKind.RULE, 'ipfs://min-position');
+    _registry.attest(address(_restrictionRule).codehash, IPolicyRegistry.AttestKind.RULE, 'ipfs://restriction');
     _registry.attest(address(_windowRule).codehash, IPolicyRegistry.AttestKind.RULE, 'ipfs://window');
-    _registry.attest(address(_maxHoldersRule).codehash, IPolicyRegistry.AttestKind.RULE, 'ipfs://max-holders');
     vm.stopPrank();
 
     vm.startPrank(_admin);
-    // P5: seeding is legitimate here because the rule is not yet in the token's active set.
-    _maxHoldersRule.seedHolderCount(address(_token), 1);
-    _maxHoldersRule.setCap(address(_token), 3);
     _windowRule.setWindow(address(_token), 9 hours, 17 hours, _windowRule.MON_TO_FRI());
 
     IComplianceRule[] memory _ruleSet = new IComplianceRule[](4);
     _ruleSet[0] = _identityRule;
-    _ruleSet[1] = _lockupRule;
-    _ruleSet[2] = _windowRule;
-    _ruleSet[3] = _maxHoldersRule;
-    // Same admin, registry and token as the attested hook, so the same attested codehash.
-    _token.setPolicyHook(address(new ComplianceHook(_admin, _registry, address(_token), _ruleSet)));
+    _ruleSet[1] = _minPositionRule;
+    _ruleSet[2] = _restrictionRule;
+    _ruleSet[3] = _windowRule;
+    // The shared hook is already installed; the token's admin replaces the token's rule set on it.
+    _hook.setRules(address(_token), _ruleSet);
     vm.stopPrank();
   }
 
@@ -64,7 +64,7 @@ contract RuleSetIntegrationTest is IntentTokenIntegrationTest {
     uint256 _amount,
     bytes32 _expected
   ) internal {
-    (bool _ok, bytes32 _reason) = _token.canTransfer(_from, _to, _amount);
+    (bool _ok, bytes32 _reason) = _token.canTransferWithReason(_from, _to, _amount);
     assertEq(_reason, _expected, 'canTransfer reason');
     assertEq(_ok, _expected == Reasons.TRANSFER_OK);
     if (_expected != Reasons.TRANSFER_OK) vm.expectRevert(_rejected(_expected));
@@ -78,7 +78,7 @@ contract RuleSetIntegrationTest is IntentTokenIntegrationTest {
     bytes32 _expected
   ) internal {
     vm.prank(_executor);
-    (bool _ok, bytes32 _reason) = _token.canExecute(_i);
+    (bool _ok, bytes32 _reason) = _token.canExecute(_i, _sig);
     assertEq(_reason, _expected, 'canExecute reason');
     assertEq(_ok, _expected == Reasons.TRANSFER_OK);
     if (_expected != Reasons.TRANSFER_OK) vm.expectRevert(_rejected(_expected));
@@ -90,8 +90,11 @@ contract RuleSetIntegrationTest is IntentTokenIntegrationTest {
 contract RuleSetIntegration_Lockup is RuleSetIntegrationTest {
   function test_WhenAHolderIsLocked_TransfersAndIntentsAgreeUntilUnlock() external {
     vm.prank(_agent);
-    _lockupRule.setLockup(address(_token), _alice, block.timestamp + 30 days);
+    _restrictionRule.setLockup(address(_token), _alice, block.timestamp + 30 days);
 
+    // The standard's account question agrees: a locked holder cannot send, and can still be paid.
+    assertFalse(_token.canSend(_alice));
+    assertTrue(_token.canReceive(_alice));
     _assertTransferParity(_alice, _bob, 1 ether, Reasons.LOCKED);
     (ITransferIntent.TransferIntent memory _i, bytes memory _sig) = _signedIntent(_bob, 1 ether, keccak256('n'));
     _assertExecuteParity(_i, _sig, Reasons.LOCKED);
@@ -101,6 +104,7 @@ contract RuleSetIntegration_Lockup is RuleSetIntegrationTest {
     assertEq(_token.balanceOf(_bob), 1 ether);
 
     vm.warp(block.timestamp + 30 days); // the unlock second; plain transfers ignore the settlement window
+    assertTrue(_token.canSend(_alice));
     _assertTransferParity(_alice, _bob, 1 ether, Reasons.TRANSFER_OK);
   }
 }
@@ -120,45 +124,196 @@ contract RuleSetIntegration_SettlementWindow is RuleSetIntegrationTest {
   }
 }
 
-contract RuleSetIntegration_MaxHolders is RuleSetIntegrationTest {
-  function _fillToTheCap() internal {
-    _assertTransferParity(_alice, _bob, 10 ether, Reasons.TRANSFER_OK);
-    _assertTransferParity(_alice, _treasury, 10 ether, Reasons.TRANSFER_OK);
-    assertEq(_maxHoldersRule.holderCount(address(_token)), 3);
-  }
-
-  function test_WhenTheCapIsFull_ANewHolderIsRejectedWithParity() external {
-    _fillToTheCap();
-    _assertTransferParity(_alice, _carol, 1 ether, Reasons.MAX_HOLDERS);
-    (ITransferIntent.TransferIntent memory _i, bytes memory _sig) = _signedIntent(_carol, 1 ether, keccak256('n'));
-    _assertExecuteParity(_i, _sig, Reasons.MAX_HOLDERS);
-  }
-
-  function test_WhenTheCapIsFull_AFullBalanceMoveToANewHolderIsAllowed() external {
-    _fillToTheCap();
-    _assertTransferParity(_bob, _carol, 10 ether, Reasons.TRANSFER_OK);
-    assertEq(_maxHoldersRule.holderCount(address(_token)), 3);
-  }
-
-  function test_WhenTheCapIsFull_ForcedIsExemptButCounted() external {
-    _fillToTheCap();
-    vm.prank(_agent);
-    _token.forcedTransfer(_alice, _dave, 1 ether);
-    assertEq(_maxHoldersRule.holderCount(address(_token)), 4);
-  }
-
-  function test_WhenTheReceiverIsUnverifiedAtAFullCap_IdentityRejectsFirst() external {
-    _fillToTheCap();
-    _assertTransferParity(_alice, _eve, 1 ether, Reasons.RECEIVER_NOT_VERIFIED);
-  }
-
-  function test_WhenEveryoneLeaves_TheCountReturnsToZero() external {
-    _fillToTheCap();
-    vm.startPrank(_burner);
-    _token.burn(_alice, _token.balanceOf(_alice));
-    _token.burn(_bob, _token.balanceOf(_bob));
-    _token.burn(_treasury, _token.balanceOf(_treasury));
+contract RuleSetIntegration_AccountQuestions is RuleSetIntegrationTest {
+  /// @dev ERC-7943 has `canTransfer` perform a `canSend` check on the sender and a `canReceive` check on the receiver.
+  ///      For a plain transfer here it is not true while either is false, whatever the freeze, the lockup or the identity
+  ///      says (one way only: the enforcement kinds are not driven)
+  function testFuzz_CanTransferNeverExceedsTheAccountQuestions(
+    bool _bobSends,
+    bool _freezeSender,
+    bool _lockSender,
+    bool _freezeReceiver,
+    bool _unverifiedReceiver,
+    bool _wholeBalance
+  ) external {
+    address _sender = _bobSends ? _bob : _alice;
+    address _receiver = _unverifiedReceiver ? _eve : _carol;
+    vm.startPrank(_agent);
+    if (_freezeSender) _restrictionRule.setFrozen(address(_token), _sender, true);
+    if (_lockSender) _restrictionRule.setLockup(address(_token), _sender, block.timestamp + 1 days);
+    if (_freezeReceiver) _restrictionRule.setFrozen(address(_token), _receiver, true);
     vm.stopPrank();
-    assertEq(_maxHoldersRule.holderCount(address(_token)), 0);
+
+    uint256 _balance = _token.balanceOf(_sender);
+    uint256 _amount = _wholeBalance && _balance > 0 ? _balance : (_balance > 1 ? 1 : 0);
+    if (_token.canTransfer(_sender, _receiver, _amount)) {
+      assertTrue(_token.canSend(_sender), 'canTransfer without canSend');
+      assertTrue(_token.canReceive(_receiver), 'canTransfer without canReceive');
+    }
+  }
+}
+
+contract RuleSetIntegration_Freeze is RuleSetIntegrationTest {
+  function _freeze(
+    address _account,
+    bool _frozen
+  ) internal {
+    vm.prank(_agent);
+    _restrictionRule.setFrozen(address(_token), _account, _frozen);
+  }
+
+  function test_WhenTheSenderIsFrozen_TransfersAndIntentsAgreeUntilUnfrozen() external {
+    _freeze(_alice, true);
+
+    _assertTransferParity(_alice, _bob, 1 ether, Reasons.SENDER_FROZEN);
+    (ITransferIntent.TransferIntent memory _i, bytes memory _sig) = _signedIntent(_bob, 1 ether, keccak256('n'));
+    _assertExecuteParity(_i, _sig, Reasons.SENDER_FROZEN);
+    assertFalse(_token.canSend(_alice));
+    assertFalse(_token.canReceive(_alice));
+
+    _freeze(_alice, false);
+    assertTrue(_token.canSend(_alice));
+    _assertTransferParity(_alice, _bob, 1 ether, Reasons.TRANSFER_OK);
+  }
+
+  /// @dev RD4: the freeze on the receiver applies to a mint and to a forced transfer as well
+  function test_WhenTheReceiverIsFrozen_TransfersMintsAndForcedMovesAreRejected() external {
+    _freeze(_bob, true);
+
+    _assertTransferParity(_alice, _bob, 1 ether, Reasons.RECEIVER_FROZEN);
+    vm.expectRevert(_rejected(Reasons.RECEIVER_FROZEN));
+    vm.prank(_minter);
+    _token.mint(_bob, 1 ether);
+    vm.expectRevert(_rejected(Reasons.RECEIVER_FROZEN));
+    vm.prank(_agent);
+    _token.forcedTransfer(_alice, _bob, 1 ether);
+    assertFalse(_token.canReceive(_bob));
+    assertFalse(_token.canSend(_bob));
+  }
+
+  /// @dev A frozen holder can still be moved out of by force, and that is the enforcement route
+  function test_WhenTheSenderIsFrozen_AForcedTransferToAQuarantineAccountWorks() external {
+    _freeze(_alice, true);
+    vm.prank(_agent);
+    _token.forcedTransfer(_alice, _treasury, 1 ether);
+    assertEq(_token.balanceOf(_treasury), 1 ether);
+  }
+
+  /// @dev RD4: a burn, even the enforcement burner's, is refused from a frozen account
+  function test_WhenTheSenderIsFrozen_ABurnIsRejected() external {
+    _freeze(_alice, true);
+    vm.expectRevert(_rejected(Reasons.SENDER_FROZEN));
+    vm.prank(_burner);
+    _token.burn(_alice, 1 ether);
+  }
+
+  function test_WhenAFrozenHolderIsAlsoLocked_TheFreezeIsReportedFirst() external {
+    _freeze(_alice, true);
+    vm.prank(_agent);
+    _restrictionRule.setLockup(address(_token), _alice, block.timestamp + 30 days);
+    _assertTransferParity(_alice, _bob, 1 ether, Reasons.SENDER_FROZEN);
+  }
+}
+
+/// @notice L-1: dust can no longer be used to take holder slots or to leave a position nobody can exit
+contract RuleSetIntegration_MinPosition is RuleSetIntegrationTest {
+  uint256 internal constant _MIN = 10 ether;
+
+  function setUp() public override {
+    super.setUp();
+    vm.prank(_admin);
+    _minPositionRule.setMinPosition(address(_token), _MIN);
+  }
+
+  function test_WhenADustTransferTargetsAnEmptyAccount_ItIsRejectedWithParity() external {
+    _assertTransferParity(_alice, _bob, 1, Reasons.BELOW_MIN_POSITION);
+    (ITransferIntent.TransferIntent memory _i, bytes memory _sig) = _signedIntent(_bob, 1, keccak256('n'));
+    _assertExecuteParity(_i, _sig, Reasons.BELOW_MIN_POSITION);
+    assertEq(_token.balanceOf(_bob), 0);
+
+    _assertTransferParity(_alice, _bob, _MIN, Reasons.TRANSFER_OK);
+    assertEq(_token.balanceOf(_bob), _MIN);
+  }
+
+  function test_WhenATransferWouldLeaveDustBehind_ItIsRejected() external {
+    _assertTransferParity(_alice, _bob, 1000 ether - 1, Reasons.BELOW_MIN_POSITION);
+    _assertTransferParity(_alice, _bob, 1000 ether, Reasons.TRANSFER_OK);
+    assertEq(_token.balanceOf(_alice), 0);
+  }
+
+  function test_WhenAMintWouldLeaveDust_ItIsRejected() external {
+    vm.expectRevert(_rejected(Reasons.BELOW_MIN_POSITION));
+    vm.prank(_minter);
+    _token.mint(_bob, _MIN - 1);
+    vm.prank(_minter);
+    _token.mint(_bob, _MIN);
+    assertEq(_token.balanceOf(_bob), _MIN);
+  }
+
+  /// @dev Enforcement is exempt: a forced transfer may leave or create a dust position
+  function test_WhenForced_DustIsAllowed() external {
+    vm.prank(_agent);
+    _token.forcedTransfer(_alice, _dave, 1);
+    assertEq(_token.balanceOf(_dave), 1);
+  }
+
+  function test_WhenAnEnforcementBurnLeavesDust_ItIsAllowed() external {
+    vm.prank(_burner);
+    _token.burn(_alice, 1000 ether - 1);
+    assertEq(_token.balanceOf(_alice), 1);
+  }
+
+  /// @dev A minimum of zero switches the rule off for the token
+  function test_WhenTheMinimumIsSwitchedOff_DustMovesAgain() external {
+    vm.prank(_admin);
+    _minPositionRule.setMinPosition(address(_token), 0);
+    _assertTransferParity(_alice, _bob, 1, Reasons.TRANSFER_OK);
+  }
+
+  /// @dev The account answers have no opinion about an amount: a would-be holder can still receive
+  function test_WhenAMinimumIsSet_CanReceiveStillAcceptsAnEmptyVerifiedAccount() external view {
+    assertTrue(_token.canReceive(_bob));
+    assertTrue(_token.canSend(_alice));
+  }
+}
+
+/// @notice ERC-7943 leaves a balance shortfall to the base standard: `canTransfer` does not return false for it, the
+///         write reverts with the base error, and the reasoned pre-flight keeps the truth. The real rules must tolerate
+///         an amount above the balance for that to hold
+contract RuleSetIntegration_BalanceShortfall is RuleSetIntegrationTest {
+  function test_WhenTheAmountExceedsTheBalance_ThePlainAnswerIsTrueAndTheWriteRevertsWithTheBaseError() external {
+    uint256 _balance = _token.balanceOf(_alice);
+    assertTrue(_token.canTransfer(_alice, _bob, _balance + 1));
+    (bool _ok, bytes32 _reason) = _token.canTransferWithReason(_alice, _bob, _balance + 1);
+    assertFalse(_ok);
+    assertEq(_reason, Reasons.INSUFFICIENT_UNFROZEN);
+    vm.expectRevert(
+      abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, _alice, _balance, _balance + 1)
+    );
+    vm.prank(_alice);
+    _token.transfer(_bob, _balance + 1);
+  }
+
+  /// @dev The permissioned rules still decide: an unverified receiver or a lockup make the plain answer false
+  ///      whatever the amount
+  function test_WhenTheAmountExceedsTheBalanceAndARuleRejects_ThePlainAnswerIsFalse() external {
+    assertFalse(_token.canTransfer(_alice, _eve, 5000 ether)); // unverified receiver
+    vm.prank(_agent);
+    _restrictionRule.setLockup(address(_token), _alice, block.timestamp + 1 days);
+    assertFalse(_token.canTransfer(_alice, _bob, 5000 ether)); // locked sender
+  }
+
+  /// @dev The plain answer must not revert, as ERC-7943 requires, for any amount and with a minimum set, which the
+  ///      rules of this list do by never subtracting an amount from a balance that it does not fit in. Above the
+  ///      balance it is true unless a rule objects to the receiver's new position: here, one below the minimum
+  function testFuzz_WhateverTheAmount_ThePlainAnswerNeverRevertsAndAboveTheBalanceFollowsTheMinimum(
+    uint256 _amount,
+    uint256 _minimum
+  ) external {
+    _minimum = bound(_minimum, 0, 2000 ether);
+    vm.prank(_admin);
+    _minPositionRule.setMinPosition(address(_token), _minimum);
+    bool _plain = _token.canTransfer(_alice, _bob, _amount);
+    if (_amount > _token.balanceOf(_alice)) assertEq(_plain, _amount >= _minimum);
   }
 }

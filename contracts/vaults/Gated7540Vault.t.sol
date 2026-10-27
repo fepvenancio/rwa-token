@@ -13,26 +13,33 @@ import {Test} from 'forge-std/Test.sol';
 
 import {Reasons} from 'interfaces/Errors.sol';
 
+import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IERC7540Deposit} from 'interfaces/IERC7540Deposit.sol';
 import {IERC7540Operator} from 'interfaces/IERC7540Operator.sol';
 import {IERC7540Redeem} from 'interfaces/IERC7540Redeem.sol';
 import {IERC7575} from 'interfaces/IERC7575.sol';
+import {IERC7943Fungible} from 'interfaces/IERC7943Fungible.sol';
 import {IGated7540Vault} from 'interfaces/IGated7540Vault.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
+import {ITemplated} from 'interfaces/ITemplated.sol';
 
 import {ProxyDeployer} from 'contracts/deploy/ProxyDeployer.sol';
+import {Fund} from 'contracts/fund/Fund.sol';
 import {PolicyRegistry} from 'contracts/governance/PolicyRegistry.sol';
 import {ComplianceHook} from 'contracts/hooks/ComplianceHook.sol';
-import {IdentityRule} from 'contracts/hooks/rules/IdentityRule.sol';
-import {LockupRule} from 'contracts/hooks/rules/LockupRule.sol';
-import {MaxHoldersRule} from 'contracts/hooks/rules/MaxHoldersRule.sol';
+import {FundHoldersRule} from 'contracts/hooks/rules/FundHoldersRule.sol';
+import {HolderRestrictionRule} from 'contracts/hooks/rules/HolderRestrictionRule.sol';
+import {MinPositionRule} from 'contracts/hooks/rules/MinPositionRule.sol';
 import {Helpers} from 'contracts/test/Helpers.sol';
 import {MockAsset} from 'contracts/test/MockAsset.sol';
 import {MockIdentityRegistry} from 'contracts/test/MockIdentityRegistry.sol';
+import {MockIdentityRule} from 'contracts/test/MockIdentityRule.sol';
+import {IntentToken} from 'contracts/tokens/IntentToken.sol';
+import {Gated4626Vault} from 'contracts/vaults/Gated4626Vault.sol';
 import {Gated7540Vault} from 'contracts/vaults/Gated7540Vault.sol';
 
 contract Gated7540VaultUnitTest is Helpers {
@@ -59,6 +66,7 @@ contract Gated7540VaultUnitTest is Helpers {
     vm.mockCall(
       _registry, abi.encodeCall(IPolicyRegistry.isAttested, (_hook, IPolicyRegistry.AttestKind.HOOK)), abi.encode(true)
     );
+    vm.mockCall(_hook, abi.encodeCall(IComplianceHook.REGISTRY, ()), abi.encode(_registry));
     _hookDecides(Reasons.TRANSFER_OK);
     vm.mockCall(_hook, abi.encodeCall(IPolicyHook.wantsAfter, ()), abi.encode(false));
 
@@ -69,7 +77,17 @@ contract Gated7540VaultUnitTest is Helpers {
           address(_impl),
           abi.encodeCall(
             Gated7540Vault.initialize,
-            (IERC20(address(_asset)), 'Gated Async Fund', 'gASYNC', _admin, _guardian, _registry, _hook, _custody)
+            (
+              IERC20(address(_asset)),
+              'Gated Async Fund',
+              'gASYNC',
+              _admin,
+              _guardian,
+              _registry,
+              _hook,
+              new IComplianceRule[](0),
+              _custody
+            )
           )
         )
       )
@@ -158,9 +176,9 @@ contract Gated7540VaultUnitTest is Helpers {
       amount: _amount,
       operator: _operator,
       kind: _kind,
-      ref: bytes32(0),
-      deadline: 0,
-      extra: ''
+      extra: abi.encode(
+        _from == address(0) ? 0 : _vault.balanceOf(_from), _to == address(0) ? 0 : _vault.balanceOf(_to)
+      )
     });
   }
 
@@ -183,7 +201,9 @@ contract Gated7540VaultUnit_Initialize is Gated7540VaultUnitTest {
 
   function test_WhenCalledTwice_ItReverts() external {
     vm.expectRevert(Initializable.InvalidInitialization.selector);
-    _vault.initialize(IERC20(address(_asset)), 'X', 'X', _admin, _guardian, _registry, _hook, _custody);
+    _vault.initialize(
+      IERC20(address(_asset)), 'X', 'X', _admin, _guardian, _registry, _hook, new IComplianceRule[](0), _custody
+    );
   }
 
   function test_WhenCustodyIsZero_ItReverts() external {
@@ -192,7 +212,8 @@ contract Gated7540VaultUnit_Initialize is Gated7540VaultUnitTest {
     new ERC1967Proxy(
       address(_impl),
       abi.encodeCall(
-        Gated7540Vault.initialize, (IERC20(address(_asset)), 'X', 'X', _admin, _guardian, _registry, _hook, address(0))
+        Gated7540Vault.initialize,
+        (IERC20(address(_asset)), 'X', 'X', _admin, _guardian, _registry, _hook, new IComplianceRule[](0), address(0))
       )
     );
   }
@@ -711,18 +732,18 @@ contract Gated7540VaultUnit_FrozenEscrow is Gated7540VaultUnitTest {
     _requestRedeem(_alice, 50);
     _requestRedeem(_bob, 30);
     vm.prank(_agent);
-    _vault.setFrozen(address(_vault), 80);
+    _vault.setFrozenTokens(address(_vault), 80);
   }
 
   /// @dev M-2: a reject is a plain TRANSFER, so a frozen escrow blocks it ("freeze means freeze"); recovery still works
   function test_WhenTheEscrowIsFrozen_ARejectIsRefused() external {
     _escrowTwoAndFreeze();
     vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.INSUFFICIENT_UNFROZEN)
+      abi.encodeWithSelector(IERC7943Fungible.ERC7943InsufficientUnfrozenBalance.selector, address(_vault), 50, 0)
     );
     vm.prank(_fulfiller);
     _vault.rejectRedeemRequest(_alice);
-    assertEq(_vault.getFrozen(address(_vault)), 80);
+    assertEq(_vault.getFrozenTokens(address(_vault)), 80);
     assertEq(_vault.pendingRedeemRequest(0, _alice), 50);
   }
 
@@ -730,7 +751,7 @@ contract Gated7540VaultUnit_FrozenEscrow is Gated7540VaultUnitTest {
     _escrowTwoAndFreeze();
     vm.prank(_agent);
     _vault.recoverRedeemRequest(_alice, _carolRecovery);
-    assertEq(_vault.getFrozen(address(_vault)), 30);
+    assertEq(_vault.getFrozenTokens(address(_vault)), 30);
     assertEq(_vault.balanceOf(address(_vault)), 30);
   }
 
@@ -1082,13 +1103,14 @@ contract Gated7540VaultUnit_ViewsAndAdmin is Gated7540VaultUnitTest {
   }
 }
 
-/// @notice Integration: the async vault behind a real ComplianceHook with Identity, Lockup and MaxHolders
+/// @notice Integration: the async vault behind a real ComplianceHook with an identity rule, HolderRestriction and the
+///         fund's holder cap (`FundHoldersRule`, a fund of one class with a cap of 2)
 contract Gated7540VaultIntegrationTest is Test {
   Gated7540Vault internal _vault;
   MockAsset internal _asset;
   MockIdentityRegistry internal _identity;
-  LockupRule internal _lockupRule;
-  MaxHoldersRule internal _maxHoldersRule;
+  HolderRestrictionRule internal _restrictionRule;
+  Fund internal _fund;
   address internal _guardian = makeAddr('guardian');
   address internal _agent = makeAddr('agent');
   address internal _fulfiller = makeAddr('fulfiller');
@@ -1102,23 +1124,25 @@ contract Gated7540VaultIntegrationTest is Test {
     // Configure, then hand over: this test is the vault admin while it configures.
     PolicyRegistry _registry = new PolicyRegistry(address(this), address(this));
     _identity = new MockIdentityRegistry();
-    IdentityRule _identityRule = new IdentityRule(IIdentityRegistry(address(_identity)));
-    _lockupRule = new LockupRule();
-    _maxHoldersRule = new MaxHoldersRule();
+    MockIdentityRule _identityRule = new MockIdentityRule(IIdentityRegistry(address(_identity)));
+    _restrictionRule = new HolderRestrictionRule();
+    _fund = new Fund(address(this), _registry);
+    FundHoldersRule _fundRule = new FundHoldersRule(_fund);
     _registry.attest(address(_identityRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
-    _registry.attest(address(_lockupRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
-    _registry.attest(address(_maxHoldersRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
+    _registry.attest(address(_restrictionRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
+    _registry.attest(address(_fundRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
+    _fund.setRule(address(_fundRule));
+    _fund.setHolderCap(2);
 
     _asset = new MockAsset(6);
     Gated7540Vault _impl = new Gated7540Vault();
     IComplianceRule[] memory _rules = new IComplianceRule[](3);
     _rules[0] = _identityRule;
-    _rules[1] = _lockupRule;
-    _rules[2] = _maxHoldersRule;
+    _rules[1] = _restrictionRule;
+    _rules[2] = _fundRule;
     // CREATE2 through ProxyDeployer, as in production: the address does not depend on this contract's nonce.
-    ProxyDeployer _proxyDeployer = new ProxyDeployer(address(this));
-    address _predictedProxy = _proxyDeployer.predict('gASYNC', address(_impl));
-    ComplianceHook _hook = new ComplianceHook(address(this), _registry, _predictedProxy, _rules);
+    ProxyDeployer _proxyDeployer = new ProxyDeployer(address(this), _registry);
+    ComplianceHook _hook = new ComplianceHook(_registry);
     _registry.attest(address(_hook).codehash, IPolicyRegistry.AttestKind.HOOK, '');
     _registry.attest(address(_impl).codehash, IPolicyRegistry.AttestKind.IMPLEMENTATION, '');
     _vault = Gated7540Vault(
@@ -1136,19 +1160,21 @@ contract Gated7540VaultIntegrationTest is Test {
               _guardian,
               address(_registry),
               address(_hook),
+              _rules,
               _custody
             )
           ),
-          address(_hook)
+          address(_hook),
+          _rules
         )
       )
     );
     _vault.grantRole(_vault.FULFILLER_ROLE(), _fulfiller);
     _vault.grantRole(_vault.AGENT_ROLE(), _agent);
-    // The escrow vault is a bank-controlled, verified, holder-exempt account (owner decisions V2 and R1).
+    _fund.registerClass(address(_vault));
+    // The escrow vault is a bank-controlled, verified account (owner decisions V2 and R1). The fund never counts the
+    // class itself, so the escrow takes no investor slot.
     _identity.set(address(_vault), true);
-    _maxHoldersRule.setExemptHolder(address(_vault), address(_vault), true);
-    _maxHoldersRule.setCap(address(_vault), 2);
 
     _identity.set(_alice, true);
     _identity.set(_bob, true);
@@ -1179,11 +1205,11 @@ contract Gated7540VaultIntegration_Lifecycle is Gated7540VaultIntegrationTest {
     _invest(_alice, 1000);
     assertEq(_vault.balanceOf(_alice), 1000);
     assertEq(_asset.balanceOf(_custody), 1000);
-    assertEq(_maxHoldersRule.holderCount(address(_vault)), 1);
+    assertEq(_fund.holderCount(), 1);
 
     vm.prank(_alice);
     _vault.requestRedeem(1000, _alice, _alice);
-    assertEq(_maxHoldersRule.holderCount(address(_vault)), 0); // full escrow: alice left, the exempt vault never joined
+    assertEq(_fund.holderCount(), 0); // full escrow: alice left, and the vault, the class itself, never joins
     vm.prank(_fulfiller);
     _vault.fulfillRedeem(_alice, 1000, 1100); // NAV rose 10%
     assertEq(_vault.totalSupply(), 0);
@@ -1220,20 +1246,20 @@ contract Gated7540VaultIntegration_Escrow is Gated7540VaultIntegrationTest {
   function test_WhenTheCapIsFullAndTheVaultIsEmpty_APartialRedeemRequestSucceeds() external {
     _invest(_alice, 100);
     _invest(_bob, 100);
-    assertEq(_maxHoldersRule.holderCount(address(_vault)), 2); // cap reached
+    assertEq(_fund.holderCount(), 2); // cap reached
     assertEq(_vault.balanceOf(address(_vault)), 0);
 
     vm.prank(_alice);
     _vault.requestRedeem(40, _alice, _alice);
     assertEq(_vault.balanceOf(address(_vault)), 40);
-    assertEq(_maxHoldersRule.holderCount(address(_vault)), 2);
+    assertEq(_fund.holderCount(), 2);
   }
 
   /// @dev The escrow move is a TRANSFER, so a locked holder cannot exit by filing a request
   function test_WhenTheHolderIsLocked_ARedeemRequestIsRefused() external {
     _invest(_alice, 100);
     vm.prank(_agent);
-    _lockupRule.setLockup(address(_vault), _alice, block.timestamp + 30 days);
+    _restrictionRule.setLockup(address(_vault), _alice, block.timestamp + 30 days);
     vm.expectRevert(abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.LOCKED));
     vm.prank(_alice);
     _vault.requestRedeem(100, _alice, _alice);
@@ -1242,10 +1268,8 @@ contract Gated7540VaultIntegration_Escrow is Gated7540VaultIntegrationTest {
   function test_WhenSharesAreFrozen_TheyCannotBeEscrowed() external {
     _invest(_alice, 100);
     vm.prank(_agent);
-    _vault.setFrozen(_alice, 100);
-    vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.INSUFFICIENT_UNFROZEN)
-    );
+    _vault.setFrozenTokens(_alice, 100);
+    vm.expectRevert(abi.encodeWithSelector(IERC7943Fungible.ERC7943InsufficientUnfrozenBalance.selector, _alice, 1, 0));
     vm.prank(_alice);
     _vault.requestRedeem(1, _alice, _alice);
   }
@@ -1268,7 +1292,7 @@ contract Gated7540VaultIntegration_Escrow is Gated7540VaultIntegrationTest {
     vm.prank(_agent);
     _vault.recoverRedeemRequest(_alice, _bob); // FORCED, to an existing holder
     assertEq(_vault.balanceOf(_bob), 200);
-    assertEq(_maxHoldersRule.holderCount(address(_vault)), 2);
+    assertEq(_fund.holderCount(), 2);
   }
 
   /// @dev M-2, cap full: a controller that still holds is not a new holder, so the reject goes through
@@ -1280,7 +1304,7 @@ contract Gated7540VaultIntegration_Escrow is Gated7540VaultIntegrationTest {
     vm.prank(_fulfiller);
     _vault.rejectRedeemRequest(_alice);
     assertEq(_vault.balanceOf(_alice), 100);
-    assertEq(_maxHoldersRule.holderCount(address(_vault)), 2);
+    assertEq(_fund.holderCount(), 2);
   }
 
   /// @dev M-2, the steering attack: naming a new holder as controller cannot route shares past a full cap
@@ -1297,7 +1321,7 @@ contract Gated7540VaultIntegration_Escrow is Gated7540VaultIntegrationTest {
     vm.prank(_fulfiller);
     _vault.rejectRedeemRequest(_carol); // ...and so is the request-then-reject route
     assertEq(_vault.balanceOf(_carol), 0);
-    assertEq(_maxHoldersRule.holderCount(address(_vault)), 2);
+    assertEq(_fund.holderCount(), 2);
   }
 
   /// @dev A de-verified controller's reject reverts and the shares stay escrowed (unchanged by M-2)
@@ -1690,6 +1714,90 @@ contract Gated7540VaultUnit_Storage is Gated7540VaultUnitTest {
 
 /// @dev M-3: compliance holds after fulfilment. Claims re-run the controller's policy pre-flight, and the agent can
 ///      recover claimable balances to a verified account, even while paused or at a full cap
+/// @notice The async vault with a minimum position (RD7). The eligibility probes must not read the minimum as a block, and
+///         the escrow (the vault itself) is exempt, or a redeem request below the minimum could never be filed
+contract Gated7540VaultIntegration_MinPosition is Gated7540VaultIntegrationTest {
+  uint256 internal constant _MIN = 1000;
+
+  function _enableMinPosition() internal {
+    MinPositionRule _minRule = new MinPositionRule();
+    IPolicyRegistry(_vault.registry()).attest(address(_minRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
+    ComplianceHook _hook = ComplianceHook(_vault.policyHook());
+    IComplianceRule[] memory _old = _hook.rules(address(_vault));
+    IComplianceRule[] memory _list = new IComplianceRule[](_old.length + 1);
+    _list[0] = _old[0]; // identity first, then the minimum, then the holder rules
+    _list[1] = _minRule;
+    for (uint256 _i = 1; _i < _old.length; ++_i) {
+      _list[_i + 1] = _old[_i];
+    }
+    _hook.setRules(address(_vault), _list);
+    _minRule.setMinPosition(address(_vault), _MIN);
+  }
+
+  /// @dev An empty controller cannot know how many shares a request will buy, so the request is not refused for size
+  function test_WhenAMinimumIsSet_AFreshControllerCanRequestAndClaimTheMinimum() external {
+    _enableMinPosition();
+    _invest(_alice, _MIN);
+    assertEq(_vault.balanceOf(_alice), _MIN);
+  }
+
+  function test_WhenAMinimumIsSet_ClaimableAmountsOfAFreshControllerAreNotHidden() external {
+    _enableMinPosition();
+    vm.prank(_alice);
+    _vault.requestDeposit(_MIN, _alice, _alice);
+    vm.prank(_fulfiller);
+    _vault.fulfillDeposit(_alice, _MIN, _MIN);
+    assertEq(_vault.maxDeposit(_alice), _MIN);
+    assertEq(_vault.maxMint(_alice), _MIN);
+  }
+
+  /// @dev A claim below the minimum is refused by the hook; the agent's enforcement mint is exempt and delivers it
+  function test_WhenAClaimWouldLeaveDust_TheClaimRevertsAndTheAgentCanRecover() external {
+    _enableMinPosition();
+    vm.prank(_alice);
+    _vault.requestDeposit(_MIN - 1, _alice, _alice);
+    vm.prank(_fulfiller);
+    _vault.fulfillDeposit(_alice, _MIN - 1, _MIN - 1);
+
+    vm.expectRevert(
+      abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.BELOW_MIN_POSITION)
+    );
+    vm.prank(_alice);
+    _vault.mint(_MIN - 1, _alice, _alice);
+    assertEq(_vault.maxMint(_alice), _MIN - 1, 'the failed claim consumed nothing');
+
+    vm.prank(_agent);
+    _vault.recoverClaimable(_alice, _alice);
+    assertEq(_vault.balanceOf(_alice), _MIN - 1);
+  }
+
+  function test_WhenARedeemRequestWouldLeaveDustWithTheController_ItIsRefused() external {
+    _enableMinPosition();
+    _invest(_alice, 2 * _MIN);
+    vm.expectRevert(
+      abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.BELOW_MIN_POSITION)
+    );
+    vm.prank(_alice);
+    _vault.requestRedeem(_MIN + 1, _alice, _alice);
+  }
+
+  /// @dev The escrow holds 1 share, below the minimum, and is exempt as the token itself; the fulfilment burns from it
+  function test_WhenTheEscrowHoldsLessThanTheMinimum_TheRedeemLifecycleStillRuns() external {
+    _enableMinPosition();
+    _invest(_alice, 2 * _MIN);
+    vm.prank(_alice);
+    _vault.requestRedeem(1, _alice, _alice);
+    assertEq(_vault.balanceOf(address(_vault)), 1);
+
+    vm.prank(_fulfiller);
+    _vault.fulfillRedeem(_alice, 1, 1);
+    vm.prank(_alice);
+    _vault.redeem(1, _alice, _alice);
+    assertEq(_vault.balanceOf(address(_vault)), 0);
+    assertEq(_vault.balanceOf(_alice), 2 * _MIN - 1);
+  }
+}
+
 contract Gated7540VaultIntegration_Claimable is Gated7540VaultIntegrationTest {
   address internal _treasury = makeAddr('treasury');
 
@@ -1759,7 +1867,7 @@ contract Gated7540VaultIntegration_Claimable is Gated7540VaultIntegrationTest {
   function test_WhenTheControllerIsLockedUp_ThePayoutWaitsForTheUnlock() external {
     _fulfilledRedemption(_alice, 100);
     vm.prank(_agent);
-    _lockupRule.setLockup(address(_vault), _alice, block.timestamp + 1 days);
+    _restrictionRule.setLockup(address(_vault), _alice, block.timestamp + 1 days);
     assertEq(_vault.maxRedeem(_alice), 0);
     vm.expectRevert(
       abi.encodeWithSelector(IGated7540Vault.Gated7540Vault_ControllerNotEligible.selector, Reasons.LOCKED)
@@ -1800,7 +1908,7 @@ contract Gated7540VaultIntegration_Claimable is Gated7540VaultIntegrationTest {
     vm.prank(_agent);
     _vault.recoverClaimable(_alice, _alice);
     assertEq(_vault.balanceOf(_alice), 100);
-    assertEq(_maxHoldersRule.holderCount(address(_vault)), 3, 'exempt from the cap, still counted');
+    assertEq(_fund.holderCount(), 3, 'exempt from the cap, still counted');
     assertEq(_vault.claimableDepositRequest(0, _alice), 0);
   }
 
@@ -1862,35 +1970,54 @@ contract Gated7540VaultIntegration_Claimable is Gated7540VaultIntegrationTest {
   }
 }
 
-/// @notice A second holder-rule instance started on a live vault whose escrow holds shares
-contract Gated7540VaultIntegration_HolderRuleColdStart is Gated7540VaultIntegrationTest {
-  function test_WhenANewInstanceIsSeededFromTheHolderList_TheEscrowIsExemptAndTheCountMatches() external {
-    _invest(_alice, 1000);
-    _invest(_bob, 500);
-    vm.prank(_alice);
-    _vault.requestRedeem(400, _alice, _alice); // the vault now escrows 400 shares
+/// @notice A vault proxy cannot be moved onto another template's implementation, attested or not
+contract Gated7540VaultUnit_Template is Gated7540VaultUnitTest {
+  function _attestedImplementation(
+    address _impl
+  ) internal {
+    vm.mockCall(
+      _registry,
+      abi.encodeCall(IPolicyRegistry.isAttested, (_impl, IPolicyRegistry.AttestKind.IMPLEMENTATION)),
+      abi.encode(true)
+    );
+    vm.startPrank(_admin);
+    _vault.grantRole(_vault.UPGRADER_ROLE(), _admin);
+    vm.stopPrank();
+  }
 
-    MaxHoldersRule _replacement = new MaxHoldersRule(); // same code, so already attested
-    ComplianceHook _hook = ComplianceHook(_vault.policyHook());
-    IComplianceRule[] memory _rules = _hook.rules();
-    _rules[2] = _replacement;
-    address[] memory _holders = new address[](3);
-    _holders[0] = _alice;
-    _holders[1] = _bob;
-    _holders[2] = address(_vault);
-    for (uint256 _i = 1; _i < 3; ++_i) {
-      for (uint256 _j = _i; _j > 0 && _holders[_j - 1] > _holders[_j]; --_j) {
-        (_holders[_j - 1], _holders[_j]) = (_holders[_j], _holders[_j - 1]);
-      }
-    }
+  function test_WhenQueried_ItNamesItsTemplate() external view {
+    assertEq(_vault.templateId(), keccak256('Gated7540Vault'));
+  }
 
-    // One batch while the replacement is out of the list: exempt the escrow, seed, then swap the rule in.
-    _replacement.setCap(address(_vault), 2);
-    _replacement.setExemptHolder(address(_vault), address(_vault), true);
-    _replacement.seedHolderCountFromHolders(address(_vault), _holders);
-    _hook.setRules(_rules);
+  function test_WhenUpgradedToTheTokenImplementation_ItIsRefused() external {
+    address _impl = address(new IntentToken());
+    _attestedImplementation(_impl);
+    vm.expectRevert(
+      abi.encodeWithSelector(
+        ITemplated.Templated_WrongTemplate.selector, _impl, keccak256('Gated7540Vault'), keccak256('IntentToken')
+      )
+    );
+    vm.prank(_admin);
+    _vault.upgradeToAndCall(_impl, '');
+  }
 
-    assertEq(_replacement.holderCount(address(_vault)), 2);
-    assertEq(_replacement.holderCount(address(_vault)), _maxHoldersRule.holderCount(address(_vault)));
+  function test_WhenUpgradedToTheOtherVaultImplementation_ItIsRefused() external {
+    address _impl = address(new Gated4626Vault());
+    _attestedImplementation(_impl);
+    vm.expectRevert(
+      abi.encodeWithSelector(
+        ITemplated.Templated_WrongTemplate.selector, _impl, keccak256('Gated7540Vault'), keccak256('Gated4626Vault')
+      )
+    );
+    vm.prank(_admin);
+    _vault.upgradeToAndCall(_impl, '');
+  }
+
+  function test_WhenUpgradedToANewImplementationOfItself_ItUpgrades() external {
+    address _impl = address(new Gated7540Vault());
+    _attestedImplementation(_impl);
+    vm.prank(_admin);
+    _vault.upgradeToAndCall(_impl, '');
+    assertEq(_vault.templateId(), keccak256('Gated7540Vault'));
   }
 }

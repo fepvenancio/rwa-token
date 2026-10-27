@@ -1022,7 +1022,7 @@ All eight pages exist, checks 1 to 6 pass with their output shown, and the summa
 - **Will go stale when review item M-3 (claimable recovery, in progress in another session) lands:** `flows-vaults.md` ("What cannot be undone once fulfilled", the pause table, the 7540 `max*` text), `roles.md` (function table), `money.md` ("only places the asset can leave the vault") and the statements that `ControllerNotEligible` is raised only on `requestDeposit`.
 - **Not yet committed:** another session committed the first version of `docs/` as `e44dbb8` before verification finished. The fixes from the verification rounds are uncommitted edits on top of it.
 
-## v0.3.0 candidate: `MaxHoldersRule` without live seeding (2026-10-22: A done in `49c51d8`; B built, awaiting review)
+## v0.3.0 candidate: `MaxHoldersRule` without live seeding (2026-10-22: A and B merged in PR #1, merge commit `b6f8e9b`)
 
 Source: the snapshot-window discussion on the urwa-policy draft (Ethereum Magicians thread 30048, posts #2 to #5), checked against this repo's code.
 
@@ -1233,5 +1233,1414 @@ In Ignition, `Components` deploys v2. `roles.ts` and `Activate` change only the 
 | 0.3 #2: a reinstall is a new installation | Yes: cases 1 and 2 above. |
 | 0.4: the snapshot window | Yes, and the window is wider here, because the seed goes through the 7-day timelock. Change B's list seed closes it. |
 
+## Audit leftovers from 2026-10-17 (approved 2026-10-22)
+
+The two items still open from the 2026-10-17 audit. Both are text only. The build has no metadata hash, so the bytecode and the attested codehashes do not change.
+
+1. **Two `Gated7540Vault` comments overclaim.**
+   - `withdraw`: "assets can never be drained for zero shares". `_claimMint`: "shares can never be minted for zero assets".
+   - Rounding up makes each partial claim take at least its pro-rata share, which can use one side of the claimable pair up first. After that, the rest of the other side moves against zero.
+   - **Proof, in a scratch copy:** with 3 shares claimable for 10 assets, three one-asset withdrawals use the shares up, and the fourth pays an asset for 0 shares. With 10 shares claimable for 3 assets, the fourth one-share mint consumes 0 assets.
+   - Nothing is lost: the remainder is owed to the controller either way.
+   - **Change:** both comments say what the rounding does guarantee, and what happens after one side is used up.
+2. **README runbook step 7 lags `assertHandedOver`.**
+   - **Missing from step 7:** the check that every hook's `ADMIN` is the main timelock, the check that no rule exposes `hasRole` or `owner`, and the recovery timelock in the deployer check.
+   - **Change:** step 7 gets these three.
+   - **Same list in `docs/governance-and-deployment.md` ("After `Activate`"):** it also omits the hook-`ADMIN` check, so it gets that one line too.
+3. **`docs/README.md` "Checked against"** names the PR #1 merge commit `b6f8e9b`, as promised for after the merge.
+
+**Gates:** lint, fmt, tests in both runners, Slither, Aderyn, and a check that the `Gated7540Vault` deployed bytecode is unchanged.
+
+**Result (2026-10-22).**
+- Both comments now say what the rounding guarantees and what happens after one side is used up.
+- README step 7 lists the hook-`ADMIN` check, the rule access-control check and both timelocks in the deployer check. The docs list has the hook-`ADMIN` check.
+- `docs/README.md` names `b6f8e9b`.
+- **Gates:**
+  - lint 0, fmt clean;
+  - 513 passing (453 solidity, 60 nodejs), isolated 453;
+  - Slither 0, Aderyn 0;
+  - the `Gated7540Vault` deployed bytecode hash is unchanged (`303eebf4…`).
+
+## Fund layer: `Fund` plus `FundHoldersRule` (approved 2026-10-22; F-1 and F-2 approved and committed on `fund-layer`, not pushed)
+
+Source: [the assessment](docs/superpowers/specs/2026-10-22-fund-assessment.md) and its [benchmark](docs/superpowers/specs/fund-gas-bench/). On 2026-10-22 the owner asked for this plan using the assessment's defaults for its open questions. No code is written. Nothing here changes an existing contract, so the deployed bytecode of all 13 current contracts stays as it is.
+
+### Goal
+
+A fund is a set of share classes. Each class is an existing gated token or vault, with its own balances, hook and roles. The fund adds what no single class can know: a list of its classes, the number of distinct investors across them, and which classes each investor is in.
+
+- A fund-wide investor cap, enforced through each class's hook like every other policy.
+- Works the same for `IntentToken`, `Gated4626Vault` and `Gated7540Vault`. The fund code never branches on which one a class is.
+- No change to the base, `ComplianceHook`, `ProxyDeployer`, the registry, the existing rules, or any existing interface.
+
+### Assumptions
+
+The first seven are the assessment's defaults for its questions 1 to 7. F8 to F15 are choices made while planning. Say which you want changed.
+
+| # | Assumption | Why |
+|---|---|---|
+| F1 | Per-subscription lots are not solved. `LockupRule` keeps one unlock time per holder and token, so a new subscription resets it. | A lot ledger is a separate design (ERC-1450 batches, ERC-1410 partitions). |
+| F2 | Investors are counted by address. Dust can fill the cap and one investor with two wallets counts twice (finding L-1, accepted for `MaxHoldersRule`, inherited here). `IIdentityRegistry` does not change. | An identity id needs a registry change and an identity provider that supplies it. |
+| F3 | One subscription asset per class. `Gated7540Vault` stays its own share token. | Several assets per class means splitting the share token from the vault (ERC-7575). |
+| F4 | `MAX_CLASSES = 32`. | The mask allows 256. On-chain loops over classes cost about 8,600 gas each, so the limit keeps them bounded. |
+| F5 | Holders can transfer among verified investors. No restricted-transfer rule (the ERC-1450 behaviour) is built. | It is a separate rule, and it must let the 7540 escrow legs through (assessment 5.5). |
+| F6 | Two contracts: `Fund` holds state, `FundHoldersRule` holds policy. | A replaced rule keeps the investor count. `MaxHoldersRule` needed a seeding procedure because its state lives in the rule. Costs about 3,900 gas per movement. |
+| F7 | No class price on chain, so no AUM view. | Needs a price source and an owner. Later. |
+| F8 | `Fund` is `Ownable` like `ProxyDeployer`: the deployer owns it during deployment and `Activate` hands ownership to the timelock. This differs from assessment 5.1, which said an immutable `ADMIN`. | Setting up a fund (`setRule`, `registerClass`, the cap) would otherwise need timelock operations, a 7-day wait on a first deployment. `ComplianceHook` avoids that by taking its rules in the constructor, which `Fund` cannot do because the rule and the fund need each other's address. |
+| F9 | Registration is append-only and only for a class with `totalSupply() == 0`. | A class that already has holders would start with a wrong count, the cold start that `MaxHoldersRule` had to solve. This closes it by construction. A class can be closed to new issuance, not unregistered. |
+| F10 | The fund cap rejects with the existing `MAX_HOLDERS`. One reason is appended: `NOT_FUND_CLASS`. | Fewer frozen codes. The hook order tells which cap fired, because the class cap runs first. |
+| F11 | One hook per class stays. `FundHoldersRule` goes last in `RULE_ORDER`. | A shared hook would make every class pay for every rule in the list (6,945 to 10,219 gas per rule). |
+| F12 | The demo deployment makes the three existing tokens (`intent`, `fund`, `asyncFund`) classes of one demo fund. The Ignition keys `fund` and `asyncFund` already mean the 4626 and 7540 vaults, so the new futures are `fundContract` and `fundHoldersRule`. The old keys are not renamed. | Avoids a clash without touching tests that use the old keys. A 4626 vault named `fund` is a misnomer after this lands, and it is left alone. |
+| F13 | Files: `contracts/fund/Fund.sol`, `contracts/hooks/rules/FundHoldersRule.sol`, `contracts/interfaces/IFund.sol`, `contracts/interfaces/IFundHoldersRule.sol`, each with its `.t.sol` next to it. | Rules live with the rules. |
+| F14 | The class itself is never counted (no storage). Any other account can be exempted with `setExempt`, with the same semantics as `MaxHoldersRule.setExemptHolder`. | The 7540 escrow holds shares at the vault's own address. |
+| F15 | Two review checkpoints, F-1 and F-2 below. | Contracts and Solidity tests first, then deployment, TypeScript tests and docs. |
+
+### Design
+
+**`Fund`** (immutable code, `Ownable`, `IFund`). Immutable: `REGISTRY`. Constant: `MAX_CLASSES`.
+
+State:
+- an append-only class list and a `classIndexOf` mapping (position plus one, so 0 means "not a class");
+- one slot holding `{rule, count, cap}`: the installed rule, and a 48-bit count and cap. The rule is set before the first investor, so the first count write is a 5,000 write and not a 22,100 one (benchmark, M4 against M2), and the rule is read with the count and cap for free. (F-1 had `{count, cap}` in 128 bits each, with the rule in a slot of its own. F-2 changed it, see "F-2 as built".)
+- `holder[account]`: one bit per class, plus a top bit for "exempt".
+
+Owner functions:
+- `registerClass(token)` reverts unless the token is new, the list is under `MAX_CLASSES`, the rule is set, `supportsInterface(IPolicyGated)` is true, its current hook lists the rule (`IComplianceHook.rules()`), and `totalSupply() == 0`.
+- `setRule(rule)`: the rule must be attested as RULE in `REGISTRY`.
+- `setHolderCap(cap)`.
+- `setExempt(account, exempt)`: for an account that holds a class, the count follows the change, as in `MaxHoldersRule`.
+
+Rule-only functions: `join(token, account)` and `leave(token, account)`. Each resolves the class itself and reverts for an unregistered token (the second gate, after the rule's own). Each is a no-op for `account == token`. `join` sets the bit and raises the count when the account had no class and is not exempt. `leave` clears the bit and lowers the count when the last class goes and the account is not exempt.
+
+Views: `classCount`, `classAt`, `classIndexOf`, `holderCount`, `holderCap`, `rule`, `heldClasses(account)`, `isExempt(account)`, and `positionsOf(account)`, which returns each class balance the account holds. The rule also needs one combined read (class index, the account's bits, count and cap in one call) because every external call costs several hundred gas even warm. That function is kept only if the measurement shows it saves at least 1,000 gas.
+
+Events, on every state change: `ClassRegistered`, `RuleSet`, `HolderCapSet`, `ExemptSet`, `HolderCountUpdated`, and `HolderClassesUpdated(account, mask)` on every mask change. The last one is the register: about 2,400 gas each, and it replaces an on-chain holder list.
+
+**`FundHoldersRule`** (immutable code, `BaseRule`, `IFundHoldersRule`). Immutable: `FUND`. `ruleId` is `keccak256('FundHoldersRule.v1')`. `wantsAfter` is true. The council attests it as RULE.
+
+`check` runs the cheap tests first:
+1. An unregistered `ctx.token`, or a rule that is not the fund's installed one (added in F-2), returns `NOT_FUND_CLASS`, for every movement including burns and zero amounts, so `isUserAllowed` also fails closed on a class that is not registered yet.
+2. Zero amount, self-transfer, a burn, kind FORCED, a receiver equal to `ctx.token`, an exempt receiver, and a receiver who already holds any class return `TRANSFER_OK`.
+3. Otherwise the receiver is a new investor. A cap of 0 rejects. A count below the cap passes. A count at or above the cap passes only when the move is net zero: the sender leaves the fund entirely (full balance, and this is the sender's only class, and the sender is not exempt) and the count is at most the cap. That last test runs only when the cheap one already failed.
+
+`after_` skips zero amounts and self-transfers, calls `join` for a receiver whose class balance went from zero to positive, and calls `leave` for a sender whose balance reached zero. Movements to an existing class holder write nothing. FORCED is exempt from the cap and still counted, as in `MaxHoldersRule`.
+
+**What does not change.** `PolicyGatedERC20Upgradeable`, `ComplianceHook`, `ProxyDeployer`, `PolicyRegistry`, `IntentExecutor`, the three templates and the four existing rules. No vault change, so the 3,030 bytes left in `Gated7540Vault` stay.
+
+### The invariant that is new
+
+Existing rules are safe because their state is keyed by `ctx.token`. The fund's state is shared across classes, so that argument does not carry over. A fake token can pass `onlyHook` by naming itself as the hook's token, and without the gate it could set masks for real investors. Two gates stop that: the rule refuses an unregistered `ctx.token`, and `Fund.join` and `Fund.leave` accept only the installed rule and also refuse an unregistered token. Only the owner (the timelock after hand-over) registers. This gets its own tests and a Halmos property.
+
+### Interfaces and the freeze
+
+- New: `IFund`, `IFundHoldersRule`. Their ERC-165 ids, event topics and the new reason are pinned in `InterfaceFreeze.t.sol`.
+- `Errors.sol` gets `NOT_FUND_CLASS` appended, which the brief allows. No existing id, topic or code changes. The freeze test proves it.
+- Errors are named `Fund_*` and `FundHoldersRule_*` (rule 16).
+
+### Tests first (rule 5: the red run is shown before each implementation)
+
+Unit tests isolate with `vm.mockCall` and `vm.expectCall` (rule 16), fuzz with `bound`:
+1. `Fund.t.sol`:
+   - `registerClass`: each revert (not owner, zero address, duplicate, over `MAX_CLASSES`, no rule set, not ERC-165 `IPolicyGated`, hook does not list the rule, supply above zero);
+   - `setRule`: unattested and zero address;
+   - `join` and `leave`: only the rule, only a registered token, the class itself never counted, each count transition;
+   - `setExempt` on a current holder and on a non-holder;
+   - the views, including `positionsOf` and out-of-range `classAt`.
+2. `FundHoldersRule.t.sol`:
+   - accept and each reject (`NOT_FUND_CLASS` for transfer, mint and burn, `MAX_HOLDERS`);
+   - cap 0, FORCED, the escrow receiver, an exempt receiver;
+   - the net-zero case at the cap, once with the sender keeping another class and once without;
+   - `after_` joins and leaves, a zero amount, a self-transfer;
+   - `*_TokenCallsAreStatic`, the same guard `MaxHoldersRule` has;
+   - fuzz.
+3. The registration gate: a fake token that names itself, and a fake hook calling `after_`, change neither `holderCount` nor any mask; a direct `join` or `leave` from a non-rule reverts.
+4. Integration, three classes (one `IntentToken`, one `Gated4626Vault`, one `Gated7540Vault`), real hooks and the real rule set:
+   - `canTransfer` and the state-changing call agree for each outcome;
+   - 7540 `requestRedeem`, `fulfillRedeem`, `rejectRedeemRequest` and `recoverRedeemRequest` leave the count right (the escrow is never counted);
+   - a hook replacement that keeps the rule keeps the state, and a `setRule` to a new instance keeps the count;
+   - an investor in two classes counts once, and counts zero after leaving both;
+   - the vault `max*` functions return 0 at a full cap.
+5. Invariants (stateful fuzz over the three classes): `holderCount` equals the number of non-exempt accounts with any class bit, and a class bit is set exactly when that account's class balance is positive.
+6. Halmos: an unregistered token cannot change the count or a mask; a join followed by a leave restores the count. Kept only if it runs on the proxied path as the existing properties do.
+7. `ContractSizes.t.sol` gets both contracts.
+
+### Gas
+
+Expected on an ordinary transfer between existing class holders: about +23,000 on top of whatever the class's hook already costs (benchmark M10 at +19,326, plus the separate-contract cost of about 3,900, measured over a hook with `IdentityRule` and a class `MaxHoldersRule`). A first investor by mint is about +47,000. These are expectations, not gates. The real contracts are benchmarked again at the end with the same harness, and the plan stops for review if an ordinary transfer is more than 10% above that.
+
+### Deployment (F-2)
+
+- `Components`: deploys `Fund` (owner is the deployer, `REGISTRY` is the registry) and `FundHoldersRule(fund)`.
+- Council step 1 attests `FundHoldersRule` as RULE with the other rules. The council reads `rule.FUND()`, the fund's code and its owner first: the rule's codehash covers the fund's address and not the fund's code. `Fund` is reviewed but not attested, like `ProxyDeployer`.
+- `roles.ts`: `RULE_ORDER` gets `fundHoldersRule` last for all three tokens. `Tokens` takes it as a rule parameter, so every hook is built with it.
+- `Activate`, after all token deploys: `setRule`, `setHolderCap` (new parameter `fundHolderCap`, default equal to `holderCap`), then `registerClass` for each token, then `transferOwnership(timelock)`. Until a class is registered, every movement on it is rejected with `NOT_FUND_CLASS`, so no balance can exist before registration. The roles that mint come after registration.
+- `assertHandedOver` gains: the fund is owned by the timelock, its rule is the attested instance, and every demo token is a registered class.
+- Runbook (README step 7 and `docs/governance-and-deployment.md`): never remove `FundHoldersRule` from a registered class's hook (same rule as `MaxHoldersRule`, change A), because movements made without it are not recorded; register a class only while its supply is zero; the council check above.
+
+### TypeScript (F-2)
+
+`fixtures.ts` attests the new rule in council step 1. A new `test/nodejs/fund.test.ts`: a class registered through the real timelock after the delay; the fund cap enforced across two classes through viem; `HolderClassesUpdated` decoded; `canTransfer` parity from the TypeScript side. The existing 60 TypeScript tests must pass unchanged apart from the rule list in the fixtures. A test that spreads holders across classes counts each holder once per fund, so it can hit a fund cap equal to the class cap earlier than before. If so, the fixtures raise `fundHolderCap`, and the test body stays as it is.
+
+### Docs (F-2)
+
+- `docs/`: `architecture.md` (contracts table, structure and inheritance diagrams), `roles.md`, `transfer-checks.md` (a `FundHoldersRule` section), `governance-and-deployment.md`, and "Checked against" in `docs/README.md`. Every edited sentence is verified against the code, as in the last docs pass.
+- README: contracts list, rule order, deviations from the brief, runbook step 7.
+- Proposed brief edits, which need your OK because the brief is the standing instruction file: §3 layout gets `contracts/fund/`, and §6 gets `FundHoldersRule` in the rule list.
+
+### Checkpoints and gates
+
+- **F-1:** interfaces, `NOT_FUND_CLASS`, `Fund`, `FundHoldersRule`, the Solidity tests above, the freeze and size tests. Stop for review.
+- **F-2:** Ignition, `fund.test.ts`, the benchmark rerun, the docs. Stop for review.
+- **Gates at each:** `npx hardhat test` in both runners with the summary line pasted, `npm run lint:sol`, `npm run fmt:check`, `slither .`, `npm run aderyn`, `npm run validate:upgrades`, the Halmos run, the isolated profile, and `npm run verify:reproducible` (the manifest grows from 13 to 15: `FundHoldersRule` under ATTESTED, `Fund` under DEPLOYED). The 13 existing entries must be byte-identical to `v0.2.0`. The baseline today is 513 passing (453 Solidity, 60 TypeScript).
+- **Attestation impact:** new `FundHoldersRule` (RULE) and `Fund` (reviewed, not attested). Unchanged: every current attested contract.
+
+### Risks
+
+1. The new invariant above. It is the one place a bug could let one class corrupt the count for all of them.
+2. A rule dropped from a registered class's hook leaves the state silently stale. The runbook forbids it and monitoring should read `hook.rules()`. The fund cannot see it.
+3. Counting by address (F2).
+4. About +23,000 gas on each movement in a class. The cheapest way to cut it is folding the fund count into `MaxHoldersRule`, which saves most of the 10,219 per-rule dispatch cost. That is not in this plan: it merges two rules and re-pins `IMaxHoldersRule`.
+5. Replacing `Fund` itself loses its state. The split exists so that the rule is the part that gets replaced. A `Fund` replacement would need a seeding path like `MaxHoldersRule`'s, and is not planned.
+
+### Not in this plan
+
+Class prices and AUM, restricted transfers, identity ids, lots, an ERC-7575 share split, CREATE2-derived class addresses, a data-contract rule list in `ComplianceHook`, and folding the fund count into `MaxHoldersRule`.
+
+### F-1 as built (2026-10-22, approved by the owner)
+
+Contracts and Solidity tests only. No Ignition, no TypeScript test, no docs (F-2). Committed on `fund-layer`, not pushed.
+
+- **New code:**
+  - `contracts/interfaces/IFund.sol`, `contracts/interfaces/IFundHoldersRule.sol`;
+  - `NOT_FUND_CLASS` appended to `Errors.sol`;
+  - `contracts/fund/Fund.sol`, `contracts/hooks/rules/FundHoldersRule.sol`;
+  - `contracts/test/MockStatefulFund.sol`, a fund whose read writes state, for the static-call guard.
+- **Tests (124 new):**
+  - `Fund.t.sol` 56: every revert, each count transition, exemption, views, and a fuzz run against a plain model of the same rules;
+  - `FundHoldersRule.t.sol` 44: accept and each reject, the net-zero cases, `after_`, the static-call guard, and the registration gate with the real `Fund` (a fake token that names itself, a caller that is not the rule, the real hook of a real class);
+  - `FundIntegration.t.sol` 21: one `IntentToken`, one `Gated4626Vault` and one `Gated7540Vault` with real hooks and rules, covering the cap across classes with pre-flight parity, net zero at the cap, FORCED counted, an unregistered class, the 7540 escrow (request, fulfil, reject at a full cap, recover), a hook replacement and a rule replacement;
+  - `FundInvariant.t.sol` 3 invariants over 128,000 calls per seed (three seeds run): class bits equal positive balances, the count equals the non-exempt investors, and no class, fulfiller or custody account is ever recorded;
+  - `halmos/FundHalmos.t.sol` 5 properties: an unregistered token never changes state, only the rule writes, and the count is right after any two operations on two accounts and any three on one account (the second account already an investor), and join then leave restores the state.
+- **Freeze and size:** `InterfaceFreeze.t.sol` pins both interface ids (computed independently with `cast sig`, and equal to the compiler's), six event topics and the new reason. `ContractSizes.t.sol` and the reproducibility manifest (13 to 15 contracts) have both new contracts.
+- **Red runs.**
+  - The freeze additions failed to compile on the missing `Reasons.NOT_FUND_CLASS` alone.
+  - Against a throwaway stub, none of the 56 `Fund` tests passed.
+  - Against a stub rule, 24 rule tests failed and 20 passed. The 20 are accept-path and "nothing recorded" tests that an always-OK stub satisfies by construction, and each has a failing counterpart.
+  - The integration and invariant suites test existing contracts in combination, so they were not red first. The mutation runs below are their evidence.
+- **Mutation checks, on a scratch copy.**
+  - 40 bugs planted (20 in `Fund`, 20 in the rule), 39 killed by the Solidity tests. The survivor was an equivalent mutant: the `account == token` guard in `leave` was dead code, because `join` never records the class itself. It is removed.
+  - Seven planted in `Fund` for Halmos. Six were killed at first. The seventh (an exempt account that leaves decrements the count) needs the count above zero to show, so the three-operation property now starts with a second investor, and all seven are killed.
+- **Differences from the plan above:**
+  - `admission` is in from the start. Whether it saves the 1,000 gas the plan set as its test stays a measurement for F-2.
+  - `leave` has no guard for the class itself (above). The rule does not skip a receiver equal to the token: the fund ignores it, and a test pins that.
+  - A second `FundHoldersRule` with the same fund has the same codehash, so the registry already attests it. Replacing a rule with identical code needs no attestation. Only changed code does.
+  - `IFund` lists its two constant getters under views, which the lint's declaration order requires.
+- **Finding, rule replacement (superseded in F-2).** `Fund.setRule` takes effect at once. In F-1, until the classes' hooks listed the new rule, the old rule's pre-flight still said yes and its `after_` was refused with `Fund_OnlyRule` only for movements that change a holder's classes, so a transfer between existing holders went through. An outside review of F-1 pointed at both halves. F-2 makes the old rule fail closed in `check` instead, see "F-2 as built".
+- **Results.**
+  - `npx hardhat test`: 637 passing (577 Solidity, 60 TypeScript), up from 513. The isolated profile: 577 passing.
+  - Lint 0, fmt clean, `tsc` clean, Slither 0, Aderyn 0, upgrades-core 3 of 3 (`Fund` is immutable, so it is outside its scope). Slither's first run found three things in the new code (two locals that start at zero by design, one ignored tuple return) and Aderyn's found two view-call-before-write patterns. Each has an inline suppression with its reason.
+  - `verify:reproducible`: 15 contracts identical across the two production builds.
+  - The deployed bytecode of the 13 existing contracts is identical to `d3574df`, compared against a pristine build of that commit.
+  - Halmos: the 5 fund properties take about 38 seconds. The existing four take 3 seconds. A first draft of one property took 124 seconds, so it was split.
+- **Not yet (done in F-2):** the benchmark rerun, so the gas expectations above were estimates.
+- **Note:** `docs/superpowers/` is git-ignored at the owner's request (2026-10-22). The assessment and benchmark linked in this section are local files.
+
+### F-2 as built (2026-10-23, approved by the owner)
+
+Ignition, the TypeScript tests, the benchmark rerun, the docs, and two changes to F-1's code that came out of the measurements and an outside review. The owner approved it, the fail-closed change included, and it is committed on `fund-layer`, not pushed.
+
+- **Deployment.**
+  - `Components` deploys `Fund(deployer, registry)` and `FundHoldersRule(fund)`. `RULE_ORDER` puts `fundHoldersRule` last for all three tokens, and `Tokens` takes it as a rule parameter.
+  - `Activate` takes `fundContract`, `fundHoldersRule` and `fundHolderCap`. The plan said `fundHolderCap` would default to `holderCap`. I made it required, like `holderCap`, because that is simpler, and did not check whether Ignition can default one parameter to another. After the token deploys it calls `setRule` and `setHolderCap`, then `registerClass` for `intent`, `fund` and `asyncFund`, chained so they are classes 1, 2 and 3. The role grants wait for the registrations, and `Fund` ownership moves to the timelock after them.
+  - `assertHandedOver` gained: the fund is owned by the timelock, runs the attested rule that points back at it, has the intended cap, and holds the three tokens as classes 1 to 3 in order.
+- **TypeScript.** `fund.test.ts` has 7 tests: the deployment, the register events decoded, the cap across three classes with pre-flight parity, an executor-settled intent at a full cap (refused, with `canExecute` agreeing, and a whole-balance intent admitted), a class created after hand-over (rejected until the timelock registers it), the rule replaced in one timelock batch, and the rule set alone (every movement fails closed, pre-flight included). `deployment.test.ts` gained a twin hook without the fund rule, which now stops `Activate` at `registerClass`. Two existing tests changed for the fifth rule: a hard-coded rule count of 3 in `governance.test.ts`, and the twin hook in `deployment.test.ts`, which now lists the fund rule so that it still reaches the post-deploy check. The other 58 pass unchanged.
+- **Benchmark on the real contracts**, over a hook with `IdentityRule` and a class `MaxHoldersRule`, gas including the 21,000 intrinsic (harness in `docs/superpowers/specs/fund-gas-bench/`):
+
+  | Movement | Added by the fund layer |
+  |---|---|
+  | transfer between existing holders | +26,906 |
+  | mint to an existing holder | +25,285 |
+  | existing investor takes a second class | +31,808 |
+  | first investor ever | +53,346 |
+  | new investor by transfer | +54,964 |
+  | whole-balance move to a new holder | +57,342 |
+  | burn, investor stays in the fund | +33,124 |
+  | burn, investor leaves the fund | +32,724 |
+
+  The plan expected about +23,000 for an ordinary transfer and +47,000 for a first investor, so the real cost is 17% and 13% above it, over the plan's 10% line. The estimate took the lean in-rule variant (+19,326) and added the 3,900 split cost, and the real rule is closer to the non-lean variant with a separate contract (+26,674). It is not a bug, and nothing here stops on it, but the plan said to stop, so it is reported.
+- **`admission`, measured.** Against a variant that reads the fund with separate lazy calls, the single `admission` read costs 2,247 more on an ordinary movement and 3,474 more on a burn, and saves 2,460 when a new investor joins. It fails the plan's test of saving 1,000 on the common path. It is kept because of the next point: the rule rides in the slot that `admission` reads anyway.
+- **Change to F-1: the retired rule fails closed.** An outside review of F-1 made two points, both checked. First, while a class's hook lists a rule the fund has replaced, `canTransfer` says yes but a mint to a new holder reverts, which breaks "pre-flight never lies". Second, and not in my F-1 note, a transfer between two existing holders needs no write to the fund, so under the retired rule it went through. I proved that second point on `19323f3` with a probe test before changing anything. The fix is the review's own: `admission` also returns the installed rule, and `FundHoldersRule.check` returns `NOT_FUND_CLASS` for every movement unless that rule is itself. To make it free, the installed rule, the count and the cap share one slot (`address rule`, `uint48 count`, `uint48 cap`), so the new read costs nothing extra: measured, +254 gas on an ordinary movement, and about 1,700 less on every join and leave, because the count write no longer needs a separate rule-slot read. The cap now reverts above `type(uint48).max`. `IFund`'s interface id does not change (a return type is not in a selector). `NOT_FUND_CLASS`'s NatSpec widened and its value did not. During a replacement the class is now closed to everything, `forcedTransfer` included, until its hook lists the new rule, so the batch is the only safe way to change the rule, as the runbook says.
+- **Tests added.** `FundIntegration_Claimable`: a 7540 deposit fulfilled while the fund has room, the fund then filled through two other classes, the claim refused with `ControllerNotEligible(MAX_HOLDERS)`, and `recoverClaimable` delivering it as a counted enforcement mint (count 3 over a cap of 2). Static-call tests for the reads that the first suite left out: the balance reads in `after_`, the sender's `admission` and balance in `check`, and `Fund`'s reads in `registerClass` and `setRule`, each with a control showing the revert comes from the write. Packed-slot tests: no write to the rule, the count or the cap disturbs the other two (also asserted at every step of the model fuzz and in the Halmos properties).
+- **Mutation checks.** The Solidity set was run again on the new code, with seven mutants added and the dead-code one removed (46 planted in `Fund` and the rule, all caught). Six wiring mutants in the Ignition modules (fund ownership not handed over, cap never set, a class not registered, the intent hook built without the rule, classes registered in another order, the rule not installed) are all caught by the fixture's checks. Halmos: all seven F-1 mutants caught, and the properties now also assert that the rule and the cap never move.
+- **Docs.** `architecture.md` (the fund section, tables, diagrams), `transfer-checks.md` (a `FundHoldersRule` section, the order table, the reason code), `roles.md`, `governance-and-deployment.md` (a section on changing the fund's rule, the deployment steps, the checks), `flows-token.md`, `flows-vaults.md`, `money.md`, `docs/README.md`, the root README (runbook steps 1, 2, 5 and 7, security model, deviations) and SECURITY.md (scope, suppressions). A fresh agent that had not seen my reasoning checked every changed sentence against the code and found three wrong claims, four overclaims and a set of stale sentences on pages the diff had not touched. All are fixed. One it named is older than the fund layer and I left it: the README says three interface files are extra to the brief, and it is more.
+- **Results.**
+  - `npx hardhat test`: 658 passing (590 Solidity, 68 TypeScript), up from 637. The isolated profile: 590 passing.
+  - Lint 0, fmt clean, `tsc` clean, Slither 0, Aderyn 0, upgrades-core 3 of 3, Halmos 5 fund properties in 39 s (and the existing 4 in 7 s).
+  - `verify:reproducible`: 15 contracts identical across the two production builds. The 13 existing contracts' deployed bytecode is identical to `d3574df`.
+- **Brief.** On the owner's go-ahead, `CLAUDE.md` got two edits: the §3 layout lists `contracts/fund/` and `FundHoldersRule.sol`, and §6 has a `FundHoldersRule` entry. It notes that the rule's state is shared by every class, so it is sound only through the fund's registration gate. The points the review raised about the market, an identity adapter or a TypeScript kit were set aside at the owner's request.
+
+### The review of F-1, claim by claim (2026-10-23)
+
+The pasted review's code and architecture claims, checked against the repo:
+
+| Claim | Verdict |
+|---|---|
+| Its line references (`Fund.sol`, `FundHoldersRule.sol`, `FundIntegration.t.sol`, PLAN.md line 1438) | Accurate for `19323f3`. It read the real code |
+| Pre-flight says yes while a mint to a new holder reverts, after `setRule` alone | True and documented in F-1 |
+| A transfer between existing holders still succeeds under the retired rule | True. Proved with a probe on `19323f3`. My F-1 note ("movements revert") overstated it. Fixed in F-2 as above |
+| `recoverClaimable` across classes at a full cap has no test | True. Added, and it behaves as the review predicted |
+| Every external call in a rule is proven to be a STATICCALL | Overstated: the guard covered `policyHook` and the first `admission` only. Completed in F-2 |
+| Packing makes the first investor "a 5,000 write instead of 22,100" | Imprecise: only the count write. The account's own slot is still a fresh 22,100, and a new investor costs about +53,000 in all |
+| 125k to 135k gas for a warm transfer, 180k to 200k to onboard | Close for a three-rule hook (128,050 for a transfer, 183,676 for a new investor by transfer, 205,926 for a first mint). More with a longer rule list |
+| "72+ planted mutants killed" | Not checkable as stated. The fund layer's own count is 46 Solidity, 7 Halmos and 6 deployment mutants, all caught after F-2 |
+| "No cold-start seeding problem by construction" | True for registration. A rule dropped from a registered class's hook still leaves the state stale, and the docs say so |
+| Standard interfaces keep the stack composable with DeFi and custodians | Overstated. A gated token reverts for any counterparty that is not verified, so every venue contract must itself be a verified holder |
+| Address-based counting, per-holder lockup instead of per-lot | Accurate, and F2 and F1 in this plan |
+
+Not assessed: the scores, the market and buyer claims, the audit-cost figures, and the identity-adapter and relayer-kit suggestions.
+
+### DvP and the fund layer (considered, not built)
+
+What exists. `IntentToken.executeTransfer` moves one token between two accounts on the signature of the sender, and the movement reaches the hook as `EXECUTED`, with the intent's `ref` and `deadline` in the context. `IntentExecutor.executeBatch(token, intents, sigs)` takes one token and is all-or-nothing for the intents in it.
+
+What that means for delivery versus payment. There is no multi-token atomic settlement today. A securities leg and a cash leg are two intents on two tokens, and `executeBatch` cannot hold both because it takes one token. Even two separate calls would not make a DvP, because each signed intent can be executed alone: an operator could execute the securities leg and never the cash leg, and nothing on chain ties them. The `ref` field is free-form and nothing reads it. So the executor is not yet a DvP engine, and the brief's "grows into multi-leg DvP later" is still to do.
+
+What the fund layer does with it. Nothing in `Fund` or `FundHoldersRule` blocks a DvP. The rule treats `EXECUTED` like `TRANSFER`: a new investor is capped, and a whole-balance intent that empties the sender's only class is net zero and passes. This is covered by unit tests and by a TypeScript test that signs a real intent, which `canExecute` and the executor refuse at a full cap and admit for a whole balance. The settlement window rule already applies to `EXECUTED` movements.
+
+The shape of a DvP executor, and a change to the intent that it needs, are in the next section. It replaces the sketch that was here, which bound the legs through `ref` and a convention.
+
+## DvP: an intent revision and a DvP executor (design 2026-10-23, Option B chosen; I-1, E-1 and E-2 built, awaiting review)
+
+On 2026-10-23 the owner asked for a plan for the DvP executor, and whether the intents should change while the code is still a demo. The analysis below led to a change of the intent and a separate executor. The owner chose Option B for D8 (the intent carries the payment leg) and kept D1 to D7 as recommended. I-1 (the intent revision), E-1 (the executor contract) and E-2 (deployment, TypeScript tests, gas, docs) are built and wait for the owner's review ("I-1 as built", "E-1 as built" and "E-2 as built" at the end of this section).
+
+### Goal and limits
+
+A secondary trade of a share class against cash, settled atomically: both legs move or neither does, and the hook runs on each gated leg, so identity, lockup, the settlement window, the class cap and the fund cap all apply. Not goals: custody across transactions, price discovery, matching, fees, partial fills, more than two legs, cross-chain, and any change to the base, the hook, the rules or the two vault templates.
+
+### What the intent could and could not do before I-1 (read from the code)
+
+1. A signature commits `from`, `to`, `amount`, `nonce`, `deadline` and `ref`. Nothing in it says who may execute the intent or on what condition. `executeTransfer` checks only that the caller holds `EXECUTOR_ROLE`.
+2. So any account holding that role on the token can execute any valid signed intent. Today those are the `IntentExecutor`'s operators. A DvP executor would be a second holder.
+3. `ref` is free-form and nothing reads it. The nonce is random and per signer, so pre-signed trades can be executed in any order. The deadline is inclusive. Signatures are ECDSA or ERC-1271.
+4. `canExecute` leaves the signature out, so its pre-flight can say yes to an intent that then fails with `BAD_SIGNATURE`. That is a gap against the brief's "pre-flight never lies".
+5. `executeBatch(token, intents, sigs)` takes one token.
+6. Only `IntentToken` has intents. The vault templates do not (for the 7540 vault the brief says the request is the intent). The mixin is about 1.9 KB (the base-only harness is 13,174 bytes and `IntentToken` is 15,089), so it would fit in `Gated4626Vault` and, with about 1.1 KB to spare, in `Gated7540Vault`. The design says no for the 7540 vault.
+7. ERC-2612 `permit` is on every template, but its nonce is sequential per owner (OpenZeppelin `Nonces`), so a holder's permits must be used in the order they were signed.
+
+### The hard problem: a leg that can be executed alone
+
+The seller's signed securities intent is a complete instruction. Any executor can run it with no cash leg, and `ref` does not help because nothing reads it. Whatever the DvP executor checks, it cannot stop the intent from being run somewhere else. The options:
+
+| Option | How | Cost | Verdict |
+|---|---|---|---|
+| 0. Convention | The DvP executor is the only `EXECUTOR_ROLE` holder on the token. A reserved prefix of `ref` marks trade intents, and the executor's standalone path refuses it | No change to intents. A governance invariant (nobody else is ever granted the role) and a reserved prefix in a free field that nothing else reads | Works, and is fragile: one later grant to another executor silently removes the guarantee. It also switches off plain intents on that token |
+| 1. Executor binding | Add `address executor` to the signed `TransferIntent`. The token requires `executor == address(0)` or `executor == msg.sender` | Breaking change to the struct, the typehash and the selectors of `executeTransfer`, `canExecute`, `IIntentExecutor.execute` and `executeBatch`. About 12 Solidity and 5 TypeScript files, plus docs. `IntentToken`'s implementation is re-attested and `IntentExecutor` is redeployed | The guarantee is on chain, per intent, and the signer chooses it. Other executors can coexist on the same token. **The core of the fix, taken, together with the consideration fields below** |
+| 2. Escrow in `to` | The seller's intent pays the DvP executor, which forwards | The executor must be a verified identity and exempt from the caps. Tokens strand if the intent is executed alone, so it needs recovery state | Worse |
+| 3. Permit legs | `permit` then `transferFrom` for both legs | The kind is `TRANSFER`, so no window and no `ref` in the context. Sequential nonces. Permits can be front-run. USDT has no permit | A fallback for vault shares only |
+| 4. Witness | The token verifies a signature over a caller-defined typed struct, as Permit2 does | A dynamic typehash inside the token: more audit surface. It contains option 1 | More than this needs |
+
+### The intent revision (I-1), Option B
+
+`TransferIntent` becomes (new fields after `ref`, in this order):
+
+```
+address from; address to; uint256 amount; bytes32 nonce; uint256 deadline; bytes32 ref;
+address executor;            // zero: any EXECUTOR_ROLE holder, as today
+uint256 validAfter;          // zero: no lower bound
+address considerationToken;  // what the signer is to receive for this leg, informational to the token
+uint256 considerationAmount;
+```
+
+What the token checks, in the mixin and in the pre-flight that `canExecute` shares with `executeTransfer`:
+
+- **Executor.** `executor != address(0) && executor != msg.sender` gives `WRONG_EXECUTOR`.
+- **Window.** The intent is executable when `validAfter <= block.timestamp <= deadline`. Before `validAfter` it gives `INTENT_NOT_YET_VALID`. The deadline check is the existing one.
+- **Consistency (the owner's condition for B).** If `considerationToken != address(0)` or `considerationAmount != 0`, then `executor` must be non-zero; otherwise `CONSIDERATION_NEEDS_EXECUTOR`. Without it a signer could put a payment in the message and any executor could run the transfer without it. It is a check on the message's own consistency, not a rule about who, where or when; rule 11 is read that way by the owner's decision.
+- **Signature in the pre-flight.** `canExecute(intent, sig)` includes the signature check (`BAD_SIGNATURE`), so the pre-flight covers the whole write path. `isValidSignatureNow` is a static call, so it stays a view. A bound intent is only executable from its executor, so pre-flight must run from that address (an `eth_call` with `from`, or the executor's `canExecuteDvPGated` and `canExecuteDvP3009`); from any other address it returns `WRONG_EXECUTOR`.
+- The existing checks keep their order and the new ones follow them; tests pin the order.
+
+The token never reads `considerationToken` or `considerationAmount` beyond the consistency check: they are hashed into the signature and nothing else. Only the executor named in the intent enforces the payment. The NatSpec says so.
+
+Reasons appended to `Errors.sol`: `WRONG_EXECUTOR`, `INTENT_NOT_YET_VALID`, `CONSIDERATION_NEEDS_EXECUTOR`. The nonce model, `cancelIntent`, the domain, ERC-1271 and the `IntentExecuted` event do not change. `ref` stays free for the ISO 20022 reference.
+
+What it touches: `ITransferIntent`, `IntentSettledUpgradeable`, `IIntentExecutor`, `IIntentExecutorBatch`, `IntentExecutor`, `Errors.sol`; the intent tests (`IntentSettledUpgradeable.t.sol`, `IntentExecutor.t.sol`, `IntentToken.t.sol`, `RuleSetIntegration.t.sol`), the Halmos intent properties (`IntentTokenHalmos.t.sol`), the TypeScript signing helper and tests (`fixtures.ts`, `intents.test.ts`, `time.test.ts`, `parity.test.ts`, `fund.test.ts`); `InterfaceFreeze.t.sol` (three ids re-pinned); the docs; and brief §5, which prints the struct and the `canExecute` signature and lists the reasons. Existing signed intents stop verifying. There are none outside the tests. Gas per execution rises by about 1.4k inside the call, measured in I-1 (see "I-1 as built"); the plan's earlier estimate of a few hundred was low. `IntentToken` has 9,487 bytes of room, and `ContractSizes.t.sol` guards the limit.
+
+### Why B and not A (the owner's decision)
+
+Option A was `executor` alone, with the trade terms bound by a hash in `ref`. B was proposed in an outside review, and I checked it against the mixin.
+
+- A leaves the seller signing a `bytes32`. The signature does commit to every term, but only a signer whose tool recomputes the hash from the terms is protected, and a custodian policy engine that sees only the typed message cannot apply a price limit. A also spends `ref`, which the brief reserves for the ISO 20022 reference. B puts the payment leg in the typed message and frees `ref`.
+- B makes the executor simpler: no `Trade` struct, no `tradeId`. The executor takes the signed legs and checks that they mirror.
+- B does not make the token enforce the payment. The review said the mixin would; it cannot, because it sees only its own token. That is why the consistency check exists.
+- The soundness argument, to be pinned by tests: the executor requires the securities intent's consideration to equal the cash leg, so it is non-zero; the consistency check then forces a non-zero `executor`; the executor check then forces that executor to be the one calling. A DvP leg therefore cannot be run by any other executor, and none can carry a payment its signer did not see.
+- B does not help the buyer on an ERC-3009 cash leg. The authorization has no consideration fields, so the buyer's wallet shows a value, the executor as payee, and a nonce (a hash of the security token's address and the seller's `intentHash`, see E-1). With a gated cash token the buyer's own intent carries the mirror fields.
+- The cost of B: the frozen struct has 10 fields and fixes the shape of a trade as one consideration leg. A fee leg, a basket or a three-party trade needs another struct change, where under A it would have been a new executor. The token also carries two fields it does not enforce, which a reader may assume it does. The consideration does not reach the hook (`TransferContext` is frozen; only `extra` can grow), so no rule can check a price. Nothing here needs that today.
+
+### The DvP executor (E-1, E-2)
+
+`DvPExecutor`, immutable, with the roles of `IntentExecutor`: the timelock as admin, `OPERATOR_ROLE`, the guardian's pause, the recovery timelock's unpause. It holds `EXECUTOR_ROLE` on the tokens it settles, and nothing else. It is not attested, like `IntentExecutor`, and goes into SECURITY.md scope. It has no sweep: a token sent to it by mistake stays there.
+
+Two entry points, both `OPERATOR_ROLE`, `whenNotPaused`, `nonReentrant`, and neither runs one leg alone:
+
+- **`executeDvPGated(securityToken, cashToken, securitiesIntent, securitiesSig, cashIntent, cashSig)`.** The cash token is an `IntentToken` too. The executor checks that the legs mirror, then calls `cashToken.executeTransfer(cashIntent, cashSig)` and `securityToken.executeTransfer(securitiesIntent, securitiesSig)`. Cash goes buyer to seller and shares seller to buyer directly; the executor holds nothing. Mirror: `securitiesIntent.from == cashIntent.to` and `securitiesIntent.to == cashIntent.from`; `securitiesIntent.amount == cashIntent.considerationAmount` and `cashIntent.amount == securitiesIntent.considerationAmount`; `securitiesIntent.considerationToken == cashToken` and `cashIntent.considerationToken == securityToken`; the two tokens differ. The executor does not compare the `executor` fields: the tokens do, and the consistency check makes them non-zero (see above). The two deadlines and `validAfter` values need not match; each token checks its own, so the trade runs in the overlap.
+- **`executeDvP3009(securityToken, cashToken, securitiesIntent, securitiesSig, authorization)`.** The cash token is a USDC-style ERC-3009 token. The executor checks that `authorization.from == securitiesIntent.to`, that its value is `securitiesIntent.considerationAmount`, that `securitiesIntent.considerationToken == cashToken`, and that `authorization.nonce == keccak256(abi.encode(securityToken, securityToken.intentHash(securitiesIntent)))`. That nonce ties the buyer's authorization to exactly this securities intent on exactly this token; the intent carries every term and names the executor. The token's address is in the nonce because the executor cannot tell an honest token's hash from a counterfeit's: with the bare hash, an operator could pair the buyer's authorization with a substituted token that reports that hash and delivers nothing, and pay the cash to itself (found while building E-1; `test_WhenAnOperatorSubstitutesACounterfeitSecurityToken_TheAuthorizationIsRefused`). The gated form has no such gap, because the buyer's signed intent names the security token in `considerationToken`. Then it calls `receiveWithAuthorization` with the buyer's own times and signature (only the payee can call it, so nobody can front-run it with `transferWithAuthorization`, which has a different typehash), then `securityToken.executeTransfer`, then pays the cash on to the seller, and requires that its own cash balance is what it was before the call and that the seller's balance rose by exactly the value, which refuses fee-on-transfer tokens whether the fee falls on the pull or on the payout. The executor does not map or touch the authorization's times. At the exact second of the deadline the intent (inclusive) and the authorization (strict, in Circle's code) can disagree; the trade then reverts as a whole, and tests pin it.
+- **Cancel.** Either party cancels by spending the nonce on their own token (`cancelIntent`), or for the authorization by `cancelAuthorization`. The trade then fails atomically. No new function.
+- **Pre-flight.** `canExecuteDvPGated` and `canExecuteDvP3009` return `(ok, reason)`. They check, in order, the executor's own pause (`PAUSED`), the match (`LEGS_DO_NOT_MATCH`, a reason appended to `Errors.sol`), and then each leg from the executor's address, cash first, with the token's reason. For the external stablecoin the cash leg is the authorization's window with Circle's strict edges (`INTENT_NOT_YET_VALID`, `INTENT_EXPIRED`), its state (`NONCE_USED`) and the buyer's balance (`INSUFFICIENT_UNFROZEN`). It cannot check the buyer's signature, which the cash token exposes no view for, nor a pause or blocklist on the cash token, so the 3009 pre-flight can say yes to a trade that then fails. Two legs on tokens that share policy state, such as two classes of one fund, each get the current state, and the first leg's movement can change the second's answer. A leg that fails reverts with `DvPExecutor_LegFailed(leg, reason)` carrying the token's revert data.
+- **Event.** `DvPSettled(securitiesIntentHash, seller, buyer, securityToken, cashToken, securityAmount, cashAmount, operator)`. The tokens emit their own `IntentExecuted` as well.
+- **Fund layer.** The securities leg is `EXECUTED`. The fund cap, the net-zero rule for a whole-balance sale, the window, the lockup and identity all apply to it with no change. The executor never holds a class token, so it needs no identity entry and no cap exemption.
+- **Deployment (E-2, not built).** `Components` deploys it. `Activate` grants it `EXECUTOR_ROLE` on `intent` (the only deployed token with intents) and on any gated cash token, which must itself be an `IntentToken`; none is deployed today, so a gated cash leg needs one added to `Tokens`. It also grants `OPERATOR_ROLE` and hands over its admin like the executor's. `assertHandedOver` (in `fixtures.ts`) pins its roles and the set of `EXECUTOR_ROLE` holders on each of those tokens.
+
+### Tests first
+
+- **Token (I-1), each red before green:** `WRONG_EXECUTOR` (zero executor passes, the named one passes, any other fails); `INTENT_NOT_YET_VALID` and the deadline, both inclusive; `CONSIDERATION_NEEDS_EXECUTOR` for amount only, token only and both, and a zero consideration with a zero executor passing; `intentHash` changes with each new field (fuzzed); `canExecute` and `executeTransfer` agree on every reason, `BAD_SIGNATURE` included; an intent with the four new fields at zero behaves as today.
+- **The leg alone:** a securities intent signed for the DvP executor and run through `IntentExecutor` reverts `WRONG_EXECUTOR`; the same with a consideration and a zero executor reverts `CONSIDERATION_NEEDS_EXECUTOR`; the DvP executor has no entry point for one leg. Mutation check in a scratch copy: delete the consistency check and the first test must fail.
+- **Executor unit:** each mirror field, wrong in turn, reverts; changing any field of either intent makes its signature fail; atomicity in both directions (cash leg fails and shares stay, share leg fails and cash stays); the executor holds nothing after any call; a cash token whose transfer re-enters; a fee-on-transfer cash token; a 3009 mock that requires the caller to be the payee; an authorization whose nonce is not the securities intent's hash; an authorization reused for a second intent; the deadline edge for the 3009 leg; a pair that cannot settle twice.
+- **Integration:** a class token and a gated cash token with real hooks and the fund rule, and a 3009 mock; pre-flight parity; the settlement window; a lockup; a whole-balance sale to a new investor at a full fund cap (passes) and a partial sale (refused).
+- **Properties:** a fuzz test that after an ERC-3009 trade the executor's cash balance is exactly what was donated to it and the seller received the value (a stateful invariant would add nothing: beyond its roles and pause flag the executor keeps no state). Two Halmos properties on stub tokens with real balances: if the gated entry point returns, both legs ran once and the intents mirror; if the 3009 entry point returns, the executor kept its cash, the seller received exactly the value, and the nonce was the one that ties the intent.
+- **TypeScript:** real signing of the intents (all ten fields in the typed data) and of the 3009 authorization with viem, through the deployment, with a class created and traded.
+- **Mutation checks** on the executor and on the new intent checks, in a scratch copy.
+
+### Checkpoints and gates
+
+- **I-1:** the intent revision, complete with tests, Halmos, TypeScript and docs. Stop for review.
+- **E-1:** `IDvPExecutor`, `DvPExecutor`, its Solidity tests, the freeze and size entries. Stop for review.
+- **E-2:** Ignition, the TypeScript tests, the benchmark of a DvP, the docs. Stop for review.
+- **Gates at each:** both runners with the summary line, lint, fmt, `tsc`, Slither, Aderyn, upgrades-core, Halmos, the isolated profile, reproducibility. After I-1 the bytecode of `IntentToken` and `IntentExecutor` changes on purpose and nothing else existing does, which the comparison with the pristine build will show.
+
+### Risks
+
+- ERC-3009 is a Draft. USDC's current source (Circle's FiatToken v2.2) has the bytes-signature overload, so contract wallets work, and it takes `receiveWithAuthorization` only from the payee. It also reverts while the token is paused and for a blocklisted party (the executor too), which would fail the whole trade. I read Circle's repository, not each chain's deployed version, and I did not check EURC.
+- An operator that never executes cannot take anything. A trade it ignores expires at its deadline, and either party can cancel.
+- The change to the intent is breaking, and the cost of that is lowest now.
+- The cash leg of kind ERC-3009 leaves the pause and blocklist of an external token outside the hook, so it is a dependency we do not control.
+- The signed consideration is a one-leg shape, frozen with the interface. A second consideration leg is a new struct change.
+
+### Not in this plan
+
+Matching and order books, fees, partial fills, more than two legs, cross-chain settlement, a Permit2 cash leg, class switches, DvP for the two vault templates, and any rule that reads the consideration.
+
+### Decisions (2026-10-23)
+
+| # | Question | Decision |
+|---|---|---|
+| D1 | Revise `TransferIntent` now and add `executor`? | Yes |
+| D2 | Add `validAfter` in the same revision? | Yes |
+| D3 | Make `canExecute` take the signature? | Yes |
+| D4 | Which cash tokens in the first version? | A gated cash token and ERC-3009. Permit2 later, if USDT or an arbitrary ERC-20 is needed |
+| D5 | Who may call the executor? | `OPERATOR_ROLE` only. The signed legs bind every term, so opening it later is a new deployment of an immutable contract, not a rewrite |
+| D6 | `DvPExecutor` beside `IntentExecutor` or replacing it? | Beside. They can share a token safely. Revised 2026-10-23 on the owner's instruction: `IntentExecutor` now refuses any intent that states a consideration (`IntentExecutor_ConsiderationNotSupported`), because it cannot enforce a payment; otherwise it and its tests stay as they were |
+| D7 | The two vault templates? | Out of the first version. Their secondary trades stay plain transfers until the owner says otherwise |
+| D8 | Consideration fields in the intent? | Option B, with the check that a non-zero consideration needs a non-zero executor |
+
+D8 was chosen by the owner in so many words, and D1 to D7 were kept as recommended; I read that as adopting my recommendations. If any of them was meant to stay open, say which.
+
+My defaults, which the owner can overrule: the new fields go after `ref` in the order `executor`, `validAfter`, `considerationToken`, `considerationAmount`; two entry points (gated and 3009) in place of one with a kind flag; cash comes in first; the executor's errors are named `DvPExecutor_<Name>`; the reason names are `WRONG_EXECUTOR`, `INTENT_NOT_YET_VALID` and `CONSIDERATION_NEEDS_EXECUTOR`; the event is `DvPSettled`.
+
+### I-1 as built (2026-10-23, awaiting review)
+
+What changed:
+
+- `ITransferIntent`: `TransferIntent` has the four new fields after `ref`, in the order `executor`, `validAfter`, `considerationToken`, `considerationAmount`; `canExecute(intent, sig)` takes the signature. `Errors.sol` has `WRONG_EXECUTOR`, `INTENT_NOT_YET_VALID` and `CONSIDERATION_NEEDS_EXECUTOR`, each the keccak256 of its name.
+- `IntentSettledUpgradeable`: `_intentPreflight` checks, in this order, the deadline, the nonce, the consideration (either field non-zero needs an executor), the executor (non-zero must be the caller) and `validAfter` (inclusive). `canExecute` and `executeTransfer` then check the signature, then the hook, in the same order. `intentHash` encodes the typehash and the struct in one `abi.encode`; a struct of static fields encodes in place, and the tests build the hash field by field to prove the order. The typehash string has all ten fields.
+- `IntentExecutor`: only a NatSpec sentence changed. Its bytecode changes because the struct type is part of its function selectors.
+- Not touched: the base, the hook, the rules, the vaults, the fund layer, `IIntentExecutor` and `IIntentExecutorBatch` (their ids change because they carry the struct type), the nonce model, `cancelIntent`, the domain, the `IntentExecuted` event.
+
+Rule 11 (no `if` about who or when in a template) is read as the owner decided: these are checks on the signed message's own fields, in the same class as the deadline and the nonce, which were already in the mixin. The brief's §5 now says so.
+
+Tests, written first. With the interface changed and the mixin compiling but behaving as before (a stub), the four intent test files ran **84 passing, 25 failing**: the hash and typehash tests, every executor, `validAfter`, consideration and check-order test, the `canExecute` signature tests, the parity fuzz test, and the two regression tests below. After the mixin change all 109 passed, and the full Solidity run failed only `InterfaceFreeze` on the three changed ids. The ids were computed with `cast sig`; the same method reproduces the three old pinned values.
+
+- `IntentSettledUpgradeable.t.sol`: the typehash pinned as a string; the hash fuzzed over all ten fields and a test that changing each new field changes it; executor binding (zero, the caller, another role holder, any other address, the role check first); `validAfter` (inclusive, the second before, an empty window); the three consideration cases and a fuzz; the check order (six tests); `canExecute` (bad signature, altered intent, ERC-1271 wallet, wrong executor, not yet valid, consideration without executor); and a fuzz that `canExecute` returns exactly what `executeTransfer` reverts with, over the executor, window, consideration, signature, nonce, hook and caller.
+- The regression for the whole design, `IntentExecutor.t.sol` on the real token: an intent that names another executor and states a payment is refused by `IntentExecutor.execute` and by `executeBatch` with `WRONG_EXECUTOR`, nothing moves, and the same signed intent runs from the executor it names. An intent that states a payment and names no executor is refused by every executor. An intent that names `IntentExecutor` settled the transfer alone whatever it stated; that behaviour was reversed on 2026-10-23 (see "Validation of an outside review"): `IntentExecutor` now refuses an intent that states a consideration, and the token's `WRONG_EXECUTOR` and `CONSIDERATION_NEEDS_EXECUTOR` checks remain the guard for any other executor that holds the role. The same test now expects `IntentExecutor_ConsiderationNotSupported`, and a zero-consideration intent naming another executor still reaches the token and gets `WRONG_EXECUTOR`.
+- `IntentToken.t.sol`: a bad signature, with `canExecute` and `executeTransfer` agreeing on the real stack.
+- TypeScript: the signing helper has all ten fields; four new tests (all ten fields hash alike in viem and on chain and settle through the real executor; a named other executor is refused and pre-flight says so from each address; a consideration without an executor is refused; `validAfter` is inclusive at its second) and the chain-domain test now expects `canExecute` to say `BAD_SIGNATURE`.
+- Halmos: `check_intentNamingAnotherExecutorNeverExecutes` and `check_considerationWithoutExecutorNeverExecutes`, on the proxied token with a symbolic signature.
+
+Mutation checks, in place and restored, on the mixin: the consideration check dropped; applied to the amount only; applied to the token only; the executor comparison dropped; the `validAfter` check dropped; made exclusive; the signature dropped from `canExecute`; the executor check moved before the nonce check; a field left out of the hash. Each is caught by 1 to 7 tests. The order mutant survived at first, so `test_WhenTheNonceIsUsedAndTheExecutorIsWrong_NonceUsedWins` was added. Dropping the consideration check or the executor comparison also fails exactly the matching Halmos property and no other.
+
+Gas, measured with the real token, a mocked hook and a probe in a scratch copy: `executeTransfer` costs 121,767 gas before and 123,201 after, +1,434 (+1.2%), inside the call. The four extra calldata words add about 500 gas more in a transaction when they are zero. `canExecute` also checks the signature now, which costs more by design.
+
+Gates, on the final tree:
+
+- `npx hardhat test`: **695 passing (623 Solidity, 72 TypeScript)**; the isolated profile: 623 Solidity.
+- `forge fmt --check` and `solhint --max-warnings 0`: clean. `tsc --noEmit`: clean.
+- Halmos: **11 properties pass** (5 fund, 6 intent token) in about 2.5 minutes. Aderyn: 0 findings. upgrades-core: 3 upgradeable contracts, 3 passed.
+- `verify:reproducible`: 15 contracts identical across two production builds, the default profile and forge; `TokenProxy` matches `ProxyDeployer`.
+- Bytecode against `82c3c92`, built from a clean worktree: exactly `IntentToken` and `IntentExecutor` differ, and the other 35 contracts are byte-identical. That is the change the plan expected.
+- Slither: **0 results** (311 contracts, 97 detectors), run on the final tree after the last source edit, which was NatSpec and test files only.
+
+A fresh agent checked the documentation diff against the code. It found one wrong statement (the token "signs" and "never reads" the consideration), four overclaims and several stale sentences; all are fixed. One sentence it flagged as unpinned, that `IntentExecutor` treats a consideration as a record, now has a test.
+
+What was not done in I-1, and E-1 and E-2 then did: the executor contract (`IDvPExecutor`, `DvPExecutor`), the Ignition and TypeScript work, and the DvP docs and the brief's executor line.
+
+### E-1 as built (2026-10-23, awaiting review)
+
+What was built:
+
+- `IDvPExecutor` and `DvPExecutor` (6,710 bytes of runtime code, 17,866 under the limit): `executeDvPGated`, `executeDvP3009`, their pre-flights `canExecuteDvPGated` and `canExecuteDvP3009`, `pause` and `unpause`, with the roles, the guardian pause and the recovery timelock of `IntentExecutor`. Each entry point is `nonReentrant`, `OPERATOR_ROLE` and `whenNotPaused`. There is no entry point that runs one leg.
+- `IERC3009`, the two functions of ERC-3009 the executor calls. `Errors.sol` has one more reason, `LEGS_DO_NOT_MATCH`.
+- Test mocks: `MockERC3009Token` (USDC-shaped, with Circle's checks and an optional transfer fee), `MockReentrantCashToken`, `MockReentrantGatedToken`, `MockFakeSecurityToken`.
+- Pins: `InterfaceFreeze.t.sol` has the ids of `IDvPExecutor` and `IERC3009` (computed with `cast sig`), the `DvPSettled` topic and the new reason; `ContractSizes.t.sol` has `DvPExecutor`.
+- Not touched: the base, the hook, the rules, the vaults, the fund layer, `IntentExecutor`, Ignition, the brief.
+
+Where the build differs from the plan above, and why:
+
+- **The authorization's nonce includes the security token's address:** `keccak256(abi.encode(securityToken, securityToken.intentHash(securitiesIntent)))`, not the bare hash. With the bare hash an operator could pair the buyer's authorization with a substituted security token that reports the genuine hash and delivers nothing, and pay the buyer's cash to an account of its own. The executor cannot tell an honest token's hash from a counterfeit's. The gated form is not exposed, because the buyer's signed intent names the security token. This changes what the buyer signs, so E-2's TypeScript helper must compute this nonce. `test_WhenAnOperatorSubstitutesACounterfeitSecurityToken_TheAuthorizationIsRefused` is the regression; it builds the authorization the naive design would have produced.
+- **A failing leg reverts with `DvPExecutor_LegFailed(leg, reason)`** carrying the token's revert data, as `IntentExecutor.executeBatch` does for its items, instead of bubbling the token's error unchanged. With two tokens the operator needs to know which leg refused. The legs are the two gated legs, or the pull of the cash and the securities leg; the 3009 payout to the seller is not wrapped, and a failure there (a blocklisted seller, a re-entering token) reverts with the cash token's own error.
+- **The seller's cash balance is checked as well as the executor's.** A fee on the payout leaves the executor whole and the seller short; only the seller check sees it.
+- **The pre-flight returns the executor's own pause as `PAUSED` and a mismatch as `LEGS_DO_NOT_MATCH`.** The 3009 pre-flight cannot check the buyer's signature or a pause or blocklist on the cash token, and says so in its NatSpec.
+- **The executor-balance property is a fuzz test, not a stateful invariant**, because beyond its roles and its pause flag the executor keeps no state between calls.
+- Modifier order is `nonReentrant onlyRole whenNotPaused`, because Aderyn flags the guard when it is not first.
+
+Tests, written first. With the interfaces, the mocks and a stub executor whose settlement functions reverted and whose pre-flights answered no, `DvPExecutor.t.sol` ran **13 passing, 54 failing** (the 13 are nine constructor, role and ERC-165 tests, and four tests that passed for nothing: two with a bare `vm.expectRevert()`, and two reentrancy tests whose low-level call `vm.expectRevert` does not check; all four were later made exact). After the implementation all 67 passed. A test for the gated-path reentrancy guard, and the fixes that a mutation run and a review forced, made it 72. They are:
+
+- Unit, with every external call mocked and the ones that matter to a test expected (or expected not to happen): the constructor and roles (the recovery rules of M-1); the gated entry point (role, pause, both legs and the event, each mirrored field wrong in turn, equal tokens, a failing cash leg that never runs the securities leg, a failing securities leg, both failing and the cash leg reported first, a security token or a cash token without code); the 3009 entry point (role, pause, the happy path and the event, each authorization field wrong in turn, equal tokens, the executor ending with more or less cash, the seller receiving anything but the value, a failing pull that never runs the securities leg, a failing delivery that never pays the seller, a security token without code); and both pre-flights (each reason, Circle's strict edges at 10, 11, 1999 and 2000, the cash leg reported before the securities leg in the gated one and the authorization before the securities leg in the 3009 one).
+- Integration on the real stack (`RuleSetIntegrationTest` as the base, so identity, lockup, settlement window and the holder cap are real), with a real gated cash token: a trade settles and the executor keeps nothing; a locked seller undoes the cash leg; a buyer without cash moves no shares; both failing reports the cash leg; a Saturday trade waits for Monday; at a full holder cap a partial sale to a new holder is refused and a whole-balance sale is admitted; a seller's or buyer's cancel fails the trade atomically; a mismatched pair; an intent naming another executor, or stating a payment with none; a paused executor; a second attempt; a token that revoked the executor. Every case that is a policy refusal compares pre-flight with the real call. The revoked executor is the known gap: pre-flight says yes, because the tokens' own `canExecute` does not check the caller's role either, and the test pins that.
+- Integration with the ERC-3009 mock: the happy path, a locked seller, an authorization that belongs to another intent, one that pays less than the stated consideration, the counterfeit token, a used authorization, an authorization that ends on the intent's deadline (the intent's last second is lost, because the intent's deadline is inclusive and `validBefore` is exclusive) and one that ends a second later (it settles on the deadline), a fee-on-transfer token with its exact error, a stray balance hiding a fee, and the fuzz test that the executor's balance is exactly what was donated to it.
+- Integration on the fund layer (`FundIntegrationTest` as the base): at a full fund of three investors, a partial sale to a new investor is refused with `MAX_HOLDERS` at the securities leg, a whole-balance sale to a new investor is admitted and the count stays at three, and a partial sale to an existing investor is admitted.
+- Reentrancy: a cash token that calls back as an operator during the pull, and during the payout, and a gated token that calls back, are each stopped by the guard. (The first version of these tests passed with the guard removed, because `vm.expectRevert` does not compare the data of a low-level call; they now compare the returned data.)
+- Halmos on stub tokens with real balances: if the gated entry point returns, both legs ran once and the intents mirror; if the 3009 entry point returns, the securities leg ran once, the cash was pulled once, the executor kept its cash, the seller received exactly the value, and the nonce was the one that ties the intent.
+
+Mutation checks, in place and restored, 26 in all: the pause, role and reentrancy modifiers dropped (gated and 3009); each of the seven mirror conditions dropped; the two legs swapped; each of the five authorization conditions dropped, and the bare-hash nonce; the executor and the seller conservation checks dropped; the securities leg never run; the seller never paid; the pre-flight legs swapped, both window edges moved, the pause ignored. Each is caught by 1 to 18 tests. Two weaknesses in my own tests showed up and were fixed: the 3009 reentrancy mutant survived (the assertion above), and the gated guard had no test. Halmos catches the dropped mirror conditions, the dropped securities leg, the dropped nonce, payer, value and token conditions, and the dropped executor conservation check, each with the property that targets it.
+
+Gates, on the final tree:
+
+- `npx hardhat test`: **767 passing (695 Solidity, 72 TypeScript)**; the isolated profile: 695 Solidity.
+- `forge fmt --check`, `solhint --max-warnings 0` and `tsc --noEmit`: clean. Aderyn: 0 findings (five inline suppressions with reasons, three of them as in `IntentExecutor`). upgrades-core: 3 of 3.
+- Halmos: **13 properties pass** (2 executor, 5 fund, 6 intent token). This, upgrades-core, `verify:reproducible` and the bytecode comparison ran before the last edits, which touched only NatSpec, inline suppressions and tests.
+- Bytecode against `82c3c92`, from a clean worktree: `IntentToken` and `IntentExecutor` differ (I-1), `DvPExecutor` is new, and the other 35 contracts are byte-identical.
+- `verify:reproducible`, with `DvPExecutor` added to its list for this run only (E-2 adds it for good): **16 contracts identical** across two production builds, the default profile and forge, with `DvPExecutor` among them.
+- Slither: **0 results** (337 contracts, 97 detectors) on the final tree. The first run found three `unused-return` findings, the ignored `ok` of the tokens' `canExecute`, which the reason already carries; they are suppressed inline with that reason.
+
+A fresh agent checked the E-1 record, the NatSpec and the tests against the code, and looked for a way an operator, a counterfeit token or a party could redirect value. It found none: each party's signature covers the parts of the trade that decide where its own value goes, and the operator's choices (the token addresses, which signed legs to pair, the signature bytes and the timing) are pinned by the mirror and by the nonce. It found one wrong statement of mine in the tests (a no-code test that failed on the mirror check instead), a dozen overclaims in the record and NatSpec, and one gap, all fixed or documented below.
+
+Known limits, as documented in the NatSpec:
+
+- Pre-flight checks neither `OPERATOR_ROLE` nor that the executor holds `EXECUTOR_ROLE` on the tokens, because the tokens' own `canExecute` does not check the caller's role. After a token revokes the executor, pre-flight still says yes and the real call fails; the post-deploy check that pins the role set (E-2) is what guards that.
+- The 3009 pre-flight cannot see the buyer's signature, nor a pause or blocklist on the cash token.
+- A 3009 trade whose seller is the executor itself reverts with `DvPExecutor_CashNotConserved` (the executor cannot sign an intent, so this is unreachable with a valid signature). A seller who is also the buyer reverted too, with pre-flight saying yes; that was a bug in E-1, fixed in E-2 ("Validation of an outside review").
+- There is no on-chain allowlist of tokens. A party who signs a trade that names a counterfeit token loses to it.
+- In the 3009 form the buyer's signature covers the securities intent only through an opaque nonce, so a wallet cannot show what the buyer receives. In the gated form the cash intent states it in clear.
+- Two legs on tokens that share policy state, such as two classes of one fund, each get the current state in pre-flight.
+
+What was not done in E-1, and E-2 then did: the Ignition module and the post-deploy checks for the executor, the TypeScript tests and signing helper including the new nonce, the gas of a DvP, the docs and SECURITY.md entries, the brief's lines, and `DvPExecutor` in `verify-reproducible.ts`.
+
+### E-2 as built (2026-10-23, awaiting review)
+
+What changed:
+
+- `Components` deploys `DvPExecutor(deployer, guardian)`. `Activate` grants it `EXECUTOR_ROLE` on the intent token (the intent token's executors are now exactly `IntentExecutor` and `DvPExecutor`), `OPERATOR_ROLE` to the same `operator` account as the intent executor, and `RECOVERY_ROLE` to the recovery timelock, then hands its admin to the main timelock like the other contracts. Neither executor is attested.
+- A gated cash token is not deployed by `Activate`. It is a separate instrument; its administrator grants the DvP executor `EXECUTOR_ROLE` (a governance operation if the timelock administers it). The ERC-3009 token is external (USDC).
+- The post-deploy check (`assertHandedOver`, now exported) adds the DvP executor to the deployer-holds-nothing, timelock-is-admin and recovery-role-set pins, pins its operator and guardian, and pins `EXECUTOR_ROLE` on the intent token: the two executors hold it, and no account the stack knows about does.
+- TypeScript: `signIntent` takes the token whose domain is signed; `dvpNonce`, `signGatedTrade`, `sign3009Trade` and `deployGatedCashToken` in `fixtures.ts`; `dvp.test.ts` (seven flows and the gas test); deployment and governance tests extended.
+- Docs: a new page, [flows-dvp.md](docs/flows-dvp.md), and edits to the architecture, roles, governance-and-deployment, money, transfer-checks and flows-token pages, the docs index, the README (components, roles, runbook, post-deploy checks) and SECURITY.md (scope, trust and limits, mutation rows). The brief's §1, §3 and §5 and `verify-reproducible.ts` (16 contracts) carry the new contract.
+
+Tests, written first. With the helpers and the new tests in place and no deployment wiring, the TypeScript suite ran **69 passing, 14 failing**: the 11 new DvP, deployment and governance tests, and three existing governance tests that now name the DvP executor. After the wiring all 83 passed. They are:
+
+- `dvp.test.ts`, through the production deployment: a gated trade settles and the events name the executor; an ERC-3009 trade settles with the helper-computed nonce; the bare-hash nonce is refused; the settlement window refuses a Saturday trade and admits it on Monday; at a full holder cap a partial sale to a new investor is refused and a whole-balance sale is admitted; the intent executor cannot settle a DvP-bound intent, and an intent that states a payment and names no executor is refused; only the operator submits, and a paused executor refuses and pre-flight says `PAUSED`.
+- Deployment: the DvP executor's roles, its ERC-165 id and nothing paused; an `Activate` pointed at the wrong contract leaves the real executor with the deployer and the hand-over check refuses it.
+- Governance: the guardian pause, the recovery batch (unpause and guardian removal) and the forbidden-calls list now include the DvP executor; and an `EXECUTOR_ROLE` granted on the intent token to the operator key, through the timelock, fails the post-deploy check.
+
+Mutation checks on the wiring, in place and restored: the DvP executor never granted `EXECUTOR_ROLE`, its operator role or its recovery role; never handed over; the operator key also granted `EXECUTOR_ROLE`; the DvP operator role given to the minter. Each makes `Activate` fail the post-deploy check (the deployment, DvP and governance tests fail). Dropping the check for stray `EXECUTOR_ROLE` holders is caught by the governance test that grants one. A first run of this script was wrong: it left the previous mutant's file in place for the next one, so its results were discarded and it was redone with both files restored before each mutant.
+
+Gas, measured on the local chain with the real policy on the security token and identity on the gated cash token (`npx hardhat test nodejs test/nodejs/dvp.test.ts` prints it): a gated trade **382,001**; an ERC-3009 trade **296,445** (with a mock cash token, which is cheaper than USDC behind its proxy and blocklist); for scale, one securities intent through `IntentExecutor` 205,829 and one plain cash transfer 68,663. The test asserts only loose ceilings.
+
+Gates, on the final tree:
+
+- `npx hardhat test`: **781 passing (698 Solidity, 83 TypeScript)**; the isolated profile: 698 Solidity.
+- `forge fmt --check`, `solhint --max-warnings 0` and `tsc --noEmit`: clean. Aderyn: 0 findings. upgrades-core: 3 of 3.
+- Halmos: **13 properties pass**.
+- `verify:reproducible`: **16 contracts identical** across two production builds, the default profile and forge, with `DvPExecutor` in the list permanently.
+- Bytecode against `82c3c92`: `IntentToken` and `IntentExecutor` differ (I-1), `DvPExecutor` is new (6,710 bytes), the other 35 are identical.
+- Slither: **0 results** (338 contracts, 97 detectors). It ran before the last edits, which touched NatSpec and documentation only.
+- A fresh agent checked the E-2 documentation against the code. It found one wrong statement (SECURITY.md said no deployed executor enforces a payment, which was true before `DvPExecutor`), four overclaims (the fee-on-transfer error, `cancelAuthorization` which no test covers and which the buyer does not call directly, the whole-balance sale at the fund-wide cap which holds only if the sale empties the seller's only class, and gas figures that vary by a few hundred between runs), and seven stale sentences that still said "the executor" or listed suppressions and mutants without the DvP executor. All are fixed. The same pass found that the DvP executor's `revokeRole`, `unpause` and `pause` overrides had no recorded mutants; four were run (recovery cannot revoke the guardian, recovery can revoke any role, recovery cannot unpause, anyone can pause) and each is caught by one test in `DvPExecutorUnit_Roles`.
+
+#### Validation of an outside review
+
+The owner pasted a review of E-1 and asked whether it is true. Each finding was reproduced with a test before anything was changed.
+
+1. **Self-trade in `executeDvP3009`: true, a bug in my code, fixed.** If the seller, the buyer and the authorization's payer are one account, pre-flight returned yes and execution reverted with `DvPExecutor_CashNotConserved(seller, before + price, before)`: the executor read the seller's balance before the pull took the price from the same account, so the payout could not raise it by the price. The test reproduced the exact revert. The fix is Option 2 of the review: the seller's balance is read after the pull and the delivery, immediately before the payout, so the check measures the payout alone. Option 1 (forbid self-trades) would make the executor decide who may trade with whom, which belongs to a rule, not to the executor, and the gated form already settles a self-trade (the review is right about that, and a test now pins it). The Halmos property no longer excludes the self-trade case; it asserts a net change of zero for a seller who is also the payer. The mutant that reads the balance before the pull is killed by the new Solidity test; Halmos cannot kill it, because its property is about what holds when a call returns, and the mutant only makes a legitimate call revert.
+2. **`IntentExecutor` settled an intent that stated a consideration, free of payment: true, and a design property. Changed on the owner's instruction, 2026-10-23 (see "The `IntentExecutor` refusal" below).** The test that pinned it was mine, and SECURITY.md said so. The risk the review describes is real: a signer who reads the consideration fields and does not check which contract the `executor` field names is protected only if it names `DvPExecutor`. The attacker needs the `IntentExecutor` operator to submit the intent, and the operator could move the shares of a plain intent in the same way, so the consideration fields added no new theft; they added a false sense of safety. The owner chose the review's recommendation, which reverses decision D6's "`IntentExecutor` and its tests stay as they are", and removes the use of the consideration fields as a record on a free-of-payment intent (`ref` remains for the reference).
+3. **Pre-flight on a multi-class fund swap: true, and already documented.** `test_WhenTheFundIsAboveItsLoweredCap_ASwapOfTwoClassesPassesPreflightAndFailsOnTheSecondLeg` reproduces it with two intent-capable classes of one fund and a cap lowered below the investor count: pre-flight says yes, and the second leg fails with `MAX_HOLDERS` because the first leg took the buyer out of the fund. The review's names for the fund's internals (`isInvestor`, `classCount`) are not in the code (`heldClasses`, `positionsOf`), but the mechanism is as described. It is in the NatSpec, in flows-dvp.md and in SECURITY.md.
+4. The review's praise of the tests is accurate as far as I checked: the parity fuzz, the deadline and `validBefore` edge tests and the reentrancy tests with `OPERATOR_ROLE` granted to the attacker exist as described.
+
+What is not done: the brief's §8 phase list does not mention the DvP phases. The work is committed on `fund-layer` (I-1 `0b1b765`, E-1 `128933c`, E-2 `589790a`, the `IntentExecutor` refusal `24b7798`) and not pushed.
+
+#### The `IntentExecutor` refusal (2026-10-23, on the owner's instruction)
+
+`IntentExecutor.execute` and `executeBatch` now revert with `IntentExecutor_ConsiderationNotSupported(index)` (declared in `IIntentExecutorBatch`; the index is the position in the batch, and zero for `execute`) when an intent's `considerationToken` or `considerationAmount` is non-zero, before the token is called. The check is the executor's, not the token's, so the token's `canExecute` does not see it. Decision D6 is revised: `IntentExecutor` stays beside `DvPExecutor`, but it is no longer unchanged. Its bytecode already differed from the last commit because of the intent revision (3,599 bytes now).
+
+Tests, written first. With the error declared and nothing throwing it: **31 passing, 8 failing** in `IntentExecutor.t.sol`, the eight being the refusal tests (token only, amount only, both, a fuzz over any consideration, a batch that names the position of the intent that states one, and three on the real token: naming the intent executor, naming the DvP executor, naming no executor). After the change all 39 pass. The unit helper `_intent` now has a zero consideration and still names an executor and a `validAfter`, so forwarding of those fields stays pinned; a test shows an intent with no consideration is still forwarded with every other field. The role and pause checks still come first. Seven mutants, each caught by 2 to 7 tests: `execute` never refuses; the check ignores the amount, or the token, or needs both; `executeBatch` never refuses, or names the wrong position; `execute` refuses only after calling the token.
+
+Tests that relied on the old behaviour were rewritten, not loosened. In Solidity, an intent naming the intent executor and stating a payment is now refused and nothing moves (it was settled alone before); a zero-consideration intent naming another executor still reaches the token and gets `WRONG_EXECUTOR`; a stated payment naming the DvP executor is refused by the intent executor, refused by the token if another role holder submits it directly, and runs from the DvP executor. In TypeScript, `intents.test.ts` and `dvp.test.ts` expect the new error through the real stack, and a new test shows a batch naming the position.
+
+Gates on the final tree: `npx hardhat test` **792 passing (707 Solidity, 85 TypeScript)**; isolated profile 707; `forge fmt`, `solhint`, `tsc` clean; Aderyn 0; Halmos 13 properties pass; upgrades-core 3 of 3; `verify:reproducible` 16 contracts identical; bytecode against `82c3c92`: `IntentToken` and `IntentExecutor` differ and `DvPExecutor` is new, the other 35 identical. Slither: **0 results** (338 contracts, 97 detectors) on the final tree.
+
+Docs updated: flows-token (the executor paragraph and the batch diagram), transfer-checks, flows-dvp, architecture, roles, the README, SECURITY.md (the consideration bullet and a mutation row), the brief's §1 and §5. Not changed: `IIntentExecutor`'s ERC-165 id (errors are not part of it) and `InterfaceFreeze.t.sol`, which pins no error selectors. Nothing is committed or pushed.
+
+## Review items, built before the first deployment (plan 2026-10-23; decisions made; S0 to S5, decision 4, finding 1 and finding 4 committed)
+
+On 2026-10-23 the owner pasted a merged outside assessment and then said: "I prefer to have the code ready from the gate than waiting to do fixes X months after... if one institutions uses this seriously the gas costs are unecessary". The first version of this section proposed eleven decisions. The owner answered them the same day with changes, and added an S0 for the interfaces. The numbers below are the owner's answer; they differ from the first version's. A second answer settled the one open point of the first reply: `IPolicyHook` keeps its shape, with `checkSend` and `checkReceive` added and `ref` and `deadline` moved from fields into `extra`. The brief's rule 4 is satisfied: the owner's RD3 is the explicit instruction to reopen `contracts/interfaces/`, to be re-frozen after S0.
+
+### The assessment, checked against HEAD `7536ec2`
+
+| Claim | Result | Evidence |
+|---|---|---|
+| ERC-7943 differs from our interface | True | The standard is Final (created 2025-06-10). Fungible id `0x3edbb4c4` is the XOR of the six selectors (recomputed with `cast sig`). We differ in names (`setFrozen`, `getFrozen`), in `canTransfer` returning `(bool, bytes32)`, in having no `canSend`/`canReceive` and no `bool` returns, and in `setFrozen` reverting above the balance (Final: "MUST allow freezing more assets than those held"). Our `ForcedTransfer` event also has an `agent` argument; Final's has three |
+| `AttestKind.IMPLEMENTATION` is not tied to a template | True, reproduced | `_authorizeUpgrade` checks only the attestation. A probe upgraded an `IntentToken` proxy to the `Gated4626Vault` implementation and it was accepted: balances survive, `decimals()` goes 18 to 6, `asset()` is 0, `totalAssets()` and `deposit` revert, plain transfers still work. Needs `UPGRADER_ROLE` (the timelock), so a governance mistake, not an attack |
+| Dropping `FundHoldersRule` from a registered class's hook un-caps it silently | True, reproduced, already documented | A probe: `setRules` without the rule on a registered class is accepted; at a full cap of 3 a fourth investor then received tokens and `fund.holderCount()` stayed 3. Documented in the fund section above and in `governance-and-deployment.md`; the runbook forbids it |
+| No `unregisterClass` | True | `Fund` has `registerClass` only |
+| The hook codehash is per token | True, documented | `TOKEN`, `ADMIN` and `REGISTRY` are immutables, so each class needs its own deployed hook and its own council attestation |
+| No address-level freeze | Partly | `setFrozen` is read only for the sender, so inflows and mints to a frozen holder pass. But `IdentityRule` rejects a de-verified sender (all kinds except MINT and FORCED) and a de-verified receiver (all kinds except BURN), so de-verifying in the identity registry blocks an address both ways. The registry is external, no role in this repo writes to it, and no document presents de-verification as the freeze route |
+| Pause blocks mint and burn | True, documented | `_check` lets only FORCED through, and FORCED to `address(0)` is reserved. A burn by `BURNER_ROLE` from a de-verified holder is also refused by `IdentityRule` (`SENDER_NOT_VERIFIED`), paused or not. The enforcement route is `forcedTransfer` to the treasury, then a burn after an unpause, which takes the timelock delay or the recovery timelock's |
+| Dust griefing | True, accepted as L-1 | `MinPositionRule` is planned and not built. The 4626 route needs a verified empty receiver and 1 wei |
+| No batch primitives, no recovery address, no jurisdiction rule, whole-balance lockup | True | |
+| ERC-7540 `maxDeposit` can overstate when controller and receiver differ | True, protected | `maxDeposit` checks the controller; the hook checks the receiver at the mint |
+| "A thin ERC-7943 adapter would do" | Wrong | Freezing above the balance, the return types and the event shape cannot be done from outside the token. They touch the base. The Docs section above deferred exact conformance until the ERC was Final, and it now is |
+
+Checked after the owner's answer: the ERC-3643 reference token (`Token.sol` in the ERC-3643 repository, main) puts `whenNotPaused` on `transfer` and `transferFrom` only; `mint`, `burn` and `forcedTransfer` carry `onlyAgent` alone, so its agents can mint and burn while paused. Its `setAddressFrozen` blocks `transfer` and `transferFrom` in both directions, but mint, burn and `forcedTransfer` ignore the flag. Not checked: whether the ERC-3643 text (as opposed to that token) says anything about pause, and whether it declares an ERC-165 id.
+
+### Measured baseline
+
+An ordinary `transfer` of 0.1 token between two existing holders on `IntentToken`, every touched account cold (`vm.cool`), probe in a scratch copy, so the numbers move by a few hundred gas between runs:
+
+| Rules installed, in order | Gas | Step |
+|---|---|---|
+| `IdentityRule` | 36,962 | |
+| + `LockupRule` | 43,825 | +6,863 |
+| + `MaxHoldersRule` | 69,198 | +25,373 |
+| + `FundHoldersRule` | 91,082 | +21,884 |
+
+By reading the code (not traced), the four-rule transfer calls back into the proxied token seven times: `balanceOf` five times (`MaxHoldersRule.check` once, and `MaxHoldersRule.after_` and `FundHoldersRule.after_` twice each) and `policyHook` twice (`onlyHook` in each `after_`).
+
+One more share class today: `new ComplianceHook` with four rules costs 880,631 gas (3,316 bytes of runtime code), plus 29,144 gas for the council's `attest`, plus one council review of that hook.
+
+Deployed sizes against the 24,576-byte limit, today and with `MulticallUpgradeable` added to the base (spike in a scratch copy, compiled):
+
+| Contract | Today | Headroom | With Multicall | Headroom |
+|---|---|---|---|---|
+| `IntentToken` | 15,574 | 9,002 | 16,194 | 8,382 |
+| `Gated4626Vault` | 16,253 | 8,323 | 16,859 | 7,717 |
+| `Gated7540Vault` | 21,546 | 3,030 | 22,152 | **2,424** |
+
+Multicall costs about 610 bytes in each template. Everything else the base gains has to fit in the 2,424 bytes the 7540 vault has left.
+
+### Decisions (the owner's, 2026-10-23)
+
+| # | Decision | As decided | What I add or check |
+|---|---|---|---|
+| RD1 | Hook topology | **Shared.** One `ComplianceHook` per deployment, one codehash for the council to attest. State is keyed by token (`rules(token)`, `afterMask[token]`, `MAX_RULES` per token). The per-token admin comes from the token itself, `IAccessControl(token).hasRole(DEFAULT_ADMIN_ROLE, msg.sender)`, as the rules already do, so the hook has no `ADMIN` or `TOKEN` immutable. `setRules(token, rules)` also accepts `msg.sender == token`, so the token's initialiser installs the hook and the initial rule set in one call; until then `NO_RULES` fails closed. `ProxyDeployer` loses the `TOKEN()` binding check, passes `initialRules` in the init data and checks `hook.rules(proxy)` equals them afterwards. `afterTransfer` requires `msg.sender == ctx.token`. `onlyHook` in the rules is unchanged. The post-deploy check pins `rules(token)` to `RULE_ORDER` as now | The `msg.sender == token` clause is what makes the chicken-and-egg work: during the proxy's construction the token has no code yet, so the hook could not ask it `hasRole`. It is safe: a contract can only set the rules of its own address, and every rule is still attested. Confirmed by the owner: the token's `_setHook` and `ProxyDeployer` require `hook.REGISTRY()` equal to the token's registry, because a shared hook built on another registry would vet rules against the wrong list. The token initialisers (`IntentToken`, both vaults) gain an `initialRules` argument |
+| RD2 | Balances in `extra` | **Do it.** `extra` is ours (rule 14). Pre-move `abi.encode(uint256 fromBalance, uint256 toBalance)`, zero for the zero side; for EXECUTED the layout appends `bytes32 ref, uint256 deadline`. `check` reads `extra`; `after_` derives the post-move balances from `amount` (`to + amount`, `from - amount`). The layout is documented in the policy interface's NatSpec. It is built by the same code in `_canTransfer` and `canExecute`, so parity holds | Same context for `check` and `after_`, so the base reads the two balances once per movement and the rules make no callbacks into the token. The two counting rules already return early on a self-transfer and a zero amount. `abi.decode` of the first two words ignores the EXECUTED tail |
+| RD3 | ERC-7943 Final | **The token face only.** `IPolicyGated` takes 7943's names and return types: `setFrozenTokens` (above the balance), `getFrozenTokens`, `forcedTransfer` returns `bool`, `canTransfer` returns `bool`, `canSend`, `canReceive`. `supportsInterface(0x3edbb4c4)`. The reasoned pre-flight moves to a second name, `canTransferWithReason`. Policy rejections keep `PolicyGated_TransferRejected(bytes32)`; the token's own frozen check uses `ERC7943InsufficientUnfrozenBalance`. `canSend` and `canReceive` come from the policy's account-level checks. `IPolicyHook` keeps its shape with two edits: `checkSend` and `checkReceive` are added (also to `IComplianceRule`, with a default of `TRANSFER_OK` in `BaseRule`), and `ref` and `deadline` leave the context as fields and ride in `extra` for EXECUTED, which removes two transient slots. `_releaseFrozen` unfreezes only the frozen part of what moves, with `Frozen` before `Transfer`. Brief rule 7 is amended: policy rejections revert `PolicyGated_TransferRejected(bytes32)`, the token's own frozen check reverts `ERC7943InsufficientUnfrozenBalance` | The second name returns `(bool allowed, bytes32 reason)`, as the old `canTransfer` did. `isUserAllowed` goes: it is today a zero-amount mint probe, which `canReceive` replaces. The `ForcedTransfer` event becomes Final's three-argument event, with a second event `ForcedTransferBy(from, to, amount, agent)` so the agent is not lost. |
+| RD4 | Address freeze | **Fold in** as `HolderRestrictionRule`, replacing `LockupRule`. Packed `uint64 unlockTime` plus `bool frozen` per (token, holder): one storage read. The freeze is in `checkSend` and `checkReceive` (account-level, both directions, as ERC-3643's `setAddressFrozen`); the lockup stays in the transfer check because it depends on the kind (an enforcement burn is exempt). `AGENT_ROLE` sets both. FORCED ignores the freeze on `from`; the receiver is still identity-checked | Mint to a frozen account is refused here (`checkReceive`); the ERC-3643 reference token allows it. Also refused: a burn, by a holder or by `BURNER_ROLE`, from a frozen account, so the enforcement route stays `forcedTransfer` to a quarantine account, as RD9 says. Confirmed by the owner: the freeze on `to` applies to FORCED and to MINT; the reference token checks neither. The docs say a quarantine wallet is never address-frozen (use a lockup), otherwise enforcement into it fails |
+| RD5 | `MaxHoldersRule` on fund classes | **Leave out.** The investor count that matters for a fund is fund-wide. The rule stays available for a class with its own regulatory limit, and the docs say so. It also removes the per-class seed and exempt-holder ceremony for the escrow vault | `RULE_ORDER` loses it for `intent`, `fund` and `asyncFund`, since the deployment registers all three as classes. The measured step was 25,373 gas |
+| RD6 | Template check | **Yes.** `templateId()` constant per template, compared in `_authorizeUpgrade` next to the attestation. `AttestKind` stays | The id is not versioned: `keccak256('IntentToken')`, `'Gated4626Vault'`, `'Gated7540Vault'`, so a bug-fix implementation of the same template stays upgradeable |
+| RD7 | `MinPositionRule` | **Yes, zero means off.** The post-move balance of each non-zero side must be zero or at least the minimum, so no dust is left behind on either side. FORCED exempt; a holder's burn is checked, an enforcement burn (the operator holds `BURNER_ROLE`, as the lockup rule and the token's frozen-balance check define it) is not, and the role is asked only when a burn would leave a balance below the minimum. Ordered right after the identity rule and before the holder rules, so the counts only ever see real positions. This closes L-1 | Exempt, confirmed by the owner: the token itself (the 7540 escrow, without which a redeem request below the minimum would be refused) and accounts the token's admin lists. A new reason `BELOW_MIN_POSITION` |
+| RD8 | Batching | **No bespoke batch functions; add `MulticallUpgradeable`.** One function, every role-gated call gets atomic batching, `_msgSender()` is preserved through the delegatecall to self | Measured at about 610 bytes (above). OpenZeppelin's `multicall` is not payable, so no ETH can enter. The size is the risk: shared hook plumbing, the 7943 face, `templateId` and the policy checks must fit in 2,424 bytes in the 7540 vault. Measured after S2. If over, the lever is `via-ir` pinned in both toolchains, as the owner decided, not moving functions out of the vault. It needs the same setting in Hardhat and forge (the reproducibility gate compares them) and a clean run of Slither, Aderyn and Halmos. `optimizer.runs` is 200 in both (`hardhat.config.ts`, `foundry.toml`); lowering it changes no code but costs gas on every call |
+| RD9 | Pause | **Docs only, no `forcedBurn`.** Incident path: `forcedTransfer(from, quarantine)` during the pause, then `burn(quarantine)` after the unpause. The docs say plainly that this differs from ERC-3643, which lets agents burn while paused | Verified above, for the ERC-3643 reference token. The docs will say "the ERC-3643 reference token". Our pause also blocks the issuer's mint, which that token does not |
+| RD10 | Fund integrity | **`Fund.isClassIntact(token)`, no `unregisterClass`.** Intact means registered and the installed rule listed in `hook.rules(token)`. Add `firstBrokenClass()` so the monitor and the post-deploy check make one call | `firstBrokenClass()` returns the first registered class that is not intact, or the zero address |
+| RD11 | Order | **S0 to S5** below. The owner's S0 is the specification, the interface edits and the re-pinned `InterfaceFreeze.t.sol`, in one commit with the tree green, then a re-freeze | S0 is built in the additive form: see "S0 as built" for why the edits to the existing frozen interfaces move to the steps that implement them |
+
+The first estimate of the gas result is the owner's: the 91k four-rule transfer should land around 65 to 70k with RD2 and RD5, before `MinPositionRule`. By arithmetic RD5 alone gives about 65.7k (91,082 minus 25,373). To be re-measured after S3, with the probe above.
+
+### Decided: the policy interface
+
+`IPolicyHook` keeps its shape (`beforeTransfer`, `afterTransfer`, `wantsAfter`, `policyHook()` on the token) with two edits, both landing in S1:
+
+- `checkSend(address token, address account)` and `checkReceive(address token, address account)`, each returning a reason code, on `IPolicyHook` and on `IComplianceRule`; `BaseRule` returns `TRANSFER_OK` by default. They serve `canSend` and `canReceive` and nothing else: `check(ctx)` already applies the same account-level decision to a movement, per kind, so the hook still makes one call per rule per movement. A rule's `check` and its `checkSend` and `checkReceive` must agree, and a test pins that.
+- `TransferContext` loses `ref` and `deadline` as fields: `{token, from, to, id, amount, operator, kind, extra}`. No contract reads them; the base builds them and tests set them. For EXECUTED they ride in `extra` after the balances.
+
+The draft ERC in `~/dev/urwa-policy` is not adopted by this stack; RD2 puts balances in `extra` for every kind, which that draft does not allow, so its amendment stays an S5 item.
+
+### Assumptions, say if wrong
+
+1. The demo rule order becomes: `intent`: identity, min position, holder restriction, settlement window, fund holders. `fund` and `asyncFund`: identity, min position, holder restriction, fund holders.
+2. The rule setters (`setLockup`, `setFrozen`, and the cap and exemption setters that stay) are batched by OpenZeppelin's `Multicall` on the rule, which preserves the sender, not by array functions, for the reason RD8 gives. S3 decides whether it fits.
+
+### S0: the interface specification
+
+Text only, no NatSpec (it lands with the code, as rule 16 requires). Parameter names carry the project's underscore; the ERC-165 ids do not depend on names.
+
+```solidity
+// contracts/interfaces/IERC7943Fungible.sol (new): the Final text
+interface IERC7943Fungible is IERC165 {
+  event ForcedTransfer(address indexed from, address indexed to, uint256 amount);
+  event Frozen(address indexed account, uint256 amount);
+  error ERC7943CannotSend(address account);
+  error ERC7943CannotReceive(address account);
+  error ERC7943CannotTransfer(address from, address to, uint256 amount);
+  error ERC7943InsufficientUnfrozenBalance(address account, uint256 amount, uint256 unfrozen);
+  function forcedTransfer(address from, address to, uint256 amount) external returns (bool result);
+  function setFrozenTokens(address account, uint256 amount) external returns (bool result);
+  function canSend(address account) external view returns (bool allowed);
+  function canReceive(address account) external view returns (bool allowed);
+  function getFrozenTokens(address account) external view returns (uint256 amount);
+  function canTransfer(address from, address to, uint256 amount) external view returns (bool allowed);
+} // id 0x3edbb4c4
+
+// contracts/interfaces/IPolicyGated.sol: is IERC7943Fungible
+//   removed: setFrozen, getFrozen, isUserAllowed, canTransfer(bool, bytes32), ForcedTransfer with an agent,
+//            Frozen (now inherited), PolicyGated_FrozenExceedsBalance
+//   added:   canTransferWithReason(from, to, amount) returns (bool allowed, bytes32 reason)
+//            event ForcedTransferBy(address indexed from, address indexed to, uint256 amount, address indexed agent)
+//            error PolicyGated_HookRegistryMismatch(address hookRegistry, address tokenRegistry)   // _setHook and init
+//   kept:    mint, burn, pause, unpause, setPolicyHook, registry, PolicyHookChanged, PolicyGated_TransferRejected
+//            policyHook() stays
+
+// contracts/interfaces/ITemplated.sol (new)
+interface ITemplated {
+  error Templated_WrongTemplate(address newImplementation, bytes32 expected, bytes32 actual);
+  function templateId() external pure returns (bytes32 id);
+}
+
+// contracts/interfaces/IComplianceHook.sol: shared
+//   removed: ADMIN(), TOKEN(), the constructor's token and initialRules, RuleSetChanged(bytes32[])
+//   setRules(address token, IComplianceRule[] calldata rules)   // token admin, or msg.sender == token
+//   rules(address token) returns (IComplianceRule[] memory)
+//   ruleCount(address token) returns (uint256)
+//   event RuleSetChanged(address indexed token, bytes32[] ruleIds)
+//   errors: ComplianceHook_NotTokenAdmin(address token, address caller)
+//   kept: MAX_RULES, REGISTRY(), the 16-rule cap, per-rule attestation, NO_RULES fail-closed
+
+// contracts/interfaces/IFund.sol: added
+//   isClassIntact(address token) returns (bool)
+//   firstBrokenClass() returns (address token)        // zero address when every class is intact
+
+// contracts/interfaces/IHolderRestrictionRule.sol (new; replaces ILockupRule)
+//   setLockup(address token, address holder, uint256 unlockTime)      // token AGENT_ROLE
+//   setFrozen(address token, address holder, bool frozen)             // token AGENT_ROLE
+//   unlockTime(address token, address holder) returns (uint256)
+//   isFrozen(address token, address holder) returns (bool)
+//   events LockupSet(token, holder, unlockTime), HolderFrozenSet(token, holder, frozen)
+
+// contracts/interfaces/IMinPositionRule.sol (new)
+//   setMinPosition(address token, uint256 amount)                     // token DEFAULT_ADMIN_ROLE; zero is off
+//   setExempt(address token, address account, bool exempt)            // token DEFAULT_ADMIN_ROLE
+//   minPosition(address token) returns (uint256), isExempt(address token, address account) returns (bool)
+//   events MinPositionSet, ExemptSet
+
+// contracts/interfaces/Errors.sol: appended reasons
+//   BELOW_MIN_POSITION, SENDER_FROZEN, RECEIVER_FROZEN
+
+// TransferContext.extra, pre-move, for every kind:
+//   abi.encode(uint256 fromBalance, uint256 toBalance)   // zero for address(0)
+
+// contracts/interfaces/IPolicyHook.sol and IComplianceRule.sol: the two edits of "Decided: the policy interface"
+//   TransferContext { address token; address from; address to; uint256 id; uint256 amount; address operator;
+//                     TransferKind kind; bytes extra; }          // ref and deadline removed
+//   function checkSend(address token, address account) external view returns (bytes32 reason)     // both interfaces
+//   function checkReceive(address token, address account) external view returns (bytes32 reason)  // both interfaces
+//   BaseRule: both default to TRANSFER_OK
+```
+
+The initialisers of `IntentToken`, `Gated4626Vault` and `Gated7540Vault` gain an `initialRules` argument. `IPolicyRegistry`, `ITransferIntent`, `IIntentExecutor`, `IIntentExecutorBatch`, `IDvPExecutor` and `IERC3009` do not change.
+
+### The other designs, as decided
+
+**Template ids (RD6).** `_authorizeUpgrade` keeps the attestation check and then requires `ITemplated(newImpl).templateId() == templateId()`. An implementation without the function reverts the call, so it is refused. Tests first: each template to another template's implementation refused, to a new implementation of its own accepted, an implementation without `templateId` refused.
+
+**Frozen amounts above the balance (RD3).** `_check` already treats the unfrozen amount as zero when `frozen > balance`. `_releaseFrozen` follows the standard: it lowers the frozen amount by exactly what the action needs, so with a balance of 10, a frozen amount of 100 and a forced transfer of 10, the frozen amount becomes 90 (today it becomes 0). The `frozen <= balance` invariant test and the Halmos frozen properties are rewritten around `unfrozen = balance - min(frozen, balance)`.
+
+**Fund integrity (RD10).** The post-deploy check calls `firstBrokenClass()`. It cannot prevent a drop; nothing in the hook can know about the fund. The docs name the call as the monitor.
+
+**Gas candidates (R7, each measured alone before it is kept).** The five `balanceOf` callbacks go with RD2. Packing the rule count and the after mask into one word saves one cold read. Storing the rule list as the code of a data contract replaces one cold read per rule with one `EXTCODECOPY`, worth it only if the probe shows a clear gain at four rules, because each `setRules` then deploys a data contract. A candidate is kept when it saves about 2,000 gas per transfer or per class and the code stays simple. Results go into the docs as measured numbers; tests do not assert gas.
+
+### Build order
+
+Each step: tests first with the red run shown, implementation, both runners, Slither, Aderyn and Halmos where touched, the gas probe re-run, then stop for review. Commits only on the owner's order, files staged by name.
+
+| Step | Content |
+|---|---|
+| S0 | This section, the new interface files, the appended reasons and their pins (built, see below). The breaking edits to the existing frozen interfaces land with the step that implements them. Re-freeze on approval |
+| S1 | The shared hook and the context with balances; the rules' balance reads move to the context (the existing rules, so the tree stays green); `ProxyDeployer` and the initialisers take `initialRules` |
+| S2 | The base: ERC-7943 face, `_releaseFrozen`, `MulticallUpgradeable`, `templateId`. **Size gate** on the 7540 vault |
+| S3 | The rules: `HolderRestrictionRule`, `MinPositionRule`; `MaxHoldersRule` and `FundHoldersRule` adapted to the context. Gas probe re-run (built, see "S3 as built"; the two counting rules had read the context since S1, so their S3 change is the cap answer in `checkReceive`) |
+| S4 | The fund views; the Ignition modules and fixtures (shared hook deployment, the new `RULE_ORDER`, the post-deploy checks) (built, see "S4 as built"; the shared hook deployment had landed in S1) |
+| S5 | Docs, `SECURITY.md`, `README.md`, the brief (`CLAUDE.md` §1, §4, §5, §6 and the rule list), the pause runbook, the amendment to the draft ERC for RD2, `InterfaceFreeze` re-pinned, reproducibility (built, see "S5 as built"; the draft ERC amendment is in another repository and is not done) |
+
+### What this changes in frozen files
+
+By step: S1 `IPolicyHook`, `IComplianceRule`, `IComplianceHook` and the semantics of `TransferContext.extra`; S2 `IPolicyGated` and the ERC-165 id of every template; S4 `IFund`. New files, built in S0: `IERC7943Fungible`, `ITemplated`, `IHolderRestrictionRule`, `IMinPositionRule`, and three appended reason codes in `Errors.sol`. `ILockupRule` goes in S3. Every implementation, hook and rule codehash changes, which is free before the first deployment. `InterfaceFreeze.t.sol` is re-pinned in each step's commit.
+
+### S0 as built (2026-10-23, committed `71f10cd`)
+
+The owner's S0 was: the specification, the interface edits and the re-pinned `InterfaceFreeze.t.sol`, one commit, tree green. All of it cannot be one green commit. Changing `IPolicyGated`, `IPolicyHook`, `IComplianceRule` and `IComplianceHook` breaks every contract and test that implements or calls them (`TransferContext` alone appears in 23 contract and test files, and the shared hook is a rewrite of `ComplianceHook`). Making that compile would pull S1 and S2 into S0. So S0 is built in the additive form, which stays green:
+
+- The specification above, final.
+- Four new interface files: `IERC7943Fungible` (the Final text), `ITemplated`, `IHolderRestrictionRule`, `IMinPositionRule`, with full NatSpec.
+- Three appended reasons in `Errors.sol`: `BELOW_MIN_POSITION`, `SENDER_FROZEN`, `RECEIVER_FROZEN`.
+- `InterfaceFreeze.t.sol` pins the four ids (`0x3edbb4c4`, `0x7aa77f29`, `0x3abb7c85`, `0x44ac9195`, computed with `cast sig`; the first is the standard's own and `type(IERC7943Fungible).interfaceId` reproduced it), the event topics and the three reasons.
+
+Tests first: the pins were added before the files and the run failed to compile (`HHE902`, the import of `IERC7943Fungible.sol` could not be resolved), then passed once the files existed. `forge fmt --check` and `solhint` are clean. Both runners: 792 passing (707 Solidity, 85 TypeScript), unchanged, since the pins live in existing tests.
+
+"Re-freeze" then means: the specification here is frozen for S1 to S5, and the new interface files are frozen by their pins. Each existing interface changes in one commit together with the code that implements it and its new pin.
+
+### S1 as built (2026-10-24, committed `0aaed89`)
+
+One shared `ComplianceHook` and the balances in the context. What changed:
+
+- **Hook.** `ComplianceHook(registry)` is the only constructor argument. State is per token: a mapping to a struct holding the rules by position and one word with the rule count and the after mask. `setRules(token, rules)` is allowed to the token itself or to whoever holds `DEFAULT_ADMIN_ROLE` on it, asked live (a token with no code is refused); `afterTransfer` requires `msg.sender == ctx.token`; `wantsAfter()` answers for `msg.sender`; `rules(token)`, `ruleCount(token)`, `checkSend` and `checkReceive` (first rejection wins, `NO_RULES` for a token with none). `RuleSetChanged(token, ruleIds)`.
+- **Token.** The initialisers of `IntentToken` and both vaults take `initialRules`. The base's init installs the hook, then calls `setRules(address(this), initialRules)` on it (skipped for an empty list). `_setHook` also requires `hook.REGISTRY()` to equal the token's registry (`PolicyGated_HookRegistryMismatch`).
+- **Context.** `TransferContext` is `{token, from, to, id, amount, operator, kind, extra}`. `extra` is `abi.encode(fromBalance, toBalance)` before the move for every kind, with `bytes32 ref, uint256 deadline` appended for EXECUTED. It is built in `_context`, which the write and every pre-flight share, so parity holds by construction. `afterTransfer` gets the same context.
+- **Rules.** `IPolicyHook` and `IComplianceRule` gained `checkSend` and `checkReceive` (`BaseRule` returns `TRANSFER_OK`; `IdentityRule` answers them from the registry). `MaxHoldersRule` and `FundHoldersRule` read the balances from `extra` and make no call into the token except the `policyHook` lookup in `onlyHook`. `Fund._hookListsRule` and `MaxHoldersRule._isListed` read `rules(token)`.
+- **Deployer.** `ProxyDeployer.deploy(symbol, implementation, initData, hook, expectedRules)` no longer checks a binding; it checks that the token installed `hook` and that `hook.rules(proxy)` equals `expectedRules`, in order (`ProxyDeployer_RulesMismatch`).
+- **Deployment.** The `Tokens` stage is gone. `Components` deploys the hook; the council attests rules, hook and implementations in one step; `Activate` takes `hook` and the five rule addresses, passes each token its `RULE_ORDER` list in the init data, and the hand-over check pins `hook.rules(token)` to `RULE_ORDER`. Consequence for the owner to weigh: there is no longer a council read of each token's rule list between the deploy of the hook and the token coming up, because the list is installed when the token is initialised. What stops a wrong list is the attestation of every rule, `ProxyDeployer`'s equality check and the post-deploy check, all before any role is granted.
+- **Pins.** `InterfaceFreeze.t.sol` re-pinned, ids computed with `cast sig` from the compiled interfaces: `IPolicyHook` `0x4f7b9fbb` (was `0xb7723023`), `IComplianceRule` `0x837a7ec1` (was `0x93d5c2be`), `IComplianceHook` `0xa8f3d563` (was `0x2604e338`), `IProxyDeployer` `0xcedb15bb` (was `0x886d8cd8`), `IGated4626Vault` `0x6208cbc1` (was `0xb008690c`), `IGated7540Vault` `0x8f0b8793` (was `0x75f5b0db`); `RuleSetChanged` topic `0x052ffefc...d820`.
+
+Two statements of the plan that the build did not bear out. The two transient slots do not go: `executeTransfer` has to hand the kind, the reference and the deadline to `_update`, which OpenZeppelin fixes at three arguments, so they still travel through transient storage; what changed is that the reference and the deadline land in `extra` instead of in struct fields. And the vault initialisers take the rules, and for the 7540 vault the name and symbol, as `memory`, because the extra calldata array put them over the stack limit.
+
+Tests first, red run shown: the new `ComplianceHook.t.sol` and the new base tests (`PolicyGatedUnit_Context`, `PolicyGatedUnit_SharedHook`) failed to compile against the old code (wrong argument counts, `setRules(address, ...)`, `checkSend`, the ten-field context, `PolicyGated_HookRegistryMismatch`), then passed. New or rewritten: the hook suite (per-token isolation, the token and admin authorisation, the cap per token, `afterTransfer` for the context token only, `wantsAfter` for the caller, account checks), the context layout for each kind and its parity with the pre-flight, the registry check and the initial rules, `ProxyDeployer`'s rules check, the identity account checks, and the TypeScript deployment tests (a twin hook, an unattested hook, an unattested rule). The tests that mocked `balanceOf` for the counting rules now put the balances before the move in the context, and the two "token tries to write during the balance read" tests became "the rule never reads it".
+
+Gates on the working tree: Solidity runner 737 passing (was 707), Node runner 85 passing, `forge fmt --check`, `solhint --max-warnings 0`, `tsc --noEmit`, `validate:upgrades` (3 of 3), Aderyn 0 findings, Halmos 13 of 13 (the fund suite's hook stub needed `rules(address)`), reproducibility (16 contracts identical, `TokenProxy` matches `ProxyDeployer`), Slither 0 results (it first reported two benign findings in the 7540 initialiser, a reentrancy through the `setRules` call before the vault's own initial state; suppressed inline with the reason, since the hook is attested and `initialize` cannot be re-entered). Aderyn needed inline suppressions: the narrowings in the hook (bounded by `MAX_RULES`), and the errors that S0's interfaces declare before anything throws them. The S0 commit on its own did not pass the Aderyn gate for that reason; these suppressions come off as S2 and S3 use the errors.
+
+Measured, same probe and method as the baseline (transfer of 0.1 token between two holders, every touched account cold, scratch copy):
+
+| Rules installed, in order | Before | After S1 |
+|---|---|---|
+| `IdentityRule` | 36,962 | 35,661 |
+| + `LockupRule` | 43,825 | 42,523 |
+| + `MaxHoldersRule` | 69,198 | 62,977 |
+| + `FundHoldersRule` | 91,082 | 81,804 |
+| identity, lockup, fund (no per-class cap, RD5's set) | n/a | 63,389 |
+
+The four-rule transfer fell 9,278 gas (10%): the balance callbacks that RD2 removes, and one cold storage read fewer from packing the count with the mask. With RD5's set, which S4 puts in the deployment, a transfer costs 63,389, which is 27,693 (30%) below the old four-rule figure. That is above the 57,000 to 59,000 the decision estimated: RD2 saved most of its estimate on `MaxHoldersRule`, which RD5 then removes, so the two overlap. One more class: the shared hook is deployed once (852,213 gas, 4,078 bytes), and a class costs `setRules` for four rules inside its initialiser, 152,941 gas, with no deployment, no attestation and no council review of a new hook; it was 880,631 plus 29,144 and a review.
+
+Sizes (deployed bytes, headroom to 24,576): `IntentToken` 16,287 (8,289), `Gated4626Vault` 16,949 (7,627), `Gated7540Vault` 22,010 (2,566; was 3,030), `ComplianceHook` 4,078. The 7540 vault now has 2,566 bytes for what S2 adds: `MulticallUpgradeable` measured at about 610, plus the ERC-7943 face and `templateId`. That is tight; the `via-ir` fallback of RD8 is a real possibility.
+
+The docs, `README.md`, `SECURITY.md` and `CLAUDE.md` still describe a hook per token and the `Tokens` stage; the plan puts them in S5.
+
+### S2 as built (2026-10-24, committed `6709889`)
+
+The ERC-7943 face, the freeze semantics, `MulticallUpgradeable` and the template check. What changed:
+
+- **`IPolicyGated`** inherits `IERC7943Fungible`. Removed: `setFrozen`, `getFrozen`, `isUserAllowed`, the tuple `canTransfer`, the four-argument `ForcedTransfer` and `PolicyGated_FrozenExceedsBalance`. Added: `canTransferWithReason`, `ForcedTransferBy`. The token answers `supportsInterface(0x3edbb4c4)`. `forcedTransfer` emits the standard's three-argument `ForcedTransfer` and then `ForcedTransferBy`, and returns `true`.
+- **Freeze.** `setFrozenTokens` accepts an amount above the balance. `_releaseFrozen` lowers the frozen amount by exactly the part of the amount that was frozen (balance 10, frozen 100, force 10: frozen becomes 90) and emits `Frozen` before `Transfer`. `_check` measures the unfrozen balance, zero when the frozen amount is the larger, so a zero amount passes. A forced transfer and an enforcement burn (the operator holds `BURNER_ROLE`, as the lockup rule defines it) may take frozen tokens but never more than the balance. The token's own check reverts with `ERC7943InsufficientUnfrozenBalance(account, amount, unfrozen)`; a policy rejection, including a hook that returns the same reason code with no shortfall behind it, keeps `PolicyGated_TransferRejected(reason)`.
+- **`canSend`, `canReceive`** are the hook's `checkSend` and `checkReceive` for this token, false while paused and when there is no hook. `FundHoldersRule` answers both with `NOT_FUND_CLASS` for a token that is not a registered class or when it is not the fund's installed rule, so `canReceive` is false exactly when every movement is (pulled forward from S3, so the standard's answer is truthful at this stop).
+- **Template id.** Each template reports `keccak256('IntentToken')`, `'Gated4626Vault'` or `'Gated7540Vault'`; `_authorizeUpgrade` refuses an attested implementation that reports another id, or none. The review's reproduction is a governance test on the deployed stack: the timelock schedules the intent token's upgrade to the attested 4626 implementation and the execution reverts with `Templated_WrongTemplate`.
+- **`MulticallUpgradeable`** in the base, with `__Multicall_init` in the initialisers. It is not payable, preserves the sender, and a forced transfer followed by a plain one in one batch reaches the hook as FORCED and then TRANSFER.
+- **Pins.** `IPolicyGated` `0x02331726` (was `0xf517b40d`); `ForcedTransferBy` topic `0x9820680c...5978`; the old `ForcedTransfer` and `Frozen` pins moved to `IERC7943Fungible`. The two Aderyn suppressions for errors now thrown came off.
+
+Tests first, red run shown (the new base, template and conformance tests failed to compile against the old interface). Solidity runner 790 passing (was 737), Node runner 91 (was 85, with the cross-template upgrade test and the new `erc7943.test.ts`). The Halmos frozen properties were rewritten for the new semantics (the frozen amount never rises, and enforcement releases exactly the frozen part) and pass with the other twelve. Fourteen mutants of the new base logic were run against the base and `IntentToken` suites and every one was killed: the release taking the whole amount, a missing `Frozen`, a zero amount refused when the frozen amount is the larger, the burn and forced exemptions dropped, the template check dropped, `canSend` ignoring pause, `canReceive` asking about sending, `setFrozenTokens` refusing above the balance, the unfrozen error as a policy rejection, `ForcedTransferBy` dropped, `forcedTransfer` returning false, the standard's id dropped from `supportsInterface`, and `canTransfer` ignoring the amount.
+
+Gates on the working tree: `forge fmt --check`, `solhint --max-warnings 0`, `tsc --noEmit`, `validate:upgrades` (3 of 3, so `__Multicall_init` is where the validator wants it), Aderyn 0, Halmos 13 of 13, reproducibility (16 contracts), Slither 0 results (it first reported two equality findings, on an enum and on a reason code, which are suppressed inline with the reason).
+
+Sizes against the 24,576-byte limit, with S1 in brackets: `IntentToken` 17,778 (16,287), `Gated4626Vault` 18,375 (16,949), `Gated7540Vault` **23,479** (22,010), headroom 1,097. The size gate holds without `via-ir`. S2 added 1,469 bytes to the 7540 vault, of which about 610 is `MulticallUpgradeable`, against the 2,566 that were left. Nothing in S3 to S5 touches the vault's code, but 1,097 bytes is what any later feature in a template has to fit in.
+
+Gas, same probe: the four-rule transfer is 82,020 (S1: 81,804, so +216, the `_check` helper and the enforcement-burn lookup); the RD5 set 63,604.
+
+**The outside review of S0 to S2, checked against the code.**
+
+| Claim | Result |
+|---|---|
+| One shared hook and one attestation replace a hook and a council step per class | True. The saving is smaller than stated: the 880,631 gas of the old hook deployment and the 29,144 of its attestation are replaced by `setRules` in the initialiser (152,941 for four rules), so the net is about 757,000 and one council step, not 909,000 |
+| Rule list and mask share one word, so the three hook calls read one warm slot | True: `beforeTransfer`, `wantsAfter` and `afterTransfer` read the same word, warm after the first |
+| A predicted proxy address cannot be set on the shared hook before it exists; the init and the equality check are atomic | True. Before `deploy` the address has no code, so `setRules` for it reverts `ComplianceHook_NotTokenAdmin`; `new TokenProxy` and `initialize` run in one call |
+| A token cannot install a hook on another registry | True, tested in the base and in `ProxyDeployer` |
+| Moving `ref` and `deadline` into `extra` shrinks the struct a rule receives from 10 words to 8 | **False for what the rule receives.** The ABI encoding of the context is 384 bytes before and 384 bytes after for every kind but EXECUTED, which grew from 384 to 448; the two words removed from the head are replaced by the two balances in `extra`. The saving comes from the removed callbacks, not from a smaller context |
+| It removes 5 reentrant `balanceOf` reads, 9,278 gas (10.2%), 30.4% with RD5 | Numbers true (91,082 to 81,804, and to 63,389). The reads are view calls back into the token, not reentrant (the guard is held and a view call is allowed), the 9,278 includes about 1,300 from the packed word, and two `policyHook` callbacks per transfer remain (`onlyHook` in each `after_`) |
+| Self-transfers and zero amounts return early in both counting rules, in `check` and `after_` | True. In `FundHoldersRule.check` the class test runs first, so a zero-amount probe on a token that is not the fund's class is still `NOT_FUND_CLASS` |
+| Pre-flight with `amount > fromBalance` is caught in `_check` before the rules | **False as built in the first S2 pass, true now.** An account holding `BURNER_ROLE` was exempt from the frozen check and so from the balance bound, so `canTransfer(burner, 0, balance + 1)` said yes while the write would revert. Reproduced by a failing test, fixed: enforcement actions may take frozen tokens but never more than the balance |
+| `_releaseFrozen` used to clamp the frozen amount and would wipe an excess freeze | Accurate about the clamp, but no excess freeze could exist before: `setFrozen` refused amounts above the balance |
+| `Frozen` before `Transfer`; `canSend`/`canReceive`/`canTransfer` as the standard says; id advertised | True, tested (including the exact unfrozen boundary and a pair-by-pair check of `canTransfer` against `canSend` and `canReceive` on the real identity rule) |
+| The template check closes the cross-template upgrade completely | True for a template that reports its id honestly. The attestation stays the root of trust: a council that attests code which lies about its id defeats it |
+| Multicall is safe with the transient slots because `_consumePending` clears them first | True and tested (`test_WhenAForcedTransferIsFollowedByAPlainTransferInOneBatch_TheSecondIsPlain`). A reverting subcall reverts the transaction and the transient storage with it |
+| The working tree has S2's TypeScript callers still to do | Out of date: S1 is committed (`0aaed89`) and S2 was complete, TypeScript included, when the review arrived |
+| `MinPositionRule`: `IMinPositionRule` and `PLAN.md` line 1989 disagree about exemptions | The quoted line does not exist in this file. The substance is right: neither the plan nor the interface said what happens to an enforcement burn that leaves a remainder below the minimum. Now stated in both: an enforcement burn is exempt, and the role is asked only when a burn would leave a balance in (0, min). Test and implementation are S3 |
+| `CredentialRule` should override `checkSend` and `checkReceive` | Valid, and missing: the Credential-layer section does not mention `checkSend`, `checkReceive`, `canSend` or `canReceive`. That section is not part of this plan, so it is left as it is and flagged to the owner |
+| `EXIT_ONLY` fixes a real vault case: a lapsed investor cannot redeem | True of the code: `Gated7540Vault._requirePayoutEligible` runs the burn probe `_canTransfer(controller, 0, 0)`, `IdentityRule` rejects an unverified sender for a burn, and `requestRedeem` is a transfer from the same sender. Today the exit is `recoverRedeemRequest` or `recoverClaimable` by `AGENT_ROLE` |
+
+Found while validating, fixed in S2: the pre-flight gap above, and a flaw the fuzzer found afterwards: a hook returning `INSUFFICIENT_UNFROZEN` for a mint was relabelled with the standard's error and a zero account. The token now confirms a real shortfall before using the standard's error.
+
+### S3 as built (2026-10-24, committed `58fdb7b`)
+
+The two rules, and one change to the vaults and the counting rules that the minimum forced. What changed:
+
+- **`HolderRestrictionRule`** replaces `LockupRule`; `LockupRule.sol`, `LockupRule.t.sol` and `ILockupRule.sol` are deleted. One storage word per (token, holder): `struct Restriction { uint64 unlockTime; bool frozen }` (a test pins the packing). `check` judges the sender first, for every kind except FORCED and a mint: frozen gives `SENDER_FROZEN`, a lockup still running gives `LOCKED` (TRANSFER and EXECUTED; a BURN unless the operator holds `BURNER_ROLE`, asked only while a lockup is running). Then the receiver, for every kind except a burn: frozen gives `RECEIVER_FROZEN`, so a mint or a forced transfer into a frozen account is refused, as RD4 decided. A burn from a frozen account is refused even for the burner. `checkSend` and `checkReceive` answer the freeze; the lockup depends on the kind, so they ignore it. `setLockup` and `setFrozen` keep each other's field. `setLockup` refuses a future time above 64 bits (`UnlockTimeTooLarge`); a time at or before now clears the lockup as before.
+- **`MinPositionRule`**, as RD7: per token, 0 is off. After a movement the receiver holds `toBalance + amount`, which must reach the minimum, and the sender holds `fromBalance - amount`, which must be 0 or reach it. Neither sum is computed where it could overflow or underflow, so a view never reverts on arithmetic (Halmos proves it for every input). Exempt: FORCED (including the enforcement mint), the token itself (the 7540 escrow), accounts the token's admin lists, and an enforcement burn (the operator holds `BURNER_ROLE`); the role is asked only when a burn would leave a remainder below the minimum, and the exemptions only when a position would breach. Zero amounts and self-moves are never judged. A holder who sits below a raised minimum can only exit completely or top up. `isExempt` is true for the token itself without a listing.
+- **Aderyn.** The five "unused until S3" suppressions in `IHolderRestrictionRule` and `IMinPositionRule` are gone; the three on `IERC7943Fungible` stay for good (the standard's own errors).
+- **Pins.** The `ILockupRule` id and event pin go; `LockupSet` keeps its topic under `IHolderRestrictionRule` (same signature). No interface id changed in S3. NatSpec only: `IComplianceRule.checkReceive` (below), `IGated4626Vault`, `IFundHoldersRule`, `IMaxHoldersRule`, `IMinPositionRule`.
+
+**What the plan did not foresee: the one-wei probes.** The vaults asked `canTransfer(0, receiver, 1)` for `maxDeposit`, `maxMint`, the 7540 `requestDeposit` and the claim check, and `canTransfer(owner, 0, 1)` for the 4626 `maxRedeem`. With a minimum set, one wei is dust. Written first, the new vault tests failed: `maxDeposit` read 0 for any account holding less than the minimum, `requestDeposit` refused every fresh controller with `ControllerNotEligible(BELOW_MIN_POSITION)` (10 tests red), and after fixing the mint side alone a holder sitting exactly at the minimum still had `maxRedeem` 0, because a burn of one share leaves dust. A rule cannot tell a probe from a movement, so the probes had to ask what they mean:
+
+- **Mint side: `canReceive`.** A new internal `_accountReason(account, sending)` in the base (the reason behind `canSend` and `canReceive`; PAUSED, NO_HOOK, or the hook's `checkSend` / `checkReceive`). It has no amount, so a minimum cannot read as a block. The vault `max*` and the 7540 request and claim checks use it.
+- **The cap had to follow.** `maxDeposit` is 0 for a new investor at a full cap, which `Gated4626Vault.t.sol` and `FundIntegration.t.sol` assert and ERC-4626 requires (`maxDeposit` must not exceed what `deposit` accepts). The one-wei probe carried that. So `MaxHoldersRule.checkReceive` and `FundHoldersRule.checkReceive` now answer the cap as `check` answers for a mint: an account that is not yet a holder (an investor, for the fund) cannot receive at or above the cap; an exempt account, an existing holder and the class itself can. The token is asked for a balance only at or above the cap. This reverses a stance of mine in S2 ("a full fund does not stop an account from being asked"), not one of yours. `canReceive` becomes more useful to integrators for it: an exchange asking whether it can send to an address now learns that the fund is full.
+- **Burn side.** The 4626 `maxRedeem` probes a burn of nothing (the 7540 payout probe already did): identity, freeze, lockup, pause. The size of a real redemption is judged when it burns.
+- **`IComplianceRule.checkReceive` NatSpec.** It must not depend on an amount, and it must agree with `check` except where the movement itself frees what the account would take: a transfer that empties its sender can still admit a new holder at the cap, which an account question cannot know.
+- **Limit that stays.** A 7540 request cannot know how many shares it will buy, so it is not refused for size. For a fresh controller whose fulfilled shares come to less than the minimum, the claim reverts with `BELOW_MIN_POSITION` and the claimable stays; the agent's `recoverClaimable` (an enforcement mint, exempt) delivers it, or the fulfiller rejects the request before fulfilling. A test shows the claim reverting and the recovery.
+
+Alternatives I did not take: leave the counting rules alone and let `maxDeposit` ignore the cap (it would overstate, against ERC-4626); probe with the largest amount instead of one wei (works for a minimum, breaks `maxDeposit` for any future supply-cap or maximum-position rule, which is why one wei was the right probe for upper bounds); put `if (reason == BELOW_MIN_POSITION)` in the vault (rule knowledge in a template, brief rule 11).
+
+Tests first, red runs shown. The first run failed to compile against the missing rules; with the rules in, the rule suites passed and nine `checkReceive` cap tests failed; the ten vault minimum-position tests failed on the probes; after the mint side, one `maxRedeem` test still failed. Solidity runner 890 passing (was 790), Node runner 92 (was 91, with the freeze test). Halmos 16 of 16 (was 13): `MinPositionRuleHalmos` proves that a transfer is rejected exactly when a position would be left in (0, min), that the rule never reverts on any input of any kind, and that FORCED is never rejected. Mutation checks: 5 of 5 planted bugs fail a Halmos property; of 24 planted in the two rules, 23 fail a Solidity test and one is equivalent (dropping the `min == 0` early return gives the same answers, since the checks that follow pass at 0; it only saves the decode); of 12 planted in the probes and account answers, 11 failed a test at once and one (the no-hook answer of `_accountReason`) survived because no test could reach a token without a hook. The new base test clears the hook slot and kills it; it also covers the `NO_HOOK` reason of the pre-flight, which nothing tested before.
+
+Gates on the working tree: `forge fmt --check`, `solhint --max-warnings 0`, `tsc --noEmit`, `validate:upgrades` (3 of 3), Aderyn 0, Halmos 16 of 16, reproducibility (17 contracts: `LockupRule` out, `HolderRestrictionRule` and `MinPositionRule` in). Slither's first full run had one result: `_stored` in `setLockup` starts at zero by design. It is suppressed inline with that reason; the rule alone then gives 0 results, and the second full run (375 contracts, 97 detectors) gave 0 results.
+
+Sizes against the 24,576-byte limit, with S2 in brackets: `IntentToken` 17,855 (17,778), `Gated4626Vault` 18,449 (18,375), `Gated7540Vault` **23,548** (23,479), headroom 1,028. The base grew about 70 bytes (`_accountReason`); the vaults' probes got lighter and nearly paid for it. `HolderRestrictionRule` 3,180, `MinPositionRule` 2,779.
+
+**Gas, and a flag about the numbers.** Same probe as before (transfer of 0.1 token, every account cold), on forge 1.8.1. The absolute numbers in the S1 and S2 commit messages do not reproduce today: the same probe on the S2 commit (`6709889`) gives 108,336 for identity, lockup and fund, against the 63,604 reported, and 129,252 for the four rules, against 82,020. About 27,000 of each figure is outside the token's own frame (the proxy and the cold accesses around it, constant across rule sets); the token's frame alone is 81,122 and 102,038. I could not find why the earlier figures were lower (the probe file is the same; I suspect a different forge version or a harness detail). The deltas between rule sets are what the decisions used, and they hold: below, S2 and S3 are measured side by side now. Inside the token's frame:
+
+| Rules, in order | Gas | Step |
+|---|---|---|
+| S2: identity, lockup, fund | 81,122 | |
+| S3: identity, restriction, fund | 84,549 | +3,427 (the receiver's word; the freeze) |
+| + `MinPositionRule`, minimum off | 93,757 | +9,208 |
+| the same, minimum on | 95,295 | +1,538 |
+| + `MaxHoldersRule` (a class with its own cap) | 116,211 | +20,916 |
+
+The demo class set of the assumptions (identity, minimum, restriction, fund) costs 95,295 against S2's 81,122: +14,173 (17%), of which 10,746 is the minimum rule. **A rule that is off still costs 9,208**: the call, the context it is handed, a cold account and a cold read. The rule list is per token, so a token that does not want a minimum should leave the rule out; the list is S4's decision (assumption 1 puts the rule in all three classes).
+
+**Decisions for you.**
+
+1. **The probes.** The change above (`canReceive` for the mint side, cap-aware counting rules, a zero-amount burn probe). It touches the vaults, which the plan listed for S5 at most, and reverses my S2 position on `canReceive`. The alternatives are above.
+2. **Where `MinPositionRule` is listed (S4).** In all three demo classes as assumption 1 says (+10.7k a transfer with the minimum on, 9.2k when off), or only in the classes that set a minimum. A token's list is its own, so this is a deployment choice, not a code one.
+3. **The Credential layer plan** (the other session) does not mention `checkSend` or `checkReceive`. `BaseRule` answers OK to both, so `canSend`, `canReceive` and the vaults' `max*` would say yes to an account that `CredentialRule` refuses in `check`. The rule has to override them, without an amount.
+
+### S4 as built (2026-10-24, committed `ed8471f`)
+
+The fund's monitor, the rule lists of the demo deployment and the post-deploy check. What changed:
+
+- **`Fund.isClassIntact(token)` and `Fund.firstBrokenClass()`** (RD10). A class is intact when it is registered and its hook still lists the fund's installed rule. `firstBrokenClass()` returns the first class that is not, in registration order, or the zero address; it loops over at most 32 classes. Neither reverts: a token that cannot name its hook, or a hook that cannot list its rules, is a broken class (try/catch around both calls), so the call that says which class is broken cannot be stopped by the broken class. The views cover the three ways a class stops being capped or starts failing closed: the fund rule dropped from a class's list (the runbook's forbidden step, reproduced in `FundIntegration_Integrity` and in a timelock test), the rule replaced in the fund while the lists still name the old one (every class is broken until its hook lists the new rule, and the monitor walks down the classes as each is fixed), and a hook swap to a hook that does not list it. They prevent none of it: nothing in the hook can know about the fund. `IFund` is re-pinned, `0x44c4a64f` to `0x2d89d7d8`; no event changed.
+- **The demo rule lists** (RD5 and assumption 1). Intent token: identity, minimum position, holder restriction, settlement window, fund holders. Both vaults: identity, minimum position, holder restriction, fund holders. No `MaxHoldersRule` on any class. `deployment.test.ts` writes the order out; it does not read it from the module.
+- **Ignition.** `Components` deploys `MinPositionRule`. `MaxHoldersRule` is still deployed and attested, and listed on no token, so governance can add it to a class that has a limit of its own without another council step; it is one line to drop. `Activate` takes `intentMinPosition`, `fundMinPosition` and `asyncFundMinPosition` (0 by default, which switches the rule off) and sets each before the hand-over. The per-class cap and the escrow exemption are gone from `Activate` and from the fixture's parameters (`holderCap`, `maxHoldersRule`): the 7540 vault is the token itself, which neither the fund rule nor the minimum counts.
+- **Post-deploy check** (`assertHandedOver`, the one the runbook prescribes). It still pins each hook's list. It now also asserts that every class is intact and that `firstBrokenClass()` is the zero address.
+- **Tests first, red runs shown.** The Solidity run failed to compile against a `Fund` without the views; with the views in, the Node run still failed on Ignition (the fixture could not build: no `minPositionRule`), which took nearly every stack test with it. Solidity runner 906 passing (was 890), Node runner 95 (was 92): the decided order, a deployment that sets minimums and enforces one, and the dropped rule through the timelock.
+- **Mutation checks.** Eight planted bugs in the new `Fund` views (an unregistered token passing, the registration ignored, the first or last class skipped, a failing hook or token counted as listed, the wrong comparison, the last broken class returned instead of the first): all eight fail a test.
+
+Gates on the working tree: `forge fmt --check`, `solhint --max-warnings 0`, `tsc --noEmit`, `validate:upgrades` (3 of 3), Aderyn 0 (the empty `catch` blocks carry inline suppressions with their reason), Halmos 16 of 16, reproducibility (17 contracts), Slither 0 results (377 contracts, 97 detectors).
+
+**Gas, measured as whole transactions on the deployed stack.** A new probe, not in the repo: the stack is deployed through Ignition, an ordinary transfer of a tenth of a token between two holders is sent as a real transaction, and `gasUsed` is read from the receipt (21,000 of intrinsic gas included). The same probe ran on four commits, each in a copy of its own tree, on Hardhat's in-process node. This is not comparable to the inside-the-token-frame table in S3 (which leaves out the intrinsic gas and the proxy).
+
+| Deployed stack | Intent token transfer | 4626 share transfer |
+|---|---|---|
+| Before the review items (`7536ec2`) | 144,700 | 138,001 |
+| S2 (`6709889`) | 135,463 | 128,526 |
+| S3 (`58fdb7b`) | 138,890 | 131,953 |
+| S4 (working tree) | 127,204 | 120,290 |
+
+S4 is 17,496 gas (12.1%) below the stack before the review items for the intent token and 17,711 (12.8%) for the 4626 share, while it adds the address freeze, the minimum position (off) and the account-level answers. The steps agree with the S3 probe: S3 added 3,427 to each (the receiver's word); S4 removes `MaxHoldersRule` (about 20,900) and adds `MinPositionRule` (9,208 even when off), a net of 11,700 less. S0 to S2 together are 9,237 below the start (the balance callbacks moved into the context). What would save most now is a deployment choice: a token that wants no minimum can leave `MinPositionRule` out of its list (9,208 a transfer).
+
+Sizes: `Fund` 6,012 bytes (limit 24,576).
+
+**The outside review of S2 and S3, checked against the code.** It was mostly praise; the claims that carry weight:
+
+| Claim | Result |
+|---|---|
+| The two S2 fixes work as described: the enforcement-burn bound in `_availableToMove` and `_check`, and `ERC7943InsufficientUnfrozenBalance` only on a real shortfall in `_update` | True, and the code is as quoted. One note: the "previously" state existed in the S2 working tree only; no commit ever held it |
+| `HolderRestrictionRule` reads one word for the sender and answers the freeze and the lockup from it; the role is asked only for a burn while a lockup runs | True (`vm.load` pin at `HolderRestrictionRule.t.sol:209`) |
+| `MinPositionRule` cannot overflow or underflow, and asks for the exemption and the role only once a position would breach | True |
+| "Backed by 16/16 Halmos symbolic proofs" | Overstated. 16 is the whole suite; three properties are about `MinPositionRule`. `HolderRestrictionRule` has none: it has no arithmetic beyond its checked 64-bit cast |
+| "Formally verified across all 5 `TransferKind`s" | Partly. Never reverting is proven for all five kinds. The exact decision is proven for TRANSFER, with balances constrained so the sums fit; MINT, BURN and EXECUTED rest on unit and fuzz tests |
+| 23 of 24 mutants killed | True; the 24th is equivalent |
+| `canSend` is true during a lockup while every holder-driven move is refused with `LOCKED` | True, and by design (RD4 puts the lockup in `check` only). It is what an integrator reading `canSend` gets wrong, so it is decision 4 |
+| `Gated4626Vault.maxRedeem` probes zero "because" the lockup sits in `check(BURN)` | The conclusion is right, the reason is half of it. The zero amount is for the minimum (one share leaves dust); that the probe is a burn and not `canSend` is for the lockup |
+| `CredentialRule` must answer `checkSend` and `checkReceive`: sender `ACTIVE`, `EXIT_ONLY` or `LAPSED`, `NONE` and `BLOCKED` refused with `SENDER_NOT_VERIFIED`; receiver eligible | Matches the Credential plan's table. The receiver's reasons are three, not one: `RECEIVER_NOT_VERIFIED`, `CREDENTIAL_EXPIRED`, `RECEIVER_NOT_ELIGIBLE` |
+| Reference `IHolderRestrictionRule.sol#L13` | It is line 12 |
+
+**Decisions for you.**
+
+1. **`MinPositionRule` in all three classes, off by default** (assumption 1), costing 9,208 a transfer. The alternative is to list it only on the classes that will set a minimum; a class can be given the rule later through `setRules` (a timelock operation), so leaving it out is reversible.
+2. **`MaxHoldersRule` deployed and attested but unlisted.** It spends one deployment and one attestation to save a council step later. Dropping it from `Components` and the council step is one line each.
+3. **`Activate` sets the minimums.** The alternative is to set none at deployment and leave it to the timelock (seven days). The default of 0 means a deployment that sets nothing behaves as before.
+4. **`canSend` and the lockup** (done, as a separate commit after S4: see "Decision 4 as built"). Today a locked holder reads `canSend` true and every movement of theirs is refused. The freeze already sets the precedent for the fix: it is in `checkSend` although FORCED passes it. Putting the lockup in `checkSend` as well (the holder's word is already read, so no new read) makes `canSend` say `LOCKED` for exactly the movements `check` refuses; FORCED and the enforcement burn stay exempt in `check`. It contradicts RD4's sentence that the lockup stays in the transfer check, which is why I have not done it. I recommend it: one line and a test, and it makes the standard's account question truthful during a lockup.
+
+### Decision 4 as built: the lockup in `HolderRestrictionRule.checkSend` (2026-10-24, committed `f3a8295`)
+
+You accepted the recommendation in decision 4 of the S4 record and asked for it as a commit of its own after S4. What changed:
+
+- **`checkSend(token, account)`** returns `SENDER_FROZEN` for a frozen account, then `LOCKED` while `block.timestamp < unlockTime`, and `TRANSFER_OK` otherwise: the same order as `check`. It reads the holder's one word and asks the token for nothing. `checkReceive` is unchanged: a locked account can still be paid.
+- **Effect.** `canSend` says `LOCKED` during a lockup, in agreement with `canTransferWithReason` and with the 4626 `maxRedeem`, which was already 0. Nothing else asks `checkSend`: the vaults ask `checkReceive`, so no vault behaviour moved, and a transfer's gas does not move (the answer is off the hot path).
+- **The one gap that stays**, the one `IComplianceRule` allows: `check` still passes FORCED and an enforcement burn for a locked holder, because the movement decides those. A test pins it, as the freeze already has the same gap for FORCED.
+- **Amends RD4's sentence** "the lockup stays in the transfer check because it depends on the kind". The lockup is now in both; the transfer check still applies the exemptions by kind. `IHolderRestrictionRule` NatSpec is amended; no interface id changes.
+- **Tests first, red run shown:** seven failed (`TRANSFER_OK` where `LOCKED` was expected): the new unit tests (locked, the unlock second, cleared, frozen and locked together, no role asked, the allowed gap, and the fuzz that now includes a locked sender), the real token's `canSend` and `canReceive` around a lockup, and the 4626 vault's `canSend` next to `maxRedeem`; the TypeScript lockup test asserts the same on the deployed stack. Six planted bugs (lock ignored, `<=` at the boundary, lock before freeze, freeze ignored, `checkReceive` refusing a locked account, the comparison reversed): all six fail a test.
+- **Gates:** Solidity runner 911 passing (was 906), Node runner 95; `forge fmt --check`, `solhint --max-warnings 0`, `tsc --noEmit`, `validate:upgrades` (3 of 3), Aderyn 0, Halmos 16 of 16, reproducibility (17 contracts), Slither 0 results.
+- **For S5:** the docs say `canSend` is false for a frozen or a locked holder, and that it does not answer for the enforcement routes (`forcedTransfer`, a `BURNER_ROLE` burn), which pass `check` for both.
+
+### S5 as built (2026-10-24, committed `d901045`)
+
+The documentation, brought in line with the code of S0 to S4 and the `checkSend` change. What changed:
+
+- **`CLAUDE.md` (the brief):** the hook is shared (§1, §6), rule 4 notes the interfaces were reopened once, rule 7 is amended (policy rejections are `PolicyGated_TransferRejected`, the token's own frozen shortfall is `ERC7943InsufficientUnfrozenBalance`), the repo layout, §4 (`IERC7943Fungible`, the new `IPolicyGated`, the freeze arithmetic, `multicall`, `templateId`, the registry enforcement points), §5 (`TransferContext.extra`, `checkSend` and `checkReceive`, the account-level answers, the appended reason codes), §6 (topology, the dispatcher, the demo lists, `HolderRestrictionRule`, `MinPositionRule`, `MaxHoldersRule` as available and unlisted, the fund monitor), §7 (the `max*` probes, the 7540 escrow and the below-minimum claim) and §8.
+- **`README.md`:** the architecture block, the security-model table and bullets, the deployment runbook rewritten for two modules and one council step (the `Tokens` stage and the second council step are gone), the deviations (ERC-7943 Final, interfaces reopened once, two known departures from the standard's text).
+- **`SECURITY.md`:** scope, items 1 and 3 of "things that differ" (a token's address is fixed by its symbol; a hook's attestation covers its code, not any token's list), new limits (dropping the fund rule, account-level answers, the pause, the two ERC-7943 departures, a burner's own burns, a frozen remainder below the minimum, a below-minimum 7540 claim), the suppression tables, and the mutation results of this series.
+- **`docs/`:** all nine pages. New sections: the incident runbook, the monitor, setting a minimum position, adding `MaxHoldersRule` to a class later, `HolderRestrictionRule`, `MinPositionRule`, "Vaults as fund classes", "Account-level questions", "During a pause". The anchors other pages link to were kept.
+- **How it was checked.** A change ledger written from the code; four page writers working from it; a scripted check (stale terms, links, anchors, Mermaid hazards: clean except the intended mentions); five independent verifiers, one per group of pages, each checking every changed sentence against the code. Three statements were wrong (a reference to a `PLAN.md` entry that did not exist yet, a "no test covers it" for a test added minutes before, and an unqualified `redeem(maxRedeem)` claim); the verifiers also found about 40 overstatements, omissions and naming slips. All are fixed; the ones that could not be settled by reading (the ERC-3643 reference token, gas figures, mutation counts) stay marked as such. A second verifier then checked the rewritten sentences and found seven more (a count of "two gaps" between a rule's account answer and its `check` where the rule's own exemptions are the other part, "no rule reads a balance from the token" without "on the movement path", and the like); they are fixed too. Examples: "the one allowed gap" when there are two, "every movement is rejected with `NOT_FUND_CLASS`" when an earlier rule or the pause answers first, a lockup recommended for a quarantine account that a vault exit would trip on, and a `maxRedeem` that overstates when a frozen remainder below the minimum would stay. The last of these is now pinned by a test (`test_WhenAFrozenRemainderBelowTheMinimumWouldStay_RedeemingAllOfMaxRedeemReverts`), the one change outside the documents.
+- **Gates.** Solidity runner 912 passing (was 911, the added test), Node runner 95; `forge fmt --check`, `solhint --max-warnings 0` and `tsc --noEmit` clean. Nothing else in the code changed, so Slither, Aderyn, Halmos, `validate:upgrades` and the reproducibility check stand as at `f3a8295`.
+- **Not done, or not re-measured.** The amendment to the draft ERC for RD2 lives in `~/dev/urwa-policy`, a different repository, and is not done. The DvP gas figures in `docs/flows-dvp.md` and the `seedHolderCountFromHolders` figures in the governance page predate the shared hook and are marked as such. The ERC-3643 reference token paragraphs rest on the 2026-10-23 check recorded in RD9; they say so, and say that the ERC-3643 text itself was not checked.
+
+**The latest outside review (architecture and code), checked.**
+
+| Claim | Result |
+|---|---|
+| The shared hook, balances in `extra`, the 7943 face, the template id and the fund views are as decided | True |
+| `wantsAfter()` is keyed by `msg.sender`, so an off-chain caller gets an empty answer; `wantsAfter(token)` would be the honest signature | True and harmless. Worth doing only if the interface is reopened again |
+| The base imports `IComplianceHook` to read `REGISTRY()` | True: a small layering leak from the base to one hook interface |
+| 1. `canReceive` and `canTransfer` disagree at a full cap, and 7943 forbids quantitative rules in `canSend` and `canReceive` | **True, and my S3 change caused it.** ERC-7943 Final says `canTransfer` "MUST perform a `canSend` check on the `from` parameter and a `canReceive` check on the `to` parameter", and that `canSend` and `canReceive` "MUST NOT encode transfer-specific or quantitative rules (e.g., balance checks, amount limits)". A holder cap is a count, which the standard does not mention, so the second point is a defensible reading and not a certain one. The first is certain: at a full cap a full-balance transfer to a new holder passes `canTransfer` while `canReceive` says false. S2 had it right (the cap was a decision about a movement) and S3 broke it to keep the vaults' `max*` from overstating |
+| 1, option (a): drop the cap from `checkReceive` and accept that `maxDeposit` overstates at a full cap, as it does for a minimum | The comparison does not hold. A minimum makes only small deposits fail; a full cap makes every deposit by a new investor fail, so `maxDeposit` would exceed what `deposit` accepts, which ERC-4626 forbids |
+| 2. An address freeze blocks an enforcement burn, a lockup does not | True, and decided (RD4): the way out of a frozen account is `forcedTransfer` to a quarantine account. It is documented in the brief, the README, the governance page and `SECURITY.md`. No change |
+| 3. `_takesFrozenTokens` asks `BURNER_ROLE` in the base, duplicated in two rules, and a burner redeeming through a vault can redeem frozen shares | Half true. The role is asked in the base and in both rules. The vault claim is false for frozen tokens: `maxRedeem` stops at the unfrozen balance, so a probe of a burner holding frozen shares failed with `ERC4626ExceededMaxRedeem`. It is true for a lockup and the minimum: the same probe had a locked burner redeem in full. That is now a limit in `SECURITY.md`. A flag announced by `burn()` would also have to reach the rules, which means a new field in `extra` |
+| 4. A balance shortfall reverts with the 7943 error, and `canTransfer` returns false for it; 7943 leaves balance validation to the base | **True.** ERC-7943 Final: `canTransfer` "MUST NOT return false based on token-specific, non-permissioned validations such as balance or allowance checks", and `ERC7943InsufficientUnfrozenBalance` is for an amount at or below the balance, with "more specific errors from the base standard" when the amount exceeds it. Here an amount above the balance reverts with the 7943 error and makes `canTransfer` false. The draft ERC repository adopted the conformant reading on 2026-10-23 (Phase 0.7, `e75e5ee`), so the two now disagree |
+| 5. `MinPositionRule` costs about 9.2k when off | True, and in the plan and the docs. Nothing to change in code |
+| 6. `Gated7540Vault` has 1,028 bytes of headroom, from 3,030 | True. The via-ir fallback stands |
+| 7. The docs were stale | True before this step; this step |
+| The suppressions are justified by the test that pins them | Mostly: each has its reason on the line above, not all name a test |
+
+I did not change the code for findings 1, 3 and 4. Each is a decision that reopens something you decided or touches many tests, and 1 and 4 each have more than one fix. The README and `SECURITY.md` now state both departures from the standard plainly, and `docs/README.md` says the pages follow the code.
+
+**Decisions for you.**
+
+1. **Finding 1, `canReceive` and the cap.** Options: (a1) take the cap out of `checkReceive` in both counting rules, so `canReceive` is eligibility only (identity, freeze, fund class), and give the vaults' mint-side probes a mint of a very large amount instead of `canReceive`: the minimum cannot read as a block (the amount clears it), a new investor at a full cap still reads as refused, and the standard's account question stays clean; the cost is that a future rule bounding a position's size would zero `maxDeposit`, and a rule author would have to know. (b) keep the cap in `checkReceive` and remove the net-zero exception, so `canTransfer` and `canReceive` always agree: a strict ratchet, which also stops a holder moving a whole position to a new wallet at a full cap, a use `MaxHoldersRule` was built to allow. (c) leave it and keep the documented departure. I recommend (a1).
+2. **Finding 4, the balance shortfall.** Follow the standard: `canTransfer` stays true for an amount above the balance when nothing is frozen, and false when a frozen amount stands in the way; a plain transfer above the balance reverts with the base's `ERC20InsufficientBalance`; `canTransferWithReason` keeps full parity and says `INSUFFICIENT_UNFROZEN` for it, so "pre-flight never lies" stays true for the function that carries a reason. It changes S2's behaviour and the tests that assert the 7943 error for an amount above the balance (Solidity, TypeScript, one Halmos property). I recommend it, as its own step with the red run first.
+3. **Finding 3.** Leave as it is and document it (done), or add a flag. I recommend leaving it.
+4. **The draft ERC amendment for RD2** (`~/dev/urwa-policy`): do it now, in that repository, or leave it until RD2's other consequences are settled.
+
+### Finding 1 as built: the holder cap leaves `canReceive` (2026-10-24, committed `1f7b8fc`)
+
+Your option (a1) for finding 1 of the outside review, built as the first of two separate steps (finding 4 is the second). The review was right that my S3 change had made `canReceive` and `canTransfer` disagree: ERC-7943 Final says `canTransfer` "MUST perform a `canSend` check on the `from` parameter and a `canReceive` check on the `to` parameter" and that `canSend` and `canReceive` "MUST NOT encode transfer-specific or quantitative rules". What changed:
+
+- **The cap is `check`'s alone.** `MaxHoldersRule` no longer overrides `checkReceive` (the `BaseRule` default accepts). `FundHoldersRule.checkReceive` answers what `checkSend` answers, `NOT_FUND_CLASS` for a token that is not a registered class or when the rule is not the fund's installed one. A new holder or investor at a full cap is eligible at account level (`canReceive` true); a mint or a partial transfer to it is refused by `check` with `MAX_HOLDERS`; a full-balance transfer to it passes (net zero), and `canReceive` agrees, so for a plain transfer through the shipped rules `canTransfer` is not true while `canReceive` is false.
+- **The vaults probe a mint again, of a very large amount.** The base has `_mintProbe(receiver)`, which is `_canTransfer(address(0), receiver, _MINT_PROBE)` with `_MINT_PROBE = type(uint128).max`. `Gated4626Vault.maxDeposit` and `maxMint`, and `Gated7540Vault.requestDeposit`, `maxDeposit`, `maxMint` and the deposit-claim check use it, in place of the account question of S3. The amount is not zero, so a holder cap sees a new holder and refuses it (`maxDeposit` is 0 for a new investor at a full cap, as ERC-4626 requires), and it is above any minimum position up to `type(uint128).max`, so such a minimum does not read as a block. `maxRedeem` and `maxWithdraw` are unchanged (a burn of nothing). The internal `_accountReason` is gone; `canSend` and `canReceive` are built from the hook's `checkSend` and `checkReceive` as they were in S2.
+- **A limit you should know.** A rule that bounded the size of a position (a supply cap, a maximum balance) would refuse the probe and zero `maxDeposit` and `maxMint`. None of the shipped rules does, and a rule author has to know: the NatSpec of `_mintProbe`, `IGated4626Vault` and `IComplianceRule` say so.
+- **NatSpec** (no interface id changes): `IComplianceRule.checkReceive` and `checkSend` say an account answer must not depend on an amount or encode a quantitative rule (the "one allowed gap" is gone); `IMaxHoldersRule`, `IFundHoldersRule`, `IMinPositionRule` and `IGated4626Vault` follow.
+- **Tests first, red run shown.** Written against the cap-aware code: the account tests of both counting rules failed (`MAX_HOLDERS` where `TRANSFER_OK` was expected), the integration test of a full cap failed, a fuzz of `canTransfer` against `canSend` and `canReceive` over cap, freeze, lockup and identity found "canTransfer without canReceive" (a full-balance transfer to a new holder at a full cap), and the vault unit tests failed once their hook stubs no longer answered `checkReceive`. After the change 514 tests of the affected suites pass. In TypeScript, `parity.test.ts` asserts `maxDeposit` against the mint probe again, and `fund.test.ts` asserts `canReceive` stays true at a full fund cap.
+- **Mutation checks:** 11 of 11 planted bugs killed, each by at least one test (`mutate_f1.py` in the session scratchpad): the probe amount one wei, and zero; `Gated4626Vault.maxDeposit` probing one wei; `maxMint` of the 4626 vault, and `requestDeposit`, `maxDeposit` and the deposit-claim check of the 7540 vault, each ignoring the probe; `FundHoldersRule` and `MaxHoldersRule` each answering the cap in `checkReceive` again; `canReceive` ignoring pause; the mint probe asking the sender side. `SECURITY.md` has the row, and marks the S3 row as superseded for the cap and the probe.
+- **Gates, on the final tree (after the verifier's corrections):** Solidity runner 906 passing (was 912: 13 tests that asserted the cap in `checkReceive` are removed and 7 that assert it is not are added), Node runner 95; `forge fmt --check`, `solhint --max-warnings 0` and `tsc --noEmit` clean; `validate:upgrades` 3 of 3; Aderyn 0; Halmos 16 of 16; reproducible, 17 contracts identical across two builds; Slither 0 results (377 contracts, 97 detectors).
+- **Docs.** `CLAUDE.md` (§5, §6, §7), `README.md` (the security-model bullet; the first of the two departures from the standard is removed, one remains), `SECURITY.md` (the account-level bullet, the departure bullet, the new limit) and five `docs/` pages say what the code now does. A verifier checked the changed sentences against the code; its first round found two stale sentences in `CLAUDE.md` (one said `checkReceive` still adds the fund cap) and eight overstatements, for example "never true while either answer is false" (an enforcement burn passes for a locked holder while `canSend` says `LOCKED`), "clears any minimum" (a minimum above `type(uint128).max` would refuse the probe) and a mutation-table row that still described the old account answers. All are corrected.
+
+**Left for you.** Finding 4 (the balance shortfall) is the next step, as its own commit. Nothing else changes.
+
+### Finding 4 as built: a balance shortfall follows ERC-7943 (2026-10-25, committed `a4f237d`)
+
+Decision 2 of the second outside review, built as the second of the two separate steps. ERC-7943 Final, fetched again on 2026-10-24: `canTransfer` "MUST validate that the `amount` being transferred doesn't exceed the unfrozen amount (which is the difference between the current balance and the frozen balance)" and "MUST NOT return false based on token-specific, non-permissioned validations such as balance or allowance checks"; `ERC7943InsufficientUnfrozenBalance` is for an amount "less than or equal to its balance, but greater than its unfrozen balance", and for an amount above the whole balance "more specific errors from the base standard SHOULD be used instead". The two MUSTs collide when nothing is frozen and the amount is above the balance: the first would say false, the second forbids it. I resolved it the way the draft ERC's reference does (`ExampleToken._tokenCheck`, Phase 0.7): the unfrozen validation applies while something is frozen, and with nothing frozen the balance is left to the base. What changed, all in `PolicyGatedERC20Upgradeable`:
+
+- **The write.** A shortfall found by the token's own check reverts `ERC20InsufficientBalance(from, balance, amount)` when the amount is above the whole balance, frozen or not, and `ERC7943InsufficientUnfrozenBalance` when it is within the balance but above the unfrozen balance. `forcedTransfer` and an enforcement burn already reverted the base error above the balance, through `_releaseFrozen`. Policy rejections are unchanged.
+- **`canTransfer` (the bool).** `_canTransfer(from, to, amount, false)`: a shortfall counts only when a frozen amount stands in the way, meaning `frozen > 0` for the sender and the movement is not one that may take frozen tokens (FORCED, or a burn whose operator holds `BURNER_ROLE`, which is what a pre-flight with a burner as sender models). A pure balance shortfall is ignored and the hook decides as usual, with the amount above the balance as given. So with nothing frozen an amount above the balance reads true when the hook accepts it; with something frozen an amount above the unfrozen balance reads false, above the balance too; a hook rejection reads false whatever the amount.
+- **Unchanged.** `canTransferWithReason`, `canExecute`, the vault `max*` probes and the 7540 checks count every shortfall (`_check(ctx, hook)` keeps its meaning), so "pre-flight never lies" holds for them. The one place the two pre-flights differ is a pure balance shortfall: `canTransfer` true, `canTransferWithReason` `(false, INSUFFICIENT_UNFROZEN)`. I kept the reason code `INSUFFICIENT_UNFROZEN` for it rather than appending a new one, as you decided.
+- **The shipped rules tolerate an amount above the balance** (`MinPositionRule` compares before it subtracts, the counting rules compare for equality), which `canTransfer` now relies on: it must not revert. A fuzz over amounts and minimums pins it for the five rules of the integration list; it does not cover `FundHoldersRule`, whose check also compares for equality.
+- **No interface change.** `IPolicyGated` NatSpec only; `InterfaceFreeze.t.sol` passes.
+- **Tests first, red run shown.** 11 failed against the code of `1f7b8fc`: the base error expected above the balance (the unit fuzz, the integration test with the real rules, the intent, the DvP trade with a buyer short of cash, and its both-legs variant), `canTransfer` expected true above the balance (the base unit tests, the burner pre-flight tests, the integration fuzz, the TypeScript test), and the table fuzz over frozen amount, amount and hook (it found "false != true" for nothing frozen and an amount above the balance). Three new tests pass before and after, because they pin what must not change: a hook rejection, a frozen amount, and the real rules' rejections still make `canTransfer` false. Three existing tests asserted the old rule and were not in the red run, since they passed against the old code; the green run found them and I changed them: the intent token's pair test (now `canTransfer` equals `canSend` and `canReceive`, and the reasoned answer adds the balance), the base invariant on the unfrozen boundary, and the TypeScript test of the account answers.
+- **Mutation checks:** 11 of 11 planted bugs killed, each by at least one test (`mutate_f4.py` in the session scratchpad, run against the unit, integration, intent, DvP and vault suites): the write never using the base error; using it at the balance too; using it for every shortfall; `canTransfer` counting a pure balance shortfall; `canTransferWithReason` leaving it to the base; the frozen amount ignored in `canTransfer`'s test; another account's frozen amount asked; enforcement kinds not excluded; the ignored shortfall skipping the hook; the shortfall boundary moved to `<=`; the strict `_check` made lenient (killed through `canExecute`). `SECURITY.md` has the row.
+- **Size.** `IntentToken` 17,778 to 17,945 bytes, `Gated4626Vault` 18,399 to 18,552, `Gated7540Vault` 23,495 to 23,661 (margin 915 of 24,576). Gas of a successful transfer: not measured; its path gains one internal call.
+- **Gates, on the final tree (after the verifier's corrections):** Solidity runner 915 passing (was 906: nine added), Node runner 96 (was 95: one added); `forge fmt --check`, `solhint --max-warnings 0` and `tsc --noEmit` clean; `validate:upgrades` 3 of 3; Aderyn 0; Halmos 16 of 16 (its properties do not name the revert error); reproducible, 17 contracts identical across two builds; Slither 0 results (378 contracts, 97 detectors).
+- **Docs.** `CLAUDE.md` (rule 7, §4, §5), `README.md` (the security-model bullets, the deviations: "one known departure" is replaced by the difference between the two pre-flights), `SECURITY.md` (the same bullet, a new mutation row) and seven `docs/` pages say what the code does. A writer agent updated `docs/`; an independent verifier derived the truth table from the code and checked the diff. It found, and I corrected: two stale sentences in `MinPositionRule` (its NatSpec and a test comment said the token refuses a sender short of the amount before the hook is asked, which `canTransfer` no longer does), the qualifier "with nothing frozen" in several places (it is also true for a burn by a `BURNER_ROLE` sender with something frozen), a `SECURITY.md` sentence that was wrong for that burner, "as the standard requires" for the `frozen > 0` boundary (the standard does not say which clause wins above the balance, so the prose now says it follows the draft ERC's reference and that a one-unit freeze flips the answer), "canTransfer cannot" overstated against other known differences between the pre-flights and the write, a 4626 `redeem` or `withdraw` that is stopped by `maxRedeem` or `maxWithdraw` before the token's error, and two test names. It also found that only `canTransfer` hands the hook an amount above the sender's balance, so a rule author must know; `CLAUDE.md` §6, the `IComplianceRule.check` NatSpec and `transfer-checks.md` now say so. Left alone: `ITransferIntent.sol` (frozen interface, stale since S2) says `executeTransfer` reverts `PolicyGated_TransferRejected` carrying the reason `canExecute` returns, which is not so for a shortfall; and `CLAUDE.md` §5's "Pre-flight never lies" is an absolute that `canExecute` already breaks in small ways (it does not check the executor role, the zero `to` or the time of a later block). Neither is new.
+
+**Left for you.** Nothing else in the review items. Open: the draft ERC amendment for RD2 in `~/dev/urwa-policy` (not done), and the Credential-layer plan, which still lacks `checkSend`/`checkReceive`. Finding 3 stays as it is.
+
+### Not in this plan
+
+A `JurisdictionRule`, amount-level lockups, an ERC-3643 read adapter, ERC-1066 style reason codes, a recovery address for identity re-keying. The assessment calls them secondary, and none of them changes what the items above build.
+## Credential layer: `CredentialRegistry` plus `CredentialRule` (track A; planned 2026-10-23; C-1 committed and ported, C-2 built and awaiting review)
+
+Source: [the assessment](docs/superpowers/specs/2026-10-23-credential-layer-assessment.md) and the [three research reports](docs/superpowers/specs/research-2026-10-23/). On 2026-10-23 the owner asked for this plan using the assessment's defaults for its section 6. No code is written. Nothing here changes an existing contract's code, an existing interface id or an existing event, so the bytecode of every contract already in the manifest stays as it is.
+
+### Goal
+
+Today identity is one yes or no per address (`IdentityRule` over `IIdentityRegistry.isVerified`). A bank needs to know, per address, who vouched for it, what it is (customer, professional investor, fund, bank, infrastructure), until when, and its standing, and each token needs to say which of those it accepts. A holder whose credential lapses must still be able to exit.
+
+- One small registry holds the record. One small rule applies a per-token policy to it.
+- The record is written by attesters, either directly or from an EIP-712 credential the attester signed off chain. That signed record is the verifiable-credential part: W3C credentials stay off chain, the issuer's service verifies them and signs this record.
+- No change to the base, `ComplianceHook`, `PolicyRegistry`, the other rules or any frozen interface. `CredentialRegistry` also answers `isVerified`, so the existing `IdentityRule` can read it unchanged.
+
+### Where this starts
+
+Track A touches files the DvP work has uncommitted edits in: `Errors.sol`, `InterfaceFreeze.t.sol`, `ContractSizes.t.sol`, `verify-reproducible.ts`, `Components.ts`, `roles.ts` and the docs. So it starts only after the DvP work is committed, on a new branch cut from that commit, in a `git worktree` outside `/Users/address0/dev/gated-token-stack` (one HEAD serves every session there). The baseline test count is taken at that commit and written into C-1. For reference: the committed code at `82c3c92` passes 658 (590 Solidity, 68 TypeScript), which I ran from a clean export on 2026-10-23. The DvP session records 792 (707, 85) on its working tree, which I have not re-run.
+
+### Assumptions
+
+C1 to C12 are the assessment's defaults. Say which you want changed.
+
+| # | Assumption | Why |
+|---|---|---|
+| C1 | One record per address. Two attesters vouching for one wallet share the one slot (see decision 12). | Keeps a check to one slot read per party. |
+| C2 | The qualification bits are fixed in a shared `Quals` library (bits 0 to 7 named, 8 to 15 reserved, 16 to 31 free for a deployment). The registry never interprets them. | The meaning of a bit is a legal question, so it lives in one reviewable place. |
+| C3 | `CredentialRegistry` and `CredentialRule` are immutable contracts, not proxies. A schema change means a new registry, a new rule and `setRules`. | Rule 12 for the rule. The registry follows `PolicyRegistry` and the executors. |
+| C4 | The registry stores flags only. No names, no evidence hashes, no URIs, no hashes of personal data. | EDPB Guidelines 02/2025: hashes of personal data stay personal data. The link from address to person stays with the attester. |
+| C5 | `validUntil` is required and non-zero for an `ACTIVE` record. There is no cap on validity. | A credential that cannot lapse is the failure seen in Securitize. A cap is arbitrary and left to the attester's process. |
+| C6 | At most 64 attesters. Ids are never reused. | The rule's per-token trust is a `uint64` bitmap. Reusing an id would revive old records. |
+| C7 | Holder caps still count addresses (finding A5). Omnibus wallets and entity ids are out of v1. | Needs an entity map. Say so in anything bank-facing. |
+| C8 | No change for ERC-7943. | Track B (assessment decision 9). |
+| C9 | The rule has no `after_` and no running state. | The pitfalls in assessment 3.2: counters by type drift and state is missed while a rule is out of the list. |
+| C10 | A token's policy is set by the token's `DEFAULT_ADMIN_ROLE`, read live with `hasRole`, as `SettlementWindowRule.setWindow` does. | Same authority as the other per-token configuration. |
+| C11 | `ctx.operator` is used only to test `BURNER_ROLE` on a `BURN`, as `LockupRule` does. A spender is never checked. | Keeps pre-flight honest. Same documented caveat as `LockupRule`. |
+| C12 | `IdentityRule`, `IIdentityRegistry` and `MockIdentityRegistry` stay as they are and stay supported. | External ERC-3643 style registries still plug in through them. |
+
+### Design
+
+**`CredentialRegistry`** (immutable, `AccessControl`, `EIP712`, `ERC165`, `ICredentialRegistry`, `IIdentityRegistry`). Roles: `DEFAULT_ADMIN_ROLE`, `GUARDIAN_ROLE`, `RECOVERY_ROLE`. Constructor `(admin, guardian)`, administered by the deployer until `Activate` hands over, as `IntentExecutor` is.
+
+Record, one slot, 25 bytes used: `validUntil` (`uint64`), `status` (`uint8`), `quals` (`uint32`), `country` (`uint16`, ISO 3166-1 numeric), `attester` (`uint8`), `issuedAt` (`uint64`), `guardianBlock` (`bool`).
+
+Status values: `NONE`, `ACTIVE`, `EXIT_ONLY`, `BLOCKED`, `LAPSED`. `LAPSED` is only ever returned by `profileOf`, never stored, and no write accepts it.
+
+`profileOf(subject)` returns `(status, quals, country, attester)` with the effective status, resolved in this order:
+1. never written: `NONE`;
+2. `guardianBlock` set, or stored `BLOCKED`: `BLOCKED`;
+3. the attester is killed: `EXIT_ONLY`;
+4. stored `ACTIVE` and `block.timestamp > validUntil`: `LAPSED`;
+5. otherwise the stored status.
+
+`isVerified(subject)` is `profileOf(subject).status == ACTIVE`.
+
+Writers:
+- `set(subject, validUntil, quals, country)`: an active attester; stores `ACTIVE`, `issuedAt = block.timestamp`. `quals` must be inside the attester's allowed mask; `validUntil` must be in the future.
+- `register(credential, sig)`: anyone submits an EIP-712 `Credential(subject, validUntil, quals, country, issuedAt)` signed by an attester. Checked with OpenZeppelin `SignatureChecker`, so an HSM-backed or Safe attester works through ERC-1271. Same checks as `set`, plus `issuedAt` strictly above the stored one and not in the future. The domain is name, version `"1"`, chain id and the registry address.
+- `setStatus(subject, status)`: the record's own attester; `ACTIVE` (only while `validUntil` is in the future), `EXIT_ONLY` or `BLOCKED`. Sets `issuedAt = block.timestamp`, so an older signed credential cannot overwrite it.
+
+Guardian (stop only, no delay): `blockSubject(subject)`, `killAttester(id)`.
+
+Admin, a timelock after hand-over: `addAttester(account, allowedQuals)` (returns the id), `setAttesterAccount(id, account)` (key rotation without reissuing), `setAttesterQuals(id, allowedQuals)` (affects only later writes), `killAttester(id)`.
+
+Admin or recovery (decision 11): `clearGuardianBlock(subject)`, `reviveAttester(id)`. `RECOVERY_ROLE` may also revoke `GUARDIAN_ROLE` and nothing else, the same override the tokens and executors have.
+
+Events on every state change (rule 16): `CredentialSet`, `StatusSet`, `SubjectBlocked`, `SubjectUnblocked`, `AttesterAdded`, `AttesterAccountSet`, `AttesterQualsSet`, `AttesterKilled`, `AttesterRevived`.
+
+**`CredentialRule`** (immutable, `BaseRule`, `ICredentialRule`). Immutable: `REGISTRY`. `ruleId` is `keccak256('CredentialRule.v1')`. `wantsAfter` is false. The council attests it as RULE.
+
+Per-token policy, one slot, set by `setPolicy(token, requireAll, requireAny, forbidAny, attesters)`: three `uint32` masks and a `uint64` attester bitmap. A record is *eligible* for a token when: the status is `ACTIVE`, the attester's bit is in `attesters`, `quals & requireAll == requireAll`, `requireAny == 0` or `quals & requireAny != 0`, and `quals & forbidAny == 0`. `attesters == 0` means unconfigured, which admits nobody.
+
+| Kind | Sender must be | Receiver must be |
+|---|---|---|
+| `TRANSFER`, `EXECUTED` | `ACTIVE`, `EXIT_ONLY` or `LAPSED` | eligible |
+| `MINT` | none | eligible |
+| `BURN` from a holder or a vault | `ACTIVE`, `EXIT_ONLY` or `LAPSED` | none |
+| `BURN` whose operator holds the token's `BURNER_ROLE` | none | none |
+| `FORCED` | none | eligible |
+
+The role lookup for the enforcement burn happens only when the sender check would otherwise fail. Zero amounts are not skipped: the 7540 vault's zero-amount burn probe must still see a blocked controller. A sender that is `NONE` or `BLOCKED` gets `SENDER_NOT_VERIFIED`. A receiver that is `NONE`, `BLOCKED` or `EXIT_ONLY` gets `RECEIVER_NOT_VERIFIED`, `LAPSED` gets `CREDENTIAL_EXPIRED`, and an active receiver that fails the policy, or any receiver of a token with no policy, gets `RECEIVER_NOT_ELIGIBLE`. Unconfigured affects receivers only: a sender needs no policy, so existing holders can still exit.
+
+**What does not change.** `PolicyGatedERC20Upgradeable`, `ComplianceHook`, `PolicyRegistry`, `ProxyDeployer`, the executors, `Fund`, the templates and the other five rules. `IdentityRule` stays in the manifest and is only taken out of the demo deployment's rule order (C-2).
+
+### Decisions
+
+Numbers 1 to 10 are the assessment's section 6, adopted at the owner's instruction to use its defaults. 11 to 17 came up while planning. They are my defaults, and the owner can overrule any of them.
+
+| # | Question | Decision |
+|---|---|---|
+| 1 | Scope | Track A now. The tokenised-deposit needs (decimals, references, role split, supply cap, issuance switch) are track B, a separate plan. On the owner's direction of 2026-10-23 they are built as new legos around the unchanged token, not as changes to it (see "Track B, on the same pieces") |
+| 2 | Lapse and kill | A lapsed credential and a killed attester give exit-only. An explicit block stops everything |
+| 3 | Enforcement burn | A burn by `BURNER_ROLE` skips the sender check, unlike `IdentityRule` today |
+| 4 | Forced receiver | A `FORCED` move needs an eligible receiver (stricter than JPMD) |
+| 5 | Signed credential in v1 | Yes |
+| 6 | Qualification bits | The eight in `Quals`; counsel reviews the wording before any bank relies on it |
+| 7 | Target chain and the Cancun EVM | Closed 2026-10-23 by the owner: Cancun and signed intents are accepted, and the code is not designed around chains that lack them. A deployment still has to confirm its chain has EIP-1153 |
+| 8 | Fast emergency upgrade path | Open. Not part of track A |
+| 9 | ERC-7943 adapter | Open. Track B |
+| 10 | Omnibus and entities | Out of v1 (C7) |
+| 11 | Who reverses a guardian action | The main timelock **and** the recovery timelock. The assessment said the timelock only. The guardian holds `CANCELLER_ROLE` on the main timelock and could cancel the operation that unblocks what it blocked, which is the reason the recovery timelock exists (owner decision M-1). So `clearGuardianBlock` and `reviveAttester` accept `DEFAULT_ADMIN_ROLE` or `RECOVERY_ROLE` |
+| 12 | One attester overwriting another's record | Allowed only if the slot is `NONE`, the same attester wrote it, or the previous attester is killed. Otherwise it reverts. The assessment did not say |
+| 13 | Reason codes | Two appended, `CREDENTIAL_EXPIRED` and `RECEIVER_NOT_ELIGIBLE`. `LAPSED` exists as a return value so the first one is accurate. `SENDER_NOT_VERIFIED` and `RECEIVER_NOT_VERIFIED` are reused |
+| 14 | Demo deployment | `credentialRule` replaces `identityRule` in `RULE_ORDER` for all three tokens, and the Ignition key `identityRule` is renamed, not left as a misnomer. `IdentityRule` stays in the repo and in the manifest |
+| 15 | Where the files go | `contracts/identity/CredentialRegistry.sol`, `contracts/hooks/rules/CredentialRule.sol`, `contracts/interfaces/ICredentialRegistry.sol`, `ICredentialRule.sol` and `Quals.sol`, each contract with its `.t.sol` next to it. The new `identity/` folder needs a brief edit, proposed in C-2 |
+| 16 | Attester set-up at deployment | The deployer is the registry's admin until `Activate`, which adds the first attester, sets each token's policy, grants `RECOVERY_ROLE` to the recovery timelock, hands `DEFAULT_ADMIN_ROLE` to the main timelock and renounces. After that, adding an attester or changing a policy waits for the timelock delay |
+| 17 | Gas stop line | Expect +11,000 to +15,000 gas per ordinary movement over `IdentityRule` (an estimate from EIP-2929 prices, not measured). Stop for review if the measured figure is more than +20,000 |
+
+### Interfaces and the freeze
+
+- New: `ICredentialRegistry`, `ICredentialRule`, the `Quals` library. Their ERC-165 ids, event topics, the `Quals` values and the two new reasons are pinned in `InterfaceFreeze.t.sol`.
+- `Errors.sol` gets `CREDENTIAL_EXPIRED` and `RECEIVER_NOT_ELIGIBLE` appended, which the brief allows. No existing id, topic or code changes. The freeze test proves it.
+- `IIdentityRegistry` is not touched. The registry's ERC-165 answers both ids.
+- Errors are named `CredentialRegistry_*` and `CredentialRule_*` (rule 16).
+
+### Tests first (rule 5: the red run is shown before each implementation)
+
+Unit tests isolate with `vm.mockCall` and `vm.expectCall`, fuzz with `bound`:
+1. `CredentialRegistry.t.sol`:
+   - `set`, `register`, `setStatus` and every revert (not an attester, killed attester, quals outside the allowed mask, `validUntil` in the past or zero, `LAPSED` as an input, wrong status transition);
+   - `profileOf` for each of the five resolution steps, and `isVerified` equal to `ACTIVE`;
+   - the expiry boundary: the second equal to `validUntil` and the one after;
+   - replay: the same signed credential twice, an older one over a newer one, an old one after a direct write, another chain id or registry address, an ERC-1271 attester, a signature by a rotated-out key;
+   - a guardian block cannot be cleared by an attester, by a signed credential or by `setStatus`; both timelock paths clear it; a killed attester gives `EXIT_ONLY` and `reviveAttester` restores it;
+   - the overwrite rule (decision 12) in each branch;
+   - role gates on every function, `RECOVERY_ROLE` can revoke `GUARDIAN_ROLE` and nothing else;
+   - ids are never reused, the 65th attester reverts.
+2. `CredentialRule.t.sol`:
+   - accept and each reject in the table above, for every kind;
+   - an enforcement burn and a `FORCED` move against `NONE`, `BLOCKED`, `LAPSED` and killed-attester senders;
+   - exit-only holder: can send, burn and redeem, cannot receive;
+   - each mask on its own (`requireAll`, `requireAny`, `forbidAny`), the attester bitmap, an unset policy (receivers rejected, senders unaffected);
+   - `setPolicy` only by the token's `DEFAULT_ADMIN_ROLE`, and a fake token cannot read or change another token's policy;
+   - zero amounts are checked;
+   - `*_TokenCallsAreStatic` and view-ness, the same guard the other rules have;
+   - fuzz over kind, operator and status.
+3. Integration, real hooks and the real rule set, three tokens (`IntentToken`, `Gated4626Vault`, `Gated7540Vault`):
+   - `canTransfer`, `isUserAllowed` and the state-changing call agree for each outcome and each kind, with the documented burner exception;
+   - 7540: a lapsed controller can claim a redemption payout, `rejectRedeemRequest` to a lapsed controller reverts and `recoverRedeemRequest` to an eligible account works, the escrow vault is credentialed with `INFRA`, `recoverClaimable` needs an eligible `to`;
+   - the existing `IdentityRule` over the registry behaves as it does over `MockIdentityRegistry`;
+   - the rule in a real `RuleSetIntegration` order with lockup, window and the two cap rules.
+4. Invariants (stateful fuzz): `issuedAt` never decreases for an address; a record read as `ACTIVE` never has `validUntil` in the past; an address with `guardianBlock` never reads anything but `BLOCKED` until a timelock path clears it.
+5. Halmos: a lapsed record never resolves to `ACTIVE`; the signed path cannot lower `issuedAt` or clear a block. Kept only if it runs on this path as the existing properties do.
+6. `ContractSizes.t.sol` gets both contracts.
+7. Mutation checks on both contracts in a scratch copy (never the shared tree): drop the expiry test, drop the block check, drop the `issuedAt` test, make the burner exemption unconditional, skip zero amounts, swap sender and receiver. Each must be caught.
+
+### Gas
+
+Measured with the harness in `docs/superpowers/specs/fund-gas-bench/` on the real contracts: an ordinary transfer, a mint and a vault claim, once with `IdentityRule` over the registry and once with `CredentialRule`, plus the cost of `set`, `register` and `setStatus`. Decision 17 sets the stop line. The numbers go into the "as built" record.
+
+### Deployment (C-2)
+
+- `Components`: deploys `CredentialRegistry(deployer, guardian)` and `CredentialRule(registry)`, and no longer takes `identityRegistry` as a parameter. The key `identityRule` becomes `credentialRule` here, in `Tokens`, `roles.ts` and the tests that name it.
+- Council step 1 attests `CredentialRule` as RULE with the others. The council reads `rule.REGISTRY()`, the registry's code, its admin and its attester list first: the rule's codehash covers the registry's address and not the registry's code. The registry is reviewed, not attested, like `Fund` and `ProxyDeployer`.
+- `RULE_ORDER`: `credentialRule` first for all three tokens, where `identityRule` was.
+- `Activate`: `addAttester` for the demo KYC attester (new parameter `kycAttester`), `setPolicy` for each token while the deployer is still its admin (`requireAll = KYC`, `attesters` = that attester, which matches today's identity-only behaviour), grant `RECOVERY_ROLE` to the recovery timelock, grant `DEFAULT_ADMIN_ROLE` to the main timelock, deployer renounces.
+- `assertHandedOver` gains: the registry's admin is the timelock, its recovery role is the recovery timelock, the guardian holds `GUARDIAN_ROLE`, the deployer holds nothing, and every token's policy is the intended one.
+- Runbook (README and `docs/governance-and-deployment.md`): the council check above; how an attester is onboarded and rotated; never remove `CredentialRule` from a token's hook without replacing it, because a hook with no identity rule admits anyone.
+
+### TypeScript (C-2)
+
+`fixtures.ts` replaces the `identity.write.set` calls with a helper that has the demo attester write a credential for the holders, the recovery account and the 7540 escrow vault (with `INFRA`). The tests that use the old registry in `governance.test.ts`, `deployment.test.ts`, `parity.test.ts`, `dvp.test.ts`, `fund.test.ts` and `vaults.test.ts` keep their assertions. A new `test/nodejs/credentials.test.ts`: a real EIP-712 credential signed with viem and submitted by a third party; expiry through the real clock helper; a lapsed holder exits and cannot receive; a guardian block, and its reversal through the recovery timelock after the delay; `canTransfer` parity from the TypeScript side; event decoding. The existing tests must pass unchanged apart from the identity set-up.
+
+### Docs (C-2)
+
+- `docs/`: `architecture.md` (contracts table and diagrams), `roles.md` (registry roles, who holds them after `Activate`, what the guardian can do to it), `transfer-checks.md` (a `CredentialRule` section and a row in the per-kind table), `governance-and-deployment.md`, and "Checked against" in `docs/README.md`. Every edited sentence is verified against the code, and a fresh agent checks the diff afterwards.
+- README: contracts list, rule order, deviations from the brief, the runbook.
+- Proposed brief edits, which need your OK because the brief is the standing instruction file: §3 layout gets `contracts/identity/`, and §6 gets `CredentialRule` in the rule list and a line on the registry. `SECURITY.md` gets the attester trust assumption.
+
+### Checkpoints and gates
+
+- **C-1:** `Quals`, the two interfaces, the two reason codes, `CredentialRegistry`, `CredentialRule`, all Solidity tests above, the mutation run, the gas measurement, the freeze and size tests. Stop for review.
+- **C-2:** Ignition, `credentials.test.ts`, the fixture changes, the docs. Stop for review.
+- **Gates at each:** `npx hardhat test` in both runners with the summary line pasted, `npm run lint:sol`, `npm run fmt:check`, `tsc`, `slither .`, `npm run aderyn`, `npm run validate:upgrades`, the Halmos run, the isolated profile, and `npm run verify:reproducible` (the manifest grows from 16 to 18: `CredentialRule` under ATTESTED, `CredentialRegistry` under DEPLOYED). The 16 existing entries must be byte-identical to the base commit.
+- **Attestation impact:** new `CredentialRule` (RULE) and `CredentialRegistry` (reviewed, not attested). Unchanged: every current attested contract.
+
+### Risks
+
+1. Attesters are the trust root. A compromised attester can credential any wallet for every token that trusts it. The limits are the per-attester allowed qualifications, the per-token attester bitmap, and the guardian's kill. There is no on-chain proof of the KYC itself.
+2. The rule's codehash does not cover the registry's code (assessment A6). The council check and the runbook carry it. A registry attestation kind is a later option and needs an interface change.
+3. The meaning of each qualification bit is legal. A wrongly defined bit is a misclassification. Counsel reviews `Quals` before any bank relies on it.
+4. Public flags. Even a status bit and a country can identify a customer under bank secrecy rules. The registry stores no personal data, but on a public chain the pattern is visible. Deployment choice, not a contract fix.
+5. Exit-only lets a lapsed holder sell to an eligible buyer. A bank that wants a lapsed holder frozen uses `setStatus(BLOCKED)`.
+6. One record per address (C1): a second provider for the same wallet needs the overwrite rule, and the earlier attester's view is lost.
+7. A compromised guardian can block every address. The recovery timelock removes it after its delay, the same class of risk as a guardian that pauses.
+8. The enforcement-burn exemption lets a `BURNER_ROLE` holder burn from an unregistered address. Today it can already burn from any verified holder, so the extra reach is small, but it is new.
+9. Adding an attester or changing a policy waits for the timelock delay once the deployer has handed over.
+10. Holder caps still count addresses (C7).
+11. The gas figure is an estimate until C-1 measures it.
+
+### Not in this plan
+
+Entity ids and omnibus handling, the follow-on rules (`SupplyCapRule`, `IssuanceSwitchRule`, `JurisdictionRule`, `HolderLimitRule`, each a small plan of its own), every track B item, an ERC-7943 adapter, an adapter that reads ONCHAINID or EAS into the registry, zero-knowledge proofs, evidence or hash storage, a cap on validity, a registry attestation kind, appeals or dispute handling, and any change to `IdentityRule`.
+
+### Track B, on the same pieces (noted 2026-10-23, not planned or approved)
+
+The owner's direction: Cancun and signatures are not a concern, and the aim is code that is easy to reuse. I checked the token: `mint`, `burn`, `forcedTransfer` and `setFrozen` are gated only by a role, and a contract can hold a role (the two executors already hold `EXECUTOR_ROLE`). So a tokenised deposit needs no change to `PolicyGatedERC20Upgradeable`. Policy goes in rules. Privileged workflow goes in contracts that hold the token's existing roles. The one token-level item is a thin template.
+
+| Need (assessment 4.3) | Where it goes | Touches the base? |
+|---|---|---|
+| D1 decimals | A thin template `DepositToken`: `IntentToken` plus a `decimals` initializer argument. About 40 lines | No. A new template |
+| D2 reference on mint and burn | A `MintController` holds `MINTER_ROLE` and `BURNER_ROLE`, requires a `ref` and emits it | No |
+| D3 case reference on freeze and forced transfer | An `EnforcementController` holds `AGENT_ROLE`, requires a case id and emits it | No |
+| D4 role split | The controllers: a freezer role and a clawback role on the controller, which is the only holder of `AGENT_ROLE` on the token. It also forwards `LockupRule.setLockup`, which reads `AGENT_ROLE` on the token | No |
+| D5 supply cap | `SupplyCapRule` on `MINT` | No |
+| D6 issuance switch | `IssuanceSwitchRule` on `MINT` and `BURN` | No |
+| D9 ERC-7943 | Open. It adds functions to the token, so it is the one item here that would touch it | Only if chosen |
+| Scoped mandates instead of locks | Signed intents already name an executor, a deadline and a start time, and `DvPExecutor` settles without escrow | No |
+
+Limits to know before choosing this. The reference lives in the controller's event and is tied to the token's `Transfer` or `ForcedTransfer` by the transaction. The hook's `ctx.ref` stays zero for mint, burn and forced moves, so a rule cannot read it; if a rule must, that is a base change. The plain `mint` and `forcedTransfer` stay callable by whoever still holds the roles, so a controller only binds if it is the sole holder, which `assertHandedOver` can pin. The controllers are new trust points and need their own tests, audit and attestation review.
+
+### C-1 as built (2026-10-23, awaiting review)
+
+Contracts, Solidity tests, the freeze and size pins and the reproducibility manifest. No Ignition, no TypeScript test, no docs (C-2). Branch `credential-layer`, cut from `24b7798`, in the worktree `/Users/address0/dev/gated-token-stack-credential`. Nothing is committed.
+
+**New code.**
+- `contracts/interfaces/Quals.sol`, `ICredentialRegistry.sol`, `ICredentialRule.sol`.
+- `contracts/identity/CredentialRegistry.sol` (409 lines, 11,082 bytes deployed) and `contracts/hooks/rules/CredentialRule.sol` (141 lines, 3,275 bytes). The limit is 24,576.
+- `contracts/test/MockERC1271Wallet.sol`, a contract account for the ERC-1271 attester tests.
+- Tests next to the code: `CredentialRegistry.t.sol`, `CredentialRule.t.sol`, `CredentialRuleIntegration.t.sol`, `CredentialRuleVaults.t.sol`, and `contracts/test/halmos/CredentialRegistryHalmos.t.sol`.
+- Changed: `Errors.sol` (`CREDENTIAL_EXPIRED`, `RECEIVER_NOT_ELIGIBLE` appended), `InterfaceFreeze.t.sol`, `ContractSizes.t.sol`, `scripts/verify-reproducible.ts` (two manifest entries).
+
+**Differences from the plan.** Each is my call, and you can overrule any of them.
+1. The signed `Credential` carries the attester id (six fields in the EIP-712 type). ERC-1271 cannot recover a signer, so the registry must be told whose account to ask.
+2. `profileOf` tests for a block before it tests for `NONE`. The plan listed `NONE` first. An address the guardian blocked before it had any record reads `BLOCKED`, so "a guardian block always reads BLOCKED" has no exception.
+3. Killed attesters are a `uint64` mask in the registry, not a flag in each attester's slot, so one read serves both parties of a movement. `attesterAt` still returns `killed`.
+4. `blockSubject`, `clearGuardianBlock`, `killAttester` and `reviveAttester` do nothing, and emit nothing, when they change nothing. A guardian script can be repeated safely.
+5. `setStatus(ACTIVE)` needs a `validUntil` strictly in the future, as `set` does. A record still reads `ACTIVE` through its last second but cannot be restored in that second.
+
+**Tests, red first (rule 5).** Against stubs (every registry function reverting, the rule approving everything): 15 passing, 120 failing. The 15 are what a stub can satisfy: accept cases for an approve-all rule, and plain `AccessControl` behaviour. My first stubs failed every `setUp`, which showed 21 failing contracts and 0 passing and hid the count, so I made them permissive enough for `setUp` to run.
+
+**Green.** 170 new Solidity tests: `CredentialRegistry.t.sol` 93 (including three stateful invariants at 256 runs, and a test that the handler reaches both a write and a rejection), `CredentialRule.t.sol` 42, `CredentialRuleIntegration.t.sol` 24, `CredentialRuleVaults.t.sol` 10 (seven on the 7540 vault, three on the 4626 vault), and one more in `InterfaceFreeze.t.sol` for the `Quals` bits. Fuzz tests use `bound`; no Solidity test uses `vm.assume`. The integration tests use the real token, hook, registry and rule, and compare `canTransfer`, `canExecute` and `isUserAllowed` with the real call for each standing.
+
+**Gates, on the final tree.**
+- `npx hardhat test`: **962 passing (877 Solidity, 85 TypeScript)**, 0 failing. The baseline at `24b7798`, run from a clean export, is 792 (707, 85). Isolated profile: 877 passing.
+- `forge fmt --check`, `solhint --max-warnings 0` and `tsc` clean. Aderyn 0 findings. upgrades-core 3 of 3 (the new contracts are not upgradeable).
+- Slither: **0 results** (379 contracts, 97 detectors). The first run found 6: four `incorrect-equality` on comparisons of the status enum, two `unused-return` on a tuple that is only partly used. Neither is a defect. I added inline suppressions with the reason on the line above, in the style of the other rules, and changed nothing else.
+- Halmos: five new properties pass (one is a control), and the 13 existing ones still pass. Planted bugs: Halmos gives counterexamples for three of the four I tried; the fourth (a direct write that stores `issuedAt` as zero) is caught by the invariant and the unit tests, not by Halmos. The first version of the stale-credential property was vacuous: every path reverted because of the overwrite rule, not because of the staleness. The control property exposed it, and both now use one attester.
+- `verify:reproducible`: 18 contracts identical across the two production builds, the default profile and forge. The 16 existing contracts have runtime and creation code identical to the build of `24b7798` (compared artifact by artifact). The manifest grew from 16 to 18.
+
+**Mutation run.** 56 mutants (34 on the registry, 22 on the rule), run in three scratch copies: 56 killed, none survived. 23 were killed by exactly one test, which are the sharp boundaries (the lapse second, the 65th attester, each role gate). The invariants alone catch four of the registry mutants. One of them, a write that drops the guardian block, escaped until the handler kept its own record of the blocks, because the invariant had been reading the flag the mutant deletes. The list is fixed and not exhaustive.
+
+**Gas** (forge `--isolate`, 21,000 intrinsic included, ordinary movement between existing holders, same token and hook, a throwaway bench in scratch):
+
+| Rule set | transfer | mint | burn |
+|---|---|---|---|
+| A: `IdentityRule` over a mock registry | 73,499 | 86,779 | 73,285 |
+| B: `IdentityRule` over `CredentialRegistry` | 78,023 | 90,041 | 76,547 |
+| C: `CredentialRule` | 81,626 | 93,196 | 76,828 |
+
+C over A: +8,127 on a transfer, +6,417 on a mint, +3,543 on a burn. Decision 17 expected +11,000 to +15,000 and set the stop line at +20,000, so the plan did not stop. Registry writes: `set` 58,203 (new address) and 41,138 (rewrite), `setStatus` 35,430, `blockSubject` 32,430. The signed `register` was not measured.
+
+**For the review.**
+- Revoking a signed credential that nobody has submitted yet: `setStatus` needs a record, so the attester cannot touch it directly. It can write a record and block it (which raises `issuedAt` past the credential's), or the guardian can block the address. `validUntil` bounds the exposure either way.
+- Under the plain `IdentityRule` over this registry, a lapsed or exit-only holder cannot send (tested). Exit-only behaviour exists only with `CredentialRule`.
+- `register` is open to anyone, by design: the holder or a relayer pays the gas.
+- The new contracts use no transient storage, so they do not depend on the Cancun decision.
+- Next, C-2: Ignition (`Components`, `Tokens`, `roles.ts`, `Activate`), the TypeScript fixtures and `credentials.test.ts`, the docs, and the brief edits you must approve.
+
+### C-1 rebased onto the review items and ported (2026-10-25)
+
+The owner chose to wait for S0 and S1, then port C-1. S0 to S5 and two follow-up fixes have landed on `fund-layer` (`a4f237d`), so `credential-layer` was rebased onto it. The old tip is kept as the local ref `backup/credential-layer-c1-8b09efb`.
+
+- **Rebase.** C-1 is now `3d48032`. Five files conflicted, all because both sides appended or because the other session removed lines: `PLAN.md`, `Errors.sol`, `InterfaceFreeze.t.sol`, `ContractSizes.t.sol` and `scripts/verify-reproducible.ts`. Both sides were kept, except in the manifest (`LockupRule` is gone, `HolderRestrictionRule` and `MinPositionRule` are in, `CredentialRule` is added) and in the size test (an import the other side removed). `3d48032` does not pass its tests on its own: three type errors in the tests, and the rule answers the new probes with `BaseRule`'s default. The next commit fixes both.
+- **The rule.** `CredentialRule` overrides `checkSend(token, account)` and `checkReceive(token, account)`, which the review items added to `IComplianceRule` and which feed the token's `canSend` and `canReceive`. `BaseRule` answers `TRANSFER_OK` to both, so without the overrides the rule compiles and says yes to an account with no credential or a lapsed one (six tests fail). `check` is built on the same two helpers, so a probe and `check` cannot disagree: the interface requires it, and a fuzz test pins it. The enforcement burn stays in `check`, since it depends on the operator.
+- **The tests.** `TransferContext` has eight fields (`ref` and `deadline` are gone); `canTransfer` with a reason is `canTransferWithReason`; `isUserAllowed` is `canReceive`; the vault tests build the shared `ComplianceHook(registry)` and pass the rules to `initialize` and `deploy`. Five new unit tests pin the probes against `check`, and the integration tests now assert `canSend` and `canReceive` on the token, the lapsed and the blocked holder included.
+- **Result.** `npx hardhat test`: 1186 passing (1090 Solidity, 96 TypeScript), 0 failing. The other session's 915 Solidity tests are untouched; the 175 new ones are C-1's 170 and the five probe tests. The other gates (Slither, Halmos, the mutation run, reproducibility, gas, the isolated profile) are re-run on the final tree at the end of C-2, which includes this port.
+
+### C-2 as built (2026-10-25, awaiting review)
+
+Deployment, TypeScript tests and docs, on top of C-1 as rebased and ported above. Branch `credential-layer` is at `cd51112` (C-2, committed 2026-10-25 with its files staged by name: 23 modified and 2 new, `docs/credentials.md` and `test/nodejs/credentials.test.ts`), over `9a8e43a` (the port), in the worktree `/Users/address0/dev/gated-token-stack-credential`. Nothing is pushed.
+
+**Deployment.**
+- `Components` deploys `CredentialRegistry(deployer, guardian)` and `CredentialRule(registry)`, and no longer takes `identityRegistry`. Its parameters are `governance`, `council`, `guardian`, `minDelay`. `IdentityRule` is not deployed, so the council still attests six rules (`CredentialRule` where `IdentityRule` was). `IdentityRule` stays in the repo and the reproducibility manifest.
+- `roles.ts`: `credentialRule` first in all three `RULE_ORDER` lists, and a `QUALS` copy of `Quals.sol` (the Solidity bits are pinned by `InterfaceFreeze.t.sol`, so a change there fails the build before the two copies can disagree).
+- `Activate`: `addAttester(kycAttester, kycAllowedQuals)` while the deployer is the registry's admin, then `setPolicy(token, KYC, 0, 0, 1)` for each token (the same "KYC from attester 0 and nothing more" the identity check meant), `RECOVERY_ROLE` on the registry to the recovery timelock, and `DEFAULT_ADMIN_ROLE` on the registry to the main timelock with the deployer renouncing. The hand-over waits for the attester and the policies, so no token is handed over unconfigured.
+- Registry code is reviewed by the council, not attested (like `Fund` and `ProxyDeployer`). The runbook has the council read `REGISTRY()`, the registry's code, its admin and its attester list before it attests the rule.
+
+**TypeScript.** `fixtures.ts` has the demo attester (`kyc`), `verify` and `deverify` helpers, `STATUS`, `COUNTRY`, and the credentialled holders, recovery account and 7540 vault (`KYC | INFRA`). `assertHandedOver` now also checks: the registry's admin is the main timelock, the recovery timelock holds exactly `RECOVERY_ROLE` on it, the guardian holds only `GUARDIAN_ROLE`, the deployer holds nothing, one attester (the KYC provider, not killed), the rule reads this registry and is attested, and every token's policy is `KYC` from attester 0. New `credentials.test.ts` (8 tests): the deployment wiring; eligible and ineligible holders with probes and pre-flight agreeing; a credential signed with viem and submitted by a stranger (a replay and a forgery fail); expiry on the real clock; a guardian block lifted only by the recovery timelock; killing and reviving an attester; a policy change by the timelock deciding who may receive; event decoding. `parity.test.ts` gets five conditions (sender and receiver exit-only, sender and receiver lapsed, sender blocked by the guardian) across its four operations: 20 tests. The other six test files change only their identity set-up.
+
+**Docs.** New `docs/credentials.md`. Edited: `README.md`, `SECURITY.md` (scope, the attester trust assumption), and in `docs/`: `README`, `architecture`, `roles`, `transfer-checks`, `flows-token`, `flows-vaults`, `flows-dvp`, `money`, `governance-and-deployment` (runbook, sequence diagram, rule-order table, a warning not to drop the credential rule from a list). A fresh agent checked the diff against the code and found 22 things: 5 wrong, 7 stale, 10 nits. I checked each against the code and fixed all of them except three nits (generic "verified account" wording in `transfer-checks.md`, a missing `RECOVERY_ROLE` bullet that predates this work, and a list that puts `CredentialRule` and `IdentityRule` side by side). The Mermaid diagrams, the internal links and anchors were checked by the same agent and are clean. SECURITY.md also gets the credential layer's inline suppressions (section 4) and three mutation rows (section 5).
+
+**Behaviour the owner should know about** (all were in the C-1 design; the docs now say them):
+- A holder whose credential lapsed, or whose attester was killed, can send, burn and redeem, and cannot receive. Under `IdentityRule` they could do none of these.
+- The issuer's enforcement burn (operator holds `BURNER_ROLE`) now passes the sender check even for a blocked or unknown holder. Under `IdentityRule` that burn was refused with `SENDER_NOT_VERIFIED`. `forcedTransfer` into an eligible account stays the other way out.
+- A redemption payout to a lapsed controller goes through; to a blocked or unknown one it does not.
+
+**Gates, on the final tree (the working tree with C-2).**
+- `npx hardhat test`: **1214 passing (1090 Solidity, 124 TypeScript)**, 0 failing. At the port it was 1186 (1090, 96): the 28 more are the 8 in `credentials.test.ts` and the 20 parity tests. Isolated profile: 1090 passing.
+- `forge fmt --check`, `solhint --max-warnings 0`, `tsc`: clean. Aderyn: 0 findings. Slither: 0 results (420 contracts, 97 detectors). upgrades-core: 3 of 3.
+- Halmos: all pass, 21 properties in five suites (the five registry properties among them).
+- `verify:reproducible`: 19 contracts identical across the two production builds (17 on `a4f237d` plus the two new ones). The 17 existing manifest entries (runtime code, creation hash, immutable slots) are identical to those of a clean export of `a4f237d`, built the same way and compared entry by entry on 2026-10-26; only `CredentialRegistry` and `CredentialRule` are new.
+- Mutation run: **62 mutants, 62 killed, none survived** (34 on the registry, 22 on the rule, and 6 new ones on the `checkSend` and `checkReceive` probes the port added), in three scratch copies of the final tree. 23 were killed by exactly one test, which are the sharp boundaries. Deployment wiring: **7 of 7 killed** (no policy set, a policy that asks for no bits, a policy that trusts no attester 0, a registry not handed to the timelock, no recovery role on the registry, the credential rule last in the order, an attester allowed to assert nothing), by `credentials.test.ts` and `deployment.test.ts`. The lists are fixed, not exhaustive.
+
+**Gas** (forge `--isolate`, 21,000 intrinsic included, a transfer between existing holders, same token and hook, re-measured on this tree with a throwaway bench in scratch):
+
+| Rule set | transfer | mint | burn |
+|---|---|---|---|
+| A: `IdentityRule` over a mock registry | 72,461 | 85,205 | 71,957 |
+| B: `IdentityRule` over `CredentialRegistry` | 76,985 | 88,467 | 75,219 |
+| C: `CredentialRule` | 80,640 | 91,613 | 75,604 |
+
+C over A: +8,179 on a transfer, +6,408 on a mint, +3,647 on a burn. Registry writes are unchanged from C-1: `set` 58,203 (new) and 41,138 (rewrite), `setStatus` 35,430, `blockSubject` 32,430. The signed `register` (a stranger submits an attester's EIP-712 credential; each call its own transaction, 21,000 included, measured 2026-10-26 on a copy of the `cd51112` tree): 68,239 for a new subject and 51,174 for a rewrite with an ECDSA attester, and 69,249 for a new subject with an ERC-1271 attester. The ERC-1271 figure uses `MockERC1271Wallet`, which only recovers one key, so a Safe or an HSM front costs more by whatever its `isValidSignature` does. That is about 10,000 above the direct `set` (58,203 and 41,138), the price of the hash and the signature check.
+
+**Not done or not checked.**
+- Nothing is pushed.
+- The deployment mutants and the mutation run ran in scratch copies, not in CI. CI is not run.
+- Track B is not started.
+
+**Proposed brief edits** (the brief is the standing instruction file, so these need your OK and are **not applied**):
+1. §3 layout: add `identity/  CredentialRegistry.sol  CredentialRegistry.t.sol`; add `CredentialRule.sol` to `hooks/rules/`; add `ICredentialRegistry`, `ICredentialRule` and `Quals` to the interfaces line; add `MockERC1271Wallet.sol` to `test/`.
+2. §5 reason codes: append `CREDENTIAL_EXPIRED` and `RECEIVER_NOT_ELIGIBLE` (2026-10-23).
+3. §6 initial rule set: the demo lists start with `CredentialRule` where they say `IdentityRule`; add a `CredentialRule` bullet: a sender must be able to leave (registry standing `ACTIVE`, `EXIT_ONLY` or `LAPSED`) except on `MINT` and `FORCED` (not checked) and an enforcement `BURN`; a receiver must be `ACTIVE` and meet the token's policy, unless `BURN`; a lapsed receiver gets `CREDENTIAL_EXPIRED`, a token without a policy admits no receiver; state lives in `CredentialRegistry` (immutable, reviewed, not attested), so the rule has no `after_`; keep the `IdentityRule` bullet and mark it "not in the demo lists".
+4. §4 or §6: one line for the registry's guardian (`blockSubject`, `killAttester`) and its recovery path (`clearGuardianBlock`, `reviveAttester`, `revokeRole(GUARDIAN_ROLE)` by the recovery timelock).
+5. §7: "verified holder", "verified recovery account" and "`to` must pass identity" become "must pass the token's policy".
+
+## `ProxyDeployer` checks the first implementation (planned 2026-10-26, built and committed 2026-10-27)
+
+Source: finding 1 of the audit of the token, hook and policy contracts (2026-10-26, rated low; the page is `docs/gated-token.html`, section "Audit"). On 2026-10-26 the owner asked for this plan. On 2026-10-27 the owner approved D1 to D4 as recommended and confirmed that no `ProxyDeployer` is live; the work is built and described under "Result" at the end of this section.
+
+### Goal
+
+`ProxyDeployer.deploy` creates a token proxy over any `_implementation` and then trusts the token's own answers: `policyHook()`, `rules(token)` and `symbol()`. An implementation the council never reviewed can give all three correctly. Today an implementation's attestation is enforced on chain only when a token is upgraded (`_authorizeUpgrade`). For a first deployment it is a council step in the runbook, which `docs/governance-and-deployment.md` says in two places ("Place a new token" row, and the `deploy` section).
+
+Only the owner can call `deploy`: the deployer account until `Activate`, the timelock after it. The aim is that "only attested code runs" also holds at the first deployment, with the same registry question the other three gates ask (hook, rules, upgrade).
+
+The check cannot live in the token. The initialiser is the implementation's own code, so a hostile implementation would simply not run it. Only the deployer can ask the registry before the proxy exists.
+
+### What changes
+
+1. `ProxyDeployer` gets an immutable `REGISTRY`. The constructor becomes `(initialOwner, registry)`, and a zero registry reverts.
+2. `deploy` reverts with `ProxyDeployer_ImplementationNotAttested(implementation)` unless `REGISTRY.isAttested(_implementation, IMPLEMENTATION)`. Order inside `deploy`: the salt check and the salt write, both as today, then this check, then CREATE2 and everything after it. That keeps the salt error first for an already used symbol, keeps every write before every external call (so it should not need a new Aderyn suppression; C-1 confirms with a run), and a revert still undoes the salt write.
+3. Only if D2 is accepted: after initialisation `deploy` also requires `IPolicyGated(_proxy).registry() == REGISTRY`, else `ProxyDeployer_RegistryMismatch(expected, actual)`.
+4. Nothing else moves. `predict` and the CREATE2 address do not change: they depend on the deployer's address, the symbol and the implementation, and the deployer's own address comes from its sender and nonce, not its code. The check reads the registry at deploy time only, like the other gates: revoking an attestation later leaves running tokens alone.
+
+### Decisions for the owner (recommendation first)
+
+| # | Question | Recommendation | Alternative |
+|---|---|---|---|
+| D1 | `IProxyDeployer.sol` is frozen (rule 4). Reopen it to add the getter `REGISTRY()` and the errors `ProxyDeployer_ImplementationNotAttested`, `ProxyDeployer_ZeroAddress` (and `ProxyDeployer_RegistryMismatch` with D2), and re-pin the interface id in `InterfaceFreeze.t.sol` (now `0xcedb15bb`)? | Yes. The getter matches `IComplianceHook` and `IFund`, and lets the post-deploy check read it. Errors do not change the id; the getter does, and the new id is taken from the selectors with `cast` and checked against solc's value, as for the other pins. | Errors only, no getter. The id stays. The registry is public on the contract but not in the interface. |
+| D2 | Also require the new token's `registry()` to equal `REGISTRY`? | Yes. Without it the owner could pass the implementation check and still initialise the token against another registry that attests its own hook and rules. One view call and one error. | No. The finding is only about the implementation. |
+| D3 | Is the registry fixed at construction? | Fixed, as in `ComplianceHook` and `Fund`. | A setter is one more power for the timelock to hold. |
+| D4 | Migration. | None, because the repo records no live `ProxyDeployer` (this file, "Finding: bytecode depends on the compile job": "none exists yet"). Please confirm none is live. | If one is, deploy a new one owned by the timelock and leave the old one unused. Its token addresses are unaffected. |
+
+### Files touched (why rule 3 applies)
+
+- Contracts: `contracts/deploy/ProxyDeployer.sol`, `contracts/interfaces/IProxyDeployer.sol` (D1).
+- Pins and sizes: `contracts/test/InterfaceFreeze.t.sol`, `contracts/test/ContractSizes.t.sol`.
+- Unit tests: `contracts/deploy/ProxyDeployer.t.sol`.
+- Call sites of the constructor, each passing its registry and, where the test deploys through the deployer without having attested the implementation, attesting it first: `DvPExecutor.t.sol`, `IntentToken.t.sol`, `Gated4626Vault.t.sol`, `Gated7540Vault.t.sol`, `MaxHoldersRule.t.sol`, `FundIntegration.t.sol`.
+- Deployment: `ignition/modules/Components.ts` (the module already has `registry`), `test/nodejs/fixtures.ts` (`deployGatedCashToken`), `test/nodejs/deployment.test.ts`.
+- Docs and notes: `docs/governance-and-deployment.md` (the "Place a new token" row, the `deploy` section, the runbook's attestation step), `SECURITY.md` (section 3 item 1, and a mutation row in section 5), `docs/gated-token.html` (finding 1, the glossary line on "attested", the note under the registry figure), `docs/README.md` ("Checked against"). `README.md` line 71 ("Attested code only") becomes true as written and needs no edit.
+
+About 19 files, 11 of them Solidity. The deployment flow itself is unchanged: the council already attests the implementations after `Components` and before `Activate`.
+
+### Tests first (red run shown before the implementation)
+
+In `ProxyDeployer.t.sol`:
+1. `test_WhenTheImplementationIsNotAttested_ItRevertsAndNothingIsDeployed`, and the symbol is still free afterwards.
+2. `testFuzz_WhenTheImplementationIsAttestedAsAnotherKind_ItReverts`, with the kind bounded to `NONE`, `HOOK` and `RULE`.
+3. `test_WhenTheImplementationHasNoCode_ItRevertsAsNotAttested` (today it reverts inside the proxy constructor, with another error).
+4. `test_WhenTheSymbolWasUsedAndTheImplementationIsNotAttested_SaltUsedWins`.
+5. `test_WhenTheImplementationIsAttested_ItDeploysAsBefore`. The existing tests keep passing with the registry passed in.
+6. `test_WhenTheRegistryIsZero_ItReverts` and `test_ItRecordsTheRegistry`.
+7. With D2: `test_WhenTheTokenNamesAnotherRegistry_ItRevertsAndNothingIsDeployed`.
+
+In `deployment.test.ts`: an `Activate` over an implementation the council did not attest stops before any role is granted, in the shape of the existing test for an unattested rule.
+
+Mutants, recorded in `SECURITY.md` section 5: the check removed; the check after CREATE2; the wrong kind compared; the check placed before the salt check; the constructor ignoring its registry; with D2, the registry check removed.
+
+### Verification
+
+`npx hardhat test` in both runners (baseline at `a148d2f`: 1011 passing, 915 Solidity and 96 Node, plus the new tests), `npm run lint:sol`, `slither .`, `npm run aderyn`, and `npm run verify:reproducible`. `ProxyDeployer`'s creation code changes, so its reference build changes with it. `ContractSizes` should stay far under the limit. `npm run validate:upgrades` and Halmos are unaffected: `ProxyDeployer` is not upgradeable and has no symbolic property.
+
+### What it does not solve
+
+- An owner that can grant itself `ATTESTER_ROLE`. After `Activate` that is the timelock, so it is delayed and visible, not prevented.
+- What attestation means. It covers one deployed implementation's code (UUPS puts `address(this)` in the code), not the quality of the council's review.
+- Tokens already deployed. The check runs at deploy time only.
+- `Fund` is still not attested (`SECURITY.md` section 2).
+
+### Order of work after approval
+
+1. Owner answers D1 to D4.
+2. Interface and pin (D1), then the tests above, with the red run shown.
+3. Implementation, then the call sites and the Ignition module.
+4. Both runners, lint, Slither, Aderyn, reproducibility, the mutants.
+5. Docs and notes, and finding 1 on `docs/gated-token.html` marked fixed with the commit.
+6. Stop for review. Nothing is committed or pushed without an instruction.
+
+### Result (2026-10-27)
+
+Built as planned with D1 to D4 as recommended. `ProxyDeployer` holds an immutable `REGISTRY` (constructor `(initialOwner, registry)`, zero reverts with `ProxyDeployer_ZeroAddress`). `deploy` asks `REGISTRY.isAttested(implementation, IMPLEMENTATION)` after the salt check and the salt write and before CREATE2, and right after the initialiser it requires `token.registry() == REGISTRY` (D2), before the hook, rule and symbol checks. `IProxyDeployer` gained `REGISTRY()` and the three errors; its id is re-pinned to `0xc8982ea0` (was `0xcedb15bb`; the old id XOR `REGISTRY()`'s selector `0x06433b1b`, from `cast sig`, matched by solc).
+
+Red run first, against a signature-only stub (constructor and getter, no check) so the tests compiled: Solidity 917 passing and 10 failing, Node 96 passing and 1 failing, each failure the missing check. The pin was run red on its own before the interface changed.
+
+Where it differs from the plan:
+- The wrong-kind fuzz covers `HOOK` and `RULE` only. The registry refuses to attest `NONE`, so `NONE` is the unattested test.
+- The real-registry cases (unattested, wrong kind, no code, a second unattested instance of the template, and an attested happy path) are a second contract in `ProxyDeployer.t.sol`, `ProxyDeployerIntegration_RealRegistry`. The unit contract also checks that `deploy` asks the registry about the implementation as `IMPLEMENTATION` (`vm.expectCall`) and that the symbol deploys once the implementation is attested.
+- Two existing unit tests that made the registry refuse everything now refuse the hook only, since a blanket refusal now stops at the implementation first.
+- `DvPExecutor.t.sol` had two more deploys through a deployer built elsewhere (`DvPExecutorFundIntegration`), over implementations nobody attested. The first full run caught them; they now attest first, as the deployment does.
+- `docs/architecture.md` (the `ProxyDeployer` row) was also updated, so that `docs/README.md`'s "Checked against" line stays true.
+
+Verification: `npx hardhat test` 1024 passing (927 Solidity, 97 Node), `npm run lint:sol` and `forge fmt --check` clean, `slither .` 0 results with no new suppression, `npm run aderyn` 0 findings, `npm run verify:reproducible` passes (17 contracts identical across the builds, `TokenProxy` matches the code `ProxyDeployer` embeds; `ProxyDeployer` now has one immutable slot in the manifest, the registry). Mutants: 8 of 8 caught, recorded in `SECURITY.md` section 5. The check moved after CREATE2 is caught by one test only, the implementation with no code, because a revert removes the proxy either way.
+
+Docs: on 2026-10-27, before the merge of `credential-layer`, seven fresh agents checked the nine `docs/*.md` pages, `README.md`, `SECURITY.md` and `docs/gated-token.html` claim by claim against the code (about 2,100 claims). Every reported mismatch in the Markdown files was confirmed against the merged code and fixed (`docs/credentials.md`, which the merge added, was not part of that check), including the README runbook and deviations, which now describe the new checks. The brief's §4 list of where attestation is enforced still does not name `ProxyDeployer.deploy`; the brief is the owner's to change, and the README deviations record it.
+
+## Cleanup: nothing kept for a deployment that never happened (2026-10-27)
+
+The owner, 2026-10-27: "the code was never deployed so clean everything we can to avoid any confusion", after an inventory of unused code and files. Recorded here before the change (rule 3); the owner asked for it to be done, not stopped for review.
+
+- `IdentityRule` is no longer deployed: the credential layer replaced it in every list. It leaves production: the rule, `IIdentityRule` and `IdentityRule.t.sol` are deleted, and the tests that only need a simple identity gate use `contracts/test/MockIdentityRule.sol`, the same logic as a test mock. The tests of `IdentityRule` reading the credential registry go with it. `IIdentityRegistry` stays: `CredentialRegistry` implements it (`isVerified`) for integrators.
+- `MaxHoldersRule` is deleted with `IMaxHoldersRule`, its tests and its deployment in `Components`: no token lists it, and the fund-wide cap is `FundHoldersRule`. Tests that used it as the cap move to `FundHoldersRule` where they test another contract's behaviour at a full cap, and are deleted where they tested only the removed rule.
+- Files: the empty `.gitkeep` placeholders in folders that have files, `.npmignore` (the package is private), four `export` keywords in `fixtures.ts` on helpers only that file uses, and the local, git-ignored `docs/superpowers/` folder with its `.gitignore` line. PLAN.md keeps the decisions those notes informed.
+- The brief, `README.md` and `SECURITY.md` follow. `docs/*.md` is replaced by the HTML pages right after, so it is not edited for this.
+
 ## Open questions for the owner
-1. Review of the PR for Change A and Change B ("v0.3.0 candidate: `MaxHoldersRule` without live seeding").
+1. DvP: decisions D1 to D8 are recorded in the DvP section (D8: Option B; D6 revised for the `IntentExecutor` refusal). I-1, E-1, E-2 and the refusal are built and wait for your review.
+2. Nothing on `fund-layer` is pushed, and the DvP section is not committed. Push, or open a pull request, only when you say. The branch carries PR #2's commit `d3574df` until PR #2 merges.
+3. Credential layer (track A): C-1 is committed on branch `credential-layer` (rebased onto `a4f237d` and ported, see above). C-2 is built and waits for your review (see "C-2 as built"); it is committed as `cd51112`, and the brief edits listed there need your OK. Decisions 1 to 6 and 10 adopt the assessment's defaults. Please confirm or change 11 to 17, which came up while planning (11: the recovery timelock can also reverse a guardian block; 12: the rule for one attester overwriting another; 14: the demo deployment swaps `IdentityRule` for `CredentialRule`; 17: the gas stop line). Decision 7 (Cancun and signatures) is closed: accepted. Decisions 8 and 9 (fast upgrade path, ERC-7943) are open and do not block track A. Track B is noted as legos around an unchanged token; it is not planned.
+4. `ProxyDeployer` implementation check (audit finding 1): D1 to D4 approved on 2026-10-27 and built; see "Result" in its section.

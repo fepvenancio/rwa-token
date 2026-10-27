@@ -3,18 +3,22 @@ pragma solidity ^0.8.28;
 
 import {Test} from 'forge-std/Test.sol';
 
-import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
-import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
+import {ICredentialRegistry} from 'interfaces/ICredentialRegistry.sol';
+import {IFund} from 'interfaces/IFund.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 
 import {ProxyDeployer} from 'contracts/deploy/ProxyDeployer.sol';
+import {Fund} from 'contracts/fund/Fund.sol';
 import {GovernanceTimelock} from 'contracts/governance/GovernanceTimelock.sol';
 import {PolicyRegistry} from 'contracts/governance/PolicyRegistry.sol';
 import {ComplianceHook} from 'contracts/hooks/ComplianceHook.sol';
-import {IdentityRule} from 'contracts/hooks/rules/IdentityRule.sol';
-import {LockupRule} from 'contracts/hooks/rules/LockupRule.sol';
-import {MaxHoldersRule} from 'contracts/hooks/rules/MaxHoldersRule.sol';
+import {CredentialRule} from 'contracts/hooks/rules/CredentialRule.sol';
+import {FundHoldersRule} from 'contracts/hooks/rules/FundHoldersRule.sol';
+import {HolderRestrictionRule} from 'contracts/hooks/rules/HolderRestrictionRule.sol';
+import {MinPositionRule} from 'contracts/hooks/rules/MinPositionRule.sol';
 import {SettlementWindowRule} from 'contracts/hooks/rules/SettlementWindowRule.sol';
+import {CredentialRegistry} from 'contracts/identity/CredentialRegistry.sol';
+import {DvPExecutor} from 'contracts/intents/DvPExecutor.sol';
 import {IntentExecutor} from 'contracts/intents/IntentExecutor.sol';
 import {IntentToken} from 'contracts/tokens/IntentToken.sol';
 import {Gated4626Vault} from 'contracts/vaults/Gated4626Vault.sol';
@@ -39,16 +43,18 @@ contract ContractSizesTest is Test {
     _assertFits('Gated4626Vault', address(new Gated4626Vault()));
     _assertFits('Gated7540Vault', address(new Gated7540Vault()));
     _assertFits('PolicyRegistry', _registry);
-    _assertFits(
-      'ComplianceHook',
-      address(new ComplianceHook(address(this), IPolicyRegistry(_registry), address(this), new IComplianceRule[](0)))
-    );
+    _assertFits('ComplianceHook', address(new ComplianceHook(IPolicyRegistry(_registry))));
     _assertFits('IntentExecutor', address(new IntentExecutor(address(this), address(this))));
-    _assertFits('LockupRule', address(new LockupRule()));
+    _assertFits('DvPExecutor', address(new DvPExecutor(address(this), address(this))));
+    _assertFits('HolderRestrictionRule', address(new HolderRestrictionRule()));
+    _assertFits('MinPositionRule', address(new MinPositionRule()));
     _assertFits('SettlementWindowRule', address(new SettlementWindowRule()));
-    _assertFits('MaxHoldersRule', address(new MaxHoldersRule()));
-    _assertFits('IdentityRule', address(new IdentityRule(IIdentityRegistry(address(this)))));
-    _assertFits('ProxyDeployer', address(new ProxyDeployer(address(this))));
+    _assertFits('CredentialRegistry', address(new CredentialRegistry(address(this), address(this))));
+    _assertFits('CredentialRule', address(new CredentialRule(ICredentialRegistry(address(this)))));
+    _assertFits('ProxyDeployer', address(new ProxyDeployer(address(this), IPolicyRegistry(_registry))));
+    Fund _fund = new Fund(address(this), IPolicyRegistry(_registry));
+    _assertFits('Fund', address(_fund));
+    _assertFits('FundHoldersRule', address(new FundHoldersRule(IFund(address(_fund)))));
     _assertFits(
       'GovernanceTimelock',
       address(new GovernanceTimelock(7 days, new address[](0), new address[](0), address(this), address(this)))
