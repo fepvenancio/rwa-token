@@ -109,4 +109,30 @@ contract GovernanceTimelockUnitTest is Test {
     _timelock.cancel(_id);
     assertFalse(_timelock.isOperationPending(_id));
   }
+
+  /// @dev No contract enforces a floor on the delay: the constructor takes any value, and an operation of the timelock
+  ///      on itself, after the current delay, can set any lower one
+  function test_WhenGovernanceLowersTheDelay_NothingStopsItBelowSevenDays() external {
+    address[] memory _members = new address[](1);
+    _members[0] = _governance;
+    assertEq(new GovernanceTimelock(0, _members, _members, address(0), _recovery).getMinDelay(), 0);
+
+    bytes memory _call = abi.encodeCall(_timelock.updateDelay, (1 hours));
+    vm.prank(_governance);
+    _timelock.schedule(address(_timelock), 0, _call, bytes32(0), bytes32(0), _DELAY);
+    vm.warp(block.timestamp + _DELAY);
+    vm.prank(_governance);
+    _timelock.execute(address(_timelock), 0, _call, bytes32(0), bytes32(0));
+    assertEq(_timelock.getMinDelay(), 1 hours);
+  }
+
+  /// @dev RECOVERY_ROLE revokes CANCELLER_ROLE from any holder, governance's own included: OpenZeppelin makes every
+  ///      proposer a canceller, and recovery is not limited to the guardian
+  function test_WhenRecoveryRevokesGovernancesCancelRight_ItIsRevoked() external {
+    bytes32 _canceller = _timelock.CANCELLER_ROLE();
+    assertTrue(_timelock.hasRole(_canceller, _governance));
+    vm.prank(_recovery);
+    _timelock.revokeRole(_canceller, _governance);
+    assertFalse(_timelock.hasRole(_canceller, _governance));
+  }
 }

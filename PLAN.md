@@ -2645,11 +2645,57 @@ The owner asked for the docs to be rebuilt as HTML for product people and curiou
 
 Built by seven writing agents from a shared template and stylesheet (`docs/assets/site.css`: one palette, every text colour at least 4.5:1 on every background in both themes), then checked claim by claim by seven separate agents against the code; every reported mismatch was confirmed in the code before it was fixed. A consistency check confirms every page uses the same stylesheet, fonts, navigation and footer, has no inline styles or colour literals, and has no broken links or anchors.
 
+## Five behaviours found while writing the docs: confirmed, with proposals (2026-10-27, nothing changed)
+
+The owner asked to confirm each behaviour with a test and to propose fixes before changing any code. Each test below passes today: it pins the behaviour as the code has it. No contract is changed.
+
+### B1. A forced transfer out of the 7540 escrow strands the last pending redemption
+
+- **What happens.** Every pending redemption's shares sit in one balance at the vault's own address; `pendingShares` is booked per controller. `forcedTransfer` (base, `AGENT_ROLE`) can move tokens out of any address, the vault's included, without touching the booking. The earlier fulfilments still settle from the pool; the last controller's `fulfillRedeem`, `rejectRedeemRequest` and `recoverRedeemRequest` all revert with `ERC20InsufficientBalance(vault, 0, n)`. The only way out is to force the shares back.
+- **Test.** `Gated7540VaultUnit_PooledEscrow.test_WhenTheAgentForcesSharesOutOfTheEscrow_TheLastPendingRedemptionCannotSettle`.
+- **Options.**
+  - **A (recommended).** The 7540 vault refuses `forcedTransfer` whose `from` is the vault itself, with its existing `Gated7540Vault_Unsupported()`, as it already does for the issuer `mint` and `burn`. Escrowed shares then move only through the per-controller paths: fulfil, reject, `recoverRedeemRequest`. Needs `virtual` on the base's `forcedTransfer` (the base's `burn` is already `virtual` for the same reason). No interface change.
+  - B. Keep it, and track the total pending so a forced transfer cannot take the pool below it: a new storage field kept in step by four functions, for a power nobody needs.
+  - C. Document only: an agent error, undone by forcing the shares back.
+
+### B2. A frozen amount on the 7540 escrow cannot target a controller
+
+- **What happens.** `setFrozenTokens(vault, n)` freezes part of the pool, not anyone's request. The fulfiller has no `BURNER_ROLE`, so a fulfilment's burn may take only unfrozen shares, and a reject is a plain transfer. Whichever fulfilment or reject comes last and needs the frozen part is refused with `ERC7943InsufficientUnfrozenBalance`, whoever it belongs to. Freezing 30 meant for bob blocks alice's 50 if bob's settles first.
+- **Test.** `Gated7540VaultUnit_PooledEscrow.test_WhenPartOfThePooledEscrowIsFrozen_TheLastFulfilmentIsBlockedWhoeverItIs` (and the existing `Gated7540VaultUnit_FrozenEscrow` tests, which freeze the whole pool).
+- **Options.**
+  - **A (recommended, with B1's A).** The 7540 vault refuses `setFrozenTokens` on its own address, with `Gated7540Vault_Unsupported()`. To hold one controller's pending redemption, the fulfiller does not fulfil it, or the agent moves it with `recoverRedeemRequest` (per controller, FORCED, to a quarantine account). Needs `virtual` on the base's `setFrozenTokens`. The two `Gated7540VaultUnit_FrozenEscrow` tests become "freezing the escrow reverts". `recoverRedeemRequest`'s `_releaseFrozen(address(this), …)` then never releases anything but still checks the balance; it can stay. No interface change.
+  - B. A per-controller hold on pending redemptions (`holdRedeemRequest(controller)` blocking fulfil and reject): new function, storage and interface surface.
+  - C. Document only.
+  - ERC-7943 note for A: `forcedTransfer` and `setFrozenTokens` are the standard's functions; refusing them for one address (the vault itself) is a token-level restriction that tooling calling them on the vault would see as a revert.
+
+### B3. A settlement window can be changed but not cleared
+
+- **What happens.** `setWindow` refuses an empty day mask (`SettlementWindowRule_InvalidWindow`) and there is no clear function. The rule fails closed when unconfigured, so a cleared window would block every intent rather than switch the rule off. To stop windowing a token, its admin takes the rule out of the list with `setRules`.
+- **Test.** `RuleSetIntegration_SettlementWindow.test_WhenTheWindowRuleIsTakenOutOfTheList_IntentsSettleOutsideTheWindow` (and the existing `test_WhenTheDayMaskIsEmpty_ItReverts`).
+- **Proposal: no change.** It is the fail-closed design; halting intents is what pause is for. The pages already say how to turn it off.
+
+### B4. No contract enforces a minimum timelock delay
+
+- **What happens.** `GovernanceTimelock` accepts any initial delay (0 included), and an operation of the timelock on itself can lower it with `updateDelay`, after the current delay. Only the deployment default (7 days) and the post-deploy check stand behind "at least 7 days".
+- **Test.** `GovernanceTimelockUnitTest.test_WhenGovernanceLowersTheDelay_NothingStopsItBelowSevenDays`.
+- **Options.**
+  - **A (recommended).** `GovernanceTimelock` enforces a 7-day floor in its constructor and in an `updateDelay` override, reverting with a new `GovernanceTimelock_DelayBelowFloor(delay, floor)`. The floor stays an internal constant, so the interface id does not change; the new error is an addition to the frozen `IGovernanceTimelock` (owner decision). The main timelock is where the upgrade, hook and rule powers live, so this is where holders rely on the delay. The recovery timelock (plain OpenZeppelin, powers that only undo the guardian) is left as it is.
+  - B. Same floor on the recovery timelock too: a small subclass instead of the plain OpenZeppelin contract, one more contract to deploy and attest-check.
+  - C. No change: lowering the delay is itself a delayed, public operation that the guardian can cancel.
+
+### B5. `RECOVERY_ROLE` revokes `CANCELLER_ROLE` from governance too
+
+- **What happens.** On the main timelock the recovery timelock may revoke `CANCELLER_ROLE` from any holder. OpenZeppelin makes every proposer a canceller, so that includes the governance multisig, not only the guardian. On the tokens, executors and credential registry it may revoke `GUARDIAN_ROLE` from any holder, which is the role itself.
+- **Test.** `GovernanceTimelockUnitTest.test_WhenRecoveryRevokesGovernancesCancelRight_ItIsRevoked`.
+- **Proposal: no change.** The recovery timelock's only proposer and executor is governance, so this is governance removing its own cancel right after a 7-day delay; nobody else gains a power. Limiting it to "the guardian" would need the timelock to know which account that is.
+
+### If the recommendations are accepted
+
+- Code: `PolicyGatedERC20Upgradeable` (`virtual` on `forcedTransfer` and `setFrozenTokens`), `Gated7540Vault` (two overrides), `GovernanceTimelock` (floor), `IGovernanceTimelock` (one error).
+- Tests first: the two `PooledEscrow` tests and the two `FrozenEscrow` tests become "it reverts with `Gated7540Vault_Unsupported`" (plus the agent's `recoverRedeemRequest` as the way to move one controller's escrow); the delay test becomes "below 7 days reverts", in the constructor and in `updateDelay`; mutants for each check.
+- Docs: the 7540 vault, base, roles, money, governance timelock and deployment pages, README's delay note, SECURITY.md section 3.
+- Verification: both runners, lint, Slither, Aderyn, `verify:reproducible`, `validate:upgrades` (the base and vault change bytecode).
+
 ## Open questions for the owner
 1. Credential layer: decisions 11 to 17 in its section came up while planning and still wait for your confirmation (11: the recovery timelock can also reverse a guardian block; 12: the rule for one attester overwriting another; 14: the demo deployment uses `CredentialRule`; 17: the gas stop line). Decisions 8 and 9 (fast upgrade path, ERC-7943) are open.
-2. Behaviours found while writing the HTML pages, for you to accept or change:
-   - The 7540 vault keeps every pending redemption's shares in one balance at its own address. The agent's `forcedTransfer` can take from that address without touching the pending bookkeeping, after which the last controller's `fulfillRedeem`, `rejectRedeemRequest` or `recoverRedeemRequest` reverts for want of shares. `recoverRedeemRequest` is the tool for escrowed shares.
-   - A frozen amount set on the 7540 vault's own address counts against `fulfillRedeem`'s burn, whose operator is the fulfiller (no `BURNER_ROLE`), so fulfilment can revert. No test covers it.
-   - `SettlementWindowRule.setWindow` refuses an empty weekday mask, so a token's window can be changed but not cleared; taking the rule out of the list is the way to stop it.
-   - No contract enforces a minimum timelock delay: `minDelay` is 7 days by default in `Components` and the post-deploy check asserts it, but a timelock operation can change it.
-   - `RECOVERY_ROLE` revokes `CANCELLER_ROLE` from any account on the main timelock, governance's own included, and `GUARDIAN_ROLE` from any account on the tokens, the executors and the credential registry.
+2. The five behaviours found while writing the HTML pages are confirmed by tests, with proposals, in "Five behaviours found while writing the docs" above: B1 and B2 (the 7540 escrow) and B4 (the delay floor) recommend a change; B3 and B5 recommend none. Nothing is changed until you decide.

@@ -758,6 +758,65 @@ contract Gated7540VaultUnit_FrozenEscrow is Gated7540VaultUnitTest {
   address internal _carolRecovery = makeAddr('carolRecovery');
 }
 
+/// @notice The escrow is one balance at the vault's own address, shared by every controller, while pending redemptions
+///         are booked per controller. Enforcement aimed at the vault's address acts on the pool, not on a controller
+contract Gated7540VaultUnit_PooledEscrow is Gated7540VaultUnitTest {
+  address internal _quarantine = makeAddr('quarantine');
+
+  function _escrowTwo() internal {
+    _holdShares(_alice, 50);
+    _holdShares(_bob, 30);
+    _requestRedeem(_alice, 50);
+    _requestRedeem(_bob, 30);
+  }
+
+  /// @dev A forced transfer out of the vault's address leaves 80 shares booked against 50 held: the last pending
+  ///      redemption can then be neither fulfilled, rejected nor recovered, until shares are forced back
+  function test_WhenTheAgentForcesSharesOutOfTheEscrow_TheLastPendingRedemptionCannotSettle() external {
+    _escrowTwo();
+    vm.prank(_agent);
+    _vault.forcedTransfer(address(_vault), _quarantine, 30);
+    assertEq(_vault.balanceOf(address(_vault)), 50);
+    assertEq(_vault.pendingRedeemRequest(0, _alice) + _vault.pendingRedeemRequest(0, _bob), 80);
+
+    _fulfillRedeem(_alice, 50, 50); // the first one still settles from the pool
+
+    bytes memory _short = abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, address(_vault), 0, 30);
+    vm.expectRevert(_short);
+    _fulfillRedeem(_bob, 30, 30);
+    vm.expectRevert(_short);
+    vm.prank(_fulfiller);
+    _vault.rejectRedeemRequest(_bob);
+    vm.expectRevert(_short);
+    vm.prank(_agent);
+    _vault.recoverRedeemRequest(_bob, _quarantine);
+    assertEq(_vault.pendingRedeemRequest(0, _bob), 30);
+
+    // Forcing the shares back is the only way out.
+    vm.prank(_agent);
+    _vault.forcedTransfer(_quarantine, address(_vault), 30);
+    _fulfillRedeem(_bob, 30, 30);
+    assertEq(_vault.pendingRedeemRequest(0, _bob), 0);
+  }
+
+  /// @dev A frozen amount on the vault's address cannot name a controller. Meant for bob's 30, it blocks whichever
+  ///      fulfilment needs the frozen part: here bob's settles first and alice's, the last, is refused
+  function test_WhenPartOfThePooledEscrowIsFrozen_TheLastFulfilmentIsBlockedWhoeverItIs() external {
+    _escrowTwo();
+    vm.prank(_agent);
+    _vault.setFrozenTokens(address(_vault), 30);
+
+    _fulfillRedeem(_bob, 30, 30); // the fulfiller does not hold BURNER_ROLE, so the burn takes unfrozen shares only
+    assertEq(_vault.balanceOf(address(_vault)), 50);
+
+    vm.expectRevert(
+      abi.encodeWithSelector(IERC7943Fungible.ERC7943InsufficientUnfrozenBalance.selector, address(_vault), 50, 20)
+    );
+    _fulfillRedeem(_alice, 50, 50);
+    assertEq(_vault.pendingRedeemRequest(0, _alice), 50);
+  }
+}
+
 /// @dev L-3: a fulfilment price that floors to zero is stored as 1, so `convertTo*` never divide by zero
 contract Gated7540VaultUnit_ZeroPrice is Gated7540VaultUnitTest {
   function test_WhenTheFulfilmentPriceFloorsToZero_TheLastPriceIsOneAndConversionsWork() external {
