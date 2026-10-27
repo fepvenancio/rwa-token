@@ -7,6 +7,7 @@ import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
+import {ISettlementWindowRule} from 'interfaces/ISettlementWindowRule.sol';
 import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
 
 import {ComplianceHook} from 'contracts/hooks/ComplianceHook.sol';
@@ -118,6 +119,26 @@ contract RuleSetIntegration_SettlementWindow is RuleSetIntegrationTest {
   }
 
   function test_WhenInsideTheWindow_IntentsSettle() external {
+    (ITransferIntent.TransferIntent memory _i, bytes memory _sig) = _signedIntent(_bob, 1 ether, keccak256('n'));
+    _assertExecuteParity(_i, _sig, Reasons.TRANSFER_OK);
+    assertEq(_token.balanceOf(_bob), 1 ether);
+  }
+
+  /// @dev A window can be changed but never cleared (`setWindow` refuses an empty day mask), so the way to stop
+  ///      windowing a token is to take the rule out of its list
+  function test_WhenTheWindowRuleIsTakenOutOfTheList_IntentsSettleOutsideTheWindow() external {
+    vm.warp(_SATURDAY_10AM);
+    vm.expectRevert(ISettlementWindowRule.SettlementWindowRule_InvalidWindow.selector);
+    vm.prank(_admin);
+    _windowRule.setWindow(address(_token), 9 hours, 17 hours, 0);
+
+    IComplianceRule[] memory _withoutWindow = new IComplianceRule[](3);
+    _withoutWindow[0] = _identityRule;
+    _withoutWindow[1] = _minPositionRule;
+    _withoutWindow[2] = _restrictionRule;
+    vm.prank(_admin);
+    _hook.setRules(address(_token), _withoutWindow);
+
     (ITransferIntent.TransferIntent memory _i, bytes memory _sig) = _signedIntent(_bob, 1 ether, keccak256('n'));
     _assertExecuteParity(_i, _sig, Reasons.TRANSFER_OK);
     assertEq(_token.balanceOf(_bob), 1 ether);

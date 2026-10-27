@@ -111,6 +111,13 @@ interface IGated7540Vault {
    */
   error Gated7540Vault_ExceedsPending(uint256 _requested, uint256 _pending);
 
+  /**
+   * @notice Thrown when a forced transfer out of the vault would take shares booked to pending redemptions
+   * @param _requested The amount to move
+   * @param _surplus The vault's shares above the pending total, the only ones a forced transfer may take
+   */
+  error Gated7540Vault_ExceedsSurplus(uint256 _requested, uint256 _surplus);
+
   /// @notice Thrown when recovering the claimable balances of a controller that has none
   error Gated7540Vault_NothingClaimable();
 

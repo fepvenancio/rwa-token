@@ -104,32 +104,6 @@ abstract contract PolicyGatedERC20Upgradeable is
     _burn(_from, _amount);
   }
 
-  /// @inheritdoc IERC7943Fungible
-  function forcedTransfer(
-    address _from,
-    address _to,
-    uint256 _amount
-  ) external onlyRole(AGENT_ROLE) returns (bool _result) {
-    _releaseFrozen(_from, _amount);
-    _moveAs(_from, _to, _amount, IPolicyHook.TransferKind.FORCED, bytes32(0), 0);
-    // Emitted after the hook's afterTransfer: re-entry is blocked by `_update`'s guard and the hook is attested.
-    // slither-disable-start reentrancy-events
-    emit ForcedTransfer(_from, _to, _amount);
-    emit ForcedTransferBy(_from, _to, _amount, _msgSender());
-    // slither-disable-end reentrancy-events
-    _result = true;
-  }
-
-  /// @inheritdoc IERC7943Fungible
-  function setFrozenTokens(
-    address _account,
-    uint256 _amount
-  ) external onlyRole(AGENT_ROLE) returns (bool _result) {
-    _getPolicyGatedStorage().frozen[_account] = _amount;
-    emit Frozen(_account, _amount);
-    _result = true;
-  }
-
   /// @inheritdoc IPolicyGated
   function pause() external onlyRole(GUARDIAN_ROLE) {
     _pause();
@@ -208,6 +182,32 @@ abstract contract PolicyGatedERC20Upgradeable is
   /// @inheritdoc IPolicyGated
   function registry() external view returns (address _registry) {
     _registry = address(_getPolicyGatedStorage().registry);
+  }
+
+  /// @inheritdoc IERC7943Fungible
+  function forcedTransfer(
+    address _from,
+    address _to,
+    uint256 _amount
+  ) public virtual onlyRole(AGENT_ROLE) returns (bool _result) {
+    _releaseFrozen(_from, _amount);
+    _moveAs(_from, _to, _amount, IPolicyHook.TransferKind.FORCED, bytes32(0), 0);
+    // Emitted after the hook's afterTransfer: re-entry is blocked by `_update`'s guard and the hook is attested.
+    // slither-disable-start reentrancy-events
+    emit ForcedTransfer(_from, _to, _amount);
+    emit ForcedTransferBy(_from, _to, _amount, _msgSender());
+    // slither-disable-end reentrancy-events
+    _result = true;
+  }
+
+  /// @inheritdoc IERC7943Fungible
+  function setFrozenTokens(
+    address _account,
+    uint256 _amount
+  ) public virtual onlyRole(AGENT_ROLE) returns (bool _result) {
+    _getPolicyGatedStorage().frozen[_account] = _amount;
+    emit Frozen(_account, _amount);
+    _result = true;
   }
 
   /**

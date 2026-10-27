@@ -194,6 +194,16 @@ Further limits recorded during review:
   refused for size. If the shares claimed, added to what the receiver already holds, come to less than the minimum, the claim reverts with `BELOW_MIN_POSITION` and
   the claimable stays until the agent's `recoverClaimable` (an enforcement mint, exempt) delivers it, or the fulfiller
   rejects the request before fulfilling.
+- **The 7540 escrow is pooled, and enforcement on it is per controller.** Pending redemptions are booked per
+  controller, but their shares sit in one balance at the vault's own address. `forcedTransfer` out of that address may
+  take only the shares above the booked total (`Gated7540Vault_ExceedsSurplus`): shares that reached the vault outside
+  a request. `setFrozenTokens` on it reverts (`Gated7540Vault_Unsupported`), since a frozen amount there could not name
+  a controller. One controller's redemption is held by not fulfilling it, or moved with `recoverRedeemRequest`. Tooling
+  that calls `setFrozenTokens` on the vault's address, or forces booked shares out of it, sees a revert. Pinned by
+  `Gated7540VaultUnit_Escrow`.
+- **The main timelock's delay has a floor of 7 days.** `GovernanceTimelock` refuses less at deployment and in
+  `updateDelay` (`GovernanceTimelock_DelayBelowFloor`). The recovery timelock is OpenZeppelin's own, without a floor;
+  its powers only undo the guardian's. Pinned by `GovernanceTimelockUnitTest`.
 - **Revoking an attestation does not affect live tokens.** Attestation is checked at install and upgrade time only.
   The guardian pauses while the timelock removes the component.
 - **`totalAssets` of the 7540 vault is indicative** (the last fulfilment price); `preview*` revert, as ERC-7540
@@ -298,10 +308,9 @@ Each row is a bug deliberately planted, the tests that caught it, then the file 
 | `Gated7540Vault` access | controller/operator check removed from `redeem`, `withdraw`, `_claimMint`, `_claimDeposit`; `FULFILLER_ROLE` removed from `fulfillRedeem`, `rejectRedeemRequest`, `fulfillDeposit`, `rejectDepositRequest`; `whenNotPaused` removed from `withdraw` | 1 to 2 tests each (`Gated7540VaultUnit_ClaimAccess` and others). Before the 2026-10-17 review, 6 of these 9 survived |
 | `Gated7540Vault.requestDeposit` | eligibility checked on the owner instead of the controller | `test_WhenAVerifiedOwnerRequestsForAnUnverifiedController_ItIsRefused`, the only test where owner differs from controller |
 | Base transient context | kind slot not cleared after a movement | 3 tests (forced-then-plain, executed-then-plain, and others) |
-| `Gated7540Vault` escrow (L-2) | `rejectRedeemRequest` or `recoverRedeemRequest` stops releasing frozen escrow | 1 test each (`Gated7540VaultUnit_FrozenEscrow`) |
 | `Gated7540Vault` price (L-3) | the minimum price of 1 removed | 3 tests (`Gated7540VaultUnit_ZeroPrice` and the fulfilment fuzz) |
 | `Gated7540Vault` claims (M-3) | deposit-claim, mint-claim, redeem or withdraw eligibility check removed; `maxRedeem` back to pause-only; `recoverClaimable` without the recipient check; enforcement mint downgraded to a plain MINT; payout probe with amount 1 | 1 to 11 tests each (`Gated7540VaultIntegration_Claimable`). The amount-1 probe breaks 11, since it would block payouts to controllers holding no shares |
-| `Gated7540Vault` reject (M-2) | rejected shares returned as FORCED | 5 tests, including the steering attack at a full cap, the paused reject and the frozen escrow |
+| `Gated7540Vault` reject (M-2) | rejected shares returned as FORCED | tests including the steering attack at a full cap and the paused reject |
 | Recovery timelock (M-1) | base or executor `revokeRole` lets RECOVERY_ROLE revoke any role, or not the guardian; recovery cannot `unpause`; `GovernanceTimelock` lets it revoke any role, or not CANCELLER. On `DvPExecutor` (2026-10-23): the same three, and `pause` open to anyone | 1 to 2 tests each (`PolicyGatedUnit_Recovery`, `IntentExecutorUnit_Recovery`, `DvPExecutorUnit_Roles`, `GovernanceTimelockUnitTest`) |
 | Recovery deployment (M-1) | `Activate` skips the executor's RECOVERY_ROLE, or leaves governance as a recovery-timelock canceller | The hand-over check, which pins the recovery timelock's exact role set and its lack of cancellers (59 TS tests fail) |
 | Base enforcement | `forcedTransfer` keeps frozen tokens | 2 unit tests |
@@ -317,6 +326,7 @@ Each row is a bug deliberately planted, the tests that caught it, then the file 
 | `CredentialRegistry` (2026-10-25) | the lapse never returned, or at `>=`; a guardian block or a killed attester ignored; `isVerified` true for any record; the stale-credential, future-`issuedAt`, signature, validity-in-the-future (on `set` and on `setStatus(ACTIVE)`) or qualification-mask check dropped, or the validity boundary moved; a write that drops the guardian block; a status change that keeps `issuedAt`, or a direct write that stores it as zero; the overwrite rule dropped, or a killed attester's record not replaceable; `clearGuardianBlock` or `reviveAttester` open to anyone; the recovery role able to revoke any role or kill an attester; a duplicate attester account allowed, on add or on rotation, or the old account kept; `setStatus` by another attester, by a killed one, on a missing record or with `NONE` or `LAPSED`; block, unblock and kill not idempotent; the 65th attester allowed; the signed hash omitting the attester | 34 of 34. 21 by exactly one test (the lapse second, the 65th attester, each role gate, each no-op). One (a write that drops the guardian block) escaped the invariants until the handler kept its own record of the blocks |
 | `CredentialRule` (2026-10-25) | the enforcement-burn exemption widened to any burn or any kind, dropped, or looked up for every sender; a blocked, unknown or lapsed sender judged wrongly; zero amounts skipped; `FORCED` or `MINT` checking the sender; `BURN` checking the receiver; an unset policy admitting; the lapsed reason removed; an exit-only receiver admitted; the attester bitmap or its shift, `requireAll`, `requireAny` or `forbidAny` dropped or weakened; `setPolicy` unauthenticated, dropping a field or keyed by the sender; the receiver or the sender read from the wrong side; `checkSend` or `checkReceive` always accepting, ignoring the token's policy or reading the wrong side | 28 of 28. 2 by exactly one test |
 | Ignition credential wiring (2026-10-25) | no policy set on the tokens; a policy that asks for no bits, or trusts no attester 0; the registry not handed to the timelock; no `RECOVERY_ROLE` on the registry; the credential rule last in the order; an attester allowed to assert nothing | 7 of 7, by `credentials.test.ts` and `deployment.test.ts` (1 to 15 failing) |
+| `Gated7540Vault` escrow, `GovernanceTimelock` floor (2026-10-27) | the surplus check removed, or ignoring the booked total, or at `>=`; the booked total not raised by `requestRedeem`, or not lowered by `fulfillRedeem`, the reject or the recovery; a freeze on the vault's address allowed; the timelock floor removed from the constructor or from `updateDelay`, or at `<=`; the floor checked before OpenZeppelin's caller check | 12 of 12, by `Gated7540VaultUnit_Escrow` and `GovernanceTimelockUnitTest`. The `<=` floor first survived, and `test_WhenGovernanceSetsTheDelayToExactlySevenDays_ItApplies` was added |
 
 ## 6. Toolchain supply chain
 

@@ -57,9 +57,9 @@ Every contract except the abstract `BaseRule` has its `.t.sol` next to it. [`PLA
 The audit package (scope, suppressions, mutation results, findings an auditor should know first) is indexed in
 [`SECURITY.md`](SECURITY.md).
 
-The delays below are the timelocks' `minDelay`: 7 days by default in `Components`, and the post-deploy check asserts at
-least 7 days on both. No contract enforces a floor: a timelock operation (`updateDelay`) can change it, after the
-current delay.
+The delays below are the timelocks' `minDelay`, 7 days by default in `Components`. The main timelock refuses less than
+7 days, at deployment and in `updateDelay` (`GovernanceTimelock_DelayBelowFloor`). The recovery timelock is
+OpenZeppelin's own: the post-deploy check asserts at least 7 days there, and an operation of that timelock can change it.
 
 | Power | Holder | Delay | Can |
 |---|---|---|---|
@@ -68,7 +68,7 @@ current delay.
 | `RECOVERY_ROLE` | recovery timelock | ≥ 7 days | on every token, vault and both executors: `unpause` and revoke `GUARDIAN_ROLE`; on the main timelock: revoke `CANCELLER_ROLE`; on the credential registry: revoke `GUARDIAN_ROLE`, clear a guardian block, revive an attester. Nothing else. Governance proposes and executes; nobody can cancel |
 | `UPGRADER_ROLE` | timelock | ≥ 7 days | upgrade, only to an implementation attested as `IMPLEMENTATION` |
 | `MINTER_ROLE` / `BURNER_ROLE` | issuer | none | mint, and burn (enforcement burns can take frozen tokens) |
-| `AGENT_ROLE` | issuer | none | `forcedTransfer` (clawback; bypasses pause, frozen tokens and the sender's address freeze, still policy-checked: an address-frozen receiver refuses it), `setFrozenTokens`; on the 7540 vault, `recoverRedeemRequest` (escrow → recovery account whose credential the token's policy accepts) and `recoverClaimable` (claimable assets and shares → recovery account whose credential the token's policy accepts, even while paused or at a full cap) |
+| `AGENT_ROLE` | issuer | none | `forcedTransfer` (clawback; bypasses pause, frozen tokens and the sender's address freeze, still policy-checked: an address-frozen receiver refuses it), `setFrozenTokens`; on the 7540 vault, `recoverRedeemRequest` (one controller's escrow → recovery account whose credential the token's policy accepts; out of the vault's own address `forcedTransfer` takes only shares not booked to a pending redemption, and the vault's address cannot be frozen) and `recoverClaimable` (claimable assets and shares → recovery account whose credential the token's policy accepts, even while paused or at a full cap) |
 | `EXECUTOR_ROLE` | `IntentExecutor` and `DvPExecutor` contracts | none | settle holder-signed intents that name no executor or name that executor. `IntentExecutor` settles only intents that state no consideration; `DvPExecutor` settles trades. Neither can alter an intent |
 | `OPERATOR_ROLE` (executors) | bank / relayer keys | none | submit intents via `execute` / `executeBatch` (all-or-nothing), or trades via `executeDvPGated` / `executeDvP3009` (both legs or neither) |
 | `GUARDIAN_ROLE` (executors) | multisig | none | pause an executor only; the timelock or the recovery timelock unpauses |
