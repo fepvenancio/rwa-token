@@ -54,5 +54,9 @@ library Reasons {
   bytes32 internal constant SENDER_FROZEN = keccak256('SENDER_FROZEN');
   /// @notice The receiver is frozen on this token
   bytes32 internal constant RECEIVER_FROZEN = keccak256('RECEIVER_FROZEN');
+  /// @notice The receiver's credential has lapsed: it can still send, burn and redeem, but not receive
+  bytes32 internal constant CREDENTIAL_EXPIRED = keccak256('CREDENTIAL_EXPIRED');
+  /// @notice The receiver holds an active credential that the token's policy does not accept, or the token has no policy
+  bytes32 internal constant RECEIVER_NOT_ELIGIBLE = keccak256('RECEIVER_NOT_ELIGIBLE');
 }
 // solhint-enable private-vars-leading-underscore

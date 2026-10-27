@@ -237,8 +237,8 @@ describe("DvP: a share trade against cash, settled in one transaction", async fu
 });
 
 /**
- * What a trade costs, measured on the local chain with the real policy (identity, lockup, settlement window, holder cap
- * and fund rule on the security token; identity on the gated cash token). The cash token of the 3009 trade is a mock, so
+ * What a trade costs, measured on the local chain with the real policy (credential, lockup, settlement window, holder cap
+ * and fund rule on the security token; credential on the gated cash token). The cash token of the 3009 trade is a mock, so
  * its figure is lower than USDC's would be: Circle's token runs behind a proxy and checks a blocklist. The ceilings are
  * loose and only catch a change that makes a trade several times dearer.
  */

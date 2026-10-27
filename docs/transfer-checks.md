@@ -93,12 +93,14 @@ The Ignition module (`RULE_ORDER` in `ignition/modules/roles.ts`) passes each to
 
 | Token | Order |
 |---|---|
-| `IntentToken` | `IdentityRule`, `MinPositionRule`, `HolderRestrictionRule`, `SettlementWindowRule`, `FundHoldersRule` |
-| `Gated4626Vault`, `Gated7540Vault` | `IdentityRule`, `MinPositionRule`, `HolderRestrictionRule`, `FundHoldersRule` |
+| `IntentToken` | `CredentialRule`, `MinPositionRule`, `HolderRestrictionRule`, `SettlementWindowRule`, `FundHoldersRule` |
+| `Gated4626Vault`, `Gated7540Vault` | `CredentialRule`, `MinPositionRule`, `HolderRestrictionRule`, `FundHoldersRule` |
 
 No demo list has `MaxHoldersRule`: the investor count that matters for a fund is fund-wide, and `FundHoldersRule` keeps it. `Components` still deploys `MaxHoldersRule`, and the runbook has the council attest it with the other rules, so governance can add it to a class that has a limit of its own with `setRules`, without another council step.
 
-Order decides which reason the caller sees. A sender who is both unverified and locked gets `SENDER_NOT_VERIFIED`, because `IdentityRule` runs first.
+`CredentialRule` has the place `IdentityRule` had. `IdentityRule` stays in the repo, for a deployment that keeps its identity data in an external registry with `isVerified(address)`. `Components` no longer deploys it, so the council attests it only for a deployment that adds it. It gives a holder whose verification lapses no way out ([IdentityRule](#identityrule)).
+
+Order decides which reason the caller sees. A sender who is both unverified and locked gets `SENDER_NOT_VERIFIED`, because `CredentialRule` runs first.
 
 Code: `ComplianceHook.beforeTransfer`, `afterTransfer`, `checkSend`, `checkReceive`, `setRules`, `_setRules`.
 
@@ -108,6 +110,7 @@ Code: `ComplianceHook.beforeTransfer`, `afterTransfer`, `checkSend`, `checkRecei
 |---|---|---|---|---|---|
 | Base: pause | rejects | rejects | passes | rejects | rejects |
 | Base: unfrozen balance of `from` | applies | applies | passes, up to the whole balance | no `from` | applies. A burn by a `BURNER_ROLE` holder passes, up to the whole balance |
+| `CredentialRule` | `from` can leave, then `to` eligible | the same | `to` eligible | `to` eligible | `from` can leave, unless the operator holds `BURNER_ROLE` on the token |
 | `IdentityRule` | `from` and `to` verified | `from` and `to` verified | `to` verified | `to` verified | `from` verified |
 | `MinPositionRule` | `to` ends at the minimum or more, `from` at 0 or the minimum or more | the same | passes | `to` ends at the minimum or more | `from` ends at 0 or the minimum or more, unless the operator holds `BURNER_ROLE` on the token |
 | `HolderRestrictionRule`, `from` | `SENDER_FROZEN`, then `LOCKED` while locked | `SENDER_FROZEN`, then `LOCKED` while locked | passes | no `from` | `SENDER_FROZEN` (the burner included), then `LOCKED` while locked, unless the operator holds `BURNER_ROLE` on the token, which waives the lockup only |
@@ -118,13 +121,31 @@ Code: `ComplianceHook.beforeTransfer`, `afterTransfer`, `checkSend`, `checkRecei
 | `FundHoldersRule.check` | caps a new investor | caps a new investor | passes | caps a new investor | passes |
 | `FundHoldersRule.after_` | updates the fund | updates the fund | updates the fund | updates the fund | updates the fund |
 
-`MaxHoldersRule` is in no demo list, so its rows apply only where governance adds it. `MinPositionRule` passes every movement while the token's minimum is 0, which is the default.
+In the `CredentialRule` row, "can leave" means the registry reads the sender as `ACTIVE`, `EXIT_ONLY` or `LAPSED`, and "eligible" means it reads the receiver as `ACTIVE` and the token's policy accepts it ([CredentialRule](#credentialrule)). `IdentityRule` and `MaxHoldersRule` are in no demo list, so their rows apply only where governance adds them. `MinPositionRule` passes every movement while the token's minimum is 0, which is the default.
 
 The unfrozen-balance row is what the write does, and what `canTransferWithReason` and `canExecute` answer. `canTransfer` applies it only while a frozen amount is in the way of the sender, and otherwise leaves a balance shortfall to the base standard ([Pre-flight calls](#pre-flight-calls)).
 
 `FundHoldersRule.check` has one more outcome that applies to every kind, `FORCED` and `BURN` included: `NOT_FUND_CLASS`, for a token that is not a registered class of the fund and for a rule the fund has replaced (see [FundHoldersRule](#fundholdersrule)). The row shows what it does once the token is a class and the rule is the fund's.
 
 The `FORCED` column also covers the enforcement mint in `recoverClaimable`, where `from` is 0. Each standard rule has a unit test for that case. No code path produces `FORCED` with `to == 0`; the project brief reserves it.
+
+### CredentialRule
+
+Asks a `CredentialRegistry` what it knows about each party and applies the token's policy to the receiver. [credentials.md](credentials.md) describes the registry: what a record holds, who writes it and how a standing is resolved. The registry address is an immutable of the rule, so it is part of the attested codehash, and the codehash does not cover the registry's code, its admin or its attester list. The council reads those before it attests the rule. The rule keeps no running state and has no `after_`.
+
+The sender is checked unless the kind is `MINT` or `FORCED`. It must be able to leave, which is a standing of `ACTIVE`, `EXIT_ONLY` or `LAPSED`. An address that reads `NONE` or `BLOCKED` gets `SENDER_NOT_VERIFIED`, except on a `BURN` whose operator holds `BURNER_ROLE` on the token: that burn passes, so the issuer can burn from a blocked or unknown holder. The token is asked for that role only when the sender would otherwise be refused.
+
+The receiver is checked unless the kind is `BURN`. The token's policy is read first. A token whose policy trusts no attester admits no receiver, and every receiver gets `RECEIVER_NOT_ELIGIBLE`. Then the standing: `LAPSED` gets `CREDENTIAL_EXPIRED`, and anything but `ACTIVE` gets `RECEIVER_NOT_VERIFIED`. An `ACTIVE` receiver must have been vouched for by an attester the policy trusts, hold every bit in `requireAll`, hold at least one bit of `requireAny` when that is not zero, and hold no bit of `forbidAny`, or it gets `RECEIVER_NOT_ELIGIBLE`.
+
+The sender check comes first, zero amounts are checked like any other, and a self-transfer is not special. The rule never looks at the caller, the spender or the executor, apart from the `BURNER_ROLE` test on a `BURN`.
+
+A holder whose credential lapses, or whose attester is killed, can still send, burn and redeem, and cannot receive. A holder who is blocked can do neither; the agent can still take their tokens with `forcedTransfer`, to a receiver that is eligible, and the burner can burn them.
+
+`checkSend(token, account)` answers the sender rule for an account (it ignores the token), and `checkReceive(token, account)` the receiver rule for that token. `check` is built on the same two helpers, so a probe and `check` agree: a probe that rejects an account means `check` rejects every movement on that side except the ones the rule exempts (`MINT` and `FORCED` skip the sender check, `BURN` has no receiver, and the enforcement burn passes). A fuzz test pins that.
+
+The policy is set with `setPolicy(token, requireAll, requireAny, forbidAny, attesters)`, which replaces the whole policy and which only the token's `DEFAULT_ADMIN_ROLE` can call: the deployer while `Activate` configures the token, the main timelock after hand-over. `attesters` is a bitmap of attester ids, bit `i` for id `i`, and zero removes the policy. The demo asks for `KYC` from attester 0 on every token and nothing more.
+
+Rule id: `keccak256('CredentialRule.v1')`.
 
 ### IdentityRule
 
@@ -135,6 +156,8 @@ The sender is checked unless the kind is `MINT` or `FORCED`. The receiver is che
 A holder who loses verification can no longer send or receive. The burner cannot burn their tokens either, because a `BURN` checks `from`. The agent can still take their tokens with `forcedTransfer`, but only to a verified account.
 
 `checkSend(token, account)` and `checkReceive(token, account)` ask the same registry. They return `SENDER_NOT_VERIFIED` or `RECEIVER_NOT_VERIFIED` for an unverified account.
+
+Over a `CredentialRegistry`, `isVerified` is true only for `ACTIVE`. So under `IdentityRule` a holder whose credential lapsed, or who is exit-only, can neither send, burn nor redeem. Only `CredentialRule` lets an exit-only holder leave. A test pins the difference.
 
 Rule id: `keccak256('IdentityRule.v1')`.
 
@@ -167,7 +190,7 @@ Keeps two settings for each token and holder, an address freeze and a lockup, in
 - The sender, for every kind except `FORCED` and `MINT`. A frozen sender returns `SENDER_FROZEN`. Then, while `block.timestamp < unlockTime`, `TRANSFER` and `EXECUTED` return `LOCKED`, and so does `BURN` unless the operator holds `BURNER_ROLE` on the token. The rule asks the token for the role only while a lockup runs on a burn. A burn by the burner is therefore an enforcement action that ignores the lock, but not the freeze.
 - The receiver, for every kind except `BURN`. A frozen receiver returns `RECEIVER_FROZEN`, so a mint, an enforcement mint and a forced transfer into a frozen address are refused.
 
-A burn from a frozen address is refused even for the burner. The enforcement way out of a frozen address is `forcedTransfer` to a quarantine account, which must not be address-frozen, and must be verified where `IdentityRule` is listed. A locked holder can still receive tokens, and the lock covers the whole balance, including tokens received later.
+A burn from a frozen address is refused even for the burner. The enforcement way out of a frozen address is `forcedTransfer` to a quarantine account, which must not be address-frozen, and must hold an `ACTIVE` credential that the token's policy accepts where `CredentialRule` is listed (or be verified where `IdentityRule` is). A locked holder can still receive tokens, and the lock covers the whole balance, including tokens received later.
 
 On `Gated4626Vault`, a holder's `redeem` or `withdraw` is a holder burn and respects both settings. For a non-zero amount the caller sees `ERC4626ExceededMaxRedeem` or `ERC4626ExceededMaxWithdraw`, because the vault's `max*` is 0 for a locked or frozen owner. The `max*` probe treats the owner as the operator. This matches the real burn unless an account holds the vault's `BURNER_ROLE`, which `Activate` never grants. `maxDeposit` and `maxMint` are 0 for a frozen receiver.
 
@@ -253,7 +276,7 @@ The cap lives in the fund, but the rule has to be in each class's list for it to
 
 Rule id: `keccak256('FundHoldersRule.v1')`.
 
-Code: `IdentityRule.check`, `IdentityRule.checkSend`, `IdentityRule.checkReceive`, `MinPositionRule.check`, `MinPositionRule.setMinPosition`, `MinPositionRule.setExempt`, `HolderRestrictionRule.check`, `HolderRestrictionRule.checkSend`, `HolderRestrictionRule.checkReceive`, `HolderRestrictionRule.setLockup`, `HolderRestrictionRule.setFrozen`, `SettlementWindowRule._isOpen`, `SettlementWindowRule.setWindow`, `MaxHoldersRule.check`, `MaxHoldersRule.after_`, `MaxHoldersRule.seedHolderCountFromHolders`, `MaxHoldersRule.seedHolderCountFromRule`, `MaxHoldersRule.setExemptHolder`, `FundHoldersRule.check`, `FundHoldersRule.checkReceive`, `FundHoldersRule.checkSend`, `FundHoldersRule.after_`, `Fund.admission`, `Fund.join`, `Fund.leave`, `Fund.isClassIntact`, `Fund.firstBrokenClass`.
+Code: `CredentialRule.check`, `CredentialRule.checkSend`, `CredentialRule.checkReceive`, `CredentialRule.setPolicy`, `CredentialRegistry.profileOf`, `IdentityRule.check`, `IdentityRule.checkSend`, `IdentityRule.checkReceive`, `MinPositionRule.check`, `MinPositionRule.setMinPosition`, `MinPositionRule.setExempt`, `HolderRestrictionRule.check`, `HolderRestrictionRule.checkSend`, `HolderRestrictionRule.checkReceive`, `HolderRestrictionRule.setLockup`, `HolderRestrictionRule.setFrozen`, `SettlementWindowRule._isOpen`, `SettlementWindowRule.setWindow`, `MaxHoldersRule.check`, `MaxHoldersRule.after_`, `MaxHoldersRule.seedHolderCountFromHolders`, `MaxHoldersRule.seedHolderCountFromRule`, `MaxHoldersRule.setExemptHolder`, `FundHoldersRule.check`, `FundHoldersRule.checkReceive`, `FundHoldersRule.checkSend`, `FundHoldersRule.after_`, `Fund.admission`, `Fund.join`, `Fund.leave`, `Fund.isClassIntact`, `Fund.firstBrokenClass`.
 
 ## Reason codes
 
@@ -264,8 +287,8 @@ Each code is `keccak256` of its name, so `TRANSFER_OK` is not zero. A hook or ru
 | `TRANSFER_OK` | rules and hook, when the movement is allowed |
 | `PAUSED` | the base, while paused and the kind is not `FORCED`, and in the mint probe `Gated7540Vault` runs on a controller (`Gated7540Vault_ControllerNotEligible(PAUSED)`); also `DvPExecutor`'s pre-flights, while the executor is paused |
 | `INSUFFICIENT_UNFROZEN` | the base, when `from` cannot move the amount, an amount above the whole balance included (see Frozen above). `canTransfer` is a bool and counts a shortfall only while a frozen amount is in the way. The write reverts with `ERC7943InsufficientUnfrozenBalance`, or with `ERC20InsufficientBalance` above the balance, instead |
-| `SENDER_NOT_VERIFIED` | `IdentityRule` |
-| `RECEIVER_NOT_VERIFIED` | `IdentityRule` |
+| `SENDER_NOT_VERIFIED` | `CredentialRule`, `IdentityRule` |
+| `RECEIVER_NOT_VERIFIED` | `CredentialRule`, `IdentityRule` |
 | `OUTSIDE_SETTLEMENT_WINDOW` | `SettlementWindowRule` |
 | `MAX_HOLDERS` | `MaxHoldersRule`, `FundHoldersRule`, from `check`. Neither rule's `checkSend` or `checkReceive` returns it |
 | `LOCKED` | `HolderRestrictionRule` |
@@ -282,6 +305,8 @@ Each code is `keccak256` of its name, so `TRANSFER_OK` is not zero. A hook or ru
 | `BELOW_MIN_POSITION` | `MinPositionRule`, when the movement would leave an account holding less than the token's minimum position and more than zero |
 | `SENDER_FROZEN` | `HolderRestrictionRule`, when the sender's address is frozen. `checkSend` returns it too |
 | `RECEIVER_FROZEN` | `HolderRestrictionRule`, when the receiver's address is frozen. `checkReceive` returns it too |
+| `CREDENTIAL_EXPIRED` | `CredentialRule`, when the receiver's credential has lapsed. `checkReceive` returns it too |
+| `RECEIVER_NOT_ELIGIBLE` | `CredentialRule`, when the receiver holds an `ACTIVE` credential that the token's policy does not accept, or when the token has no policy. `checkReceive` returns it too |
 
 `DvPExecutor`'s ERC-3009 pre-flight also returns `INTENT_NOT_YET_VALID`, `INTENT_EXPIRED`, `NONCE_USED` and `INSUFFICIENT_UNFROZEN` for the buyer's authorization ([flows-dvp.md](flows-dvp.md#pre-flight)).
 
@@ -296,9 +321,9 @@ Each code is `keccak256` of its name, so `TRANSFER_OK` is not zero. A hook or ru
 | `IntentExecutor.executeBatch` | revert `IntentExecutor_BatchItemFailed(index, reason)`, where `reason` is the token's revert data, or `IntentExecutor_ConsiderationNotSupported(index)` for an intent that states a consideration. The whole batch is undone |
 | `DvPExecutor.executeDvPGated`, `executeDvP3009`, when a leg fails | revert `DvPExecutor_LegFailed(leg, reason)`, where `leg` is `CASH` (0) or `SECURITIES` (1) and `reason` is the token's revert data. The whole trade is undone. A failing payout to the seller in the ERC-3009 form reverts with the cash token's own error |
 | `DvPExecutor`, when the two legs do not describe one trade, or the cash does not balance | `DvPExecutor_LegsDoNotMatch()`, or `DvPExecutor_CashNotConserved(account, expected, actual)` |
-| `Gated4626Vault.deposit`, `mint`, `withdraw`, `redeem` when the matching `max*` is lower than the request | OpenZeppelin's `ERC4626ExceededMaxDeposit`, `ERC4626ExceededMaxMint`, `ERC4626ExceededMaxWithdraw`, `ERC4626ExceededMaxRedeem`, before `_update` runs. `maxDeposit` and `maxMint` probe a mint of a very large amount to the receiver and `maxRedeem` and `maxWithdraw` ask a zero-amount burn from the owner, so for a non-zero amount a rejection that depends on the account (identity, freeze, lockup, a full holder cap, pause) appears as a max of 0 and this error, not as `PolicyGated_TransferRejected`. A rejection that depends on the amount of the call does not: `MinPositionRule`'s `BELOW_MIN_POSITION` passes the max check and reverts in `_update` with `PolicyGated_TransferRejected`. A zero-amount call passes the max check. It reverts with `PolicyGated_TransferRejected` if the token is paused, or if the hook rejects a zero-amount movement: `IdentityRule` does for an unverified receiver (`deposit`, `mint`) or owner (`withdraw`, `redeem`), and `HolderRestrictionRule` does for a frozen receiver, a frozen owner and a locked owner. `MaxHoldersRule` and `MinPositionRule` do not. The `max*` probe treats the owner as the operator, which matches the real burn with the roles `Activate` grants |
+| `Gated4626Vault.deposit`, `mint`, `withdraw`, `redeem` when the matching `max*` is lower than the request | OpenZeppelin's `ERC4626ExceededMaxDeposit`, `ERC4626ExceededMaxMint`, `ERC4626ExceededMaxWithdraw`, `ERC4626ExceededMaxRedeem`, before `_update` runs. `maxDeposit` and `maxMint` probe a mint of a very large amount to the receiver and `maxRedeem` and `maxWithdraw` ask a zero-amount burn from the owner, so for a non-zero amount a rejection that depends on the account (credential, freeze, lockup, a full holder cap, pause) appears as a max of 0 and this error, not as `PolicyGated_TransferRejected`. A rejection that depends on the amount of the call does not: `MinPositionRule`'s `BELOW_MIN_POSITION` passes the max check and reverts in `_update` with `PolicyGated_TransferRejected`. A zero-amount call passes the max check. It reverts with `PolicyGated_TransferRejected` if the token is paused, or if the hook rejects a zero-amount movement: `CredentialRule` does for a receiver (`deposit`, `mint`) without an `ACTIVE` credential that the policy accepts and for an owner (`withdraw`, `redeem`) with no credential or a blocked one, and `HolderRestrictionRule` does for a frozen receiver, a frozen owner and a locked owner. `MaxHoldersRule` and `MinPositionRule` do not. The `max*` probe treats the owner as the operator, which matches the real burn with the roles `Activate` grants |
 | `Gated7540Vault.requestDeposit`, the deposit claims `deposit` and `mint`, and the redemption claims `redeem` and `withdraw` | `Gated7540Vault_ControllerNotEligible(reason)`, from the controller check that runs before anything moves. For a request or a deposit claim it is a mint probe for the controller, the pre-flight of a mint of a very large amount that `maxDeposit` also uses, so `reason` is the hook's own reason, for example `RECEIVER_NOT_VERIFIED`, `RECEIVER_FROZEN` or `MAX_HOLDERS`, or `PAUSED`. For a redemption claim it is a zero-amount burn from the controller. A deposit claim that would leave the receiver below the minimum position passes this check and reverts in `_update` with `PolicyGated_TransferRejected(BELOW_MIN_POSITION)`. The claimable amount stays, and `recoverClaimable` delivers it. A `requestRedeem` that would leave the owner below the minimum reverts the same way |
-| `Gated7540Vault.recoverClaimable` | `Gated7540Vault_RecipientNotEligible(reason)` if `to` fails the pre-flight, a zero-amount `FORCED` mint to `to` through the hook. With the standard rules, `IdentityRule` rejects an unverified `to`, `HolderRestrictionRule` rejects a frozen `to` with `RECEIVER_FROZEN`, and `FundHoldersRule` rejects everything with `NOT_FUND_CLASS` for a token that is not a registered class or whose rule is retired |
+| `Gated7540Vault.recoverClaimable` | `Gated7540Vault_RecipientNotEligible(reason)` if `to` fails the pre-flight, a zero-amount `FORCED` mint to `to` through the hook. With the standard rules, `CredentialRule` rejects a `to` without an `ACTIVE` credential that the policy accepts, `HolderRestrictionRule` rejects a frozen `to` with `RECEIVER_FROZEN`, and `FundHoldersRule` rejects everything with `NOT_FUND_CLASS` for a token that is not a registered class or whose rule is retired |
 | `Gated7540Vault.redeem`, `withdraw` while paused | OpenZeppelin's `EnforcedPause`, before any other check |
 
 `transfer` never returns `false`. A rejected transfer reverts.
@@ -315,7 +340,7 @@ Every token has `canTransfer`, `canTransferWithReason`, `canSend` and `canReceiv
 | `canReceive(account)` | May the account receive at all? The same, with `checkReceive(token, account)`. It does not depend on an amount or a sender either, and none of the shipped rules answers a holder or investor cap in it |
 | `canExecute(intent, sig)` | Would `executeTransfer` pass, apart from the caller's `EXECUTOR_ROLE`? It checks the deadline, the nonce, the consideration, the named executor, `validAfter` and the signature, in that order, then the same path with kind `EXECUTED` and the intent's `ref` and `deadline`. The operator is the caller, and it is also the account compared with the intent's `executor`, so call it from the executor's address |
 
-What `canSend` and `canReceive` can see depends on the rules in the token's list. With the standard rules, `IdentityRule` rejects an unverified account, `HolderRestrictionRule` a frozen one (and, for `canSend`, a locked one), and `FundHoldersRule` everything for a token that is not a registered class of its fund. `MinPositionRule`, `SettlementWindowRule` and `MaxHoldersRule` have no opinion about an account, and `FundHoldersRule` has none about its cap: a holder cap or an investor cap is decided by `check`, on a movement, where a new holder at a full cap is refused with `MAX_HOLDERS`.
+What `canSend` and `canReceive` can see depends on the rules in the token's list. With the standard rules, `CredentialRule` rejects an account that cannot send (`NONE` or `BLOCKED`, for `canSend`) or cannot receive (anything but an `ACTIVE` credential that meets the token's policy, for `canReceive`; a lapsed holder can send but not receive), `HolderRestrictionRule` a frozen one (and, for `canSend`, a locked one), and `FundHoldersRule` everything for a token that is not a registered class of its fund. `MinPositionRule`, `SettlementWindowRule` and `MaxHoldersRule` have no opinion about an account, and `FundHoldersRule` has none about its cap: a holder cap or an investor cap is decided by `check`, on a movement, where a new holder at a full cap is refused with `MAX_HOLDERS`.
 
 Differences from the real call:
 

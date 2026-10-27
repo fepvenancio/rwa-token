@@ -32,7 +32,8 @@ In scope, all under `contracts/` (`.t.sol` files and `contracts/test/` are test 
 | Base | `base/PolicyGatedERC20Upgradeable` |
 | Templates | `tokens/IntentToken`, `vaults/Gated4626Vault`, `vaults/Gated7540Vault` |
 | Mixin | `mixins/IntentSettledUpgradeable` |
-| Policy | `hooks/ComplianceHook` (one per deployment, shared by every token), `hooks/BaseRule`, `hooks/rules/{Identity,MinPosition,HolderRestriction,SettlementWindow,MaxHolders,FundHolders}Rule` |
+| Policy | `hooks/ComplianceHook` (one per deployment, shared by every token), `hooks/BaseRule`, `hooks/rules/{Credential,Identity,MinPosition,HolderRestriction,SettlementWindow,MaxHolders,FundHolders}Rule` (the demo deploys all but `IdentityRule`) |
+| Credentials | `identity/CredentialRegistry` (immutable, not a proxy, not attested; the `CredentialRule` codehash covers its address, not its code) |
 | Fund | `fund/Fund` (not a proxy, not attested; the `FundHoldersRule` codehash covers its address, not its code) |
 | Governance | `governance/PolicyRegistry`, `governance/GovernanceTimelock` (the main timelock: OZ `TimelockController` plus a revoke-`CANCELLER_ROLE`-only `RECOVERY_ROLE`) |
 | Settlement | `intents/IntentExecutor`, `intents/DvPExecutor` (neither is a proxy, and neither is attested: each token authorises an executor by granting it `EXECUTOR_ROLE`) |
@@ -43,7 +44,7 @@ Also in scope: `ignition/modules/{Components,Activate,roles}.ts`, which carry th
 the hand-over to the timelock and each token's rule list (`RULE_ORDER`).
 
 Out of scope: OpenZeppelin 5.6.1 (`@openzeppelin/contracts`, `-upgradeable`; `TimelockController` is used unmodified for the recovery timelock and as the base of `GovernanceTimelock`),
-the external identity registry (`IIdentityRegistry` is an assumption about it), and test mocks.
+the external identity registry (`IIdentityRegistry` is an assumption about it, used only by `IdentityRule`), the KYC attesters' off-chain verification, and test mocks.
 
 Build: solc 0.8.30, `evmVersion: cancun`, optimizer 200 runs, no metadata hash, the same in Hardhat and forge.
 
@@ -128,7 +129,7 @@ Further limits recorded during review:
 - **7540 operators are full delegates** (review L-5). Per ERC-7540, an approved operator can create requests that pull
   the owner's assets or shares under any controller, not only claim. Owners should approve only custodians they would
   trust with the assets. Pinned by `test_WhenAnOperatorRequestsUnderItsOwnController_ItIsAFullDelegatePerErc7540`.
-- **Dust and the holder cap** (review L-1). Anyone can deposit 1 wei into the 4626 vault for a verified, empty receiver
+- **Dust and the holder cap** (review L-1). Anyone can deposit 1 wei into the 4626 vault for a credentialed, empty receiver
   and take a holder slot (or a fund investor slot), and 1 wei sent to an exiting holder breaks an exact-balance exit.
   `MinPositionRule` closes the slot grab where it is listed with a non-zero minimum: a transfer or mint that would leave an account between 0
   and the minimum is refused (`BELOW_MIN_POSITION`), as is an exit that would leave such a remainder. It does not stop 1
@@ -136,7 +137,7 @@ Further limits recorded during review:
   `BELOW_MIN_POSITION`; the holder exits the current balance (`maxRedeem`). It is off by default (a
   minimum of 0), and the demo deployment sets none unless `Activate` is given one. Where none is set, the old mitigation
   applies: the agent cleans up dust (forced transfer or burn) and monitoring watches slot usage. FORCED and an enforcement
-  burn are exempt, so an agent can still leave a remainder. Requiring a verified caller on vault mints was rejected
+  burn are exempt, so an agent can still leave a remainder. Requiring a credentialed caller on vault mints was rejected
   because it would break custodians depositing for clients.
 - **The holder cap is a ratchet** (review L-4: prose corrected, behaviour unchanged). A full-balance move to a new
   holder passes only when `count <= cap`, and any other new holder only when `count < cap`. So above a lowered cap no
@@ -152,15 +153,26 @@ Further limits recorded during review:
   the timelock and shows the cost (`fund.test.ts`, `FundIntegration_Integrity`).
 - **Account-level answers are not movement answers.** `canSend` and `canReceive` take no amount and no kind. `canSend` is
   false for an address-frozen (`HolderRestrictionRule`) or a locked holder, although `forcedTransfer` still passes the rules for both and an enforcement burn
-  passes for a locked one. `canReceive` is false for an unverified or address-frozen account and for a token that is not a fund class; the holder
+  passes for a locked one. `canReceive` is false for an account without an active credential that the token's policy accepts (a lapsed one included), an address-frozen account and a token that is not a fund class; the holder
   caps are not in it (ERC-7943 keeps quantitative rules out), so a new holder at a full cap reads true and the cap refuses
   the movement. The vaults' `maxDeposit` and `maxMint` and the 7540 request and deposit-claim checks probe a mint of a very large
   amount (`type(uint128).max`), and `maxRedeem` and the 7540 redemption claims a burn of nothing, so none of them reads a
   minimum position up to `type(uint128).max` as a block.
   A rule that bounded the size of a position (a supply cap, a maximum balance) would refuse the mint probe and zero
   `maxDeposit` and `maxMint`; none of the shipped rules does.
+- **Credentials: the attester decides who may hold, and a lapse stops only receiving.** `CredentialRegistry` records what an
+  attester says and verifies no KYC. A compromised attester key can credential any address for every token whose policy
+  trusts that attester, with any bit the attester may assert. The limits are the attester's allowed bits, the token's
+  attester bitmap and required bits (`setPolicy`), `validUntil`, and the guardian's `killAttester` (its holders become
+  exit-only at once) and `blockSubject`. A holder whose credential lapsed, or whose attester was killed, can still send,
+  burn and redeem and cannot receive; only a blocked or unknown holder cannot send. That is deliberate (a holder must be
+  able to leave), so a lapse does not stop funds already held: the address freeze, the lockup and `forcedTransfer` do.
+  An enforcement burn (operator holds `BURNER_ROLE`) passes the sender check, so the issuer can burn from a blocked
+  holder. The council attests `CredentialRule`, whose codehash covers the registry's address and not its code, so it
+  reads the registry (code, admin, attester list) first. Entities are not modelled: one wallet is one holder. Pinned by
+  `CredentialRegistry.t.sol`, `CredentialRule.t.sol` and `test/nodejs/credentials.test.ts`.
 - **A pause blocks mint and burn as well.** Only FORCED movements pass: `forcedTransfer`, and the 7540 vault's `recoverRedeemRequest` and `recoverClaimable`. Enforcement during a pause is `forcedTransfer`
-  to a quarantine account (identity-verified, never address-frozen: the freeze on a receiver applies to FORCED), and the
+  to a quarantine account (holding an active credential the token's policy accepts, never address-frozen: the freeze on a receiver applies to FORCED), and the
   burn waits for the unpause. The ERC-3643 reference token differs: its agents can mint, burn and force while paused
   (checked 2026-10-23; the ERC-3643 text itself was not checked).
 - **`canTransfer` can say yes where the write reverts.** ERC-7943 forbids `canTransfer` to fail on a balance check, so an
@@ -210,6 +222,8 @@ Inline suppressions (each carries its reason on the line above, in the source):
 | `MaxHoldersRule` `after_`, `check` | `incorrect-equality` | Exact equalities define a holder (post-move balance == amount ⇔ was 0) |
 | `FundHoldersRule` `after_`, `_senderLeavesFund` | `incorrect-equality` | Same definition of a holder, for a class balance |
 | `FundHoldersRule` `_senderLeavesFund`, `_classReason` | `unused-return` | Only the fields the call needs are read from `admission`; `_senderLeavesFund` needs the sender's classes and exemption, since the rest was read for the receiver, and `_classReason` needs the class number and the installed rule |
+| `CredentialRegistry` `profileOf`, `isVerified` | `incorrect-equality` | Compares an enum standing with a constant, not a balance. The lapse itself is a strict `>` on the time, so a record reads `ACTIVE` through its last second |
+| `CredentialRule` `_sendReason`, `_receiveReason` | `unused-return` | Only the standing is read for a sender, and the standing, the bits and the attester for a receiver; the country is stored for later rules and no policy reads it |
 | `Fund` `positionsOf` | `uninitialized-local` | The class count and the entries written start at zero by design |
 | `HolderRestrictionRule` `setLockup` | `uninitialized-local` | The stored unlock time starts at zero, the value of a cleared lockup |
 | `Gated7540Vault` `initialize` | `reentrancy-benign`, `reentrancy-events` | The initialiser installs the token's rules on the shared hook, then writes the vault's own state (custody, last price). The hook is attested, cannot re-enter `initialize`, and never reads that state; only the admin and the guardian hold a role yet |
@@ -242,12 +256,12 @@ Inline acknowledgements (reason on the line above each `aderyn-ignore`):
 | Detector | Where | Verdict | Evidence |
 |---|---|---|---|
 | `contract-locks-ether` (high) | `IntentToken`, `Gated4626Vault`, `Gated7540Vault`, `TokenProxy` | False positive: no path accepts ETH. There is no `receive` or payable function, `upgradeToAndCall` with empty data rejects value (`ERC1967NonPayable`), and with data the value is delegated into a non-payable function | `IntentTokenIntegration_Ether`, `Gated4626VaultUnit_Ether`, `Gated7540VaultUnit_Ether` |
-| `reentrancy-state-change` (high) | `HolderRestrictionRule`, `MinPositionRule`, `SettlementWindowRule`, `MaxHoldersRule`, `Fund.registerClass`, `Fund.setRule` | False positive: the token, the hook, the fund or the registry is called through view interfaces, which compile to STATICCALL, so nothing it does can change any state | `*Unit_TokenCallsAreStatic` for the rules, `FundHoldersRuleUnit_TokenAndFundCallsAreStatic` and `FundUnit_CallsAreStatic` for the fund layer: a callee whose reads write makes the entry point revert, while a quiet callee succeeds (control) |
+| `reentrancy-state-change` (high) | `HolderRestrictionRule`, `MinPositionRule`, `SettlementWindowRule`, `MaxHoldersRule`, `CredentialRule.setPolicy` and `_checkSender`, `Fund.registerClass`, `Fund.setRule` | False positive: the token, the hook, the fund or the registry is called through view interfaces, which compile to STATICCALL, so nothing it does can change any state | `*Unit_TokenCallsAreStatic` for the rules, `FundHoldersRuleUnit_TokenAndFundCallsAreStatic` and `FundUnit_CallsAreStatic` for the fund layer: a callee whose reads write makes the entry point revert, while a quiet callee succeeds (control) |
 | `arbitrary-transfer-from` (high) | `Gated7540Vault.requestDeposit` | Same as Slither's `arbitrary-send-erc20` (§4 above) | Fuzzed victim-owner test; removing the guard fails 2 tests |
 | `abi-encode-packed-hash-collision` (high) | `ProxyDeployer._initCodeHash` | False positive: only the second operand varies; the first is fixed creation code | Fuzzed `predict` formula test; off-chain CREATE2 test |
 | `storage-array-memory-edit` (high) | `SettlementWindowRule.check`, `isOpen` | False positive: a read-only copy of a storage struct into memory | Window tests |
 | `unused-state-variable` | `Gated7540Vault` ERC-7201 location | False positive: read in assembly | `Gated7540VaultUnit_Storage`: the formula equals the constant and the slot holds custody and `lastPrice` |
-| `unchecked-return` | `_grantRole` in constructors and initialisers; `Address.functionCall` in `ProxyDeployer`; `_executeLeg` in `DvPExecutor` | `_grantRole` returns false only if the role is already held; `initialize` returns nothing; the cash leg's digest is not needed and the securities leg's digest was read before the call | Role, deploy and DvP tests |
+| `unchecked-return` | `_grantRole` in constructors and initialisers (`CredentialRegistry` included), and `_revokeRole` in `CredentialRegistry.revokeRole` (it returns false only if the role was not held, and either way the account ends up without it); `Address.functionCall` in `ProxyDeployer`; `_executeLeg` in `DvPExecutor` | `_grantRole` returns false only if the role is already held; `initialize` returns nothing; the cash leg's digest is not needed and the securities leg's digest was read before the call | Role, deploy and DvP tests |
 | `costly-loop`, `require-revert-in-loop` | `ComplianceHook._setRules`, `IntentExecutor.executeBatch`, `MaxHoldersRule.seedHolderCountFromHolders` | By design: at most 16 rules, and invalid rules must fail closed; batches are atomic; an unsorted holder list must fail the whole seed | Hook, batch and seed tests |
 | `literal-instead-of-constant` | calendar arithmetic; `10 ** decimals()` | Calendar constants; `decimals()` is read at runtime | Window and vault tests |
 | `empty-block`, `modifier-used-only-once` | `BaseRule.after_`, `__IntentSettled_init`, `Fund.onlyRule`, the two empty `catch` blocks of `Fund._listsInstalledRule` | By design; in the fund views a token or a hook that fails is a broken class, and the answer is `false` | `FundUnit_ClassIntegrity` |
@@ -305,6 +319,9 @@ Each row is a bug deliberately planted, the run that caught it, then restored fr
 | `canTransfer` and the write on a balance shortfall (2026-10-24, finding 4) | the write never using the base error, using it at the balance too, or using it for every shortfall; `canTransfer` counting a pure balance shortfall; `canTransferWithReason` leaving it to the base; the frozen amount ignored in `canTransfer`'s test, or another account's frozen amount asked; enforcement kinds not excluded from it; the ignored shortfall skipping the hook; the shortfall boundary moved to `<=`; the strict `_check` made lenient (`canExecute`, the 7540 checks) | 11 of 11 |
 | `Fund` views (2026-10-24, S4) | an unregistered token passing; the registration ignored; the first or the last class skipped; a failing hook or token counted as listed; the wrong comparison; the last broken class returned instead of the first | 8 of 8 |
 | `HolderRestrictionRule.checkSend` lockup (2026-10-24) | lock ignored; `<=` at the boundary; lock reported before the freeze; freeze ignored; `checkReceive` refusing a locked account; the comparison reversed | 6 of 6 |
+| `CredentialRegistry` (2026-10-25) | the lapse never returned, or at `>=`; a guardian block or a killed attester ignored; `isVerified` true for any record; the stale-credential, future-`issuedAt`, signature, validity-in-the-future (on `set` and on `setStatus(ACTIVE)`) or qualification-mask check dropped, or the validity boundary moved; a write that drops the guardian block; a status change that keeps `issuedAt`, or a direct write that stores it as zero; the overwrite rule dropped, or a killed attester's record not replaceable; `clearGuardianBlock` or `reviveAttester` open to anyone; the recovery role able to revoke any role or kill an attester; a duplicate attester account allowed, on add or on rotation, or the old account kept; `setStatus` by another attester, by a killed one, on a missing record or with `NONE` or `LAPSED`; block, unblock and kill not idempotent; the 65th attester allowed; the signed hash omitting the attester | 34 of 34. 21 by exactly one test (the lapse second, the 65th attester, each role gate, each no-op). One (a write that drops the guardian block) escaped the invariants until the handler kept its own record of the blocks |
+| `CredentialRule` (2026-10-25) | the enforcement-burn exemption widened to any burn or any kind, dropped, or looked up for every sender; a blocked, unknown or lapsed sender judged wrongly; zero amounts skipped; `FORCED` or `MINT` checking the sender; `BURN` checking the receiver; an unset policy admitting; the lapsed reason removed; an exit-only receiver admitted; the attester bitmap or its shift, `requireAll`, `requireAny` or `forbidAny` dropped or weakened; `setPolicy` unauthenticated, dropping a field or keyed by the sender; the receiver or the sender read from the wrong side; `checkSend` or `checkReceive` always accepting, ignoring the token's policy or reading the wrong side | 28 of 28. 2 by exactly one test |
+| Ignition credential wiring (2026-10-25) | no policy set on the tokens; a policy that asks for no bits, or trusts no attester 0; the registry not handed to the timelock; no `RECOVERY_ROLE` on the registry; the credential rule last in the order; an attester allowed to assert nothing | 7 of 7, by `credentials.test.ts` and `deployment.test.ts` (1 to 15 failing) |
 
 ## 6. Toolchain supply chain
 

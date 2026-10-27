@@ -22,7 +22,7 @@ describe("ERC-7943 face and multicall on the deployed stack", async function () 
     }
   });
 
-  it("canSend and canReceive follow the identity registry, and canTransfer is never more generous", async function () {
+  it("canSend and canReceive follow the credential registry, and canTransfer is never more generous", async function () {
     const s = await networkHelpers.loadFixture(stack);
     const alice = s.holders.alice.account.address;
     const eve = s.holders.eve.account.address; // never verified

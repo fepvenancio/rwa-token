@@ -7,6 +7,8 @@ import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+import {ICredentialRegistry} from 'interfaces/ICredentialRegistry.sol';
+import {ICredentialRule} from 'interfaces/ICredentialRule.sol';
 import {IDvPExecutor} from 'interfaces/IDvPExecutor.sol';
 import {IERC3009} from 'interfaces/IERC3009.sol';
 import {IERC7540Deposit} from 'interfaces/IERC7540Deposit.sol';
@@ -33,6 +35,7 @@ import {IProxyDeployer} from 'interfaces/IProxyDeployer.sol';
 import {ISettlementWindowRule} from 'interfaces/ISettlementWindowRule.sol';
 import {ITemplated} from 'interfaces/ITemplated.sol';
 import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
+import {Quals} from 'interfaces/Quals.sol';
 
 /**
  * @notice Freeze guard for `contracts/interfaces/` (CLAUDE.md rules 4 and 14). Interfaces were frozen on 2026-10-16.
@@ -102,6 +105,10 @@ contract InterfaceFreezeTest is Test {
     assertEq(type(ITemplated).interfaceId, bytes4(0x7aa77f29), 'ITemplated');
     assertEq(type(IHolderRestrictionRule).interfaceId, bytes4(0x3abb7c85), 'IHolderRestrictionRule');
     assertEq(type(IMinPositionRule).interfaceId, bytes4(0x44ac9195), 'IMinPositionRule');
+    // Added in the credential layer (C-1, 2026-10-23), ids computed from the signatures with `cast sig`. The enum
+    // `Status` is `uint8` in a signature and `Credential` a tuple
+    assertEq(type(ICredentialRegistry).interfaceId, bytes4(0x4573f2ef), 'ICredentialRegistry');
+    assertEq(type(ICredentialRule).interfaceId, bytes4(0x35778007), 'ICredentialRule');
   }
 
   function test_WhenInterfacesCompile_TheirEventTopicsArePinned() external pure {
@@ -198,6 +205,34 @@ contract InterfaceFreezeTest is Test {
       IMinPositionRule.MinPositionExemptionSet.selector,
       0x938633e92689b6d84f33389b7d3f4f49175261a456e19fcbf4e423f8d095fc07
     );
+    // Added in the credential layer (C-1, 2026-10-23), topics computed with `cast keccak`
+    assertEq(
+      ICredentialRegistry.CredentialSet.selector, 0xd789f338d152d3d12ec115f96ae3af3aba999e7e254fb41a4b3f62f0dd903412
+    );
+    assertEq(ICredentialRegistry.StatusSet.selector, 0xe07c9ed653206f6d019e37fbf43c2610409800ac75a0178854d7a6ec8974a61b);
+    assertEq(
+      ICredentialRegistry.SubjectBlocked.selector, 0xf8e7a7c3298f51e1686201ded81cdc69cde53159622a0620bc94c69bce4ab0b3
+    );
+    assertEq(
+      ICredentialRegistry.SubjectUnblocked.selector, 0xe1ef50d52db3764eed26458645193b75dddc7c21fda345136344477e1ae7d4f0
+    );
+    assertEq(
+      ICredentialRegistry.AttesterAdded.selector, 0x347cac8b384a3552298ea649f27dfef8faa49e42e44a90756c8963e71bdf9219
+    );
+    assertEq(
+      ICredentialRegistry.AttesterAccountSet.selector,
+      0x126a98f664550ef552f7d1ccb188e342eeef9d47571dc28fa7595bd48bd65517
+    );
+    assertEq(
+      ICredentialRegistry.AttesterQualsSet.selector, 0x7c05a7be122c2ff08dcb7b70aacd1d79b8e6f0ca2edfd25ddcf1e4c288ed8034
+    );
+    assertEq(
+      ICredentialRegistry.AttesterKilled.selector, 0xb7f7a33c95d88e6a5f56a073b3056f10e2eaa7be2b33945a03a9b4feec632ee4
+    );
+    assertEq(
+      ICredentialRegistry.AttesterRevived.selector, 0xc7732850c902d4cc0faee5c1a6e5606c7a3c0151bd2f933b46ec7ebb9074a9df
+    );
+    assertEq(ICredentialRule.PolicySet.selector, 0xf9fded0e2c7053e53ea59d9519aeffbc2e928990390f779721d6484d985b503e);
   }
 
   function test_WhenReasonsCompile_TheirValuesArePinned() external pure {
@@ -226,5 +261,21 @@ contract InterfaceFreezeTest is Test {
     assertEq(Reasons.BELOW_MIN_POSITION, keccak256('BELOW_MIN_POSITION'));
     assertEq(Reasons.SENDER_FROZEN, keccak256('SENDER_FROZEN'));
     assertEq(Reasons.RECEIVER_FROZEN, keccak256('RECEIVER_FROZEN'));
+    // Appended in the credential layer (2026-10-23)
+    assertEq(Reasons.CREDENTIAL_EXPIRED, keccak256('CREDENTIAL_EXPIRED'));
+    assertEq(Reasons.RECEIVER_NOT_ELIGIBLE, keccak256('RECEIVER_NOT_ELIGIBLE'));
+  }
+
+  /// @dev The qualification bits are part of the frozen vocabulary: a record written under one meaning must never be read
+  ///      under another. Bits 8 to 15 are reserved and 16 to 31 belong to a deployment
+  function test_WhenQualsCompile_TheirBitsArePinned() external pure {
+    assertEq(Quals.KYC, uint32(1));
+    assertEq(Quals.PROFESSIONAL, uint32(2));
+    assertEq(Quals.QUALIFIED, uint32(4));
+    assertEq(Quals.INSTITUTIONAL, uint32(8));
+    assertEq(Quals.FUND, uint32(16));
+    assertEq(Quals.BANK, uint32(32));
+    assertEq(Quals.CUSTOMER, uint32(64));
+    assertEq(Quals.INFRA, uint32(128));
   }
 }

@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import {Test} from 'forge-std/Test.sol';
 
+import {ICredentialRegistry} from 'interfaces/ICredentialRegistry.sol';
 import {IFund} from 'interfaces/IFund.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
@@ -12,12 +13,14 @@ import {Fund} from 'contracts/fund/Fund.sol';
 import {GovernanceTimelock} from 'contracts/governance/GovernanceTimelock.sol';
 import {PolicyRegistry} from 'contracts/governance/PolicyRegistry.sol';
 import {ComplianceHook} from 'contracts/hooks/ComplianceHook.sol';
+import {CredentialRule} from 'contracts/hooks/rules/CredentialRule.sol';
 import {FundHoldersRule} from 'contracts/hooks/rules/FundHoldersRule.sol';
 import {HolderRestrictionRule} from 'contracts/hooks/rules/HolderRestrictionRule.sol';
 import {IdentityRule} from 'contracts/hooks/rules/IdentityRule.sol';
 import {MaxHoldersRule} from 'contracts/hooks/rules/MaxHoldersRule.sol';
 import {MinPositionRule} from 'contracts/hooks/rules/MinPositionRule.sol';
 import {SettlementWindowRule} from 'contracts/hooks/rules/SettlementWindowRule.sol';
+import {CredentialRegistry} from 'contracts/identity/CredentialRegistry.sol';
 import {DvPExecutor} from 'contracts/intents/DvPExecutor.sol';
 import {IntentExecutor} from 'contracts/intents/IntentExecutor.sol';
 import {IntentToken} from 'contracts/tokens/IntentToken.sol';
@@ -51,6 +54,8 @@ contract ContractSizesTest is Test {
     _assertFits('SettlementWindowRule', address(new SettlementWindowRule()));
     _assertFits('MaxHoldersRule', address(new MaxHoldersRule()));
     _assertFits('IdentityRule', address(new IdentityRule(IIdentityRegistry(address(this)))));
+    _assertFits('CredentialRegistry', address(new CredentialRegistry(address(this), address(this))));
+    _assertFits('CredentialRule', address(new CredentialRule(ICredentialRegistry(address(this)))));
     _assertFits('ProxyDeployer', address(new ProxyDeployer(address(this), IPolicyRegistry(_registry))));
     Fund _fund = new Fund(address(this), IPolicyRegistry(_registry));
     _assertFits('Fund', address(_fund));

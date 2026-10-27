@@ -95,7 +95,7 @@ describe("governance through the timelock", async function () {
     );
     // The token's rules answer to the token's own admin, the timelock, not to the governance multisig.
     await viem.assertions.revertWithCustomError(
-      s.hook.write.setRules([s.token.address, [s.rules.identityRule.address]], { account: governance }),
+      s.hook.write.setRules([s.token.address, [s.rules.credentialRule.address]], { account: governance }),
       s.hook,
       "ComplianceHook_NotTokenAdmin",
     );
@@ -152,7 +152,7 @@ describe("governance through the timelock", async function () {
 
   it("a hook swap and a rule-set change take effect only when the timelock executes them", async function () {
     const s = await networkHelpers.loadFixture(stack);
-    const { identityRule, holderRestrictionRule } = s.rules;
+    const { credentialRule, holderRestrictionRule } = s.rules;
     const replacement = await viem.deployContract("ComplianceHook", [s.registry.address]);
     // Same registry as the installed hook, so the same codehash: the council's attestation of the hook already covers it.
     // Only the timelock can install it, and only after the delay. The replacement needs the token's rules first.
@@ -163,7 +163,7 @@ describe("governance through the timelock", async function () {
       encodeFunctionData({
         abi: replacement.abi,
         functionName: "setRules",
-        args: [s.token.address, [identityRule.address, holderRestrictionRule.address]],
+        args: [s.token.address, [credentialRule.address, holderRestrictionRule.address]],
       }),
     );
     const swap = await schedule(
@@ -174,7 +174,7 @@ describe("governance through the timelock", async function () {
     const rules = await schedule(
       s,
       s.hook.address,
-      encodeFunctionData({ abi: s.hook.abi, functionName: "setRules", args: [s.vault4626.address, [identityRule.address]] }),
+      encodeFunctionData({ abi: s.hook.abi, functionName: "setRules", args: [s.vault4626.address, [credentialRule.address]] }),
     );
 
     await networkHelpers.time.increase(swap.delay - 1n);
@@ -187,14 +187,14 @@ describe("governance through the timelock", async function () {
       getAddress(replacement.address),
     ]);
     await rules.execute();
-    assert.deepEqual(await s.hook.read.rules([s.vault4626.address]), [getAddress(identityRule.address)]);
+    assert.deepEqual(await s.hook.read.rules([s.vault4626.address]), [getAddress(credentialRule.address)]);
   });
 
   it("after hand-over a new token can be placed only through the timelock, on the attested hook with exactly its rules", async function () {
     const s = await networkHelpers.loadFixture(stack);
     const implementation = s.implementations.token.address;
     const predicted = await s.proxyDeployer.read.predict(["NEW", implementation]);
-    const rules = [s.rules.identityRule.address];
+    const rules = [s.rules.credentialRule.address];
     const initData = encodeFunctionData({
       abi: s.token.abi,
       functionName: "initialize",

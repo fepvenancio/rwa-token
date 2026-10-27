@@ -30,7 +30,7 @@ describe("deployment (Ignition: Components → council → Activate)", async fun
     for (const t of [s.token, s.vault4626, s.vault7540]) {
       assert.ok(isAddressEqual(await t.read.registry(), s.registry.address));
     }
-    // Live from deploy: the identity rule already gates the first mint.
+    // Live from deploy: the credential rule already gates the first mint.
     const [ok, reason] = await s.token.read.canTransferWithReason([zeroAddress, s.holders.eve.account.address, 1n]);
     assert.equal(ok, false);
     assert.equal(reason, REASONS.RECEIVER_NOT_VERIFIED);
@@ -40,9 +40,9 @@ describe("deployment (Ignition: Components → council → Activate)", async fun
   it("lists each token's rules in the decided order, with the minimum off and no per-class holder cap", async function () {
     const s = await networkHelpers.loadFixture(stack);
     const r = s.rules;
-    const classRules = [r.identityRule, r.minPositionRule, r.holderRestrictionRule, r.fundHoldersRule];
+    const classRules = [r.credentialRule, r.minPositionRule, r.holderRestrictionRule, r.fundHoldersRule];
     const cases = [
-      [s.token, [r.identityRule, r.minPositionRule, r.holderRestrictionRule, r.windowRule, r.fundHoldersRule]],
+      [s.token, [r.credentialRule, r.minPositionRule, r.holderRestrictionRule, r.windowRule, r.fundHoldersRule]],
       [s.vault4626, classRules],
       [s.vault7540, classRules],
     ] as const;

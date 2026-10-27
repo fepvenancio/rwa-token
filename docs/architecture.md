@@ -16,21 +16,22 @@ A fund groups several of these tokens as its share classes. The `Fund` contract 
 | `Gated4626Vault` | `contracts/vaults/` | UUPS proxy | ERC-4626 vault. The shares are a gated token |
 | `Gated7540Vault` | `contracts/vaults/` | UUPS proxy | ERC-7540 asynchronous vault. The shares are a gated token |
 | `ComplianceHook` | `contracts/hooks/` | immutable, one per deployment | Holds an ordered list of up to 16 rules for each token. First rejection wins. A token with an empty list has every movement rejected (`NO_RULES`). Its only immutable is the registry, so one attested codehash serves every token |
-| `BaseRule` and six rules | `contracts/hooks/`, `contracts/hooks/rules/` | `BaseRule` abstract; each rule immutable, one instance shared by every token whose rule list names it (`FundHoldersRule` is bound to one fund, so it is shared by that fund's classes) | `IdentityRule`, `HolderRestrictionRule` (lockup and address freeze), `MinPositionRule`, `SettlementWindowRule`, `MaxHoldersRule`, `FundHoldersRule`. As deployed, `SettlementWindowRule` is in `IntentToken`'s list only, and `MaxHoldersRule` is deployed and attested but in no token's list |
+| `BaseRule` and seven rules | `contracts/hooks/`, `contracts/hooks/rules/` | `BaseRule` abstract; each rule immutable, one instance shared by every token whose rule list names it (`FundHoldersRule` is bound to one fund, so it is shared by that fund's classes) | `CredentialRule`, `IdentityRule`, `HolderRestrictionRule` (lockup and address freeze), `MinPositionRule`, `SettlementWindowRule`, `MaxHoldersRule`, `FundHoldersRule`. As deployed, `CredentialRule` heads every token's list, `SettlementWindowRule` is in `IntentToken`'s list only, `MaxHoldersRule` is deployed and attested but in no token's list, and `IdentityRule` is not deployed at all: it is for a deployment with an external identity registry |
 | `Fund` | `contracts/fund/` | immutable code, one per fund, owned by the deployer until `Activate` hands it to the main timelock | The fund's classes, the number of distinct investors across them, and each investor's class mask, plus views that report whether each class's rule list still names the fund's rule (`isClassIntact`, `firstBrokenClass`). It holds no policy: `FundHoldersRule` decides and the fund records |
 | `PolicyRegistry` | `contracts/governance/` | immutable, one per deployment | List of attested codehashes, each marked `HOOK`, `RULE` or `IMPLEMENTATION` |
+| `CredentialRegistry` | `contracts/identity/` | immutable, one per deployment, administered by the deployer until `Activate` hands it to the main timelock | One record per address: which attester vouched for it, its qualification bits, its country, until when, and its standing. Attesters write directly or sign EIP-712 credentials that anyone submits. The guardian can block an address or kill an attester. See [credentials.md](credentials.md) |
 | `IntentExecutor` | `contracts/intents/` | immutable | Role-gated caller that submits signed intents to a token, one at a time or as an atomic batch. It refuses an intent that states a consideration, because it cannot enforce a payment |
 | `DvPExecutor` | `contracts/intents/` | immutable | Role-gated caller that settles a share trade against cash atomically, from two signed legs. The cash is a gated token or an ERC-3009 token. See [flows-dvp.md](flows-dvp.md) |
 | `ProxyDeployer` | `contracts/deploy/` | immutable | Creates each token proxy at an address that can be computed from the symbol and the implementation alone, initialises it in the same transaction, and reverts unless the implementation is attested as `IMPLEMENTATION` and the token came up on the deployer's registry with the shared hook and exactly the expected rule list |
 | `TokenProxy` | `contracts/deploy/` | the proxy | OpenZeppelin's `ERC1967Proxy`, constructible without init data |
 | `GovernanceTimelock` | `contracts/governance/` | immutable | The main timelock: OpenZeppelin's `TimelockController` plus one power for the recovery timelock, revoking `CANCELLER_ROLE`. Holds the admin powers once deployment is finished |
-| `TimelockController` | OpenZeppelin, not in this repo | immutable | Deployed unmodified as the recovery timelock, which can only unpause the tokens and the executors, revoke `GUARDIAN_ROLE` on them, and revoke `CANCELLER_ROLE` on the main timelock from any holder. Like every OpenZeppelin timelock it is also its own admin |
+| `TimelockController` | OpenZeppelin, not in this repo | immutable | Deployed unmodified as the recovery timelock, which can only unpause the tokens and the executors, revoke `GUARDIAN_ROLE` on them and on the credential registry, revoke `CANCELLER_ROLE` on the main timelock from any holder, and clear a guardian block or revive an attester on the credential registry. Like every OpenZeppelin timelock it is also its own admin |
 
-Two external contracts are neither in this repo nor deployed by it. The identity registry is any contract with `isVerified(address)`, and `IdentityRule` reads it. The vault asset is any standard ERC-20. The vaults credit the amount named in the call, not the amount that arrives, so fee-on-transfer assets are not supported. `Gated7540Vault` also books fixed asset amounts for pending deposits and claimable redemptions, so an asset whose balances change on their own (rebasing) can break its claims.
+One external contract is neither in this repo nor deployed by it: the vault asset, any standard ERC-20. A deployment that lists `IdentityRule` instead of `CredentialRule` has a second, an identity registry, which is any contract with `isVerified(address)`. The vaults credit the amount named in the call, not the amount that arrives, so fee-on-transfer assets are not supported. `Gated7540Vault` also books fixed asset amounts for pending deposits and claimable redemptions, so an asset whose balances change on their own (rebasing) can break its claims.
 
 A token's implementation contract calls `_disableInitializers()` in its constructor, so only a proxy can be initialised. Hooks and rules are not proxies. To change one you deploy a new one and install it.
 
-Code: `PolicyGatedERC20Upgradeable`, `IntentSettledUpgradeable`, `ComplianceHook`, `BaseRule`, `Fund`, `FundHoldersRule`, `PolicyRegistry`, `IntentExecutor`, `DvPExecutor`, `ProxyDeployer`, `TokenProxy`, `GovernanceTimelock`.
+Code: `PolicyGatedERC20Upgradeable`, `IntentSettledUpgradeable`, `ComplianceHook`, `BaseRule`, `CredentialRegistry`, `CredentialRule`, `Fund`, `FundHoldersRule`, `PolicyRegistry`, `IntentExecutor`, `DvPExecutor`, `ProxyDeployer`, `TokenProxy`, `GovernanceTimelock`.
 
 ## Structure
 
@@ -46,7 +47,7 @@ flowchart LR
   PD -->|"rules, to check the new token's list"| Hook
   Proxy -->|"delegatecall"| Impl["Implementation: one per template, shared by its tokens"]
   Hook -->|"check, checkSend, checkReceive, after_"| Rules["Shared rules, listed per token: five for IntentToken, four for each vault"]
-  Rules -->|"IdentityRule only: isVerified"| IdReg["Identity registry (external)"]
+  Rules -->|"CredentialRule only: profileOf"| CredReg["CredentialRegistry (one per deployment)"]
   Rules -->|"FundHoldersRule only: admission, join, leave"| Fund["Fund (one per fund)"]
   Fund -->|"policyHook, in registerClass and the monitor views"| Proxy
   Fund -->|"rules(token), in the same calls"| Hook
@@ -58,7 +59,7 @@ flowchart LR
 
 Solid arrows are calls, except `CREATE2`, which is a deployment, and `delegatecall`, which runs the implementation's code against the proxy's storage. Dotted arrows are registry checks that run when something is installed, not on every transfer. The hook is shared: every token's proxy points at the same one, and it keeps one rule list for each token. The rules are shared the same way, so one rule instance can sit in the lists of several tokens. The two executors appear only for `IntentToken`, which is the only template with `executeTransfer`. `DvPExecutor` also calls a second token for the cash leg, a gated cash token or an ERC-3009 token, which is not drawn.
 
-The main timelock administers the tokens, the registry and both executors, and owns `ProxyDeployer` and `Fund`. The hook has no owner or admin of its own: it accepts `setRules` for a token from the token itself (the token's code calls it only in its initialiser) or from an account that holds the token's `DEFAULT_ADMIN_ROLE`, which is the main timelock. The recovery timelock can unpause the tokens and the executors and remove the guardian. [roles.md](roles.md) shows both.
+The main timelock administers the tokens, the registry, the credential registry and both executors, and owns `ProxyDeployer` and `Fund`. The hook has no owner or admin of its own: it accepts `setRules` for a token from the token itself (the token's code calls it only in its initialiser) or from an account that holds the token's `DEFAULT_ADMIN_ROLE`, which is the main timelock. The recovery timelock can unpause the tokens and the executors, remove the guardian, and undo the guardian's blocks and attester kills on the credential registry. [roles.md](roles.md) shows both.
 
 Code: `ProxyDeployer.deploy`, `PolicyGatedERC20Upgradeable._setHook`, `ComplianceHook.setRules`, `Fund.setRule`.
 
@@ -72,7 +73,7 @@ sequenceDiagram
   participant T as Token proxy
   participant H as ComplianceHook
   participant R as Each rule, in order
-  participant X as Identity registry
+  participant X as Credential registry
 
   C->>T: transfer, mint, burn, deposit ...
   T->>T: lock reentrancy guard, build TransferContext, balances before the move in extra
@@ -80,7 +81,7 @@ sequenceDiagram
   T->>H: beforeTransfer(ctx), view
   loop each rule in the token's list until one rejects
     H->>R: check(ctx), view
-    R->>X: isVerified(addr), view
+    R->>X: profileOf(addr), view
     R->>T: hasRole, view
   end
   H-->>T: TRANSFER_OK or a reason code
@@ -105,9 +106,9 @@ Code: `PolicyGatedERC20Upgradeable._update`, `_check`, `_context`, `ComplianceHo
 
 A token also answers two questions about one account, with no amount and no counterparty. They are the ERC-7943 functions `canSend(account)` and `canReceive(account)`. Each returns false while the token is paused and when it has no hook. Otherwise the token asks the hook's `checkSend(token, account)` or `checkReceive(token, account)`, which asks the token's rules in the same order as `beforeTransfer` does, and the first rule that says no wins. A token with an empty rule list gets `NO_RULES`, so both are false.
 
-A rule's account answer must agree with its `check` for the kinds the rule does not exempt: a rule that rejects an account in `checkSend` or `checkReceive` also rejects, in `check`, a movement from or to it of a kind the rule does not exempt. The exemptions are the rule's own (FORCED for the identity and holder rules, an enforcement burn for the lockup), so `canSend` can be false for an unverified, a frozen or a locked holder while `forcedTransfer` still passes. A rule whose decision depends on an amount or a count has no account-level answer, because the ERC-7943 questions are independent of any amount. The holder cap and the investor cap are therefore decided by `check`, on the movement. A full cap does not make `canReceive` false for a new holder or investor. A mint or a partial transfer to it is refused with `MAX_HOLDERS`, and a transfer that takes the sender's whole balance can admit it, because the count does not change ([transfer-checks.md](transfer-checks.md#maxholdersrule)). As deployed:
+A rule's account answer must agree with its `check` for the kinds the rule does not exempt: a rule that rejects an account in `checkSend` or `checkReceive` also rejects, in `check`, a movement from or to it of a kind the rule does not exempt. The exemptions are the rule's own (FORCED for the credential and holder rules, an enforcement burn for the credential rule and the lockup), so `canSend` can be false for a holder with no credential, a blocked one, a frozen one or a locked one while `forcedTransfer` still passes. A rule whose decision depends on an amount or a count has no account-level answer, because the ERC-7943 questions are independent of any amount. The holder cap and the investor cap are therefore decided by `check`, on the movement. A full cap does not make `canReceive` false for a new holder or investor. A mint or a partial transfer to it is refused with `MAX_HOLDERS`, and a transfer that takes the sender's whole balance can admit it, because the count does not change ([transfer-checks.md](transfer-checks.md#maxholdersrule)). As deployed:
 
-- `IdentityRule` asks the identity registry.
+- `CredentialRule` asks the credential registry. `checkSend` refuses an address that reads `NONE` or `BLOCKED`, and `checkReceive` refuses everything but an `ACTIVE` credential that meets the token's policy (`CREDENTIAL_EXPIRED` for a lapsed one, `RECEIVER_NOT_ELIGIBLE` for one the policy does not accept). A lapsed holder can send. `IdentityRule`, where a deployment lists it, asks its external registry.
 - `HolderRestrictionRule` answers `SENDER_FROZEN` or `LOCKED` for a sender and `RECEIVER_FROZEN` for a receiver. A locked account can still be paid, and a forced transfer from a locked holder still passes `check`.
 - `FundHoldersRule` answers `NOT_FUND_CLASS`, for a sender and a receiver alike, when the token is not a registered class of the fund or when it is not the fund's installed rule, and accepts otherwise. It leaves the investor cap to `check`.
 - `MinPositionRule`, `SettlementWindowRule` and `MaxHoldersRule` have no account-level opinion and accept.
@@ -134,13 +135,18 @@ flowchart BT
   PG --> P6["MulticallUpgradeable (OZ)"]
   CH["ComplianceHook"] --> ICH["IComplianceHook"]
   ICH --> IPH["IPolicyHook"]
-  IdR["IdentityRule"] --> BR["BaseRule"]
+  CR["CredentialRule"] --> BR["BaseRule"]
+  IdR["IdentityRule"] --> BR
   HR["HolderRestrictionRule"] --> BR
   MP["MinPositionRule"] --> BR
   SW["SettlementWindowRule"] --> BR
   MH["MaxHoldersRule"] --> BR
   FH["FundHoldersRule"] --> BR
   BR --> ICR["IComplianceRule"]
+  CRG["CredentialRegistry"] --> ICRG["ICredentialRegistry"]
+  CRG --> IIR["IIdentityRegistry"]
+  CRG --> AC["AccessControl (OZ)"]
+  CRG --> E712["EIP712 (OZ)"]
   FU["Fund"] --> IFU["IFund"]
   FU --> OWN["Ownable (OZ)"]
 ```
