@@ -25,12 +25,11 @@ import {ProxyDeployer} from 'contracts/deploy/ProxyDeployer.sol';
 import {PolicyRegistry} from 'contracts/governance/PolicyRegistry.sol';
 import {ComplianceHook} from 'contracts/hooks/ComplianceHook.sol';
 import {HolderRestrictionRule} from 'contracts/hooks/rules/HolderRestrictionRule.sol';
-import {IdentityRule} from 'contracts/hooks/rules/IdentityRule.sol';
-import {MaxHoldersRule} from 'contracts/hooks/rules/MaxHoldersRule.sol';
 import {MinPositionRule} from 'contracts/hooks/rules/MinPositionRule.sol';
 import {Helpers} from 'contracts/test/Helpers.sol';
 import {MockAsset} from 'contracts/test/MockAsset.sol';
 import {MockIdentityRegistry} from 'contracts/test/MockIdentityRegistry.sol';
+import {MockIdentityRule} from 'contracts/test/MockIdentityRule.sol';
 import {IntentToken} from 'contracts/tokens/IntentToken.sol';
 import {Gated4626Vault} from 'contracts/vaults/Gated4626Vault.sol';
 import {Gated7540Vault} from 'contracts/vaults/Gated7540Vault.sol';
@@ -361,13 +360,13 @@ contract Gated4626VaultUnit_SupportsInterface is Gated4626VaultUnitTest {
   }
 }
 
-/// @notice Integration: the vault behind a real ComplianceHook with Identity, HolderRestriction and MaxHolders
+/// @notice Integration: the vault behind a real ComplianceHook with an identity rule and HolderRestriction. The holder cap
+///         is the fund's, tested with the vaults in `FundIntegration.t.sol`
 contract Gated4626VaultIntegrationTest is Test {
   Gated4626Vault internal _vault;
   MockAsset internal _asset;
   MockIdentityRegistry internal _identity;
   HolderRestrictionRule internal _restrictionRule;
-  MaxHoldersRule internal _maxHoldersRule;
   address internal _guardian = makeAddr('guardian');
   address internal _agent = makeAddr('agent');
   address internal _alice = makeAddr('alice');
@@ -379,19 +378,16 @@ contract Gated4626VaultIntegrationTest is Test {
     // Configure, then hand over: this test is the vault admin while it configures, as the deploy module will be.
     PolicyRegistry _registry = new PolicyRegistry(address(this), address(this));
     _identity = new MockIdentityRegistry();
-    IdentityRule _identityRule = new IdentityRule(IIdentityRegistry(address(_identity)));
+    MockIdentityRule _identityRule = new MockIdentityRule(IIdentityRegistry(address(_identity)));
     _restrictionRule = new HolderRestrictionRule();
-    _maxHoldersRule = new MaxHoldersRule();
     _registry.attest(address(_identityRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
     _registry.attest(address(_restrictionRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
-    _registry.attest(address(_maxHoldersRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
 
     _asset = new MockAsset(6);
     Gated4626Vault _impl = new Gated4626Vault();
-    IComplianceRule[] memory _rules = new IComplianceRule[](3);
+    IComplianceRule[] memory _rules = new IComplianceRule[](2);
     _rules[0] = _identityRule;
     _rules[1] = _restrictionRule;
-    _rules[2] = _maxHoldersRule;
     // CREATE2 through ProxyDeployer, as in production: the address does not depend on this contract's nonce.
     ProxyDeployer _proxyDeployer = new ProxyDeployer(address(this), _registry);
     ComplianceHook _hook = new ComplianceHook(_registry);
@@ -421,7 +417,6 @@ contract Gated4626VaultIntegrationTest is Test {
       )
     );
     _vault.grantRole(_vault.AGENT_ROLE(), _agent);
-    _maxHoldersRule.setCap(address(_vault), 2);
 
     _identity.set(_alice, true);
     _identity.set(_bob, true);
@@ -449,20 +444,6 @@ contract Gated4626VaultIntegration_Entry is Gated4626VaultIntegrationTest {
     vm.expectRevert(abi.encodeWithSelector(ERC4626Upgradeable.ERC4626ExceededMaxDeposit.selector, _eve, 1, 0));
     vm.prank(_eve);
     _vault.deposit(1, _eve);
-  }
-
-  function test_WhenTheCapIsFull_ANewInvestorIsBlockedButHoldersCanTopUp() external {
-    _deposit(_alice, 1e6);
-    _deposit(_bob, 1e6);
-    assertEq(_maxHoldersRule.holderCount(address(_vault)), 2);
-
-    assertEq(_vault.maxDeposit(_carol), 0);
-    vm.expectRevert(abi.encodeWithSelector(ERC4626Upgradeable.ERC4626ExceededMaxDeposit.selector, _carol, 1, 0));
-    vm.prank(_carol);
-    _vault.deposit(1, _carol);
-
-    assertEq(_vault.maxDeposit(_alice), type(uint256).max);
-    _deposit(_alice, 1e6);
   }
 }
 
@@ -492,15 +473,6 @@ contract Gated4626VaultIntegration_Exit is Gated4626VaultIntegrationTest {
     _deposit(_alice, 1e6);
     _identity.set(_alice, false);
     assertEq(_vault.maxRedeem(_alice), 0);
-  }
-
-  function test_WhenAHolderFullyExits_TheHolderCountDrops() external {
-    uint256 _shares = _deposit(_alice, 1e6);
-    _deposit(_bob, 1e6);
-    vm.prank(_alice);
-    _vault.redeem(_shares, _alice, _alice);
-    assertEq(_maxHoldersRule.holderCount(address(_vault)), 1);
-    assertEq(_vault.maxDeposit(_carol), type(uint256).max); // a slot freed up
   }
 }
 
@@ -592,15 +564,6 @@ contract Gated4626VaultIntegration_MinPosition is Gated4626VaultIntegrationTest 
     vm.prank(_alice);
     _vault.redeem(_max - _MIN_SHARES, _alice, _alice);
     assertEq(_vault.balanceOf(_alice), _MIN_SHARES + 5);
-  }
-
-  /// @dev The cap is still known to `maxDeposit`: a receiver that could not become a holder has none
-  function test_WhenTheCapIsFull_MaxDepositIsStillZeroForANewInvestorWithAMinimumSet() external {
-    _enableMinPosition();
-    _deposit(_alice, _MIN_ASSETS);
-    _deposit(_bob, _MIN_ASSETS);
-    assertEq(_vault.maxDeposit(_carol), 0);
-    assertEq(_vault.maxDeposit(_alice), type(uint256).max);
   }
 }
 

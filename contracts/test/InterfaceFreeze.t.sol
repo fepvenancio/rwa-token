@@ -23,10 +23,8 @@ import {IGated7540Vault} from 'interfaces/IGated7540Vault.sol';
 import {IGovernanceTimelock} from 'interfaces/IGovernanceTimelock.sol';
 import {IHolderRestrictionRule} from 'interfaces/IHolderRestrictionRule.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
-import {IIdentityRule} from 'interfaces/IIdentityRule.sol';
 import {IIntentExecutor} from 'interfaces/IIntentExecutor.sol';
 import {IIntentExecutorBatch} from 'interfaces/IIntentExecutorBatch.sol';
-import {IMaxHoldersRule} from 'interfaces/IMaxHoldersRule.sol';
 import {IMinPositionRule} from 'interfaces/IMinPositionRule.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
@@ -69,7 +67,6 @@ contract InterfaceFreezeTest is Test {
     // Re-pinned in Phase 5b (2026-10-17) on owner instruction R1: setExemptHolder / isExemptHolder added (was 0xa13cb93c)
     // Re-pinned 2026-10-22 on owner instruction: seedHolderCountFromHolders / seedHolderCountFromRule added (was
     // 0x0e091382)
-    assertEq(type(IMaxHoldersRule).interfaceId, bytes4(0x360b3dad), 'IMaxHoldersRule');
     // Added in Phase 5a (2026-10-17)
     // Re-pinned in S1 of the review items (2026-10-24): `initialize` takes the token's initial rules (was 0xb008690c)
     assertEq(type(IGated4626Vault).interfaceId, bytes4(0x6208cbc1), 'IGated4626Vault');
@@ -82,7 +79,6 @@ contract InterfaceFreezeTest is Test {
     // Re-pinned in v0.2.0 (2026-10-17): recoverClaimable added, the one post-freeze change (owner decision M-3)
     // Re-pinned in S1 of the review items (2026-10-24): `initialize` takes the token's initial rules (was 0x75f5b0db)
     assertEq(type(IGated7540Vault).interfaceId, bytes4(0x8f0b8793), 'IGated7540Vault');
-    assertEq(type(IIdentityRule).interfaceId, bytes4(0x150c4aea), 'IIdentityRule');
     assertEq(type(IIdentityRegistry).interfaceId, bytes4(0xb9209e33), 'IIdentityRegistry');
     // Added in Phase 7 (2026-10-17), after ProxyDeployer moved to OZ Ownable
     // Re-pinned in S1 of the review items (2026-10-24): `deploy` takes and checks the expected rules (was 0x886d8cd8)
@@ -138,16 +134,6 @@ contract InterfaceFreezeTest is Test {
     // Added in Phase 4 (2026-10-16)
     assertEq(
       ISettlementWindowRule.WindowSet.selector, 0xcfbaf2575cd70ccd40d11716312d33d4c45312c933586af58b3ccc959f81b96c
-    );
-    assertEq(IMaxHoldersRule.CapSet.selector, 0x113914a326da83d9b14b874c5cc74c6602b1ef1dc38916f0a4b3f618952f77ab);
-    assertEq(
-      IMaxHoldersRule.HolderCountSeeded.selector, 0x3b207bf9da27269642fda4f809efc7efaa06f42ec179fcf59ca932eb094bda34
-    );
-    assertEq(
-      IMaxHoldersRule.HolderCountUpdated.selector, 0x3b44d433ae622a035b92513dcb4121b917fffdfa7ee90319d0e224a265504819
-    );
-    assertEq(
-      IMaxHoldersRule.HolderExemptionSet.selector, 0x76f53701a110e481b9beccc51135df840459b6ca21581f88b3ee10235891f5e5
     );
     // Added in Phase 5b (2026-10-17)
     assertEq(

@@ -11,14 +11,14 @@ import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
 
 import {ComplianceHook} from 'contracts/hooks/ComplianceHook.sol';
 import {HolderRestrictionRule} from 'contracts/hooks/rules/HolderRestrictionRule.sol';
-import {MaxHoldersRule} from 'contracts/hooks/rules/MaxHoldersRule.sol';
 import {MinPositionRule} from 'contracts/hooks/rules/MinPositionRule.sol';
 import {SettlementWindowRule} from 'contracts/hooks/rules/SettlementWindowRule.sol';
 import {IntentTokenIntegrationTest} from 'contracts/tokens/IntentToken.t.sol';
 
 /**
  * @notice Brief §6 step 5: every Phase 4 rule registered in a real ComplianceHook, in the recommended order
- *         Identity → MinPosition → HolderRestriction → SettlementWindow → MaxHolders, with pre-flight parity against the state-changing calls
+ *         Identity → MinPosition → HolderRestriction → SettlementWindow, with pre-flight parity against the state-changing
+ *         calls. The holder cap is the fund's, tested with a fund in `FundIntegration.t.sol`
  */
 contract RuleSetIntegrationTest is IntentTokenIntegrationTest {
   uint256 internal constant _MONDAY_10AM = 1_791_763_200 + 10 hours; // Mon 2026-10-12 10:00 UTC
@@ -27,7 +27,6 @@ contract RuleSetIntegrationTest is IntentTokenIntegrationTest {
   MinPositionRule internal _minPositionRule;
   HolderRestrictionRule internal _restrictionRule;
   SettlementWindowRule internal _windowRule;
-  MaxHoldersRule internal _maxHoldersRule;
   address internal _carol = makeAddr('carol');
   address internal _dave = makeAddr('dave');
 
@@ -40,26 +39,20 @@ contract RuleSetIntegrationTest is IntentTokenIntegrationTest {
     _minPositionRule = new MinPositionRule();
     _restrictionRule = new HolderRestrictionRule();
     _windowRule = new SettlementWindowRule();
-    _maxHoldersRule = new MaxHoldersRule();
     vm.startPrank(_attester);
     _registry.attest(address(_minPositionRule).codehash, IPolicyRegistry.AttestKind.RULE, 'ipfs://min-position');
     _registry.attest(address(_restrictionRule).codehash, IPolicyRegistry.AttestKind.RULE, 'ipfs://restriction');
     _registry.attest(address(_windowRule).codehash, IPolicyRegistry.AttestKind.RULE, 'ipfs://window');
-    _registry.attest(address(_maxHoldersRule).codehash, IPolicyRegistry.AttestKind.RULE, 'ipfs://max-holders');
     vm.stopPrank();
 
     vm.startPrank(_admin);
-    // P5: seeding is legitimate here because the rule is not yet in the token's active set.
-    _maxHoldersRule.seedHolderCount(address(_token), 1);
-    _maxHoldersRule.setCap(address(_token), 3);
     _windowRule.setWindow(address(_token), 9 hours, 17 hours, _windowRule.MON_TO_FRI());
 
-    IComplianceRule[] memory _ruleSet = new IComplianceRule[](5);
+    IComplianceRule[] memory _ruleSet = new IComplianceRule[](4);
     _ruleSet[0] = _identityRule;
     _ruleSet[1] = _minPositionRule;
     _ruleSet[2] = _restrictionRule;
     _ruleSet[3] = _windowRule;
-    _ruleSet[4] = _maxHoldersRule;
     // The shared hook is already installed; the token's admin replaces the token's rule set on it.
     _hook.setRules(address(_token), _ruleSet);
     vm.stopPrank();
@@ -131,40 +124,11 @@ contract RuleSetIntegration_SettlementWindow is RuleSetIntegrationTest {
   }
 }
 
-contract RuleSetIntegration_MaxHolders is RuleSetIntegrationTest {
-  function _fillToTheCap() internal {
-    _assertTransferParity(_alice, _bob, 10 ether, Reasons.TRANSFER_OK);
-    _assertTransferParity(_alice, _treasury, 10 ether, Reasons.TRANSFER_OK);
-    assertEq(_maxHoldersRule.holderCount(address(_token)), 3);
-  }
-
-  function test_WhenTheCapIsFull_ANewHolderIsRejectedWithParity() external {
-    _fillToTheCap();
-    _assertTransferParity(_alice, _carol, 1 ether, Reasons.MAX_HOLDERS);
-    (ITransferIntent.TransferIntent memory _i, bytes memory _sig) = _signedIntent(_carol, 1 ether, keccak256('n'));
-    _assertExecuteParity(_i, _sig, Reasons.MAX_HOLDERS);
-  }
-
-  /// @dev ERC-7943 keeps quantitative rules out of `canReceive`: the cap decides a movement, not an account. A new account
-  ///      at a full cap is eligible, a mint or a partial transfer to it is refused, and a full-balance transfer to it
-  ///      passes, so the cap does not make `canReceive` disagree with a transfer that passes
-  function test_WhenTheCapIsFull_CanReceiveStillAcceptsANewAccountAndTheMovementDecides() external {
-    _fillToTheCap();
-    assertTrue(_token.canReceive(_carol));
-    assertTrue(_token.canSend(_carol));
-    (bool _mintOk, bytes32 _mintReason) = _token.canTransferWithReason(address(0), _carol, 1);
-    assertFalse(_mintOk);
-    assertEq(_mintReason, Reasons.MAX_HOLDERS);
-    assertFalse(_token.canTransfer(_alice, _carol, 1 ether)); // a partial move adds a holder
-    assertTrue(_token.canTransfer(_bob, _carol, 10 ether)); // net zero: bob leaves as carol joins
-    assertFalse(_token.canReceive(_eve)); // identity is an account question and still refuses
-  }
-
+contract RuleSetIntegration_AccountQuestions is RuleSetIntegrationTest {
   /// @dev ERC-7943 has `canTransfer` perform a `canSend` check on the sender and a `canReceive` check on the receiver.
-  ///      For a plain transfer here it is not true while either is false, whatever the cap, the freeze, the lockup or
-  ///      the identity says (one way only: the enforcement kinds are not driven)
+  ///      For a plain transfer here it is not true while either is false, whatever the freeze, the lockup or the identity
+  ///      says (one way only: the enforcement kinds are not driven)
   function testFuzz_CanTransferNeverExceedsTheAccountQuestions(
-    bool _fillCap,
     bool _bobSends,
     bool _freezeSender,
     bool _lockSender,
@@ -172,7 +136,6 @@ contract RuleSetIntegration_MaxHolders is RuleSetIntegrationTest {
     bool _unverifiedReceiver,
     bool _wholeBalance
   ) external {
-    if (_fillCap) _fillToTheCap();
     address _sender = _bobSends ? _bob : _alice;
     address _receiver = _unverifiedReceiver ? _eve : _carol;
     vm.startPrank(_agent);
@@ -187,34 +150,6 @@ contract RuleSetIntegration_MaxHolders is RuleSetIntegrationTest {
       assertTrue(_token.canSend(_sender), 'canTransfer without canSend');
       assertTrue(_token.canReceive(_receiver), 'canTransfer without canReceive');
     }
-  }
-
-  function test_WhenTheCapIsFull_AFullBalanceMoveToANewHolderIsAllowed() external {
-    _fillToTheCap();
-    _assertTransferParity(_bob, _carol, 10 ether, Reasons.TRANSFER_OK);
-    assertEq(_maxHoldersRule.holderCount(address(_token)), 3);
-  }
-
-  function test_WhenTheCapIsFull_ForcedIsExemptButCounted() external {
-    _fillToTheCap();
-    vm.prank(_agent);
-    _token.forcedTransfer(_alice, _dave, 1 ether);
-    assertEq(_maxHoldersRule.holderCount(address(_token)), 4);
-  }
-
-  function test_WhenTheReceiverIsUnverifiedAtAFullCap_IdentityRejectsFirst() external {
-    _fillToTheCap();
-    _assertTransferParity(_alice, _eve, 1 ether, Reasons.RECEIVER_NOT_VERIFIED);
-  }
-
-  function test_WhenEveryoneLeaves_TheCountReturnsToZero() external {
-    _fillToTheCap();
-    vm.startPrank(_burner);
-    _token.burn(_alice, _token.balanceOf(_alice));
-    _token.burn(_bob, _token.balanceOf(_bob));
-    _token.burn(_treasury, _token.balanceOf(_treasury));
-    vm.stopPrank();
-    assertEq(_maxHoldersRule.holderCount(address(_token)), 0);
   }
 }
 
@@ -290,14 +225,14 @@ contract RuleSetIntegration_MinPosition is RuleSetIntegrationTest {
     _minPositionRule.setMinPosition(address(_token), _MIN);
   }
 
-  function test_WhenADustTransferTargetsAnEmptyAccount_ItIsRejectedWithParityAndTakesNoSlot() external {
+  function test_WhenADustTransferTargetsAnEmptyAccount_ItIsRejectedWithParity() external {
     _assertTransferParity(_alice, _bob, 1, Reasons.BELOW_MIN_POSITION);
     (ITransferIntent.TransferIntent memory _i, bytes memory _sig) = _signedIntent(_bob, 1, keccak256('n'));
     _assertExecuteParity(_i, _sig, Reasons.BELOW_MIN_POSITION);
-    assertEq(_maxHoldersRule.holderCount(address(_token)), 1);
+    assertEq(_token.balanceOf(_bob), 0);
 
     _assertTransferParity(_alice, _bob, _MIN, Reasons.TRANSFER_OK);
-    assertEq(_maxHoldersRule.holderCount(address(_token)), 2);
+    assertEq(_token.balanceOf(_bob), _MIN);
   }
 
   function test_WhenATransferWouldLeaveDustBehind_ItIsRejected() external {
@@ -315,12 +250,11 @@ contract RuleSetIntegration_MinPosition is RuleSetIntegrationTest {
     assertEq(_token.balanceOf(_bob), _MIN);
   }
 
-  /// @dev Enforcement is exempt: a forced transfer may leave or create a dust position, and it still counts as a holder
-  function test_WhenForced_DustIsAllowedAndTheHolderIsCounted() external {
+  /// @dev Enforcement is exempt: a forced transfer may leave or create a dust position
+  function test_WhenForced_DustIsAllowed() external {
     vm.prank(_agent);
     _token.forcedTransfer(_alice, _dave, 1);
     assertEq(_token.balanceOf(_dave), 1);
-    assertEq(_maxHoldersRule.holderCount(address(_token)), 2);
   }
 
   function test_WhenAnEnforcementBurnLeavesDust_ItIsAllowed() external {

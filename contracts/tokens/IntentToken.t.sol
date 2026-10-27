@@ -20,8 +20,8 @@ import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
 import {ProxyDeployer} from 'contracts/deploy/ProxyDeployer.sol';
 import {PolicyRegistry} from 'contracts/governance/PolicyRegistry.sol';
 import {ComplianceHook} from 'contracts/hooks/ComplianceHook.sol';
-import {IdentityRule} from 'contracts/hooks/rules/IdentityRule.sol';
 import {MockIdentityRegistry} from 'contracts/test/MockIdentityRegistry.sol';
+import {MockIdentityRule} from 'contracts/test/MockIdentityRule.sol';
 import {MockReentrantRule} from 'contracts/test/MockReentrantRule.sol';
 import {IntentToken} from 'contracts/tokens/IntentToken.sol';
 import {Gated4626Vault} from 'contracts/vaults/Gated4626Vault.sol';
@@ -32,7 +32,7 @@ contract IntentTokenIntegrationTest is Test {
   PolicyRegistry internal _registry;
   MockIdentityRegistry internal _identity;
   ComplianceHook internal _hook;
-  IdentityRule internal _identityRule;
+  MockIdentityRule internal _identityRule;
   IntentToken internal _impl;
   IntentToken internal _token;
 
@@ -75,7 +75,7 @@ contract IntentTokenIntegrationTest is Test {
     _identity = new MockIdentityRegistry();
     _impl = new IntentToken();
 
-    _identityRule = new IdentityRule(IIdentityRegistry(address(_identity)));
+    _identityRule = new MockIdentityRule(IIdentityRegistry(address(_identity)));
     vm.prank(_attester);
     _registry.attest(address(_identityRule).codehash, IPolicyRegistry.AttestKind.RULE, 'ipfs://rule-review');
 

@@ -19,12 +19,10 @@ import { keccak256, type Hex } from "viem";
 
 /** Contracts whose codehash is attested, then everything else the deployment puts on-chain. */
 const ATTESTED = {
-  IdentityRule: "hooks/rules",
   HolderRestrictionRule: "hooks/rules",
   MinPositionRule: "hooks/rules",
   CredentialRule: "hooks/rules",
   SettlementWindowRule: "hooks/rules",
-  MaxHoldersRule: "hooks/rules",
   FundHoldersRule: "hooks/rules",
   ComplianceHook: "hooks",
   IntentToken: "tokens",

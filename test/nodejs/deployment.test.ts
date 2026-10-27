@@ -37,7 +37,7 @@ describe("deployment (Ignition: Components → council → Activate)", async fun
   });
 
   /** RD5 and the assumptions of the review items: the order is the owner's, written out here, not read from the module. */
-  it("lists each token's rules in the decided order, with the minimum off and no per-class holder cap", async function () {
+  it("lists each token's rules in the decided order, with the minimum off", async function () {
     const s = await networkHelpers.loadFixture(stack);
     const r = s.rules;
     const classRules = [r.credentialRule, r.minPositionRule, r.holderRestrictionRule, r.fundHoldersRule];
@@ -49,7 +49,6 @@ describe("deployment (Ignition: Components → council → Activate)", async fun
     for (const [t, expected] of cases) {
       const listed = (await s.hook.read.rules([t.address])).map((rule) => getAddress(rule));
       assert.deepEqual(listed, expected.map((rule) => getAddress(rule.address)));
-      assert.ok(!listed.includes(getAddress(r.maxHoldersRule.address)), "a per-class holder cap is not part of the demo");
       assert.equal(await r.minPositionRule.read.minPosition([t.address]), 0n, "the minimum is off unless the deployment sets one");
     }
   });

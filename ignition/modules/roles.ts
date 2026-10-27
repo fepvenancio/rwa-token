@@ -33,8 +33,8 @@ export const TOKENS = {
  * Each token's ordered rule list: Credential (who may hold: an attester vouched for the address, it has not lapsed, and
  * the token's policy accepts its qualifications), then MinPosition (so the rules after it only ever see real positions), then
  * HolderRestriction, then the SettlementWindow for the intent token (vaults have no EXECUTED transfers to window), then
- * the fund-wide `FundHoldersRule` last. There is no per-class `MaxHoldersRule`: the investor count that matters for a
- * fund is fund-wide (review items, RD5). `Activate` passes each list through the token's init data and `ProxyDeployer`
+ * the fund-wide `FundHoldersRule` last: the investor count that matters for a fund is fund-wide (review items, RD5).
+ * `Activate` passes each list through the token's init data and `ProxyDeployer`
  * checks it; the post-deploy check compares `hook.rules()` against it, since a hook's attested codehash covers its
  * immutables, not this list.
  */

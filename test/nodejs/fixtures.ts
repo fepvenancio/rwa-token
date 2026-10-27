@@ -67,7 +67,7 @@ export const reasonName = (code: Hex) => REASON_NAMES.find((name) => REASONS[nam
 
 /** Mon 2026-10-12 00:00 UTC plus 260 weeks: a Monday in 2031, safely after the local chain's wall clock. */
 export const MONDAY = 1_791_763_200n + 260n * 7n * 86_400n;
-export const MONDAY_10AM = MONDAY + 10n * 3_600n;
+const MONDAY_10AM = MONDAY + 10n * 3_600n;
 export const WINDOW_OPEN = 9 * 3_600;
 export const WINDOW_CLOSE = 17 * 3_600;
 /** The fund-wide investor cap, one number for the three demo classes. */
@@ -142,7 +142,6 @@ export async function deployUntilActivate(connection: NetworkConnection) {
     minPositionRule,
     holderRestrictionRule,
     windowRule,
-    maxHoldersRule,
     fundContract,
     fundHoldersRule,
     proxyDeployer,
@@ -156,7 +155,7 @@ export async function deployUntilActivate(connection: NetworkConnection) {
 
   // Council step: the rules, the one shared hook and the implementations. The credential rule's codehash covers the
   // registry's address and not its code, so the council reads the registry first (its admin, its attesters, its code).
-  for (const rule of [credentialRule, minPositionRule, holderRestrictionRule, windowRule, maxHoldersRule, fundHoldersRule]) {
+  for (const rule of [credentialRule, minPositionRule, holderRestrictionRule, windowRule, fundHoldersRule]) {
     await attest(rule.address, ATTEST.RULE, `ipfs://rule-review/${rule.address}`);
   }
   await attest(hook.address, ATTEST.HOOK, `ipfs://hook-review/${hook.address}`);
@@ -223,7 +222,7 @@ export async function deployUntilActivate(connection: NetworkConnection) {
       recoveryTimelock,
       registry,
       credentials: credentialRegistry,
-      rules: { credentialRule, minPositionRule, holderRestrictionRule, windowRule, maxHoldersRule, fundHoldersRule },
+      rules: { credentialRule, minPositionRule, holderRestrictionRule, windowRule, fundHoldersRule },
       fund: fundContract,
       proxyDeployer,
       asset,
@@ -427,7 +426,7 @@ type DomainSource = {
 };
 
 /** The token's EIP-712 domain as the chain reports it (ERC-5267), so signing never re-derives it off-chain. */
-export async function intentDomain(token: DomainSource) {
+async function intentDomain(token: DomainSource) {
   const [, name, version, chainId, verifyingContract] = await token.read.eip712Domain();
   return { name, version, chainId, verifyingContract };
 }
@@ -489,7 +488,7 @@ export async function revertOf(call: Promise<unknown>, abi: Abi) {
 // ---- DvP ---------------------------------------------------------------------------------------------------------------
 
 /** The typed data of an ERC-3009 `receiveWithAuthorization`, as Circle's FiatToken and the test mock define it. */
-export const RECEIVE_AUTHORIZATION_TYPES = {
+const RECEIVE_AUTHORIZATION_TYPES = {
   ReceiveWithAuthorization: [
     { name: "from", type: "address" },
     { name: "to", type: "address" },
@@ -501,7 +500,7 @@ export const RECEIVE_AUTHORIZATION_TYPES = {
 } as const;
 
 /** The buyer's authorization as `DvPExecutor.executeDvP3009` takes it; its payee is always the executor. */
-export type Authorization = { from: Address; value: bigint; validAfter: bigint; validBefore: bigint; nonce: Hex; signature: Hex };
+type Authorization = { from: Address; value: bigint; validAfter: bigint; validBefore: bigint; nonce: Hex; signature: Hex };
 
 /**
  * The nonce that ties a buyer's ERC-3009 authorization to one securities intent on one security token:

@@ -21,7 +21,7 @@ Gated4626Vault (ERC-4626, gated max*, decimals offset 6), Gated7540Vault (ERC-75
 ComplianceHook (one per deployment, immutable) ──► per token, an ordered list of ≤16 attested IComplianceRule (first
                                                  rejection wins); a token installs its own list when it is initialised
 CredentialRegistry (one per deployment)          who vouched for an address, what it is, until when, and its standing
-CredentialRule, MinPositionRule, HolderRestrictionRule, SettlementWindowRule, MaxHoldersRule   hook-agnostic, shared across
+CredentialRule, MinPositionRule, HolderRestrictionRule, SettlementWindowRule   hook-agnostic, shared across
                                                  tokens; per-token config authorised live by the token's own roles
 Fund (one per fund, owned by the timelock)       its classes, investor count and per-investor class mask
 FundHoldersRule (one per fund)                   the rule in every class's hook that feeds the fund and enforces its cap
@@ -33,13 +33,13 @@ DvPExecutor (immutable)                          role-gated: settles a share tra
 
 | Path | Contents |
 |---|---|
-| `contracts/interfaces/` | Frozen ABI: `IPolicyGated`, `IERC7943Fungible`, `ITemplated`, `IPolicyHook`, `IComplianceRule`, `IComplianceHook`, `IPolicyRegistry`, `ITransferIntent`, `IIntentExecutor`, `IIntentExecutorBatch`, `IDvPExecutor`, `IERC3009`, `IIdentityRule`, `IIdentityRegistry`, `ICredentialRegistry`, `ICredentialRule`, `Quals`, `IMinPositionRule`, `IHolderRestrictionRule`, `ISettlementWindowRule`, `IMaxHoldersRule`, `IFund`, `IFundHoldersRule`, `IProxyDeployer`, `IGovernanceTimelock`, `IGated4626Vault`, `IGated7540Vault`, `IERC7540Operator` / `IERC7540Deposit` / `IERC7540Redeem` / `IERC7575` (spec-exact ids), `Errors.sol` (reason codes) |
+| `contracts/interfaces/` | Frozen ABI: `IPolicyGated`, `IERC7943Fungible`, `ITemplated`, `IPolicyHook`, `IComplianceRule`, `IComplianceHook`, `IPolicyRegistry`, `ITransferIntent`, `IIntentExecutor`, `IIntentExecutorBatch`, `IDvPExecutor`, `IERC3009`, `IIdentityRegistry`, `ICredentialRegistry`, `ICredentialRule`, `Quals`, `IMinPositionRule`, `IHolderRestrictionRule`, `ISettlementWindowRule`, `IFund`, `IFundHoldersRule`, `IProxyDeployer`, `IGovernanceTimelock`, `IGated4626Vault`, `IGated7540Vault`, `IERC7540Operator` / `IERC7540Deposit` / `IERC7540Redeem` / `IERC7575` (spec-exact ids), `Errors.sol` (reason codes) |
 | `contracts/base/` | `PolicyGatedERC20Upgradeable` |
 | `contracts/governance/` | `PolicyRegistry`, `GovernanceTimelock` |
 | `contracts/identity/` | `CredentialRegistry` |
 | `contracts/deploy/` | `ProxyDeployer`, `TokenProxy` |
 | `contracts/mixins/`, `contracts/tokens/` | `IntentSettledUpgradeable`, `IntentToken` |
-| `contracts/hooks/` | `ComplianceHook`, `BaseRule`, `rules/` `CredentialRule`, `IdentityRule`, `MinPositionRule`, `HolderRestrictionRule`, `SettlementWindowRule`, `MaxHoldersRule`, `FundHoldersRule` (in the recommended order; the demo lists no `IdentityRule` and no `MaxHoldersRule`) |
+| `contracts/hooks/` | `ComplianceHook`, `BaseRule`, `rules/` `CredentialRule`, `MinPositionRule`, `HolderRestrictionRule`, `SettlementWindowRule`, `FundHoldersRule` (in the recommended order) |
 | `contracts/fund/` | `Fund` |
 | `contracts/intents/` | `IntentExecutor`, `DvPExecutor` |
 | `contracts/vaults/` | `Gated4626Vault`, `Gated7540Vault` |
@@ -67,7 +67,7 @@ The audit package (scope, suppressions, mutation results, findings an auditor sh
 | `ATTESTER_ROLE` (registry) | security council | none | attest / revoke codehashes |
 | `GUARDIAN_ROLE` (credential registry) | multisig | none | block an address or kill an attester, and nothing else; the main or recovery timelock undoes it |
 | attester (credential registry) | KYC provider, an account in the registry (≤ 64) | none | write a credential for an address within the qualification bits it may assert, or sign one that anyone submits; it can overwrite only an empty address, a record it wrote, or a killed attester's, and change the status only of records it wrote. The compromise limits are in [`docs/credentials.md`](docs/credentials.md) |
-| token `DEFAULT_ADMIN_ROLE` → rules | timelock | ≥ 7 days | set a token's credential policy, its minimum position and its exemptions and its settlement window; where a class lists `MaxHoldersRule`, its holder cap and seed |
+| token `DEFAULT_ADMIN_ROLE` → rules | timelock | ≥ 7 days | set a token's credential policy, its minimum position and its exemptions and its settlement window |
 | `Fund` owner | timelock | ≥ 7 days | register a class, set the fund's rule and investor cap, exempt an account. Only the installed rule records which classes an account holds |
 | token `AGENT_ROLE` → rules | issuer | none | set or clear per-holder lockups, freeze or unfreeze a holder (`HolderRestrictionRule`) |
 | `FULFILLER_ROLE` (7540 vault) | bank | none | fulfil deposits/redemptions at off-chain NAV; reject pending requests |
@@ -96,9 +96,9 @@ The audit package (scope, suppressions, mutation results, findings an auditor sh
   Use `canTransferWithReason` to learn whether a movement will succeed. `canSend` and `canReceive` are the
   account-level questions (ERC-7943): `canSend` is false while paused, for an account with no credential or a blocked one, an address-frozen account,
   a locked holder (a lapsed holder can send) and a token that is not a fund class; `canReceive` is false while paused, for an account without an active
-  credential that the token's policy accepts, an address-frozen account and a token that is not a fund class. The holder caps are not in them: ERC-7943 says the
-  account questions must not encode quantitative rules (it names balance checks and amount limits), and we read a cap the
-  same way, so a cap decides a movement only. For a plain transfer through the shipped rules `canTransfer` is not true
+  credential that the token's policy accepts, an address-frozen account and a token that is not a fund class. The fund's investor cap is not in them: ERC-7943 says
+  the account questions must not encode quantitative rules (it names balance checks and amount limits), and we read the
+  cap the same way, so it decides a movement only. For a plain transfer through the shipped rules `canTransfer` is not true
   while either answer is false, but not for every kind: an enforcement burn passes for a locked holder while `canSend`
   says `LOCKED`. The vaults' `maxDeposit` and `maxMint` probe a mint of a very large amount instead.
 - **Pause.** A guardian pause blocks every balance movement except FORCED ones (`forcedTransfer`, and the 7540 vault's `recoverRedeemRequest` and `recoverClaimable`), so the issuer's mint and burn too. Enforcement
@@ -131,8 +131,8 @@ council and the KYC attester, and ends with the post-deploy checks below.
    - the `PolicyRegistry`: admin = timelock, attester = council;
    - the one shared `ComplianceHook`, whose only immutable is the registry;
    - the `CredentialRegistry` (admin = deployer until `Activate`, guardian = the guardian multisig);
-   - the shared rules: `CredentialRule` (reads that registry), `MinPositionRule`, `HolderRestrictionRule`, `SettlementWindowRule`, `MaxHoldersRule`
-     (the last is deployed and attested, listed on no token) and the `FundHoldersRule` that points at the fund;
+   - the shared rules: `CredentialRule` (reads that registry), `MinPositionRule`, `HolderRestrictionRule`,
+     `SettlementWindowRule`, and the `FundHoldersRule` that points at the fund;
    - one implementation per template, `ProxyDeployer` (owner = deployer, registry = the `PolicyRegistry`), `IntentExecutor` and `DvPExecutor` (neither is attested);
    - the `Fund` (owner = deployer).
 
@@ -178,9 +178,8 @@ council and the KYC attester, and ends with the post-deploy checks below.
      255 by default): add it to the registry as attester 0, and give each token the policy "`KYC` from attester 0 and
      nothing more". Until a token has its policy its rule admits no receiver;
    - configure: the settlement window, and each token's minimum position (parameters `intentMinPosition`,
-     `fundMinPosition` and `asyncFundMinPosition`; 0, the default, switches the rule off). There is no per-class holder cap
-     and no escrow exemption to set: the fund counts investors across classes, and the 7540 vault is the token itself,
-     which neither the fund rule nor the minimum counts;
+     `fundMinPosition` and `asyncFundMinPosition`; 0, the default, switches the rule off). Nothing is set for the
+     escrow: the 7540 vault is the token itself, which neither the fund rule nor the minimum counts;
    - configure the fund (parameter `fundHolderCap`): install its rule, set its cap, then register the three tokens as
      classes 1 to 3, one after another. Registration refuses a hook that does not list the rule and a token that has
      supply, so a mis-built list stops `Activate` before any role is granted;
@@ -311,10 +310,9 @@ The brief is in [`CLAUDE.md`](CLAUDE.md). Where the code intentionally differs, 
 - **Duplicate rules.** A duplicate `ruleId` reuses `ComplianceHook_DuplicateRule`, so the frozen ABI is unchanged.
 - **7540 operators are full delegates** (review L-5, owner decision): the code follows ERC-7540, so an approved
   operator can also create requests that pull the owner's assets or shares under any controller. Owners should approve
-  only custodians they would trust with the assets. The brief previously said "claims only" and was corrected.
-- **Deployment contracts.** Brief §3 lists `ProxyDeployer` and `TokenProxy` (in `contracts/deploy/`) without
-  describing them, and brief §4 does not list `ProxyDeployer.deploy` among the places attestation is checked: it refuses
-  an implementation not attested as `IMPLEMENTATION` and a token that names another registry. `TokenProxy`
+  only custodians they would trust with the assets.
+- **Deployment contracts.** Brief §3 lists `ProxyDeployer` and `TokenProxy` (in `contracts/deploy/`) and §4 lists
+  `ProxyDeployer.deploy` among the attestation checks, but the brief does not describe the two contracts. `TokenProxy`
   is OZ's `ERC1967Proxy` with only OZ's documented `_unsafeAllowUninitialized` override, so that it can be created
   without init data. That keeps its CREATE2 address independent of the hook; `ProxyDeployer` initialises it in the same
   transaction.

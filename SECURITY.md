@@ -32,7 +32,7 @@ In scope, all under `contracts/` (`.t.sol` files and `contracts/test/` are test 
 | Base | `base/PolicyGatedERC20Upgradeable` |
 | Templates | `tokens/IntentToken`, `vaults/Gated4626Vault`, `vaults/Gated7540Vault` |
 | Mixin | `mixins/IntentSettledUpgradeable` |
-| Policy | `hooks/ComplianceHook` (one per deployment, shared by every token), `hooks/BaseRule`, `hooks/rules/{Credential,Identity,MinPosition,HolderRestriction,SettlementWindow,MaxHolders,FundHolders}Rule` (the demo deploys all but `IdentityRule`) |
+| Policy | `hooks/ComplianceHook` (one per deployment, shared by every token), `hooks/BaseRule`, `hooks/rules/{Credential,MinPosition,HolderRestriction,SettlementWindow,FundHolders}Rule` |
 | Credentials | `identity/CredentialRegistry` (immutable, not a proxy, not attested; the `CredentialRule` codehash covers its address, not its code) |
 | Fund | `fund/Fund` (not a proxy, not attested; the `FundHoldersRule` codehash covers its address, not its code) |
 | Governance | `governance/PolicyRegistry`, `governance/GovernanceTimelock` (the main timelock: OZ `TimelockController` plus a revoke-`CANCELLER_ROLE`-only `RECOVERY_ROLE`) |
@@ -44,7 +44,7 @@ Also in scope: `ignition/modules/{Components,Activate,roles}.ts`, which carry th
 the hand-over to the timelock and each token's rule list (`RULE_ORDER`).
 
 Out of scope: OpenZeppelin 5.6.1 (`@openzeppelin/contracts`, `-upgradeable`; `TimelockController` is used unmodified for the recovery timelock and as the base of `GovernanceTimelock`),
-the external identity registry (`IIdentityRegistry` is an assumption about it, used only by `IdentityRule`), the KYC attesters' off-chain verification, and test mocks.
+the KYC attesters' off-chain verification, and test mocks.
 
 Build: solc 0.8.30, `evmVersion: cancun`, optimizer 200 runs, no metadata hash, the same in Hardhat and forge.
 
@@ -129,21 +129,21 @@ Further limits recorded during review:
 - **7540 operators are full delegates** (review L-5). Per ERC-7540, an approved operator can create requests that pull
   the owner's assets or shares under any controller, not only claim. Owners should approve only custodians they would
   trust with the assets. Pinned by `test_WhenAnOperatorRequestsUnderItsOwnController_ItIsAFullDelegatePerErc7540`.
-- **Dust and the holder cap** (review L-1). Anyone can deposit 1 wei into the 4626 vault for a credentialed, empty receiver
-  and take a holder slot (or a fund investor slot), and 1 wei sent to an exiting holder breaks an exact-balance exit.
+- **Dust and the investor cap** (review L-1). Anyone can deposit 1 wei into the 4626 vault for a credentialed, empty receiver
+  and take a fund investor slot, and 1 wei sent to an exiting holder breaks an exact-balance exit.
   `MinPositionRule` closes the slot grab where it is listed with a non-zero minimum: a transfer or mint that would leave an account between 0
   and the minimum is refused (`BELOW_MIN_POSITION`), as is an exit that would leave such a remainder. It does not stop 1
   wei being sent to an existing holder at or above the minimum, and an exit of the old exact balance then reverts with
   `BELOW_MIN_POSITION`; the holder exits the current balance (`maxRedeem`). It is off by default (a
-  minimum of 0), and the demo deployment sets none unless `Activate` is given one. Where none is set, the old mitigation
-  applies: the agent cleans up dust (forced transfer or burn) and monitoring watches slot usage. FORCED and an enforcement
+  minimum of 0), and the demo deployment sets none unless `Activate` is given one. Where none is set, the mitigation is
+  operational: the agent cleans up dust (forced transfer or burn) and monitoring watches slot usage. FORCED and an enforcement
   burn are exempt, so an agent can still leave a remainder. Requiring a credentialed caller on vault mints was rejected
   because it would break custodians depositing for clients.
-- **The holder cap is a ratchet** (review L-4: prose corrected, behaviour unchanged). A full-balance move to a new
-  holder passes only when `count <= cap`, and any other new holder only when `count < cap`. So above a lowered cap no
-  new holder is admitted, net-zero swaps included, until the count comes back down. Existing holders can still
-  transfer among themselves and exit. Pinned by
-  `MaxHoldersRule.t.sol::test_WhenTheCountIsAboveALoweredCap_ANetZeroMoveIsStillRejected`.
+- **The fund's investor cap is a ratchet** (review L-4). A new investor passes when `count < cap`, or when
+  `count == cap` and the move empties the sender's only class (net zero). So above a lowered cap no new investor is
+  admitted, net-zero moves included, until the count comes back down. Existing investors can still move among
+  themselves and exit. Pinned by
+  `FundHoldersRule.t.sol::test_WhenTheCountIsAboveALoweredCap_ANetZeroMoveIsStillRejected`.
 - **Dropping the fund rule from a class's list un-caps it silently.** The hook accepts any attested list, and nothing in it
   knows about the fund, so a list without `FundHoldersRule` stops the class from counting investors and from enforcing
   the cap (a fourth investor gets in at a full cap, and the fund's count does not know). Replacing the rule in the fund
@@ -219,7 +219,6 @@ Inline suppressions (each carries its reason on the line above, in the source):
 | `PolicyGatedERC20Upgradeable` `forcedTransfer` | `reentrancy-events` | Event after `afterTransfer`; re-entry is blocked by `_update`'s guard and the hook is attested |
 | `IntentSettledUpgradeable` `executeTransfer` | `reentrancy-events` | Same as above |
 | `PolicyGatedERC20Upgradeable` `canTransferWithReason`, `canTransfer`, `_update`, `_accountAllowed`, `_takesFrozenTokens` | `incorrect-equality` | Compares a reason code, or a movement kind, with a constant, not a balance |
-| `MaxHoldersRule` `after_`, `check` | `incorrect-equality` | Exact equalities define a holder (post-move balance == amount ⇔ was 0) |
 | `FundHoldersRule` `after_`, `_senderLeavesFund` | `incorrect-equality` | Same definition of a holder, for a class balance |
 | `FundHoldersRule` `_senderLeavesFund`, `_classReason` | `unused-return` | Only the fields the call needs are read from `admission`; `_senderLeavesFund` needs the sender's classes and exemption, since the rest was read for the receiver, and `_classReason` needs the class number and the installed rule |
 | `CredentialRegistry` `profileOf`, `isVerified` | `incorrect-equality` | Compares an enum standing with a constant, not a balance. The lapse itself is a strict `>` on the time, so a record reads `ACTIVE` through its last second |
@@ -229,7 +228,6 @@ Inline suppressions (each carries its reason on the line above, in the source):
 | `Gated7540Vault` `initialize` | `reentrancy-benign`, `reentrancy-events` | The initialiser installs the token's rules on the shared hook, then writes the vault's own state (custody, last price). The hook is attested, cannot re-enter `initialize`, and never reads that state; only the admin and the guardian hold a role yet |
 | `SettlementWindowRule` | `weak-prng` | Calendar arithmetic on the timestamp, not randomness |
 | `ComplianceHook` `_setRules` | `uninitialized-local` | The after-mask starts at zero by design |
-| `MaxHoldersRule` `seedHolderCountFromHolders` | `uninitialized-local` | The sum, the count and the previous address start at zero by design |
 | `Gated7540Vault` | `missing-inheritance` | `IERC7575` re-declares inherited ERC-4626 functions; conformance pinned by ERC-165 id `0x2f0a18c5` |
 | `Gated7540Vault` `requestDeposit` | `arbitrary-send-erc20` | `owner` is the caller or an approved operator. Fuzzed: a non-operator with a victim owner reverts and moves nothing. Removing the guard fails 2 tests |
 | `ProxyDeployer` `deploy` | `unused-return` | `initialize` returns nothing; success is checked by the post-init assertions |
@@ -256,13 +254,13 @@ Inline acknowledgements (reason on the line above each `aderyn-ignore`):
 | Detector | Where | Verdict | Evidence |
 |---|---|---|---|
 | `contract-locks-ether` (high) | `IntentToken`, `Gated4626Vault`, `Gated7540Vault`, `TokenProxy` | False positive: no path accepts ETH. There is no `receive` or payable function, `upgradeToAndCall` with empty data rejects value (`ERC1967NonPayable`), and with data the value is delegated into a non-payable function | `IntentTokenIntegration_Ether`, `Gated4626VaultUnit_Ether`, `Gated7540VaultUnit_Ether` |
-| `reentrancy-state-change` (high) | `HolderRestrictionRule`, `MinPositionRule`, `SettlementWindowRule`, `MaxHoldersRule`, `CredentialRule.setPolicy` and `_checkSender`, `Fund.registerClass`, `Fund.setRule` | False positive: the token, the hook, the fund or the registry is called through view interfaces, which compile to STATICCALL, so nothing it does can change any state | `*Unit_TokenCallsAreStatic` for the rules, `FundHoldersRuleUnit_TokenAndFundCallsAreStatic` and `FundUnit_CallsAreStatic` for the fund layer: a callee whose reads write makes the entry point revert, while a quiet callee succeeds (control) |
+| `reentrancy-state-change` (high) | `HolderRestrictionRule`, `MinPositionRule`, `SettlementWindowRule`, `CredentialRule.setPolicy` and `_checkSender`, `Fund.registerClass`, `Fund.setRule` | False positive: the token, the hook, the fund or the registry is called through view interfaces, which compile to STATICCALL, so nothing it does can change any state | `*Unit_TokenCallsAreStatic` for the rules, `FundHoldersRuleUnit_TokenAndFundCallsAreStatic` and `FundUnit_CallsAreStatic` for the fund layer: a callee whose reads write makes the entry point revert, while a quiet callee succeeds (control) |
 | `arbitrary-transfer-from` (high) | `Gated7540Vault.requestDeposit` | Same as Slither's `arbitrary-send-erc20` (§4 above) | Fuzzed victim-owner test; removing the guard fails 2 tests |
 | `abi-encode-packed-hash-collision` (high) | `ProxyDeployer._initCodeHash` | False positive: only the second operand varies; the first is fixed creation code | Fuzzed `predict` formula test; off-chain CREATE2 test |
 | `storage-array-memory-edit` (high) | `SettlementWindowRule.check`, `isOpen` | False positive: a read-only copy of a storage struct into memory | Window tests |
 | `unused-state-variable` | `Gated7540Vault` ERC-7201 location | False positive: read in assembly | `Gated7540VaultUnit_Storage`: the formula equals the constant and the slot holds custody and `lastPrice` |
 | `unchecked-return` | `_grantRole` in constructors and initialisers (`CredentialRegistry` included), and `_revokeRole` in the `revokeRole` overrides of the base, `GovernanceTimelock`, both executors and `CredentialRegistry` (it returns false only if the role was not held, and either way the account ends up without it); `Address.functionCall` in `ProxyDeployer`; `_executeLeg` in `DvPExecutor` | `_grantRole` returns false only if the role is already held; `initialize` returns nothing; the cash leg's digest is not needed and the securities leg's digest was read before the call | Role, deploy and DvP tests |
-| `costly-loop`, `require-revert-in-loop` | `ComplianceHook._setRules`, `IntentExecutor.executeBatch`, `MaxHoldersRule.seedHolderCountFromHolders` | By design: at most 16 rules, and invalid rules must fail closed; batches are atomic; an unsorted holder list must fail the whole seed | Hook, batch and seed tests |
+| `costly-loop`, `require-revert-in-loop` | `ComplianceHook._setRules`, `IntentExecutor.executeBatch` | By design: at most 16 rules, and invalid rules must fail closed; batches are atomic | Hook and batch tests |
 | `literal-instead-of-constant` | calendar arithmetic; `10 ** decimals()` | Calendar constants; `decimals()` is read at runtime | Window and vault tests |
 | `empty-block`, `modifier-used-only-once` | `BaseRule.after_`, `__IntentSettled_init`, `Fund.onlyRule`, the two empty `catch` blocks of `Fund._listsInstalledRule` | By design; in the fund views a token or a hook that fails is a broken class, and the answer is `false` | `FundUnit_ClassIntegrity` |
 | `unsafe-casting` | `ComplianceHook._setRules`, `HolderRestrictionRule.setLockup` | Each narrowing follows an explicit bound: at most 16 rules and a 16-bit mask; a range check against 64 bits | Hook tests; `HolderRestrictionRuleUnit_SetLockup` |
@@ -277,7 +275,7 @@ solhint (Wonderland config, `--max-warnings 0`):
 
 ## 5. Mutation-testing results
 
-Each row is a bug deliberately planted, the run that caught it, then restored from git. Rows dated before 2026-10-24 describe the code as it was then (a hook per token, `LockupRule`, `setFrozen`); the rows dated 2026-10-24 describe the base and the new rules after the review items. The shared hook's own authority (who may call `setRules`, the per-token keying, `afterTransfer` from the token only) is pinned by unit and integration tests, not by a planted-bug row.
+Each row is a bug deliberately planted, the tests that caught it, then the file restored from git. Counts are the failing tests in the run that recorded the row. The shared hook's own authority (who may call `setRules`, the per-token keying, `afterTransfer` from the token only) is pinned by unit and integration tests, not by a planted-bug row.
 
 | Area | Planted bug | Caught by |
 |---|---|---|
@@ -287,15 +285,13 @@ Each row is a bug deliberately planted, the run that caught it, then restored fr
 | `DvPExecutor` (2026-10-23) | pause, role or reentrancy guard dropped on either entry point; each of the seven mirror conditions dropped; the two legs swapped; each of the five authorization conditions dropped, and the bare-hash nonce; the executor's or the seller's cash check dropped, and the seller's balance read before the pull; the securities leg never run; the seller never paid; the pre-flight legs swapped, either window edge moved, the pause ignored | 1 to 18 tests each. Halmos catches the dropped mirror conditions, the dropped securities leg, the dropped nonce, payer, value and token conditions, and the dropped executor cash check. Two weaknesses in the first tests showed up and were fixed: a reentrancy test that passed with the guard removed (`vm.expectRevert` does not compare the data of a low-level call), and a gated-path guard with no test |
 | DvP deployment (2026-10-23) | `Activate` skips the DvP executor's EXECUTOR_ROLE on the intent token, its OPERATOR_ROLE or its RECOVERY_ROLE, or its hand-over; grants the operator key EXECUTOR_ROLE on the intent token; gives the DvP operator role to the minter | the post-deploy check, which pins the DvP executor's roles and the set of EXECUTOR_ROLE holders (the deployment tests fail). Dropping the check of stray EXECUTOR_ROLE holders is caught by the governance test that grants one |
 | Intent revision (2026-10-23) | consideration check dropped, or applied to the amount only, or to the token only; executor comparison dropped; `validAfter` check dropped, or made exclusive; signature dropped from `canExecute`; executor check moved before the nonce check; a field left out of the hash | 2 to 7 tests each. Dropping the consideration check or the executor comparison is also caught by the matching Halmos property (`check_considerationWithoutExecutorNeverExecutes`, `check_intentNamingAnotherExecutorNeverExecutes`). The order mutant first survived and `test_WhenTheNonceIsUsedAndTheExecutorIsWrong_NonceUsedWins` was added |
-| `MaxHoldersRule` | exit decrement dropped; self-transfer skip dropped; exemption ignored on decrement | invariant (real token, 4 actors) and unit tests |
-| `MaxHoldersRule` seeding (2026-10-22) | ascending check removed, or weakened to allow duplicates; supply check removed; exempt accounts counted; zero balances counted; each of the three seeds allowed while the rule is listed; copy seed without its previous-rule check; exemption adjusting an unlisted count; listing check always false | 1 to 9 tests each (11 of 11) |
 | `PolicyGatedERC20Upgradeable._releaseFrozen` | `>` weakened to `>=`, so a frozen amount that already fits is rewritten and `Frozen` emitted | survived the whole suite; `test_WhenTheFrozenAmountStillFits_ItIsLeftAlone` was added and now catches it |
 | `Gated4626Vault` | `maxRedeem` ignores frozen; `maxWithdraw` rounds up; `decimalsOffset` = 0 | 3 tests; rounding test; inflation test (victim-loss bound) |
 | `Gated7540Vault` | withdraw shares rounded down; mint assets rounded down; reject keeps pending; recovery keeps pending; operator guard removed | 1+ tests each; invariant `escrow == Σ pending` |
 | Phase 6 (TS) | executor hand-over skipped; `canExecute` skips the hook; NAV price rounds up; deadline exclusive | 46 / 8 / 1 / 1 failing |
 | `ProxyDeployer` | no hook-binding check; no salt check | unit test + Ignition tamper test; unit test |
 | `ProxyDeployer` implementation check (2026-10-27, audit finding 1) | the check removed; the check moved after CREATE2; the wrong kind asked (`HOOK`); the check moved before the salt check; the constructor not storing its registry; the zero-registry check removed; the token-registry check removed; `Components` passing the timelock as the registry | 8 of 8. The seven contract bugs fail 7, 1, 5, 1, 25, 1 and 1 of the 30 `ProxyDeployer.t.sol` tests. `deployment.test.ts` fails 1, 9, 10 and 10 of its 10 tests for the check removed, the wrong kind, the registry not stored and the timelock in `Components`. The check moved after CREATE2 is caught only by the implementation with no code: a revert undoes the proxy either way, so the order shows only in the error a bad implementation gets |
-| Ignition `Activate` | UPGRADER to an ops account; deployer keeps timelock admin; deployer keeps `ProxyDeployer` ownership; hooks built with rules reversed | 54 / 54 / 55 / 55 failing |
+| Ignition `Activate` | UPGRADER to an ops account; deployer keeps timelock admin; deployer keeps `ProxyDeployer` ownership | 54 / 54 / 55 failing |
 | upgrades-core | upgrade-unsafe state initialiser | `validate` FAILED |
 | Aderyn gate | one inline suppression removed | `npm run aderyn` fails (1 high) |
 | 7540 invariant handler | an action silently turned into a no-op | `afterInvariant` fails (every action must execute in every run) |
@@ -305,17 +301,16 @@ Each row is a bug deliberately planted, the run that caught it, then restored fr
 | `Gated7540Vault` escrow (L-2) | `rejectRedeemRequest` or `recoverRedeemRequest` stops releasing frozen escrow | 1 test each (`Gated7540VaultUnit_FrozenEscrow`) |
 | `Gated7540Vault` price (L-3) | the minimum price of 1 removed | 3 tests (`Gated7540VaultUnit_ZeroPrice` and the fulfilment fuzz) |
 | `Gated7540Vault` claims (M-3) | deposit-claim, mint-claim, redeem or withdraw eligibility check removed; `maxRedeem` back to pause-only; `recoverClaimable` without the recipient check; enforcement mint downgraded to a plain MINT; payout probe with amount 1 | 1 to 11 tests each (`Gated7540VaultIntegration_Claimable`). The amount-1 probe breaks 11, since it would block payouts to controllers holding no shares |
-| `Gated7540Vault` reject (M-2) | rejected shares returned as FORCED again (the old R2) | 5 tests, including the steering attack at a full cap, the paused reject and the frozen escrow |
+| `Gated7540Vault` reject (M-2) | rejected shares returned as FORCED | 5 tests, including the steering attack at a full cap, the paused reject and the frozen escrow |
 | Recovery timelock (M-1) | base or executor `revokeRole` lets RECOVERY_ROLE revoke any role, or not the guardian; recovery cannot `unpause`; `GovernanceTimelock` lets it revoke any role, or not CANCELLER. On `DvPExecutor` (2026-10-23): the same three, and `pause` open to anyone | 1 to 2 tests each (`PolicyGatedUnit_Recovery`, `IntentExecutorUnit_Recovery`, `DvPExecutorUnit_Roles`, `GovernanceTimelockUnitTest`) |
 | Recovery deployment (M-1) | `Activate` skips the executor's RECOVERY_ROLE, or leaves governance as a recovery-timelock canceller | The hand-over check, which pins the recovery timelock's exact role set and its lack of cancellers (59 TS tests fail) |
-| Base enforcement | `forcedTransfer` keeps frozen tokens | the frozen-balance invariant of the time and 2 unit tests. With the old no-op handler, the invariant missed it. (Since 2026-10-24 the invariant is `invariant_TheUnfrozenBalanceIsExactlyWhatCanBeSent`, because the frozen amount may exceed the balance) |
+| Base enforcement | `forcedTransfer` keeps frozen tokens | 2 unit tests |
 | Base transient context | ref slot not cleared | Not killable: an equivalent mutant. The ref is read only when the kind slot is set, and every movement that sets the kind rewrites the ref first |
 | Reproducibility | metadata hash re-enabled | `verify:reproducible`: every contract differs across jobs |
 | Base (2026-10-24, review item S2) | the release takes the whole amount from the frozen amount; it forgets to emit `Frozen`; a zero unfrozen balance rejects a zero amount; an enforcement burn, or a forced transfer, no longer exempt from the frozen check; the template check dropped; `canSend` ignores pause; `canReceive` asks about sending; `setFrozenTokens` refuses above the balance; the unfrozen shortfall reverts as a policy rejection; `forcedTransfer` drops `ForcedTransferBy`, or returns false; `supportsInterface` forgets the standard's id; `canTransfer` ignores the unfrozen amount | 14 of 14, each by at least one test. Before the final fixes two real gaps showed: a pre-flight whose sender held `BURNER_ROLE` could report an amount above the balance as allowed, and a hook returning `INSUFFICIENT_UNFROZEN` for a mint was relabelled with the standard's error and a zero account; each got a test first |
 | `HolderRestrictionRule`, `MinPositionRule` (2026-10-24, S3) | freeze or lockup ignored, on the sender or the receiver; FORCED, or the enforcement burner, no longer exempt; the lockup boundary moved; `checkSend` or `checkReceive` always accepting; the agent or admin check dropped; the two settings overwriting each other; the 64-bit range check dropped; the minimum compared with `<=` on either side; the token itself, a listed account or an enforcement burn no longer exempt; self-moves and zero amounts judged | 23 of 24 by a test; the 24th, dropping the `min == 0` early return, is an equivalent mutant (the checks after it accept at 0; it only saves gas) |
 | Halmos, `MinPositionRule` (2026-10-24, S3) | the receiver or sender comparison weakened; the remainder guard dropped; FORCED not exempt; the amount guard dropped | 5 of 5, each by a symbolic property (the exact decision for a transfer, never reverting for any kind, FORCED never rejected) |
-| Vault probes, account answers (2026-10-24, S3; the cap and mint-probe parts are superseded by the next row) | `maxDeposit` or `maxRedeem` probing an amount again; the cap compared with `<=`, the exemption, the existing holder, the investor or the class itself ignored in `checkReceive`; pause or no hook ignored in the account answer; the 7540 request or claim check asking the sender side | 12 of 12. The no-hook case survived at first, because no test could build a token without a hook; a test now clears the hook slot |
-| Mint probe, cap out of `checkReceive` (2026-10-24, finding 1) | the probe amount one wei or zero; `Gated4626Vault.maxDeposit` probing one wei; `maxMint` of the 4626 vault, and `requestDeposit`, `maxDeposit` or the deposit-claim check of the 7540 vault, ignoring the probe; `FundHoldersRule` or `MaxHoldersRule` answering the cap in `checkReceive` again; `canReceive` ignoring pause; the mint probe asking the sender side | 11 of 11 |
+| Mint probe, cap out of `checkReceive` (2026-10-24, finding 1) | the probe amount one wei or zero; `Gated4626Vault.maxDeposit` probing one wei; `maxMint` of the 4626 vault, and `requestDeposit`, `maxDeposit` or the deposit-claim check of the 7540 vault, ignoring the probe; `FundHoldersRule` answering the cap in `checkReceive`; `canReceive` ignoring pause; the mint probe asking the sender side | 10 of 10 |
 | `canTransfer` and the write on a balance shortfall (2026-10-24, finding 4) | the write never using the base error, using it at the balance too, or using it for every shortfall; `canTransfer` counting a pure balance shortfall; `canTransferWithReason` leaving it to the base; the frozen amount ignored in `canTransfer`'s test, or another account's frozen amount asked; enforcement kinds not excluded from it; the ignored shortfall skipping the hook; the shortfall boundary moved to `<=`; the strict `_check` made lenient (`canExecute`, the 7540 checks) | 11 of 11 |
 | `Fund` views (2026-10-24, S4) | an unregistered token passing; the registration ignored; the first or the last class skipped; a failing hook or token counted as listed; the wrong comparison; the last broken class returned instead of the first | 8 of 8 |
 | `HolderRestrictionRule.checkSend` lockup (2026-10-24) | lock ignored; `<=` at the boundary; lock reported before the freeze; freeze ignored; `checkReceive` refusing a locked account; the comparison reversed | 6 of 6 |

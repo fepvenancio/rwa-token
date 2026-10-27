@@ -2630,6 +2630,15 @@ Verification: `npx hardhat test` 1024 passing (927 Solidity, 97 Node), `npm run 
 
 Docs: on 2026-10-27, before the merge of `credential-layer`, seven fresh agents checked the nine `docs/*.md` pages, `README.md`, `SECURITY.md` and `docs/gated-token.html` claim by claim against the code (about 2,100 claims). Every reported mismatch in the Markdown files was confirmed against the merged code and fixed (`docs/credentials.md`, which the merge added, was not part of that check), including the README runbook and deviations, which now describe the new checks. The brief's §4 list of where attestation is enforced still does not name `ProxyDeployer.deploy`; the brief is the owner's to change, and the README deviations record it.
 
+## Cleanup: nothing kept for a deployment that never happened (2026-10-27)
+
+The owner, 2026-10-27: "the code was never deployed so clean everything we can to avoid any confusion", after an inventory of unused code and files. Recorded here before the change (rule 3); the owner asked for it to be done, not stopped for review.
+
+- `IdentityRule` is no longer deployed: the credential layer replaced it in every list. It leaves production: the rule, `IIdentityRule` and `IdentityRule.t.sol` are deleted, and the tests that only need a simple identity gate use `contracts/test/MockIdentityRule.sol`, the same logic as a test mock. The tests of `IdentityRule` reading the credential registry go with it. `IIdentityRegistry` stays: `CredentialRegistry` implements it (`isVerified`) for integrators.
+- `MaxHoldersRule` is deleted with `IMaxHoldersRule`, its tests and its deployment in `Components`: no token lists it, and the fund-wide cap is `FundHoldersRule`. Tests that used it as the cap move to `FundHoldersRule` where they test another contract's behaviour at a full cap, and are deleted where they tested only the removed rule.
+- Files: the empty `.gitkeep` placeholders in folders that have files, `.npmignore` (the package is private), four `export` keywords in `fixtures.ts` on helpers only that file uses, and the local, git-ignored `docs/superpowers/` folder with its `.gitignore` line. PLAN.md keeps the decisions those notes informed.
+- The brief, `README.md` and `SECURITY.md` follow. `docs/*.md` is replaced by the HTML pages right after, so it is not edited for this.
+
 ## Open questions for the owner
 1. DvP: decisions D1 to D8 are recorded in the DvP section (D8: Option B; D6 revised for the `IntentExecutor` refusal). I-1, E-1, E-2 and the refusal are built and wait for your review.
 2. Nothing on `fund-layer` is pushed, and the DvP section is not committed. Push, or open a pull request, only when you say. The branch carries PR #2's commit `d3574df` until PR #2 merges.

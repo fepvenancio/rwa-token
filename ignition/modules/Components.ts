@@ -42,9 +42,6 @@ export default buildModule("Components", (m) => {
   const minPositionRule = m.contract("MinPositionRule");
   const holderRestrictionRule = m.contract("HolderRestrictionRule");
   const windowRule = m.contract("SettlementWindowRule");
-  // Deployed and attested, and listed on no token (review items, RD5: the investor count that matters is fund-wide).
-  // Governance can add it to a class that has a limit of its own without another council step.
-  const maxHoldersRule = m.contract("MaxHoldersRule");
   // The fund and its rule need each other's address, so the rule takes the fund at construction and `Activate` installs
   // the rule in the fund with `setRule`. Not `fund`: that key already means the 4626 vault in these modules.
   const fundContract = m.contract("Fund", [deployer, registry]);
@@ -68,7 +65,6 @@ export default buildModule("Components", (m) => {
     minPositionRule,
     holderRestrictionRule,
     windowRule,
-    maxHoldersRule,
     fundContract,
     fundHoldersRule,
     intentImpl,

@@ -28,15 +28,16 @@ import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {ITemplated} from 'interfaces/ITemplated.sol';
 
 import {ProxyDeployer} from 'contracts/deploy/ProxyDeployer.sol';
+import {Fund} from 'contracts/fund/Fund.sol';
 import {PolicyRegistry} from 'contracts/governance/PolicyRegistry.sol';
 import {ComplianceHook} from 'contracts/hooks/ComplianceHook.sol';
+import {FundHoldersRule} from 'contracts/hooks/rules/FundHoldersRule.sol';
 import {HolderRestrictionRule} from 'contracts/hooks/rules/HolderRestrictionRule.sol';
-import {IdentityRule} from 'contracts/hooks/rules/IdentityRule.sol';
-import {MaxHoldersRule} from 'contracts/hooks/rules/MaxHoldersRule.sol';
 import {MinPositionRule} from 'contracts/hooks/rules/MinPositionRule.sol';
 import {Helpers} from 'contracts/test/Helpers.sol';
 import {MockAsset} from 'contracts/test/MockAsset.sol';
 import {MockIdentityRegistry} from 'contracts/test/MockIdentityRegistry.sol';
+import {MockIdentityRule} from 'contracts/test/MockIdentityRule.sol';
 import {IntentToken} from 'contracts/tokens/IntentToken.sol';
 import {Gated4626Vault} from 'contracts/vaults/Gated4626Vault.sol';
 import {Gated7540Vault} from 'contracts/vaults/Gated7540Vault.sol';
@@ -1102,13 +1103,14 @@ contract Gated7540VaultUnit_ViewsAndAdmin is Gated7540VaultUnitTest {
   }
 }
 
-/// @notice Integration: the async vault behind a real ComplianceHook with Identity, HolderRestriction and MaxHolders
+/// @notice Integration: the async vault behind a real ComplianceHook with an identity rule, HolderRestriction and the
+///         fund's holder cap (`FundHoldersRule`, a fund of one class with a cap of 2)
 contract Gated7540VaultIntegrationTest is Test {
   Gated7540Vault internal _vault;
   MockAsset internal _asset;
   MockIdentityRegistry internal _identity;
   HolderRestrictionRule internal _restrictionRule;
-  MaxHoldersRule internal _maxHoldersRule;
+  Fund internal _fund;
   address internal _guardian = makeAddr('guardian');
   address internal _agent = makeAddr('agent');
   address internal _fulfiller = makeAddr('fulfiller');
@@ -1122,19 +1124,22 @@ contract Gated7540VaultIntegrationTest is Test {
     // Configure, then hand over: this test is the vault admin while it configures.
     PolicyRegistry _registry = new PolicyRegistry(address(this), address(this));
     _identity = new MockIdentityRegistry();
-    IdentityRule _identityRule = new IdentityRule(IIdentityRegistry(address(_identity)));
+    MockIdentityRule _identityRule = new MockIdentityRule(IIdentityRegistry(address(_identity)));
     _restrictionRule = new HolderRestrictionRule();
-    _maxHoldersRule = new MaxHoldersRule();
+    _fund = new Fund(address(this), _registry);
+    FundHoldersRule _fundRule = new FundHoldersRule(_fund);
     _registry.attest(address(_identityRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
     _registry.attest(address(_restrictionRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
-    _registry.attest(address(_maxHoldersRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
+    _registry.attest(address(_fundRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
+    _fund.setRule(address(_fundRule));
+    _fund.setHolderCap(2);
 
     _asset = new MockAsset(6);
     Gated7540Vault _impl = new Gated7540Vault();
     IComplianceRule[] memory _rules = new IComplianceRule[](3);
     _rules[0] = _identityRule;
     _rules[1] = _restrictionRule;
-    _rules[2] = _maxHoldersRule;
+    _rules[2] = _fundRule;
     // CREATE2 through ProxyDeployer, as in production: the address does not depend on this contract's nonce.
     ProxyDeployer _proxyDeployer = new ProxyDeployer(address(this), _registry);
     ComplianceHook _hook = new ComplianceHook(_registry);
@@ -1166,10 +1171,10 @@ contract Gated7540VaultIntegrationTest is Test {
     );
     _vault.grantRole(_vault.FULFILLER_ROLE(), _fulfiller);
     _vault.grantRole(_vault.AGENT_ROLE(), _agent);
-    // The escrow vault is a bank-controlled, verified, holder-exempt account (owner decisions V2 and R1).
+    _fund.registerClass(address(_vault));
+    // The escrow vault is a bank-controlled, verified account (owner decisions V2 and R1). The fund never counts the
+    // class itself, so the escrow takes no investor slot.
     _identity.set(address(_vault), true);
-    _maxHoldersRule.setExemptHolder(address(_vault), address(_vault), true);
-    _maxHoldersRule.setCap(address(_vault), 2);
 
     _identity.set(_alice, true);
     _identity.set(_bob, true);
@@ -1200,11 +1205,11 @@ contract Gated7540VaultIntegration_Lifecycle is Gated7540VaultIntegrationTest {
     _invest(_alice, 1000);
     assertEq(_vault.balanceOf(_alice), 1000);
     assertEq(_asset.balanceOf(_custody), 1000);
-    assertEq(_maxHoldersRule.holderCount(address(_vault)), 1);
+    assertEq(_fund.holderCount(), 1);
 
     vm.prank(_alice);
     _vault.requestRedeem(1000, _alice, _alice);
-    assertEq(_maxHoldersRule.holderCount(address(_vault)), 0); // full escrow: alice left, the exempt vault never joined
+    assertEq(_fund.holderCount(), 0); // full escrow: alice left, and the vault, the class itself, never joins
     vm.prank(_fulfiller);
     _vault.fulfillRedeem(_alice, 1000, 1100); // NAV rose 10%
     assertEq(_vault.totalSupply(), 0);
@@ -1241,13 +1246,13 @@ contract Gated7540VaultIntegration_Escrow is Gated7540VaultIntegrationTest {
   function test_WhenTheCapIsFullAndTheVaultIsEmpty_APartialRedeemRequestSucceeds() external {
     _invest(_alice, 100);
     _invest(_bob, 100);
-    assertEq(_maxHoldersRule.holderCount(address(_vault)), 2); // cap reached
+    assertEq(_fund.holderCount(), 2); // cap reached
     assertEq(_vault.balanceOf(address(_vault)), 0);
 
     vm.prank(_alice);
     _vault.requestRedeem(40, _alice, _alice);
     assertEq(_vault.balanceOf(address(_vault)), 40);
-    assertEq(_maxHoldersRule.holderCount(address(_vault)), 2);
+    assertEq(_fund.holderCount(), 2);
   }
 
   /// @dev The escrow move is a TRANSFER, so a locked holder cannot exit by filing a request
@@ -1287,7 +1292,7 @@ contract Gated7540VaultIntegration_Escrow is Gated7540VaultIntegrationTest {
     vm.prank(_agent);
     _vault.recoverRedeemRequest(_alice, _bob); // FORCED, to an existing holder
     assertEq(_vault.balanceOf(_bob), 200);
-    assertEq(_maxHoldersRule.holderCount(address(_vault)), 2);
+    assertEq(_fund.holderCount(), 2);
   }
 
   /// @dev M-2, cap full: a controller that still holds is not a new holder, so the reject goes through
@@ -1299,7 +1304,7 @@ contract Gated7540VaultIntegration_Escrow is Gated7540VaultIntegrationTest {
     vm.prank(_fulfiller);
     _vault.rejectRedeemRequest(_alice);
     assertEq(_vault.balanceOf(_alice), 100);
-    assertEq(_maxHoldersRule.holderCount(address(_vault)), 2);
+    assertEq(_fund.holderCount(), 2);
   }
 
   /// @dev M-2, the steering attack: naming a new holder as controller cannot route shares past a full cap
@@ -1316,7 +1321,7 @@ contract Gated7540VaultIntegration_Escrow is Gated7540VaultIntegrationTest {
     vm.prank(_fulfiller);
     _vault.rejectRedeemRequest(_carol); // ...and so is the request-then-reject route
     assertEq(_vault.balanceOf(_carol), 0);
-    assertEq(_maxHoldersRule.holderCount(address(_vault)), 2);
+    assertEq(_fund.holderCount(), 2);
   }
 
   /// @dev A de-verified controller's reject reverts and the shares stay escrowed (unchanged by M-2)
@@ -1903,7 +1908,7 @@ contract Gated7540VaultIntegration_Claimable is Gated7540VaultIntegrationTest {
     vm.prank(_agent);
     _vault.recoverClaimable(_alice, _alice);
     assertEq(_vault.balanceOf(_alice), 100);
-    assertEq(_maxHoldersRule.holderCount(address(_vault)), 3, 'exempt from the cap, still counted');
+    assertEq(_fund.holderCount(), 3, 'exempt from the cap, still counted');
     assertEq(_vault.claimableDepositRequest(0, _alice), 0);
   }
 
@@ -1962,39 +1967,6 @@ contract Gated7540VaultIntegration_Claimable is Gated7540VaultIntegrationTest {
     vm.expectRevert(IGated7540Vault.Gated7540Vault_ZeroAddress.selector);
     vm.prank(_agent);
     _vault.recoverClaimable(_alice, address(0));
-  }
-}
-
-/// @notice A second holder-rule instance started on a live vault whose escrow holds shares
-contract Gated7540VaultIntegration_HolderRuleColdStart is Gated7540VaultIntegrationTest {
-  function test_WhenANewInstanceIsSeededFromTheHolderList_TheEscrowIsExemptAndTheCountMatches() external {
-    _invest(_alice, 1000);
-    _invest(_bob, 500);
-    vm.prank(_alice);
-    _vault.requestRedeem(400, _alice, _alice); // the vault now escrows 400 shares
-
-    MaxHoldersRule _replacement = new MaxHoldersRule(); // same code, so already attested
-    ComplianceHook _hook = ComplianceHook(_vault.policyHook());
-    IComplianceRule[] memory _rules = _hook.rules(address(_vault));
-    _rules[2] = _replacement;
-    address[] memory _holders = new address[](3);
-    _holders[0] = _alice;
-    _holders[1] = _bob;
-    _holders[2] = address(_vault);
-    for (uint256 _i = 1; _i < 3; ++_i) {
-      for (uint256 _j = _i; _j > 0 && _holders[_j - 1] > _holders[_j]; --_j) {
-        (_holders[_j - 1], _holders[_j]) = (_holders[_j], _holders[_j - 1]);
-      }
-    }
-
-    // One batch while the replacement is out of the list: exempt the escrow, seed, then swap the rule in.
-    _replacement.setCap(address(_vault), 2);
-    _replacement.setExemptHolder(address(_vault), address(_vault), true);
-    _replacement.seedHolderCountFromHolders(address(_vault), _holders);
-    _hook.setRules(address(_vault), _rules);
-
-    assertEq(_replacement.holderCount(address(_vault)), 2);
-    assertEq(_replacement.holderCount(address(_vault)), _maxHoldersRule.holderCount(address(_vault)));
   }
 }
 

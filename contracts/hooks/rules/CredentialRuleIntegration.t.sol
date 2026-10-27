@@ -4,13 +4,11 @@ pragma solidity ^0.8.28;
 import {Reasons} from 'interfaces/Errors.sol';
 
 import {ICredentialRegistry} from 'interfaces/ICredentialRegistry.sol';
-import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
 import {Quals} from 'interfaces/Quals.sol';
 
 import {CredentialRule} from 'contracts/hooks/rules/CredentialRule.sol';
-import {IdentityRule} from 'contracts/hooks/rules/IdentityRule.sol';
 import {CredentialRegistry} from 'contracts/identity/CredentialRegistry.sol';
 import {IntentTokenIntegrationTest} from 'contracts/tokens/IntentToken.t.sol';
 
@@ -297,36 +295,5 @@ contract CredentialRuleIntegration_Intents is CredentialRuleIntegrationTest {
     vm.prank(_executor);
     _token.executeTransfer(_i, _sig);
     assertEq(_token.balanceOf(_bob), 10 ether);
-  }
-}
-
-/// @notice The existing `IdentityRule` reads the credential registry unchanged, with its old meaning: only `ACTIVE`
-contract CredentialRuleIntegration_IdentityRuleOverTheRegistry is CredentialRuleIntegrationTest {
-  function setUp() public override {
-    super.setUp();
-    IdentityRule _identityOverCreds = new IdentityRule(IIdentityRegistry(address(_creds)));
-    vm.prank(_attester);
-    _registry.attest(address(_identityOverCreds).codehash, IPolicyRegistry.AttestKind.RULE, 'ipfs://identity-rule');
-    _installRules(_one(_identityOverCreds));
-  }
-
-  function test_WhenBothAreActive_TheTransferSucceeds() external {
-    (bool _ok,) = _transferWithParity(_alice, _bob, 1 ether);
-    assertTrue(_ok);
-  }
-
-  function test_WhenTheSenderIsExitOnly_ThePlainIdentityRuleStillRefusesIt() external {
-    vm.prank(_kyc);
-    _creds.setStatus(_alice, ICredentialRegistry.Status.EXIT_ONLY);
-    (bool _ok, bytes32 _reason) = _transferWithParity(_alice, _bob, 1 ether);
-    assertFalse(_ok);
-    assertEq(_reason, Reasons.SENDER_NOT_VERIFIED);
-  }
-
-  function test_WhenTheReceiverHasLapsed_ThePlainIdentityRuleRefusesIt() external {
-    vm.warp(_NOW + 31 days);
-    (bool _ok, bytes32 _reason) = _transferWithParity(_bob, _alice, 0); // bob holds nothing: a zero amount reaches the hook
-    assertFalse(_ok);
-    assertEq(_reason, Reasons.RECEIVER_NOT_VERIFIED);
   }
 }

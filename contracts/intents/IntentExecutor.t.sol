@@ -348,7 +348,7 @@ contract IntentExecutorUnit_SupportsInterface is IntentExecutorUnitTest {
   }
 }
 
-/// @notice Integration: the executor settling through a real IntentToken, ComplianceHook and IdentityRule
+/// @notice Integration: the executor settling through a real IntentToken, ComplianceHook and MockIdentityRule
 contract IntentExecutorIntegrationTest is IntentTokenIntegrationTest {
   IntentExecutor internal _intentExecutor;
   address internal _operator = makeAddr('operator');

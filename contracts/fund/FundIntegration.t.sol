@@ -20,10 +20,10 @@ import {PolicyRegistry} from 'contracts/governance/PolicyRegistry.sol';
 import {ComplianceHook} from 'contracts/hooks/ComplianceHook.sol';
 import {FundHoldersRule} from 'contracts/hooks/rules/FundHoldersRule.sol';
 import {HolderRestrictionRule} from 'contracts/hooks/rules/HolderRestrictionRule.sol';
-import {IdentityRule} from 'contracts/hooks/rules/IdentityRule.sol';
-import {MaxHoldersRule} from 'contracts/hooks/rules/MaxHoldersRule.sol';
+import {MinPositionRule} from 'contracts/hooks/rules/MinPositionRule.sol';
 import {MockAsset} from 'contracts/test/MockAsset.sol';
 import {MockIdentityRegistry} from 'contracts/test/MockIdentityRegistry.sol';
+import {MockIdentityRule} from 'contracts/test/MockIdentityRule.sol';
 import {IntentToken} from 'contracts/tokens/IntentToken.sol';
 import {Gated4626Vault} from 'contracts/vaults/Gated4626Vault.sol';
 import {Gated7540Vault} from 'contracts/vaults/Gated7540Vault.sol';
@@ -44,9 +44,8 @@ contract FundIntegrationTest is Test {
   ProxyDeployer internal _deployer;
   Fund internal _fund;
   FundHoldersRule internal _fundRule;
-  IdentityRule internal _identityRule;
+  MockIdentityRule internal _identityRule;
   HolderRestrictionRule internal _restrictionRule;
-  MaxHoldersRule internal _maxHoldersRule;
 
   IntentToken internal _token;
   Gated4626Vault internal _vault4626;
@@ -72,14 +71,12 @@ contract FundIntegrationTest is Test {
     _asset = new MockAsset(6);
     _deployer = new ProxyDeployer(address(this), _registry);
 
-    _identityRule = new IdentityRule(IIdentityRegistry(address(_identity)));
+    _identityRule = new MockIdentityRule(IIdentityRegistry(address(_identity)));
     _restrictionRule = new HolderRestrictionRule();
-    _maxHoldersRule = new MaxHoldersRule();
     _fund = new Fund(address(this), IPolicyRegistry(address(_registry)));
     _fundRule = new FundHoldersRule(_fund);
     _registry.attest(address(_identityRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
     _registry.attest(address(_restrictionRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
-    _registry.attest(address(_maxHoldersRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
     _registry.attest(address(_fundRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
     _fund.setRule(address(_fundRule));
     _fund.setHolderCap(3);
@@ -95,11 +92,10 @@ contract FundIntegrationTest is Test {
   function _rules(
     FundHoldersRule _last
   ) internal view returns (IComplianceRule[] memory _list) {
-    _list = new IComplianceRule[](4);
+    _list = new IComplianceRule[](3);
     _list[0] = _identityRule;
     _list[1] = _restrictionRule;
-    _list[2] = _maxHoldersRule;
-    _list[3] = _last;
+    _list[2] = _last;
   }
 
   /// @dev Deployment order: the shared hook is attested once in `setUp`; each class attests its implementation, then
@@ -192,13 +188,8 @@ contract FundIntegrationTest is Test {
     _vault7540.grantRole(_vault7540.AGENT_ROLE(), _agent);
     _vault7540.grantRole(_vault7540.FULFILLER_ROLE(), _fulfiller);
 
-    // The class caps stay out of the way, so every rejection below comes from the fund.
-    _maxHoldersRule.setCap(address(_token), 100);
-    _maxHoldersRule.setCap(address(_vault4626), 100);
-    _maxHoldersRule.setCap(address(_vault7540), 100);
-    // The 7540 escrow is a verified, holder-exempt account at the class level.
+    // The 7540 escrow is a verified account.
     _identity.set(address(_vault7540), true);
-    _maxHoldersRule.setExemptHolder(address(_vault7540), address(_vault7540), true);
 
     address[6] memory _accounts = [_alice, _bob, _carol, _dave, _treasury, _fulfiller];
     for (uint256 _i; _i < _accounts.length; ++_i) {
@@ -374,6 +365,26 @@ contract FundIntegration_Cap is FundIntegrationTest {
     assertEq(_fund.holderCount(), 2);
   }
 
+  /// @dev The cap is still known to `maxDeposit` with a minimum set: the probe amount is above any minimum, so the
+  ///      minimum does not hide a full fund
+  function test_WhenTheFundIsFullAndAMinimumIsSet_MaxDepositIsStillZeroForANewInvestor() external {
+    MinPositionRule _minRule = new MinPositionRule();
+    _registry.attest(address(_minRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
+    IComplianceRule[] memory _list = new IComplianceRule[](4);
+    _list[0] = _identityRule;
+    _list[1] = _minRule;
+    _list[2] = _restrictionRule;
+    _list[3] = _fundRule;
+    _hook.setRules(address(_vault4626), _list);
+    _minRule.setMinPosition(address(_vault4626), 1e12);
+
+    _mintToken(_alice, 10 ether);
+    _deposit4626(_bob, 1e6); // 1e12 shares at the first deposit: exactly the minimum
+    assertEq(_fund.holderCount(), 2);
+    assertEq(_vault4626.maxDeposit(_carol), 0);
+    assertEq(_vault4626.maxDeposit(_alice), type(uint256).max);
+  }
+
   function test_WhenTheFundIsFull_AnExistingInvestorStillTakesAPositionInAnotherClass() external {
     _mintToken(_alice, 10 ether);
     _deposit4626(_bob, 5e6);
@@ -453,7 +464,6 @@ contract FundIntegration_Registration is FundIntegrationTest {
       )
     );
     _other.grantRole(_other.MINTER_ROLE(), _minter);
-    _maxHoldersRule.setCap(address(_other), 100);
   }
 
   function test_WhenAClassIsNotRegistered_EveryMovementIsRejectedUntilItIs() external {
@@ -478,9 +488,8 @@ contract FundIntegration_Registration is FundIntegrationTest {
   function test_WhenAClassAlreadyHasSupply_ItCannotBeRegistered() external {
     _deployUnregistered();
     // Take the fund rule out of play to mint, which is exactly the cold start the supply check exists to refuse.
-    IComplianceRule[] memory _without = new IComplianceRule[](2);
+    IComplianceRule[] memory _without = new IComplianceRule[](1);
     _without[0] = _identityRule;
-    _without[1] = _maxHoldersRule;
     _hook.setRules(address(_other), _without);
     vm.prank(_minter);
     _other.mint(_alice, 1 ether);
@@ -492,9 +501,8 @@ contract FundIntegration_Registration is FundIntegrationTest {
 
   function test_WhenTheHookDoesNotListTheFundRule_ItCannotBeRegistered() external {
     _deployUnregistered();
-    IComplianceRule[] memory _without = new IComplianceRule[](2);
+    IComplianceRule[] memory _without = new IComplianceRule[](1);
     _without[0] = _identityRule;
-    _without[1] = _maxHoldersRule;
     _hook.setRules(address(_other), _without);
 
     vm.expectRevert(abi.encodeWithSelector(IFund.Fund_RuleNotListed.selector, address(_other), address(_fundRule)));
@@ -608,11 +616,10 @@ contract FundIntegration_Replacement is FundIntegrationTest {
     assertEq(_fund.holderCount(), 2);
 
     // A twin hook: same registry, so the attested codehash matches. Different rule order.
-    IComplianceRule[] memory _reordered = new IComplianceRule[](4);
+    IComplianceRule[] memory _reordered = new IComplianceRule[](3);
     _reordered[0] = _fundRule;
     _reordered[1] = _identityRule;
     _reordered[2] = _restrictionRule;
-    _reordered[3] = _maxHoldersRule;
     ComplianceHook _twin = new ComplianceHook(_registry);
     assertEq(address(_twin).codehash, address(_hook).codehash);
     _twin.setRules(address(_token), _reordered);
@@ -692,10 +699,9 @@ contract FundIntegration_Integrity is FundIntegrationTest {
   /// @dev The hazard the runbook forbids: a rule list without the fund rule is accepted by the hook, and the class is
   ///      un-capped. Nothing in the hook can know; the fund can say so
   function test_WhenAClassDropsTheFundRule_ItIsUncappedAndTheMonitorNamesIt() external {
-    IComplianceRule[] memory _without = new IComplianceRule[](3);
+    IComplianceRule[] memory _without = new IComplianceRule[](2);
     _without[0] = _identityRule;
     _without[1] = _restrictionRule;
-    _without[2] = _maxHoldersRule;
     _hook.setRules(address(_vault4626), _without);
 
     assertFalse(_fund.isClassIntact(address(_vault4626)));

@@ -3,19 +3,18 @@ pragma solidity ^0.8.28;
 
 import {Reasons} from 'interfaces/Errors.sol';
 
-import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
-import {IIdentityRule} from 'interfaces/IIdentityRule.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 
 import {BaseRule} from 'contracts/hooks/BaseRule.sol';
 
 /**
- * @title IdentityRule
- * @notice Requires verified identities on both legs of a movement, with the exemptions in `IIdentityRule`
+ * @title MockIdentityRule
+ * @notice Test rule: requires `from` to be verified in an identity registry, except on MINT and FORCED, and `to`, except
+ *         on BURN. The deployed rule lists use `CredentialRule`; tests use this one where they need a plain identity gate
  */
-contract IdentityRule is BaseRule, IIdentityRule {
-  /// @inheritdoc IIdentityRule
+contract MockIdentityRule is BaseRule {
+  /// @notice The identity registry consulted by the rule
   IIdentityRegistry public immutable IDENTITY;
 
   /**
@@ -25,43 +24,54 @@ contract IdentityRule is BaseRule, IIdentityRule {
   constructor(
     IIdentityRegistry _identity
   ) {
-    if (address(_identity) == address(0)) revert IdentityRule_ZeroAddress();
     IDENTITY = _identity;
   }
 
-  /// @inheritdoc IComplianceRule
+  /**
+   * @notice Rejects an unverified sender (except on MINT and FORCED) or receiver (except on BURN)
+   * @param _ctx The movement
+   * @return _reason `TRANSFER_OK`, `SENDER_NOT_VERIFIED` or `RECEIVER_NOT_VERIFIED`
+   */
   function check(
     IPolicyHook.TransferContext calldata _ctx
   ) external view returns (bytes32 _reason) {
-    // A forced transfer must be able to claw back from a de-verified holder; its receiver is still checked below.
     bool _checksSender = _ctx.kind != IPolicyHook.TransferKind.MINT && _ctx.kind != IPolicyHook.TransferKind.FORCED;
-    if (_checksSender && !IDENTITY.isVerified(_ctx.from)) {
-      return Reasons.SENDER_NOT_VERIFIED;
-    }
+    if (_checksSender && !IDENTITY.isVerified(_ctx.from)) return Reasons.SENDER_NOT_VERIFIED;
     if (_ctx.kind != IPolicyHook.TransferKind.BURN && !IDENTITY.isVerified(_ctx.to)) {
       return Reasons.RECEIVER_NOT_VERIFIED;
     }
     _reason = Reasons.TRANSFER_OK;
   }
 
-  /// @inheritdoc IComplianceRule
+  /**
+   * @notice Whether the account is verified, as a receiver
+   * @param _account The account
+   * @return _reason `TRANSFER_OK` or `RECEIVER_NOT_VERIFIED`
+   */
   function checkReceive(
     address,
     address _account
-  ) external view override(BaseRule, IComplianceRule) returns (bytes32 _reason) {
+  ) external view override returns (bytes32 _reason) {
     _reason = IDENTITY.isVerified(_account) ? Reasons.TRANSFER_OK : Reasons.RECEIVER_NOT_VERIFIED;
   }
 
-  /// @inheritdoc IComplianceRule
+  /**
+   * @notice Whether the account is verified, as a sender
+   * @param _account The account
+   * @return _reason `TRANSFER_OK` or `SENDER_NOT_VERIFIED`
+   */
   function checkSend(
     address,
     address _account
-  ) external view override(BaseRule, IComplianceRule) returns (bytes32 _reason) {
+  ) external view override returns (bytes32 _reason) {
     _reason = IDENTITY.isVerified(_account) ? Reasons.TRANSFER_OK : Reasons.SENDER_NOT_VERIFIED;
   }
 
-  /// @inheritdoc IComplianceRule
+  /**
+   * @notice The rule type
+   * @return _ruleId `keccak256('MockIdentityRule.v1')`
+   */
   function ruleId() external pure returns (bytes32 _ruleId) {
-    _ruleId = keccak256('IdentityRule.v1');
+    _ruleId = keccak256('MockIdentityRule.v1');
   }
 }

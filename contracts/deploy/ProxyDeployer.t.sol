@@ -18,9 +18,9 @@ import {ProxyDeployer} from 'contracts/deploy/ProxyDeployer.sol';
 import {TokenProxy} from 'contracts/deploy/TokenProxy.sol';
 import {PolicyRegistry} from 'contracts/governance/PolicyRegistry.sol';
 import {ComplianceHook} from 'contracts/hooks/ComplianceHook.sol';
-import {IdentityRule} from 'contracts/hooks/rules/IdentityRule.sol';
 import {Helpers} from 'contracts/test/Helpers.sol';
 import {MockIdentityRegistry} from 'contracts/test/MockIdentityRegistry.sol';
+import {MockIdentityRule} from 'contracts/test/MockIdentityRule.sol';
 import {IntentToken} from 'contracts/tokens/IntentToken.sol';
 
 contract ProxyDeployerUnitTest is Helpers {
@@ -344,7 +344,7 @@ contract ProxyDeployerIntegration_RealRegistry is Helpers {
   PolicyRegistry internal _registry;
   ProxyDeployer internal _deployer;
   ComplianceHook internal _hook;
-  IdentityRule internal _rule;
+  MockIdentityRule internal _rule;
   IntentToken internal _impl;
   address internal _admin = makeAddr('admin');
   address internal _guardian = makeAddr('guardian');
@@ -355,7 +355,7 @@ contract ProxyDeployerIntegration_RealRegistry is Helpers {
     _registry = new PolicyRegistry(address(this), address(this));
     _deployer = new ProxyDeployer(address(this), _registry);
     _hook = new ComplianceHook(_registry);
-    _rule = new IdentityRule(IIdentityRegistry(address(new MockIdentityRegistry())));
+    _rule = new MockIdentityRule(IIdentityRegistry(address(new MockIdentityRegistry())));
     _impl = new IntentToken();
     _registry.attest(address(_rule).codehash, IPolicyRegistry.AttestKind.RULE, '');
     _registry.attest(address(_hook).codehash, IPolicyRegistry.AttestKind.HOOK, '');

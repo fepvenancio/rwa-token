@@ -942,23 +942,6 @@ contract DvPExecutorIntegration_Gated is DvPExecutorIntegrationTest {
     assertEq(_token.balanceOf(_buyer), _SHARES);
   }
 
-  function test_WhenTheHolderCapIsFull_OnlyAWholeBalanceSaleToANewHolderIsAdmitted() external {
-    vm.startPrank(_alice);
-    _token.transfer(_treasury, 10 ether);
-    _token.transfer(_carol, 10 ether);
-    vm.stopPrank();
-    assertEq(_maxHoldersRule.holderCount(address(_token)), 3);
-
-    Trade memory _partial = _gatedTrade(_SHARES, _CASH);
-    _assertGatedParity(_partial, Reasons.MAX_HOLDERS, IDvPExecutor.Leg.SECURITIES);
-
-    // Alice sells everything she has: she leaves and the buyer joins, so the count does not grow.
-    Trade memory _whole = _gatedTrade(_token.balanceOf(_alice), _CASH);
-    _assertGatedParity(_whole, Reasons.TRANSFER_OK, IDvPExecutor.Leg.CASH);
-    assertEq(_token.balanceOf(_alice), 0);
-    assertEq(_maxHoldersRule.holderCount(address(_token)), 3);
-  }
-
   /// @dev A trade between an account and itself passes the mirror: both legs are self-transfers, and both settle
   function test_WhenTheSellerIsAlsoTheBuyer_AGatedTradeSettlesToo() external {
     vm.prank(_minter);
