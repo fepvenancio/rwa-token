@@ -110,7 +110,7 @@
     <figcaption><b>Sixteen contracts reviewed, four not.</b> The interfaces were read for their events, errors and reason codes. OpenZeppelin's own code, including the <code>TimelockController</code> used unmodified for the recovery timelock, was read for how these contracts use it, not reviewed itself.</figcaption>
   </figure>
   <div class="prose">
-    <p><b>The code here.</b> This page describes the reviewed contracts at commit <code>2f8c2e7</code>, which includes the fix for finding 1 below in <code>ProxyDeployer</code>. The test names on this page are the ones at that commit.</p>
+    <p><b>The code here.</b> This page describes the reviewed contracts at commit <code>cd1e525</code>, which includes the fix for finding 1 below in <code>ProxyDeployer</code>. <code>GovernanceTimelock</code>'s seven-day floor came after the review and was not part of it. The test names on this page are the ones at that commit.</p>
   </div>
 </section>
 
@@ -118,7 +118,7 @@
   <div class="prose">
     <h2>How the review worked</h2>
     <ol class="steps">
-      <li><div><b>A manual read</b> of every contract in scope, against the project's build brief, the documentation and <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/SECURITY.md"><code>SECURITY.md</code></a>.</div></li>
+      <li><div><b>A manual read</b> of every contract in scope, against the project's build brief, the documentation and <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/SECURITY.md"><code>SECURITY.md</code></a>.</div></li>
       <li><div><b>Four parallel scans</b> of the code against a catalogue of 170 known attack patterns. Each pattern was marked skipped, surviving or borderline, and each survivor was traced from its external entry point through every modifier and guard.</div></li>
       <li><div><b>One adversarial pass</b> that reasoned freely about the code and tried to build a concrete attack.</div></li>
       <li><div><b>The full test suite</b>, <code>npx hardhat test</code> (Solidity unit, fuzz and invariant tests, and Node tests with viem). The Halmos symbolic properties run in CI on every pull request and on pushes to <code>main</code> (<code>npm run test:halmos</code>); they were read for the review, not re-run.</div></li>
@@ -223,7 +223,7 @@
       </tbody>
     </table>
   </div>
-  <p class="small">The registry is fixed when the deployer is created and cannot be changed. The tests are in <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/deploy/ProxyDeployer.t.sol"><code>ProxyDeployer.t.sol</code></a>.</p>
+  <p class="small">The registry is fixed when the deployer is created and cannot be changed. The tests are in <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/deploy/ProxyDeployer.t.sol"><code>ProxyDeployer.t.sol</code></a>.</p>
 </section>
 
 <section id="finding-2">
@@ -231,7 +231,7 @@
     <h2>Finding 2: a batch is all-or-nothing</h2>
     <p><code>executeBatch</code> runs every intent in one transaction. If one fails, the executor reverts with <code>IntentExecutor_BatchItemFailed(index, reason)</code>, carrying the token's own revert data, and nothing in the batch settles. So any signer in the batch can make it fail, by cancelling the nonce with <code>cancelIntent</code> or by moving the balance first. Nobody loses tokens: the cost is the operator's gas and time.</p>
     <p>This is by design. The operator can pre-flight each intent with <code>canExecute</code>, called from the executor's address, submit intents one at a time with <code>execute</code>, or drop the failing intent and send the rest again.</p>
-    <p class="small wrap-any">Pinned by <code>test_WhenOneIntentIsRejected_NothingSettlesAndTheIndexIsReported</code>, <code>test_WhenOneIntentFails_ItRevertsWithItsIndexAndTheTokensReason</code> and <code>test_WhenTheFailingIntentIsDroppedAndResubmitted_TheRestSettles</code> in <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/intents/IntentExecutor.t.sol"><code>IntentExecutor.t.sol</code></a>.</p>
+    <p class="small wrap-any">Pinned by <code>test_WhenOneIntentIsRejected_NothingSettlesAndTheIndexIsReported</code>, <code>test_WhenOneIntentFails_ItRevertsWithItsIndexAndTheTokensReason</code> and <code>test_WhenTheFailingIntentIsDroppedAndResubmitted_TheRestSettles</code> in <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/intents/IntentExecutor.t.sol"><code>IntentExecutor.t.sol</code></a>.</p>
   </div>
 </section>
 
@@ -241,7 +241,7 @@
     <p><code>FundHoldersRule</code> counts an address as an investor as soon as it holds any amount of a class. With no minimum position, one unit is enough. Someone with several addresses that hold an eligible credential can send each of them one unit, fill the fund's cap, and keep new investors out until the agent takes the dust back with a forced transfer.</p>
     <p><code>MinPositionRule</code> closes this where the token has a minimum above 0. It sits second in every deployed rule list, before <code>FundHoldersRule</code>, and refuses with <code>BELOW_MIN_POSITION</code> any transfer, intent or mint that would leave the receiver above zero and below the minimum, and any movement that would leave the sender such a remainder. The rules after it therefore see only real positions. Forced moves, the burner's burns, the token itself and accounts the token's admin exempts are outside the rule, so the agent can still clear dust.</p>
     <p>The deployment sets each token's minimum from a parameter (<code>intentMinPosition</code>, <code>fundMinPosition</code>, <code>asyncFundMinPosition</code>), which is 0 by default. Until a minimum is set the rule is off and the finding stands; the operational answer is then the agent's forced transfer and monitoring of the investor count.</p>
-    <p class="small wrap-any">Pinned by <code>test_WhenADustTransferTargetsAnEmptyAccount_ItIsRejectedWithParity</code>, <code>test_WhenATransferWouldLeaveDustBehind_ItIsRejected</code>, <code>test_WhenAMintWouldLeaveDust_ItIsRejected</code> and <code>test_WhenForced_DustIsAllowed</code> in <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/hooks/rules/RuleSetIntegration.t.sol"><code>RuleSetIntegration.t.sol</code></a>.</p>
+    <p class="small wrap-any">Pinned by <code>test_WhenADustTransferTargetsAnEmptyAccount_ItIsRejectedWithParity</code>, <code>test_WhenATransferWouldLeaveDustBehind_ItIsRejected</code>, <code>test_WhenAMintWouldLeaveDust_ItIsRejected</code> and <code>test_WhenForced_DustIsAllowed</code> in <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/hooks/rules/RuleSetIntegration.t.sol"><code>RuleSetIntegration.t.sol</code></a>.</p>
   </div>
 </section>
 
@@ -262,7 +262,7 @@
 <section id="holds">
   <div class="prose">
     <h2>What holds, and the test that pins it</h2>
-    <p>These are the properties the rest of the documentation depends on. Each was traced in the code and is covered by a test or a Halmos property in the repository at <code>2f8c2e7</code>. The integration tests in <code>RuleSetIntegration.t.sol</code> use a test identity rule in place of <code>CredentialRule</code>.</p>
+    <p>These are the properties the rest of the documentation depends on. Each was traced in the code and is covered by a test or a Halmos property in the repository at <code>cd1e525</code>. The integration tests in <code>RuleSetIntegration.t.sol</code> use a test identity rule in place of <code>CredentialRule</code>.</p>
   </div>
   <div class="table-wrap">
     <table class="tight fixed">
@@ -295,7 +295,7 @@
       </tbody>
     </table>
   </div>
-  <p class="small">Unit and integration tests sit next to each contract (<code>*.t.sol</code>); the Halmos properties are in <a href="https://github.com/fepvenancio/rwa-token/tree/2f8c2e7/contracts/test/halmos"><code>contracts/test/halmos/</code></a> (<code>IntentTokenHalmos.t.sol</code>, <code>MinPositionRuleHalmos.t.sol</code>).</p>
+  <p class="small">Unit and integration tests sit next to each contract (<code>*.t.sol</code>); the Halmos properties are in <a href="https://github.com/fepvenancio/rwa-token/tree/cd1e525/contracts/test/halmos"><code>contracts/test/halmos/</code></a> (<code>IntentTokenHalmos.t.sol</code>, <code>MinPositionRuleHalmos.t.sol</code>).</p>
 </section>
 
 <section id="accepted">
@@ -342,7 +342,7 @@
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>2f8c2e7</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>cd1e525</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

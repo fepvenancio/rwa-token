@@ -374,14 +374,14 @@
   <div class="prose">
     <h2>Source and tests</h2>
     <ul class="plain">
-      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/mixins/IntentSettledUpgradeable.sol"><code>contracts/mixins/IntentSettledUpgradeable.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/interfaces/ITransferIntent.sol"><code>ITransferIntent.sol</code></a></li>
-      <li>Unit tests: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/mixins/IntentSettledUpgradeable.t.sol"><code>IntentSettledUpgradeable.t.sol</code></a> (replay, expiry, wrong chain or token, high-<code>s</code> malleability, ERC-1271 wallets, executor binding, start time, consideration, the check order, cancelling, and <code>canExecute</code> parity)</li>
-      <li>Integration: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/tokens/IntentToken.t.sol"><code>IntentToken.t.sol</code></a> (real registry and hook), <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/test/nodejs/intents.test.ts"><code>test/nodejs/intents.test.ts</code></a> (a real wallet's <code>signTypedData</code> settling through the executor), and the Halmos proofs in <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/test/halmos/IntentTokenHalmos.t.sol"><code>IntentTokenHalmos.t.sol</code></a> (no replay, a cancelled nonce never runs, a bound intent never runs from another caller, a stated payment with no executor never runs)</li>
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/mixins/IntentSettledUpgradeable.sol"><code>contracts/mixins/IntentSettledUpgradeable.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/interfaces/ITransferIntent.sol"><code>ITransferIntent.sol</code></a></li>
+      <li>Unit tests: <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/mixins/IntentSettledUpgradeable.t.sol"><code>IntentSettledUpgradeable.t.sol</code></a> (replay, expiry, wrong chain or token, high-<code>s</code> malleability, ERC-1271 wallets, executor binding, start time, consideration, the check order, cancelling, and <code>canExecute</code> parity)</li>
+      <li>Integration: <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/tokens/IntentToken.t.sol"><code>IntentToken.t.sol</code></a> (real registry and hook), <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/test/nodejs/intents.test.ts"><code>test/nodejs/intents.test.ts</code></a> (a real wallet's <code>signTypedData</code> settling through the executor), and the Halmos proofs in <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/test/halmos/IntentTokenHalmos.t.sol"><code>IntentTokenHalmos.t.sol</code></a> (no replay, a cancelled nonce never runs, a bound intent never runs from another caller, a stated payment with no executor never runs)</li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>2f8c2e7</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>cd1e525</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

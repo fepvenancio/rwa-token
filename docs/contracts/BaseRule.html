@@ -224,13 +224,13 @@
   <div class="prose">
     <h2>Source and tests</h2>
     <ul class="plain">
-      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/hooks/BaseRule.sol"><code>contracts/hooks/BaseRule.sol</code></a>, interfaces <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/interfaces/IComplianceRule.sol"><code>IComplianceRule.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/interfaces/IPolicyHook.sol"><code>IPolicyHook.sol</code></a> (the context and the kinds), reason codes in <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/interfaces/Errors.sol"><code>Errors.sol</code></a></li>
-      <li>Tests: <code>BaseRule</code> has no test file of its own, being abstract; it is tested through the rules built on it. <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/contracts/hooks/rules/FundHoldersRule.t.sol"><code>FundHoldersRule.t.sol</code></a> covers <code>onlyHook</code> (a stranger, an attacker naming the real class, and a fake token naming itself and its hook), and each rule's test file checks its ERC-165 answers and that a fake token can only change its own records.</li>
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/hooks/BaseRule.sol"><code>contracts/hooks/BaseRule.sol</code></a>, interfaces <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/interfaces/IComplianceRule.sol"><code>IComplianceRule.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/interfaces/IPolicyHook.sol"><code>IPolicyHook.sol</code></a> (the context and the kinds), reason codes in <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/interfaces/Errors.sol"><code>Errors.sol</code></a></li>
+      <li>Tests: <code>BaseRule</code> has no test file of its own, being abstract; it is tested through the rules built on it. <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/hooks/rules/FundHoldersRule.t.sol"><code>FundHoldersRule.t.sol</code></a> covers <code>onlyHook</code> (a stranger, an attacker naming the real class, and a fake token naming itself and its hook), and each rule's test file checks its ERC-165 answers and that a fake token can only change its own records.</li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>2f8c2e7</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>cd1e525</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>
