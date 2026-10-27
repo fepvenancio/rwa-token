@@ -167,7 +167,7 @@
 <section id="delay">
   <div class="prose">
     <h2>The delay</h2>
-    <p>The delay is a deployment parameter, <code>minDelay</code> in the <code>Components</code> module, 7 days (604,800 seconds) unless the deployment sets another value. Both timelocks get the same value, so the recovery path is never faster than the normal one.</p>
+    <p>The delay is a deployment parameter, <code>minDelay</code> in the <code>Components</code> module, 7 days (604,800 seconds) unless the deployment sets another value. Both timelocks start with the same value, so at deployment the recovery path is no faster than the normal one. Only the main timelock has a floor.</p>
     <ul class="plain">
       <li><b>What enforces it per operation:</b> OpenZeppelin refuses to schedule anything with a shorter delay than the current minimum, and refuses to execute before the scheduled time.</li>
       <li><b>What checks the 7 days:</b> the main timelock refuses less than seven days, at deployment and in <code>updateDelay</code> (<code>GovernanceTimelock_DelayBelowFloor(delay, floor)</code>). The recovery timelock is OpenZeppelin's own and has no floor; its powers only undo the guardian's. The post-deployment check asserts <code>getMinDelay() ≥ 7 days</code> on both timelocks.</li>
@@ -190,7 +190,7 @@
         <tr><td><code>PolicyRegistry</code></td><td><code>DEFAULT_ADMIN_ROLE</code></td><td>Decide who holds <code>ATTESTER_ROLE</code>. It does not attest.</td></tr>
         <tr><td><code>CredentialRegistry</code></td><td><code>DEFAULT_ADMIN_ROLE</code></td><td>Manage attesters and the guardian, clear a guardian block, revive an attester.</td></tr>
         <tr><td><code>ProxyDeployer</code>, <code>Fund</code></td><td>Ownership</td><td>Place a new token; register a fund class, set the fund's rule, investor cap and exemptions.</td></tr>
-        <tr><td>Itself</td><td><code>DEFAULT_ADMIN_ROLE</code></td><td>Change its own proposers, executors, cancellers and delay.</td></tr>
+        <tr><td>Itself</td><td><code>DEFAULT_ADMIN_ROLE</code></td><td>Change its own proposers, executors and cancellers; and its delay through <code>updateDelay</code>, which only it can call, never below seven days.</td></tr>
       </tbody>
     </table>
   </div>
@@ -229,9 +229,9 @@
   <div class="prose">
     <h2>Why it is built this way</h2>
     <ul class="plain">
-      <li><b>OpenZeppelin, plus two overrides.</b> <code>revokeRole</code> lets <code>RECOVERY_ROLE</code> revoke <code>CANCELLER_ROLE</code> and nothing else, then falls through to OpenZeppelin for every other case. <code>updateDelay</code> runs OpenZeppelin's version, then refuses a delay below seven days, so the token admin powers held here always wait at least that long.</li>
+      <li><b>OpenZeppelin, plus a constructor check and two overrides.</b> The constructor refuses a delay below seven days and grants <code>RECOVERY_ROLE</code>. <code>revokeRole</code> lets <code>RECOVERY_ROLE</code> revoke <code>CANCELLER_ROLE</code> and nothing else, then falls through to OpenZeppelin for every other case. <code>updateDelay</code> runs OpenZeppelin's version, caller check first, then refuses a delay below seven days. So every power held here waits at least seven days.</li>
       <li><b><code>RECOVERY_ROLE</code> is not a role admin.</b> A role admin could also grant the role it administers. Revoking is the smallest power that gets governance past a guardian that cancels its own replacement. Its own admin is <code>DEFAULT_ADMIN_ROLE</code>, the timelock itself, like every other role.</li>
-      <li><b>No cancellers on the recovery timelock.</b> If anyone could cancel there, the guardian problem would only move. The same delay keeps it from being a shortcut around the main timelock.</li>
+      <li><b>No cancellers on the recovery timelock.</b> If anyone could cancel there, the guardian problem would only move. It starts with the same delay, so at deployment it is no shortcut around the main timelock; it has no floor of its own.</li>
       <li><b>The guardian is stop-only.</b> Every power it has takes effect at once and only stops something. Everything that starts or changes something waits for a timelock.</li>
     </ul>
   </div>
@@ -253,14 +253,14 @@
   <div class="prose">
     <h2>Source and tests</h2>
     <ul class="plain">
-      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/1708ddf/contracts/governance/GovernanceTimelock.sol"><code>contracts/governance/GovernanceTimelock.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/1708ddf/contracts/interfaces/IGovernanceTimelock.sol"><code>IGovernanceTimelock.sol</code></a></li>
-      <li>Deployment: <a href="https://github.com/fepvenancio/rwa-token/blob/1708ddf/ignition/modules/Components.ts"><code>ignition/modules/Components.ts</code></a> (both timelocks, the delay) and <a href="https://github.com/fepvenancio/rwa-token/blob/1708ddf/ignition/modules/Activate.ts"><code>Activate.ts</code></a> (the guardian as canceller, <code>RECOVERY_ROLE</code> grants, the hand-over)</li>
-      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/1708ddf/contracts/governance/GovernanceTimelock.t.sol"><code>GovernanceTimelock.t.sol</code></a> (what <code>RECOVERY_ROLE</code> can and cannot do), <a href="https://github.com/fepvenancio/rwa-token/blob/1708ddf/test/nodejs/governance.test.ts"><code>test/nodejs/governance.test.ts</code></a> (upgrades, cancels and recovery through the real timelocks), and <code>assertHandedOver</code> in <a href="https://github.com/fepvenancio/rwa-token/blob/1708ddf/test/nodejs/fixtures.ts"><code>test/nodejs/fixtures.ts</code></a> (the post-deployment check)</li>
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/governance/GovernanceTimelock.sol"><code>contracts/governance/GovernanceTimelock.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/interfaces/IGovernanceTimelock.sol"><code>IGovernanceTimelock.sol</code></a></li>
+      <li>Deployment: <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/ignition/modules/Components.ts"><code>ignition/modules/Components.ts</code></a> (both timelocks, the delay) and <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/ignition/modules/Activate.ts"><code>Activate.ts</code></a> (the guardian as canceller, <code>RECOVERY_ROLE</code> grants, the hand-over)</li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/governance/GovernanceTimelock.t.sol"><code>GovernanceTimelock.t.sol</code></a> (what <code>RECOVERY_ROLE</code> can and cannot do, and the seven-day floor at deployment and in <code>updateDelay</code>), <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/test/nodejs/governance.test.ts"><code>test/nodejs/governance.test.ts</code></a> (upgrades, cancels and recovery through the real timelocks), and <code>assertHandedOver</code> in <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/test/nodejs/fixtures.ts"><code>test/nodejs/fixtures.ts</code></a> (the post-deployment check)</li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>1708ddf</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>cd1e525</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

@@ -386,13 +386,13 @@ assets = shares × (totalAssets + 1) / (totalSupply + 10^6)</pre>
   <div class="prose">
     <h2>Source and tests</h2>
     <ul class="plain">
-      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/1708ddf/contracts/vaults/Gated4626Vault.sol"><code>contracts/vaults/Gated4626Vault.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/1708ddf/contracts/interfaces/IGated4626Vault.sol"><code>IGated4626Vault.sol</code></a>. The vault logic it inherits is OpenZeppelin's <code>ERC4626Upgradeable</code> from <code>@openzeppelin/contracts-upgradeable</code> 5.6.1.</li>
-      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/1708ddf/contracts/vaults/Gated4626Vault.t.sol"><code>Gated4626Vault.t.sol</code></a> (unit tests with a mocked hook, integration tests with the real hook, lockups and a minimum position, the donation attack, and invariants), <a href="https://github.com/fepvenancio/rwa-token/blob/1708ddf/contracts/hooks/rules/CredentialRuleVaults.t.sol"><code>CredentialRuleVaults.t.sol</code></a> (the vault behind the real <code>CredentialRule</code>: a lapsed holder redeems but cannot deposit), <a href="https://github.com/fepvenancio/rwa-token/blob/1708ddf/contracts/fund/FundIntegration.t.sol"><code>FundIntegration.t.sol</code></a> (the vault as a fund class at a full cap), and <a href="https://github.com/fepvenancio/rwa-token/blob/1708ddf/test/nodejs/vaults.test.ts"><code>test/nodejs/vaults.test.ts</code></a> (a deposit and <code>withdraw(maxWithdraw)</code> from TypeScript)</li>
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/vaults/Gated4626Vault.sol"><code>contracts/vaults/Gated4626Vault.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/interfaces/IGated4626Vault.sol"><code>IGated4626Vault.sol</code></a>. The vault logic it inherits is OpenZeppelin's <code>ERC4626Upgradeable</code> from <code>@openzeppelin/contracts-upgradeable</code> 5.6.1.</li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/vaults/Gated4626Vault.t.sol"><code>Gated4626Vault.t.sol</code></a> (unit tests with a mocked hook, integration tests with the real hook, lockups and a minimum position, the donation attack, and invariants), <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/hooks/rules/CredentialRuleVaults.t.sol"><code>CredentialRuleVaults.t.sol</code></a> (the vault behind the real <code>CredentialRule</code>: a lapsed holder redeems but cannot deposit), <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/fund/FundIntegration.t.sol"><code>FundIntegration.t.sol</code></a> (the vault as a fund class at a full cap), and <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/test/nodejs/vaults.test.ts"><code>test/nodejs/vaults.test.ts</code></a> (a deposit and <code>withdraw(maxWithdraw)</code> from TypeScript)</li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>1708ddf</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>cd1e525</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>
