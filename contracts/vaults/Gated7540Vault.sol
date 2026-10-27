@@ -429,13 +429,14 @@ contract Gated7540Vault is
    * @inheritdoc PolicyGatedERC20Upgradeable
    * @dev Out of the vault's own address, only the shares above those booked to pending redemptions can be forced
    *      (`Gated7540Vault_ExceedsSurplus`): shares that reached the vault outside a request. A pending redemption
-   *      leaves the escrow only through fulfilment, reject or `recoverRedeemRequest`, per controller
+   *      leaves the escrow only through fulfilment, reject or `recoverRedeemRequest`, per controller. The role is
+   *      checked first, so a caller without AGENT_ROLE gets the access error whatever it asks
    */
   function forcedTransfer(
     address _from,
     address _to,
     uint256 _amount
-  ) public override returns (bool _result) {
+  ) public override onlyRole(AGENT_ROLE) returns (bool _result) {
     if (_from == address(this)) {
       uint256 _balance = balanceOf(address(this));
       uint256 _booked = _getGated7540Storage().pendingRedeemShares;
@@ -454,7 +455,7 @@ contract Gated7540Vault is
   function setFrozenTokens(
     address _account,
     uint256 _amount
-  ) public override returns (bool _result) {
+  ) public override onlyRole(AGENT_ROLE) returns (bool _result) {
     if (_account == address(this)) revert Gated7540Vault_Unsupported();
     _result = super.setFrozenTokens(_account, _amount);
   }

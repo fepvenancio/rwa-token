@@ -833,6 +833,19 @@ contract Gated7540VaultUnit_Escrow is Gated7540VaultUnitTest {
     assertEq(_vault.balanceOf(address(_vault)), 0);
   }
 
+  /// @dev The escrow rules do not mask the role check: without AGENT_ROLE both calls fail on the role, whatever they ask
+  function test_WhenACallerWithoutTheAgentRoleNamesTheEscrow_TheRoleCheckAnswers() external {
+    _escrowTwo();
+    bytes memory _noRole =
+      abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, _stranger, _vault.AGENT_ROLE());
+    vm.expectRevert(_noRole);
+    vm.prank(_stranger);
+    _vault.forcedTransfer(address(_vault), _quarantine, 81);
+    vm.expectRevert(_noRole);
+    vm.prank(_stranger);
+    _vault.setFrozenTokens(address(_vault), 1);
+  }
+
   /// @dev A forced transfer from any other address is unchanged
   function test_WhenTheAgentForcesFromAHolder_ItWorksAsBefore() external {
     _escrowTwo();
