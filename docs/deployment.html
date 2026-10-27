@@ -138,7 +138,7 @@
 <section id="components">
   <div class="prose">
     <h2>Stage 1: <code>Components</code></h2>
-    <p>Everything that does not depend on a token's address. Its parameters are <code>governance</code>, <code>council</code>, <code>guardian</code> and <code>minDelay</code> (seven days by default). The deployer is account 0.</p>
+    <p>Everything that does not depend on a token's address. Its parameters are <code>governance</code>, <code>council</code>, <code>guardian</code> and <code>minDelay</code> (seven days by default; the main timelock refuses less). The deployer is account 0.</p>
   </div>
   <div class="table-wrap">
     <table class="tight">
@@ -542,14 +542,14 @@
   <div class="prose">
     <h2>Source and tests</h2>
     <ul class="plain">
-      <li>Deployment: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/ignition/modules/Components.ts"><code>ignition/modules/Components.ts</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/ignition/modules/Activate.ts"><code>Activate.ts</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/ignition/modules/roles.ts"><code>roles.ts</code></a> (<code>RULE_ORDER</code>, <code>TOKENS</code>)</li>
-      <li>Council step and post-deploy check: <code>deployUntilActivate</code> and <code>assertHandedOver</code> in <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/test/nodejs/fixtures.ts"><code>test/nodejs/fixtures.ts</code></a>; procedure in the <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/README.md#deployment-runbook">README runbook</a></li>
-      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/test/nodejs/deployment.test.ts"><code>test/nodejs/deployment.test.ts</code></a> (rule order, a twin hook, an unattested rule or implementation stopping <code>Activate</code>), <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/test/nodejs/governance.test.ts"><code>test/nodejs/governance.test.ts</code></a> (upgrades, hook and rule changes, a new token after the hand-over, pause and recovery)</li>
+      <li>Deployment: <a href="https://github.com/fepvenancio/rwa-token/blob/1708ddf/ignition/modules/Components.ts"><code>ignition/modules/Components.ts</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/1708ddf/ignition/modules/Activate.ts"><code>Activate.ts</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/1708ddf/ignition/modules/roles.ts"><code>roles.ts</code></a> (<code>RULE_ORDER</code>, <code>TOKENS</code>)</li>
+      <li>Council step and post-deploy check: <code>deployUntilActivate</code> and <code>assertHandedOver</code> in <a href="https://github.com/fepvenancio/rwa-token/blob/1708ddf/test/nodejs/fixtures.ts"><code>test/nodejs/fixtures.ts</code></a>; procedure in the <a href="https://github.com/fepvenancio/rwa-token/blob/1708ddf/README.md#deployment-runbook">README runbook</a></li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/1708ddf/test/nodejs/deployment.test.ts"><code>test/nodejs/deployment.test.ts</code></a> (rule order, a twin hook, an unattested rule or implementation stopping <code>Activate</code>), <a href="https://github.com/fepvenancio/rwa-token/blob/1708ddf/test/nodejs/governance.test.ts"><code>test/nodejs/governance.test.ts</code></a> (upgrades, hook and rule changes, a new token after the hand-over, pause and recovery)</li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>2f8c2e7</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>1708ddf</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

@@ -177,7 +177,7 @@
         <tr><td>Policy</td><td><code>ComplianceHook</code>, <code>BaseRule</code>, <code>CredentialRule</code>, <code>MinPositionRule</code>, <code>HolderRestrictionRule</code>, <code>SettlementWindowRule</code>, <code>FundHoldersRule</code></td><td>Decides whether a movement may happen. One hook for the whole deployment, an ordered list of at most 16 rules per token. Each rule returns a reason code.</td></tr>
         <tr><td>Identity</td><td><code>CredentialRegistry</code></td><td>Records what attesters (identity providers) say about each address: who vouched for it, its qualifications, its country, until when. <code>CredentialRule</code> reads it.</td></tr>
         <tr><td>Fund</td><td><code>Fund</code></td><td>Groups several tokens as share classes of one fund and counts distinct investors across them. <code>FundHoldersRule</code> enforces the fund's investor cap.</td></tr>
-        <tr><td>Governance</td><td><code>GovernanceTimelock</code>, a second OpenZeppelin <code>TimelockController</code>, <code>PolicyRegistry</code></td><td>Admin powers sit behind a delay (7 days by default in the deployment modules). The security council records which code it reviewed. A guardian can stop things at once and do nothing else.</td></tr>
+        <tr><td>Governance</td><td><code>GovernanceTimelock</code>, a second OpenZeppelin <code>TimelockController</code>, <code>PolicyRegistry</code></td><td>Admin powers sit behind a delay of at least 7 days on the main timelock. The security council records which code it reviewed. A guardian can stop things at once and do nothing else.</td></tr>
         <tr><td>Deployment</td><td><code>ProxyDeployer</code>, <code>TokenProxy</code></td><td>Places each token at an address that depends only on the deployer, the symbol and the implementation, sets it up in the same transaction and checks it came up as reviewed.</td></tr>
         <tr><td>Settlement</td><td><code>IntentExecutor</code>, <code>DvPExecutor</code></td><td>Run transfers that holders signed in advance. <code>DvPExecutor</code> settles shares against cash in one transaction, so neither side moves without the other.</td></tr>
       </tbody>
@@ -350,14 +350,14 @@
   <div class="prose">
     <h2>Source</h2>
     <ul class="plain">
-      <li>Repository: <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/README.md"><code>README.md</code></a> (setup and commands) and <a href="https://github.com/fepvenancio/rwa-token/blob/2f8c2e7/SECURITY.md"><code>SECURITY.md</code></a> (audit preparation)</li>
-      <li>Contracts: <a href="https://github.com/fepvenancio/rwa-token/tree/2f8c2e7/contracts"><code>contracts/</code></a>, interfaces in <a href="https://github.com/fepvenancio/rwa-token/tree/2f8c2e7/contracts/interfaces"><code>contracts/interfaces/</code></a></li>
-      <li>Deployment: <a href="https://github.com/fepvenancio/rwa-token/tree/2f8c2e7/ignition/modules"><code>ignition/modules/</code></a> (<code>Components.ts</code>, <code>Activate.ts</code>, and the rule order in <code>roles.ts</code>)</li>
+      <li>Repository: <a href="https://github.com/fepvenancio/rwa-token/blob/1708ddf/README.md"><code>README.md</code></a> (setup and commands) and <a href="https://github.com/fepvenancio/rwa-token/blob/1708ddf/SECURITY.md"><code>SECURITY.md</code></a> (audit preparation)</li>
+      <li>Contracts: <a href="https://github.com/fepvenancio/rwa-token/tree/1708ddf/contracts"><code>contracts/</code></a>, interfaces in <a href="https://github.com/fepvenancio/rwa-token/tree/1708ddf/contracts/interfaces"><code>contracts/interfaces/</code></a></li>
+      <li>Deployment: <a href="https://github.com/fepvenancio/rwa-token/tree/1708ddf/ignition/modules"><code>ignition/modules/</code></a> (<code>Components.ts</code>, <code>Activate.ts</code>, and the rule order in <code>roles.ts</code>)</li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>2f8c2e7</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>1708ddf</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>
