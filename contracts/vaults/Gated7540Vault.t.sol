@@ -723,97 +723,122 @@ contract Gated7540VaultUnit_FulfillAndClaimRedeem is Gated7540VaultUnitTest {
   }
 }
 
-/// @dev L-2: the vault's internal FORCED move (recovery) releases frozen escrow exactly as `forcedTransfer` does;
-///      a reject is a plain TRANSFER since M-2, so a frozen escrow blocks it
-contract Gated7540VaultUnit_FrozenEscrow is Gated7540VaultUnitTest {
-  function _escrowTwoAndFreeze() internal {
-    _holdShares(_alice, 50);
-    _holdShares(_bob, 30);
-    _requestRedeem(_alice, 50);
-    _requestRedeem(_bob, 30);
-    vm.prank(_agent);
-    _vault.setFrozenTokens(address(_vault), 80);
-  }
-
-  /// @dev M-2: a reject is a plain TRANSFER, so a frozen escrow blocks it ("freeze means freeze"); recovery still works
-  function test_WhenTheEscrowIsFrozen_ARejectIsRefused() external {
-    _escrowTwoAndFreeze();
-    vm.expectRevert(
-      abi.encodeWithSelector(IERC7943Fungible.ERC7943InsufficientUnfrozenBalance.selector, address(_vault), 50, 0)
-    );
-    vm.prank(_fulfiller);
-    _vault.rejectRedeemRequest(_alice);
-    assertEq(_vault.getFrozenTokens(address(_vault)), 80);
-    assertEq(_vault.pendingRedeemRequest(0, _alice), 50);
-  }
-
-  function test_WhenAFrozenEscrowIsRecovered_FrozenFallsToTheRemainingEscrow() external {
-    _escrowTwoAndFreeze();
-    vm.prank(_agent);
-    _vault.recoverRedeemRequest(_alice, _carolRecovery);
-    assertEq(_vault.getFrozenTokens(address(_vault)), 30);
-    assertEq(_vault.balanceOf(address(_vault)), 30);
-  }
-
-  address internal _carolRecovery = makeAddr('carolRecovery');
-}
-
 /// @notice The escrow is one balance at the vault's own address, shared by every controller, while pending redemptions
-///         are booked per controller. Enforcement aimed at the vault's address acts on the pool, not on a controller
-contract Gated7540VaultUnit_PooledEscrow is Gated7540VaultUnitTest {
+///         are booked per controller. A forced transfer out of the vault may take only the surplus above the booked
+///         total, and the vault's own address cannot be frozen, so enforcement on escrowed shares is per controller
+contract Gated7540VaultUnit_Escrow is Gated7540VaultUnitTest {
   address internal _quarantine = makeAddr('quarantine');
 
+  /// @dev Alice books 50 and keeps 10, bob books 30: 80 shares booked, 80 in escrow
   function _escrowTwo() internal {
-    _holdShares(_alice, 50);
+    _holdShares(_alice, 60);
     _holdShares(_bob, 30);
     _requestRedeem(_alice, 50);
     _requestRedeem(_bob, 30);
   }
 
-  /// @dev A forced transfer out of the vault's address leaves 80 shares booked against 50 held: the last pending
-  ///      redemption can then be neither fulfilled, rejected nor recovered, until shares are forced back
-  function test_WhenTheAgentForcesSharesOutOfTheEscrow_TheLastPendingRedemptionCannotSettle() external {
-    _escrowTwo();
-    vm.prank(_agent);
-    _vault.forcedTransfer(address(_vault), _quarantine, 30);
-    assertEq(_vault.balanceOf(address(_vault)), 50);
-    assertEq(_vault.pendingRedeemRequest(0, _alice) + _vault.pendingRedeemRequest(0, _bob), 80);
-
-    _fulfillRedeem(_alice, 50, 50); // the first one still settles from the pool
-
-    bytes memory _short = abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, address(_vault), 0, 30);
-    vm.expectRevert(_short);
-    _fulfillRedeem(_bob, 30, 30);
-    vm.expectRevert(_short);
-    vm.prank(_fulfiller);
-    _vault.rejectRedeemRequest(_bob);
-    vm.expectRevert(_short);
-    vm.prank(_agent);
-    _vault.recoverRedeemRequest(_bob, _quarantine);
-    assertEq(_vault.pendingRedeemRequest(0, _bob), 30);
-
-    // Forcing the shares back is the only way out.
-    vm.prank(_agent);
-    _vault.forcedTransfer(_quarantine, address(_vault), 30);
-    _fulfillRedeem(_bob, 30, 30);
-    assertEq(_vault.pendingRedeemRequest(0, _bob), 0);
+  function _exceedsSurplus(
+    uint256 _requested,
+    uint256 _surplus
+  ) internal pure returns (bytes memory _revertData) {
+    _revertData = abi.encodeWithSelector(IGated7540Vault.Gated7540Vault_ExceedsSurplus.selector, _requested, _surplus);
   }
 
-  /// @dev A frozen amount on the vault's address cannot name a controller. Meant for bob's 30, it blocks whichever
-  ///      fulfilment needs the frozen part: here bob's settles first and alice's, the last, is refused
-  function test_WhenPartOfThePooledEscrowIsFrozen_TheLastFulfilmentIsBlockedWhoeverItIs() external {
+  function test_WhenTheAgentForcesBookedSharesOutOfTheEscrow_ItReverts() external {
     _escrowTwo();
+    vm.expectRevert(_exceedsSurplus(1, 0));
+    vm.prank(_agent);
+    _vault.forcedTransfer(address(_vault), _quarantine, 1);
+    assertEq(_vault.balanceOf(address(_vault)), 80);
+  }
+
+  /// @dev Shares that reach the vault outside a request (here a holder's plain transfer) are surplus: the agent can
+  ///      force them out, and only them
+  function test_WhenSharesReachTheEscrowOutsideARequest_TheAgentCanForceOnlyThoseOut() external {
+    _escrowTwo();
+    vm.prank(_alice);
+    _vault.transfer(address(_vault), 10);
+
+    vm.expectRevert(_exceedsSurplus(11, 10));
+    vm.prank(_agent);
+    _vault.forcedTransfer(address(_vault), _quarantine, 11);
+
+    vm.prank(_agent);
+    _vault.forcedTransfer(address(_vault), _quarantine, 10);
+    assertEq(_vault.balanceOf(_quarantine), 10);
+
+    _fulfillRedeem(_alice, 50, 50);
+    _fulfillRedeem(_bob, 30, 30);
+    assertEq(_vault.balanceOf(address(_vault)), 0);
+  }
+
+  /// @dev The booked total follows every exit from escrow: fulfilment, reject and recovery
+  function test_WhenRedemptionsLeaveTheEscrow_TheBookedTotalFollows() external {
+    _escrowTwo();
+    _fulfillRedeem(_alice, 20, 20); // part of alice's: 60 booked, 60 held
+    vm.prank(_fulfiller);
+    _vault.rejectRedeemRequest(_bob); // 30 booked, 30 held
+    vm.expectRevert(_exceedsSurplus(1, 0));
+    vm.prank(_agent);
+    _vault.forcedTransfer(address(_vault), _quarantine, 1);
+
+    vm.prank(_agent);
+    _vault.recoverRedeemRequest(_alice, _quarantine); // nothing booked, nothing held
+    assertEq(_vault.balanceOf(address(_vault)), 0);
+    vm.prank(_bob);
+    _vault.transfer(address(_vault), 5);
+    vm.prank(_agent);
+    _vault.forcedTransfer(address(_vault), _quarantine, 5);
+    assertEq(_vault.balanceOf(_quarantine), 35);
+  }
+
+  /// @dev Whatever stray amount sits in escrow and whatever the agent tries to force out, booked shares stay, and
+  ///      every booked redemption still settles
+  function testFuzz_TheAgentCanNeverForceBookedSharesOut(
+    uint256 _stray,
+    uint256 _amount
+  ) external {
+    _escrowTwo();
+    _stray = bound(_stray, 0, 10);
+    _amount = bound(_amount, 1, 90);
+    if (_stray > 0) {
+      vm.prank(_alice);
+      _vault.transfer(address(_vault), _stray);
+    }
+    if (_amount > _stray) vm.expectRevert(_exceedsSurplus(_amount, _stray));
+    vm.prank(_agent);
+    _vault.forcedTransfer(address(_vault), _quarantine, _amount);
+
+    _fulfillRedeem(_alice, 50, 50);
+    _fulfillRedeem(_bob, 30, 30);
+    assertEq(_vault.pendingRedeemRequest(0, _alice) + _vault.pendingRedeemRequest(0, _bob), 0);
+  }
+
+  function test_WhenTheAgentFreezesTheEscrow_ItReverts() external {
+    _escrowTwo();
+    vm.expectRevert(IGated7540Vault.Gated7540Vault_Unsupported.selector);
     vm.prank(_agent);
     _vault.setFrozenTokens(address(_vault), 30);
+    assertEq(_vault.getFrozenTokens(address(_vault)), 0);
+  }
 
-    _fulfillRedeem(_bob, 30, 30); // the fulfiller does not hold BURNER_ROLE, so the burn takes unfrozen shares only
-    assertEq(_vault.balanceOf(address(_vault)), 50);
-
-    vm.expectRevert(
-      abi.encodeWithSelector(IERC7943Fungible.ERC7943InsufficientUnfrozenBalance.selector, address(_vault), 50, 20)
-    );
+  /// @dev Holding one controller's redemption is per controller: the agent recovers it, and the others still settle
+  function test_ToHoldOneRedemption_TheAgentRecoversItAndTheOthersStillSettle() external {
+    _escrowTwo();
+    vm.prank(_agent);
+    _vault.recoverRedeemRequest(_bob, _quarantine);
+    assertEq(_vault.balanceOf(_quarantine), 30);
+    assertEq(_vault.pendingRedeemRequest(0, _bob), 0);
     _fulfillRedeem(_alice, 50, 50);
-    assertEq(_vault.pendingRedeemRequest(0, _alice), 50);
+    assertEq(_vault.balanceOf(address(_vault)), 0);
+  }
+
+  /// @dev A forced transfer from any other address is unchanged
+  function test_WhenTheAgentForcesFromAHolder_ItWorksAsBefore() external {
+    _escrowTwo();
+    vm.prank(_agent);
+    _vault.forcedTransfer(_alice, _quarantine, 10);
+    assertEq(_vault.balanceOf(_quarantine), 10);
   }
 }
 

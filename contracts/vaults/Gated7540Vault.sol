@@ -76,6 +76,8 @@ contract Gated7540Vault is
    * @param deposits Deposit requests per controller
    * @param redeems Redemption requests per controller
    * @param operators Operator approvals per controller
+   * @param pendingRedeemShares The shares booked to pending redemptions, every controller together: the part of the
+   *        vault's own balance that a forced transfer may not take
    * @custom:storage-location erc7201:gated.storage.Gated7540Vault
    */
   struct Gated7540Storage {
@@ -84,6 +86,7 @@ contract Gated7540Vault is
     mapping(address _controller => DepositState _state) deposits;
     mapping(address _controller => RedeemState _state) redeems;
     mapping(address _controller => mapping(address _operator => bool _approved)) operators;
+    uint256 pendingRedeemShares;
   }
 
   /// @inheritdoc IGated7540Vault
@@ -174,6 +177,7 @@ contract Gated7540Vault is
     if (_owner != _sender && !$.operators[_owner][_sender]) _spendAllowance(_owner, _sender, _shares);
 
     $.redeems[_controller].pendingShares += _shares;
+    $.pendingRedeemShares += _shares;
     emit RedeemRequest(_controller, _owner, 0, _sender, _shares);
     // Escrow as a TRANSFER through the hook: lockup, frozen, identity and pause all apply.
     _transfer(_owner, address(this), _shares);
@@ -207,11 +211,13 @@ contract Gated7540Vault is
     uint256 _assets
   ) external onlyRole(FULFILLER_ROLE) {
     if (_assets == 0 || _shares == 0) revert Gated7540Vault_ZeroAmount();
-    RedeemState storage _state = _getGated7540Storage().redeems[_controller];
+    Gated7540Storage storage $ = _getGated7540Storage();
+    RedeemState storage _state = $.redeems[_controller];
     if (_state.pendingShares == 0) revert Gated7540Vault_NothingPending();
     if (_shares > _state.pendingShares) revert Gated7540Vault_ExceedsPending(_shares, _state.pendingShares);
 
     _state.pendingShares -= _shares;
+    $.pendingRedeemShares -= _shares;
     _state.claimableShares += _shares;
     _state.claimableAssets += _assets;
     uint256 _price = _recordPrice(_assets, _shares);
@@ -237,10 +243,12 @@ contract Gated7540Vault is
   function rejectRedeemRequest(
     address _controller
   ) external onlyRole(FULFILLER_ROLE) {
-    RedeemState storage _state = _getGated7540Storage().redeems[_controller];
+    Gated7540Storage storage $ = _getGated7540Storage();
+    RedeemState storage _state = $.redeems[_controller];
     uint256 _shares = _state.pendingShares;
     if (_shares == 0) revert Gated7540Vault_NothingPending();
     _state.pendingShares = 0;
+    $.pendingRedeemShares -= _shares;
     emit RedeemRequestRejected(_controller, _shares);
     // A plain TRANSFER back to the controller: cap, pause, lockup and freeze all
     // apply, so a holder cannot route shares past the cap by naming a new controller. If the transfer is blocked,
@@ -285,10 +293,12 @@ contract Gated7540Vault is
     address _to
   ) external onlyRole(AGENT_ROLE) {
     if (_to == address(0)) revert Gated7540Vault_ZeroAddress();
-    RedeemState storage _state = _getGated7540Storage().redeems[_controller];
+    Gated7540Storage storage $ = _getGated7540Storage();
+    RedeemState storage _state = $.redeems[_controller];
     uint256 _shares = _state.pendingShares;
     if (_shares == 0) revert Gated7540Vault_NothingPending();
     _state.pendingShares = 0;
+    $.pendingRedeemShares -= _shares;
     emit RedeemRequestRecovered(_controller, _to, _shares, _msgSender());
     // Internal FORCED move: an enforcement action; identity still applies to the recovery account. Releases any frozen
     // escrow it takes first, as forcedTransfer does.
@@ -413,6 +423,40 @@ contract Gated7540Vault is
     uint256
   ) external pure override {
     revert Gated7540Vault_Unsupported();
+  }
+
+  /**
+   * @inheritdoc PolicyGatedERC20Upgradeable
+   * @dev Out of the vault's own address, only the shares above those booked to pending redemptions can be forced
+   *      (`Gated7540Vault_ExceedsSurplus`): shares that reached the vault outside a request. A pending redemption
+   *      leaves the escrow only through fulfilment, reject or `recoverRedeemRequest`, per controller
+   */
+  function forcedTransfer(
+    address _from,
+    address _to,
+    uint256 _amount
+  ) public override returns (bool _result) {
+    if (_from == address(this)) {
+      uint256 _balance = balanceOf(address(this));
+      uint256 _booked = _getGated7540Storage().pendingRedeemShares;
+      uint256 _surplus = _balance > _booked ? _balance - _booked : 0;
+      if (_amount > _surplus) revert Gated7540Vault_ExceedsSurplus(_amount, _surplus);
+    }
+    _result = super.forcedTransfer(_from, _to, _amount);
+  }
+
+  /**
+   * @inheritdoc PolicyGatedERC20Upgradeable
+   * @dev Reverts for the vault's own address: the escrow is shared by every controller, so a frozen amount there
+   *      could not name whose redemption it holds. One controller's redemption is held by not fulfilling it, or moved
+   *      with `recoverRedeemRequest`
+   */
+  function setFrozenTokens(
+    address _account,
+    uint256 _amount
+  ) public override returns (bool _result) {
+    if (_account == address(this)) revert Gated7540Vault_Unsupported();
+    _result = super.setFrozenTokens(_account, _amount);
   }
 
   /**

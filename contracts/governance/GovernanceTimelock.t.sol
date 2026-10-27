@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {IAccessControl} from '@openzeppelin/contracts/access/IAccessControl.sol';
+import {TimelockController} from '@openzeppelin/contracts/governance/TimelockController.sol';
 import {Test} from 'forge-std/Test.sol';
 
 import {IGovernanceTimelock} from 'interfaces/IGovernanceTimelock.sol';
@@ -110,20 +111,79 @@ contract GovernanceTimelockUnitTest is Test {
     assertFalse(_timelock.isOperationPending(_id));
   }
 
-  /// @dev No contract enforces a floor on the delay: the constructor takes any value, and an operation of the timelock
-  ///      on itself, after the current delay, can set any lower one
-  function test_WhenGovernanceLowersTheDelay_NothingStopsItBelowSevenDays() external {
+  function _belowFloor(
+    uint256 _delay
+  ) internal pure returns (bytes memory _revertData) {
+    _revertData =
+      abi.encodeWithSelector(IGovernanceTimelock.GovernanceTimelock_DelayBelowFloor.selector, _delay, 7 days);
+  }
+
+  /// @dev Schedules `updateDelay(_delay)`, the only way it can run (an operation of the timelock on itself), and
+  ///      waits out the delay
+  function _scheduleUpdateDelay(
+    uint256 _delay
+  ) internal {
+    uint256 _wait = _timelock.getMinDelay();
+    vm.prank(_governance);
+    _timelock.schedule(
+      address(_timelock), 0, abi.encodeCall(_timelock.updateDelay, (_delay)), bytes32(0), bytes32(_delay), _wait
+    );
+    vm.warp(block.timestamp + _wait);
+  }
+
+  function _executeUpdateDelay(
+    uint256 _delay
+  ) internal {
+    vm.prank(_governance);
+    _timelock.execute(
+      address(_timelock), 0, abi.encodeCall(_timelock.updateDelay, (_delay)), bytes32(0), bytes32(_delay)
+    );
+  }
+
+  function test_WhenDeployedWithADelayBelowSevenDays_ItReverts() external {
     address[] memory _members = new address[](1);
     _members[0] = _governance;
-    assertEq(new GovernanceTimelock(0, _members, _members, address(0), _recovery).getMinDelay(), 0);
+    vm.expectRevert(_belowFloor(7 days - 1));
+    new GovernanceTimelock(7 days - 1, _members, _members, address(0), _recovery);
+  }
 
-    bytes memory _call = abi.encodeCall(_timelock.updateDelay, (1 hours));
-    vm.prank(_governance);
-    _timelock.schedule(address(_timelock), 0, _call, bytes32(0), bytes32(0), _DELAY);
-    vm.warp(block.timestamp + _DELAY);
-    vm.prank(_governance);
-    _timelock.execute(address(_timelock), 0, _call, bytes32(0), bytes32(0));
-    assertEq(_timelock.getMinDelay(), 1 hours);
+  function test_WhenGovernanceLowersTheDelayBelowSevenDays_TheOperationReverts() external {
+    _scheduleUpdateDelay(1 hours);
+    vm.expectRevert(_belowFloor(1 hours));
+    _executeUpdateDelay(1 hours);
+    assertEq(_timelock.getMinDelay(), _DELAY);
+  }
+
+  /// @dev The floor itself is allowed: exactly seven days
+  function test_WhenGovernanceSetsTheDelayToExactlySevenDays_ItApplies() external {
+    _scheduleUpdateDelay(8 days);
+    _executeUpdateDelay(8 days);
+    _scheduleUpdateDelay(7 days); // waits out the new 8-day delay
+    _executeUpdateDelay(7 days);
+    assertEq(_timelock.getMinDelay(), 7 days);
+  }
+
+  function test_WhenGovernanceRaisesTheDelay_ItApplies() external {
+    _scheduleUpdateDelay(8 days);
+    _executeUpdateDelay(8 days);
+    assertEq(_timelock.getMinDelay(), 8 days);
+  }
+
+  /// @dev The floor does not mask OpenZeppelin's own check: only the timelock itself may call updateDelay
+  function test_WhenAStrangerCallsUpdateDelay_ItRevertsAsUnauthorized() external {
+    vm.expectRevert(abi.encodeWithSelector(TimelockController.TimelockUnauthorizedCaller.selector, _stranger));
+    vm.prank(_stranger);
+    _timelock.updateDelay(1 hours);
+  }
+
+  function testFuzz_TheDelayNeverDropsBelowSevenDays(
+    uint256 _delay
+  ) external {
+    _delay = bound(_delay, 0, 30 days);
+    _scheduleUpdateDelay(_delay);
+    if (_delay < 7 days) vm.expectRevert(_belowFloor(_delay));
+    _executeUpdateDelay(_delay);
+    assertGe(_timelock.getMinDelay(), 7 days);
   }
 
   /// @dev RECOVERY_ROLE revokes CANCELLER_ROLE from any holder, governance's own included: OpenZeppelin makes every

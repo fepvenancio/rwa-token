@@ -2645,7 +2645,7 @@ The owner asked for the docs to be rebuilt as HTML for product people and curiou
 
 Built by seven writing agents from a shared template and stylesheet (`docs/assets/site.css`: one palette, every text colour at least 4.5:1 on every background in both themes), then checked claim by claim by seven separate agents against the code; every reported mismatch was confirmed in the code before it was fixed. A consistency check confirms every page uses the same stylesheet, fonts, navigation and footer, has no inline styles or colour literals, and has no broken links or anchors.
 
-## Five behaviours found while writing the docs: confirmed, with proposals (2026-10-27, nothing changed)
+## Five behaviours found while writing the docs: confirmed, with proposals (2026-10-27; B1, B2 and B4 built)
 
 The owner asked to confirm each behaviour with a test and to propose fixes before changing any code. Each test below passes today: it pins the behaviour as the code has it. No contract is changed.
 
@@ -2696,6 +2696,15 @@ The owner asked to confirm each behaviour with a test and to propose fixes befor
 - Docs: the 7540 vault, base, roles, money, governance timelock and deployment pages, README's delay note, SECURITY.md section 3.
 - Verification: both runners, lint, Slither, Aderyn, `verify:reproducible`, `validate:upgrades` (the base and vault change bytecode).
 
+### Result (2026-10-27)
+
+The owner accepted B1, B2 and B4 and kept B3 and B5 unchanged. Before the code, B1's option A turned out to strand any shares that reach the vault outside a request (a holder's plain transfer, a claim or recovery naming the vault), which only the agent's forced transfer could rescue. The owner chose instead to protect only what is booked:
+
+- `Gated7540Vault` keeps `pendingRedeemShares`, the shares booked to pending redemptions across every controller, raised by `requestRedeem` and lowered by fulfilment, reject and recovery. `forcedTransfer` out of the vault's own address may take only the surplus above it (`Gated7540Vault_ExceedsSurplus(requested, surplus)`, a new error in `IGated7540Vault`). `setFrozenTokens` on the vault's address reverts with `Gated7540Vault_Unsupported()`.
+- The base's `forcedTransfer` and `setFrozenTokens` are `public virtual` (they were `external`), so the vault can override them and call the base; solhint's ordering moved them after the external functions.
+- `GovernanceTimelock` refuses a delay below 7 days in its constructor and in `updateDelay` (`GovernanceTimelock_DelayBelowFloor(delay, floor)`, a new error in `IGovernanceTimelock`), after OpenZeppelin's caller check. The interface ids do not change.
+- Tests first, red run 8 failing. The two `FrozenEscrow` tests and the two behaviour-pinning escrow tests are replaced by `Gated7540VaultUnit_Escrow` (7 tests including a fuzz); the delay test by five floor tests and a fuzz. Mutants 12 of 12 (one survived first, a test was added), recorded in `SECURITY.md` section 5.
+- `npx hardhat test` 1145 passing; lint, fmt, the type check, Slither (0), Aderyn (0), `verify:reproducible` and `validate:upgrades` pass. README, SECURITY section 3 and the brief describe the new rules; the HTML pages follow in their own change, pinned to the merged commit.
+
 ## Open questions for the owner
 1. Credential layer: decisions 11 to 17 in its section came up while planning and still wait for your confirmation (11: the recovery timelock can also reverse a guardian block; 12: the rule for one attester overwriting another; 14: the demo deployment uses `CredentialRule`; 17: the gas stop line). Decisions 8 and 9 (fast upgrade path, ERC-7943) are open.
-2. The five behaviours found while writing the HTML pages are confirmed by tests, with proposals, in "Five behaviours found while writing the docs" above: B1 and B2 (the 7540 escrow) and B4 (the delay floor) recommend a change; B3 and B5 recommend none. Nothing is changed until you decide.
