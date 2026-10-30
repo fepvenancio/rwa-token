@@ -29,6 +29,8 @@ const ATTESTED = {
   IntentToken: "tokens",
   Gated4626Vault: "vaults",
   Gated7540Vault: "vaults",
+  Portfolio: "portfolio",
+  ERC4626Adapter: "portfolio",
 } as const;
 const DEPLOYED = {
   PolicyRegistry: "governance",

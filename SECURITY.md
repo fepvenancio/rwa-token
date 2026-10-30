@@ -38,7 +38,8 @@ In scope, all under `contracts/` (`.t.sol` files and `contracts/test/` are test 
 | Governance | `governance/PolicyRegistry`, `governance/GovernanceTimelock` (the main timelock: OZ `TimelockController` plus a revoke-`CANCELLER_ROLE`-only `RECOVERY_ROLE`) |
 | Settlement | `intents/IntentExecutor`, `intents/DvPExecutor` (neither is a proxy, and neither is attested: each token authorises an executor by granting it `EXECUTOR_ROLE`) |
 | Deployment | `deploy/ProxyDeployer`, `deploy/TokenProxy` |
-| Interfaces | `interfaces/*` (frozen; ERC-165 ids, event topics and reason codes pinned by `contracts/test/InterfaceFreeze.t.sol`; the owner has reopened them on instruction, most recently 2026-10-23 to 24 for the review items and 2026-10-27 for `IProxyDeployer`, and they are frozen again) |
+| Portfolio | `portfolio/Portfolio`, `portfolio/ERC4626Adapter` (immutable, attested as `PORTFOLIO` and `ADAPTER`; no vault plugs one in yet) |
+| Interfaces | `interfaces/*` (frozen; ERC-165 ids, event topics and reason codes pinned by `contracts/test/InterfaceFreeze.t.sol`; the owner has reopened them on instruction, most recently 2026-10-23 to 24 for the review items, 2026-10-27 for `IProxyDeployer` and 2026-10-30 for the portfolio lego and a renamed `Quals` bit, and they are frozen again) |
 
 Also in scope: `ignition/modules/{Core,CoreHandover,Fund,Product,FundOpen,roles}.ts` and `ignition/profiles.ts`, which carry
 the deployment order, role grants, the hand-over to the timelock and each product's rule list.
@@ -226,6 +227,19 @@ Further limits recorded during review:
   requires.
 - **solc prints 8 "unreachable code" warnings inside OZ's `ERC4626Upgradeable`.** The code after the 7540 vault's
   always-reverting `preview*` overrides is unreachable.
+- **What a `Portfolio` trusts.** It sends money only to adapters attested as `ADAPTER` for this portfolio and this asset,
+  and each risk's caps bound how much. An adapter's codehash covers its target's address and not the target's behaviour,
+  so a bad target can lose what was allocated to it. The council reads the target before attesting, and that review is the
+  only control on the target itself. The portfolio gives its vault an unlimited allowance at construction, so whoever can
+  upgrade the vault (the timelock) could take the idle money; the delay makes that public. Pinned by
+  `Portfolio.t.sol::test_ItStoresItsSettingsAndLetsTheVaultPullTheIdleMoney`.
+- **A portfolio's caps are checked on allocate only.** An exit, or a gain in a target, can leave a risk above its relative
+  cap, and lowering a cap leaves what is already allocated where it is. Pinned by
+  `Portfolio.t.sol::test_ItWorksAboveALoweredCap`.
+- **`pricedValue()` can read low and can revert.** An adapter that cannot be read counts as zero, so a reader must check
+  `priceFresh()` as well. In the middle of a move the money is in neither place or in both, so `pricedValue()` reverts
+  then, which stops anything pricing against a half-finished transfer. Pinned by
+  `Portfolio.t.sol::test_NothingCanReadThePriceDuringAnAllocation` and `test_NothingCanReadThePriceDuringADeallocation`.
 
 ## 4. Static-analysis suppressions
 
@@ -254,6 +268,9 @@ Inline suppressions (each carries its reason on the line above, in the source):
 | `Gated7540Vault` `initialize` | `reentrancy-benign`, `reentrancy-events` | The initialiser installs the token's rules on the shared hook, then writes the vault's own state (custody, last price). The hook is attested, cannot re-enter `initialize`, and never reads that state; only the admin and the guardian hold a role yet |
 | `SettlementWindowRule` | `weak-prng` | Calendar arithmetic on the timestamp, not randomness |
 | `ComplianceHook` `_setRules` | `uninitialized-local` | The after-mask starts at zero by design |
+| `Portfolio` `_allocate`, `_deallocate` | `reentrancy-benign`, `reentrancy-events`, `reentrancy-balance` | The guard is held, the adapter is attested, and what the move changed can only be measured after the call: the balance read before it is the point of the comparison. A reentrant target is refused (`test_AReentrantTargetCannotAllocateAgainMidCall`) |
+| `Portfolio` `allocate`, `_deallocate`, `removeAdapter` | `incorrect-equality` | A zero test on a caller's argument, and the definition of an empty adapter. A donation only delays a removal until the allocator brings it back |
+| `Portfolio` `_takeOff`, `ERC4626Adapter` `allocate`, `deallocate` | `unused-return` | The list removal is false only if the adapter was not there, which the caller has checked; the portfolio measures what a target move changed |
 | `Gated7540Vault` | `missing-inheritance` | `IERC7575` re-declares inherited ERC-4626 functions; conformance pinned by ERC-165 id `0x2f0a18c5` |
 | `Gated7540Vault` `requestDeposit` | `arbitrary-send-erc20` | `owner` is the caller or an approved operator. Fuzzed: a non-operator with a victim owner reverts and moves nothing. Removing the guard fails 2 tests |
 | `ProxyDeployer` `deploy` | `unused-return` | `initialize` returns nothing; success is checked by the post-init assertions |
@@ -285,11 +302,11 @@ Inline acknowledgements (reason on the line above each `aderyn-ignore`):
 | `abi-encode-packed-hash-collision` (high) | `ProxyDeployer._initCodeHash` | False positive: only the second operand varies; the first is fixed creation code | Fuzzed `predict` formula test; off-chain CREATE2 test |
 | `storage-array-memory-edit` (high) | `SettlementWindowRule.check`, `isOpen` | False positive: a read-only copy of a storage struct into memory | Window tests |
 | `unused-state-variable` | `GatedToken` and `Gated7540Vault` ERC-7201 locations | False positive: read in assembly | `GatedTokenIntegrationTest::test_TheErc7201LocationHoldsTheDecimals` and `Gated7540VaultUnit_Storage`: the formula equals the constant and the slot holds the decimals, or custody and `lastPrice` |
-| `unchecked-return` | `_grantRole` in constructors and initialisers (`CredentialRegistry` included), and `_revokeRole` in the `revokeRole` overrides of the base, `GovernanceTimelock`, both executors and `CredentialRegistry` (it returns false only if the role was not held, and either way the account ends up without it); `Address.functionCall` in `ProxyDeployer`; `_executeLeg` in `DvPExecutor` | `_grantRole` returns false only if the role is already held; `initialize` returns nothing; the cash leg's digest is not needed and the securities leg's digest was read before the call | Role, deploy and DvP tests |
-| `costly-loop`, `require-revert-in-loop` | `ComplianceHook._setRules`, `IntentExecutor.executeBatch` | By design: at most 16 rules, and invalid rules must fail closed; batches are atomic | Hook and batch tests |
+| `unchecked-return` | `EnumerableSet.remove` in `Portfolio`; `deposit` and `withdraw` in `ERC4626Adapter`; `_grantRole` in constructors and initialisers (`CredentialRegistry` included), and `_revokeRole` in the `revokeRole` overrides of the base, `GovernanceTimelock`, both executors and `CredentialRegistry` (it returns false only if the role was not held, and either way the account ends up without it); `Address.functionCall` in `ProxyDeployer`; `_executeLeg` in `DvPExecutor` | `_grantRole` returns false only if the role is already held; `initialize` returns nothing; the cash leg's digest is not needed and the securities leg's digest was read before the call | Role, deploy and DvP tests |
+| `costly-loop`, `require-revert-in-loop` | `ComplianceHook._setRules`, `IntentExecutor.executeBatch`, `Portfolio._addAllocation`, `_subtractAllocation` | By design: at most 16 rules, and invalid rules must fail closed; batches are atomic; an adapter names only a few risks, and a move past any cap fails whole | Hook, batch and portfolio tests |
 | `literal-instead-of-constant` | calendar arithmetic; `10 ** decimals()` | Calendar constants; `decimals()` is read at runtime | Window and vault tests |
 | `empty-block`, `modifier-used-only-once` | `BaseRule.after_`, `__IntentSettled_init`, `Fund.onlyRule`, the two empty `catch` blocks of `Fund._listsInstalledRule` | By design; in the fund views a token or a hook that fails is a broken class, and the answer is `false` | `FundUnit_ClassIntegrity` |
-| `unsafe-casting` | `ComplianceHook._setRules`, `HolderRestrictionRule.setLockup` | Each narrowing follows an explicit bound: at most 16 rules and a 16-bit mask; a range check against 64 bits | Hook tests; `HolderRestrictionRuleUnit_SetLockup` |
+| `unsafe-casting` | `ComplianceHook._setRules`, `HolderRestrictionRule.setLockup`, `Portfolio._addAllocation`, `_subtractAllocation` | Each narrowing follows an explicit bound: at most 16 rules and a 16-bit mask; a range check against 64 bits; an allocation at most the 120-bit cap | Hook tests; `HolderRestrictionRuleUnit_SetLockup`; `testFuzz_ARiskAlwaysEqualsTheSumOfItsAdapters` |
 | `unused-error` | `IERC7943Fungible` | The standard's `ERC7943CannotSend`, `ERC7943CannotReceive` and `ERC7943CannotTransfer` are part of the interface the token inherits; the token reverts with `PolicyGated_TransferRejected` and `ERC7943InsufficientUnfrozenBalance` instead | n/a |
 
 solhint (Wonderland config, `--max-warnings 0`):
@@ -317,6 +334,7 @@ Each row is a bug deliberately planted, the tests that caught it, then the file 
 | Phase 6 (TS) | executor hand-over skipped; `canExecute` skips the hook; NAV price rounds up; deadline exclusive | 46 / 8 / 1 / 1 failing |
 | `ProxyDeployer` | no hook-binding check; no salt check | unit test + Ignition tamper test; unit test |
 | `ProxyDeployer` implementation check (2026-10-27, audit finding 1) | the check removed; the check moved after CREATE2; the wrong kind asked (`HOOK`); the check moved before the salt check; the constructor not storing its registry; the zero-registry check removed; the token-registry check removed; `Components` passing the timelock as the registry | 8 of 8. The seven contract bugs fail 7, 1, 5, 1, 25, 1 and 1 of the 30 `ProxyDeployer.t.sol` tests. `deployment.test.ts` fails 1, 9, 10 and 10 of its 10 tests for the check removed, the wrong kind, the registry not stored and the timelock in `Components`. The check moved after CREATE2 is caught only by the implementation with no code: a revert undoes the proxy either way, so the order shows only in the error a bad implementation gets |
+| Portfolio lego (2026-10-30) | Every role gate, on all nine entry points; each `addAdapter` refusal and the attested kind; each `removeAdapter` and `writeOffAdapter` condition, and what taking an adapter off must clear; the guardian raising either cap; both caps removed or off by one; a stale price before and during a call; a priced move counting what was sent rather than the change in value; the floor at zero; the reentrancy guard and the mid-move price guard; each `raise` and `migrateTo` condition; what `pricedValue`, `priceFresh` and `liquidAssets` count; the adapter's gates, its receiver, its leftover allowance, its risk ids and a failed read counted as fresh | 78 of 78 caught, by `Portfolio.t.sol` and `ERC4626Adapter.t.sol` |
 | Core and products (2026-10-30) | The timelock floor at 7 days, 2 hours or zero; `GatedToken` reporting another template, its implementation left initialisable, ignoring the decimals it is given, reporting 18 whatever it was given, or keeping them at another location; the default delay at 7 days or 23 hours; `Core` always deploying the window rule; `ProxyDeployer` left with the deployer or moved to the timelock; the deployer keeping the timelock admin; the guardian not made a canceller; the operations account keeping a product's admin, or the admin going elsewhere; UPGRADER to the agent; RECOVERY skipped; a product's stated policy ignored, or its decimals ignored, or a plain token defaulting to 6; MINTER not granted on a plain token; the window rule allowed on any template; a fund rule without a fund accepted, or a fund without the fund rule; every fund opening with every class; a fund starting with the deployer; opening without installing the rule or setting the cap; a fund left with the operations account; classes opening in reverse order | 32 of 32 caught, by `GatedToken.t.sol`, `GovernanceTimelock.t.sol`, `products.test.ts` and `deployment.test.ts` |
 | Ignition `Activate` | UPGRADER to an ops account; deployer keeps timelock admin; deployer keeps `ProxyDeployer` ownership | 54 / 54 / 55 failing |
 | upgrades-core | upgrade-unsafe state initialiser | `validate` FAILED |

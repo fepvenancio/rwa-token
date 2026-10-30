@@ -19,12 +19,16 @@ interface IPolicyRegistry {
    * @param HOOK A policy hook, installable with `IPolicyGated.setPolicyHook`
    * @param RULE A compliance rule, installable in a compliance hook
    * @param IMPLEMENTATION A token implementation, installable with a UUPS upgrade
+   * @param PORTFOLIO A portfolio, which a vault can plug in and another portfolio can migrate to
+   * @param ADAPTER An adapter, installable in a portfolio
    */
   enum AttestKind {
     NONE,
     HOOK,
     RULE,
-    IMPLEMENTATION
+    IMPLEMENTATION,
+    PORTFOLIO,
+    ADAPTER
   }
 
   /*///////////////////////////////////////////////////////////////

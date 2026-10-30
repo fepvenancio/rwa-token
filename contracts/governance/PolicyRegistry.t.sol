@@ -34,7 +34,7 @@ contract PolicyRegistryUnitTest is Helpers {
   function _kindFrom(
     uint8 _seed
   ) internal pure returns (IPolicyRegistry.AttestKind _attestKind) {
-    _attestKind = IPolicyRegistry.AttestKind(bound(_seed, 1, 3));
+    _attestKind = IPolicyRegistry.AttestKind(bound(_seed, 1, 5));
   }
 }
 

@@ -5,12 +5,14 @@ import {Test} from 'forge-std/Test.sol';
 
 import {Reasons} from 'interfaces/Errors.sol';
 
+import {IAdapter} from 'interfaces/IAdapter.sol';
 import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {ICredentialRegistry} from 'interfaces/ICredentialRegistry.sol';
 import {ICredentialRule} from 'interfaces/ICredentialRule.sol';
 import {IDvPExecutor} from 'interfaces/IDvPExecutor.sol';
 import {IERC3009} from 'interfaces/IERC3009.sol';
+import {IERC4626Adapter} from 'interfaces/IERC4626Adapter.sol';
 import {IERC7540Deposit} from 'interfaces/IERC7540Deposit.sol';
 import {IERC7540Operator} from 'interfaces/IERC7540Operator.sol';
 import {IERC7540Redeem} from 'interfaces/IERC7540Redeem.sol';
@@ -29,6 +31,7 @@ import {IMinPositionRule} from 'interfaces/IMinPositionRule.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
+import {IPortfolio} from 'interfaces/IPortfolio.sol';
 import {IProxyDeployer} from 'interfaces/IProxyDeployer.sol';
 import {ISettlementWindowRule} from 'interfaces/ISettlementWindowRule.sol';
 import {ITemplated} from 'interfaces/ITemplated.sol';
@@ -40,6 +43,32 @@ import {Quals} from 'interfaces/Quals.sol';
  *         A failure here means the frozen ABI changed: revert the change, or get an explicit instruction and re-pin
  */
 contract InterfaceFreezeTest is Test {
+  /// @dev The portfolio lego, added on owner instruction (2026-10-30). `AttestKind` gained two values, appended so the
+  ///      numbers already in use keep their meaning; a record written under one number must not read as another
+  function test_WhenThePortfolioLegoCompiles_ItsIdsTopicsAndKindsArePinned() external pure {
+    assertEq(type(IAdapter).interfaceId, bytes4(0x4ffb2bfe), 'IAdapter');
+    assertEq(type(IERC4626Adapter).interfaceId, bytes4(0x3398a02a), 'IERC4626Adapter');
+    assertEq(type(IPortfolio).interfaceId, bytes4(0xc7ee04eb), 'IPortfolio');
+
+    assertEq(IPortfolio.AdapterAdded.selector, 0xcf9c2c7f9adbb156bd76affb04df84595f8f5e69cab2e61221b05b05a902fa26);
+    assertEq(IPortfolio.AdapterRemoved.selector, 0xdf980d21d8c7bb34800e668dbe003299093bac8e693614151d3c57f73f98a93d);
+    assertEq(IPortfolio.AdapterWrittenOff.selector, 0xe27ee757ca32ebdf0e08bbbaa45aaf138381e27c392d6af3329c73ae62ae3655);
+    assertEq(IPortfolio.Allocated.selector, 0x9af9811abc6f1b9cf2234f8ed76daa9a577d4ffbbe0af66ec4b748cde6f4c39f);
+    assertEq(IPortfolio.CapsSet.selector, 0x81a8f97824c3f9462a46c6e730749c119a5bac832940db5e6a9b64380f38e8c8);
+    assertEq(IPortfolio.Deallocated.selector, 0x931c6bc7a1a0f8481f36670fac9821728b3288a15385b293eada3cb081e75245);
+    assertEq(
+      IPortfolio.LiquidityAdapterSet.selector, 0x2f142f81afc2d991c70116388a8896ce09113d194ab05771f16818eeefa79205
+    );
+    assertEq(IPortfolio.Migrated.selector, 0x8b80bd19aea7b735bc6d75db8d6adbe18b28c30d62b3555245eb67b2340caedc);
+
+    assertEq(uint8(IPolicyRegistry.AttestKind.NONE), 0);
+    assertEq(uint8(IPolicyRegistry.AttestKind.HOOK), 1);
+    assertEq(uint8(IPolicyRegistry.AttestKind.RULE), 2);
+    assertEq(uint8(IPolicyRegistry.AttestKind.IMPLEMENTATION), 3);
+    assertEq(uint8(IPolicyRegistry.AttestKind.PORTFOLIO), 4);
+    assertEq(uint8(IPolicyRegistry.AttestKind.ADAPTER), 5);
+  }
+
   function test_WhenInterfacesCompile_TheirErc165IdsArePinned() external pure {
     // Re-pinned in S2 of the review items (2026-10-24) on owner instruction (RD3): `IPolicyGated` inherits the ERC-7943
     // Final interface, so `forcedTransfer`, `setFrozenTokens`, `getFrozenTokens`, `canSend`, `canReceive` and the

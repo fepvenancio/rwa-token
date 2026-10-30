@@ -2945,9 +2945,22 @@ Immutable, one per vault. Holds idle money. It asks the vault for roles live. Im
 - **Write-off (P10).** `writeOffAdapter` (timelock) takes an adapter off the list and clears its allocation. A priced adapter qualifies only while it is not fresh, and the loss counts from the next accrual. A reported adapter qualifies at any time, which is how a custodian's loss clears the cap it left behind; its value was always the report, so the NAV does not move. The adapter keeps what it holds. Adding it back brings the value in under the normal rules: at once through the next report or read on a 7540, under the rate limit on a 4626.
 - **Replacing a `Portfolio`.** `migrateTo(successor)` needs no adapter installed. It moves the idle money. A timelock batch runs it with the plug change. A reported adapter's `PORTFOLIO` is immutable, so money still at a custodian is returned to the successor off-chain and appears in the next report.
 
+**Result (2026-10-30), awaiting review.** Built standing alone: `contracts/portfolio/Portfolio.sol` (11,033 bytes) and `ERC4626Adapter.sol` (2,146 bytes), with `IPortfolio`, `IAdapter` and `IERC4626Adapter`. No vault plugs one in yet, so no vault behaves differently. The tests run against a real vault's roles, a real registry and a real ERC-4626 target. What the build settled:
+
+- `deallocate(assets)` names no receiver: an adapter pays only its own portfolio, so the path cannot be pointed elsewhere.
+- The registry is read from the vault at call time, because a lego that names its vault can be built before the vault exists.
+- One `setCaps(id, absolute, relativeBps)`: the admin sets anything, the guardian may only lower. A zero absolute cap allows nothing, and 10,000 basis points is no relative limit, so a vault with no assets yet can still allocate under an absolute cap.
+- An adapter that names no risk is refused, because it would sit outside every cap.
+- `pricedValue()` reverts in the middle of a move, when the money is in neither place or in both, so nothing can price against a half-finished transfer. `allocate` reads the vault's total before taking the guard, because a plugged vault's total will ask the portfolio.
+- `AttestKind` gains `PORTFOLIO` and `ADAPTER` only. The compiler checks an enum's range wherever it is encoded, so every contract that uses it changes by that one number and no size changes: one byte in the four templates, `ProxyDeployer`, `Fund` and `ComplianceHook`, nine bytes in `PolicyRegistry`. Nothing is deployed, so nothing migrates. On a live stack an appended value would change the codehash of each of those, so it would be part of an upgrade and a new attestation.
+
+Tests first: 24 failing against stubs. Then `npx hardhat test`: `1289 passing (1148 solidity, 141 nodejs)`, and the isolated profile passes 1148. Slither 0, Aderyn 0, `validate:upgrades` 4 of 4, `verify:reproducible` 20 contracts identical, mutants 78 of 78. The first mutant run left 2 alive, a price stale before a call that recovers during it and a priced adapter that charges on the way out, and each now has a test.
+
+Not done here: plugging it into a vault (3b and 3e), its deployment module and the `ALLOCATOR_ROLE` hand-over check, the Halmos property on caps, and the HTML pages.
+
 #### Adapters
 
-`IAdapter`: `allocate(assets)`, `deallocate(assets, to)`, `value()`, `liquid()`, `fresh()`, `reported()`, `riskIds()`, `PORTFOLIO()`, `asset()`. Each is immutable and attested.
+`IAdapter`: `allocate(assets)`, `deallocate(assets)`, `value()`, `liquid()`, `fresh()`, `reported()`, `riskIds()`, `PORTFOLIO()`, `asset()`. Each is immutable and attested.
 
 - **`ERC4626Adapter`.** Immutable `PORTFOLIO` and `TARGET`. Deposits into the target, withdraws to the portfolio, values with `previewRedeem` of its whole balance, and reads liquidity with `maxWithdraw`. Not reported. This reaches Morpho's vaults as an ordinary depositor. Morpho Vault V2's `max*` always return 0 by design while its `withdraw` and `redeem` work, so against a V2 target `liquid()` reads 0: a 4626 holder's instant exit is limited to idle money, and the desk keeps that buffer. MetaMorpho V1 and standard vaults report real liquidity. A 7540 is unaffected, since the desk raises cash before it proposes. The council reads the target's curator and caps before attesting, because the codehash covers the target's address and not its behaviour, and it does not attest an adapter whose target is a gated vault of ours.
 - **`GuardedAccount`.** Runs strategies and custody with one contract. `execute(Call[] calls)` (`ALLOCATOR_ROLE`, atomic) makes plain calls only: no delegatecall, no value, no modules, no ERC-7579 and no ERC-4337. Each call needs a permission for its target and function, and the permission's validator must accept the parameters. **No validator means refused**, so nothing passes by omission. `setPermission(target, selector, validator)` is timelock and attested; `revokePermission` is timelock or guardian. Reported, so it refuses a `Portfolio` that does not accept reported adapters. `deallocate` pays only from its own balance to its portfolio.
@@ -2978,19 +2991,22 @@ With none plugged it behaves exactly as today. `setPortfolio` (timelock) checks 
 
 #### Attestation and deployment
 
-`AttestKind` gains `PORTFOLIO`, `ADAPTER`, `VALIDATOR` and `FEE_MODEL`, appended so existing values keep their numbers (P2). `setPortfolio`, `addAdapter`, `setPermission` and `setFeeModel` enforce them. `SETTLER_ROLE` is a plain role grant, since checking it in the vault would spend its margin, so the hand-over check pins the holder and `NavDesk.isWired()` shows it to monitors.
+`AttestKind` gains `PORTFOLIO` and `ADAPTER` (built), then `VALIDATOR` and `FEE_MODEL` with their legos, each appended so existing values keep their numbers (P2). `setPortfolio`, `addAdapter`, `setPermission` and `setFeeModel` enforce them. `SETTLER_ROLE` is a plain role grant, since checking it in the vault would spend its margin, so the hand-over check pins the holder and `NavDesk.isWired()` shows it to monitors.
 
 A lego that names its vault is built before the vault exists: `ProxyDeployer.predict(symbol, implementation)` gives the address, and the council attests the product's legos before the launch. A profile gains optional `nav`, `portfolio`, `adapters` and `fees` sections, and the product module plugs only what is listed, while the operations multisig is still admin. `assertHandedOver` checks `SETTLER_ROLE`, `REPORTER_ROLE`, `CHECKER_ROLE` and `ALLOCATOR_ROLE` explicitly, since these ids live outside the vault's role scan, and that the reporter, the checker and the allocator are three different accounts. Adding a lego later is a timelock operation.
 
 #### Built in this order, one PR each, stopping for review after each
 
+The owner asked on 2026-10-30 to see the `Portfolio` first, and nothing in it depends on 3a or 3b, so it comes first, standing alone over today's vaults. Plugging it in follows with 3b and 3e.
+
 | # | Content | Result |
 |---|---|---|
+| 3p | `Portfolio` and `ERC4626Adapter`, standing alone | Where a vault's money may go, tested against a real vault's roles and a real ERC-4626 target. No vault sends it money yet |
 | 3a | `GatedVaultBase`, the cash check, the payer check and the token's own address in `CredentialRule` | Money in and money out are both screened, and a vault's own credential cannot stop it |
 | 3b | `Gated7540Vault` dealing periods and `NavDesk` | A real fund with one custodian (`vault7540`) |
-| 3c | `Portfolio`, `GuardedAccount` and the two validators, on the 7540 | Several custodians and a mandate (`managed-fund`) |
+| 3c | `GuardedAccount` and the two validators, on the 7540 | Several custodians and a mandate (`managed-fund`) |
 | 3d | `FeeModel` on `NavDesk` | The fund charges fees |
-| 3e | The 4626 with a `Portfolio`, `ERC4626Adapter`, fees on the 4626 | Morpho-style on-chain investing (`vault4626-invest`) |
+| 3e | The 4626 with a `Portfolio`, fees on the 4626 | Morpho-style on-chain investing (`vault4626-invest`) |
 
 #### Tests first
 
