@@ -20,15 +20,14 @@ import { activeProfile, IMPLEMENTATION_KEY, type Profile } from "../profiles.js"
  *   The rule's codehash covers the registry's address and not its code, so the council reads the registry's code, its
  *   admin and its attester list before it attests the rule.
  * - Each other listed rule, and one implementation per template: every product of a template shares it.
- * - The `Fund` (owned by the deployer until `CoreHandover`) and the `FundHoldersRule` that points at it, if a product
- *   lists that rule. The rule's codehash covers the fund's address and not the fund's code, so the council reads the
- *   fund's code and its owner before attesting the rule.
  * - The intent executor and the DvP executor, if a product names them (administered by the deployer until
  *   `CoreHandover`). Neither is attested: neither is a hook, a rule or an implementation, and each token authorises it by
  *   granting it EXECUTOR_ROLE.
  *
- * Next: the council attests the rules, the hook and the implementations, then `CoreHandover`, then a `Product` for each
- * product.
+ * A fund is not part of the core: a bank has as many as it needs, each with its own `Fund` module.
+ *
+ * Next: the council attests the rules, the hook and the implementations, then `CoreHandover`, then a `Fund` for each fund
+ * and a `Product` for each product.
  */
 export function coreModule(profile: Profile) {
   const rules = new Set(profile.products.flatMap((product) => product.rules));
@@ -60,12 +59,6 @@ export function coreModule(profile: Profile) {
     if (rules.has("minPositionRule")) used.minPositionRule = m.contract("MinPositionRule");
     if (rules.has("holderRestrictionRule")) used.holderRestrictionRule = m.contract("HolderRestrictionRule");
     if (rules.has("windowRule")) used.windowRule = m.contract("SettlementWindowRule");
-    // The fund and its rule need each other's address, so the rule takes the fund at construction and `CoreHandover`
-    // installs the rule in the fund with `setRule`. Not `fund`: that key already means the 4626 vault in the profiles.
-    if (rules.has("fundHoldersRule")) {
-      used.fundContract = m.contract("Fund", [deployer, registry]);
-      used.fundHoldersRule = m.contract("FundHoldersRule", [used.fundContract]);
-    }
     for (const template of templates) used[IMPLEMENTATION_KEY[template]] = m.contract(template);
     if (executors.has("intent")) used.executor = m.contract("IntentExecutor", [deployer, guardian]);
     if (executors.has("dvp")) used.dvpExecutor = m.contract("DvPExecutor", [deployer, guardian]);

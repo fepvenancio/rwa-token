@@ -6,15 +6,15 @@ import { ROLES } from "./roles.js";
 /**
  * Stage 2, once per bank, after the council has attested the core. It takes the addresses `Core` produced as parameters.
  *
- * 1. Configure what only the deployer can: the first KYC attester, and the fund's rule and cap.
+ * 1. Configure what only the deployer can: the first KYC attester.
  * 2. Grant the core's roles: the guardian becomes a timelock canceller; the recovery timelock gets RECOVERY_ROLE (unpause
  *    and revoke GUARDIAN_ROLE only) on the credential registry, where it also clears a guardian block and revives an
  *    attester, and on the executors; the executors get their operator.
  * 3. Hand over: DEFAULT_ADMIN_ROLE to the timelock on the credential registry and the executors, and the deployer
- *    renounces everywhere. `ProxyDeployer` and the fund go to the operations account: products then launch without
- *    waiting, and `FundHandover` moves the fund to the timelock once its classes are in.
+ *    renounces everywhere. `ProxyDeployer` goes to the operations account: products then launch without waiting.
  *
- * Next: a `Product` for each product, run by the operations account.
+ * Next: a `Fund` for each fund and a `Product` for each product, run by the operations account, then a `FundOpen` for each
+ * fund.
  */
 export function coreHandoverModule(profile: Profile) {
   const rules = new Set(profile.products.flatMap((product) => product.rules));
@@ -62,13 +62,6 @@ export function coreHandoverModule(profile: Profile) {
       grant("dvp_operator", dvpExecutor, ROLES.OPERATOR, p("operator"));
       grant("dvp_recovery", dvpExecutor, ROLES.RECOVERY, recoveryTimelock);
       administered.push({ key: "dvpExecutor", contract: dvpExecutor });
-    }
-
-    if (rules.has("fundHoldersRule")) {
-      const fund = m.contractAt("Fund", p("fundContract"));
-      const ruleSet = m.call(fund, "setRule", [p("fundHoldersRule")]);
-      const capSet = m.call(fund, "setHolderCap", [m.getParameter<bigint>("fundHolderCap")]);
-      m.call(fund, "transferOwnership", [operations], { id: "fund_owner", after: [ruleSet, capSet] });
     }
 
     // Hand over, strictly after every call that needs the deployer's admin rights.

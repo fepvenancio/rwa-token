@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { network } from "hardhat";
-import { getAddress, isAddressEqual, maxUint256, zeroAddress } from "viem";
+import { encodeFunctionData, getAddress, isAddressEqual, keccak256, maxUint256, toHex, zeroAddress, zeroHash } from "viem";
 
+import { fundOpenModule } from "../../ignition/modules/FundOpen.js";
 import { productModule } from "../../ignition/modules/Product.js";
 import { QUALS } from "../../ignition/modules/roles.js";
 import { PROFILES, type Product, type Profile } from "../../ignition/profiles.js";
-import { assertHandedOver, deployProduct, deployProfile, deverify, REASONS, verify } from "./fixtures.js";
+import { assertHandedOver, deployProduct, deployProfile, deployStack, deverify, REASONS, verify } from "./fixtures.js";
 
 const PLAIN = ["credentialRule", "holderRestrictionRule"] as const;
 const CORE = ["credentialRegistry", "credentialRule", "holderRestrictionRule", "hook", "proxyDeployer", "recoveryTimelock", "registry", "timelock"];
@@ -207,5 +208,147 @@ describe("a vault whose asset is the bank's tokenised deposit", async function (
       deposit,
       "PolicyGated_TransferRejected",
     );
+  });
+});
+
+describe("each fund is its own lego", async function () {
+  const connection = await network.create();
+  const { viem, networkHelpers, ignition } = connection;
+  const FUND_RULES = ["credentialRule", "fundHoldersRule"] as const;
+
+  const twoFunds: Profile = {
+    id: "twoFunds",
+    products: [
+      { key: "usdShare", template: "GatedToken", name: "USD Fund", symbol: "USDF", rules: FUND_RULES, fund: "usd" },
+      { key: "eurShare", template: "GatedToken", name: "EUR Fund", symbol: "EURF", rules: FUND_RULES, fund: "eur" },
+    ],
+  };
+
+  it("a bank runs two funds, each with its own contract, rule and cap", async function () {
+    const s = await networkHelpers.loadFixture(async function two() {
+      return deployProfile(connection, twoFunds, { usdHolderCap: 1n, eurHolderCap: 2n });
+    });
+    const { usd, eur } = s.funds;
+    assert.ok(!isAddressEqual(usd.fund.address, eur.fund.address));
+    assert.ok(!isAddressEqual(usd.rule.address, eur.rule.address));
+    assert.equal(await usd.fund.read.holderCap(), 1n);
+    assert.equal(await eur.fund.read.holderCap(), 2n);
+    assert.ok(isAddressEqual(await usd.fund.read.owner(), s.timelock.address));
+    assert.ok(isAddressEqual(await eur.fund.read.owner(), s.timelock.address));
+    assert.equal(await s.registry.read.isAttested([usd.rule.address, 2]), true);
+
+    const usdShare = await viem.getContractAt("GatedToken", s.products.usdShare.address);
+    const eurShare = await viem.getContractAt("GatedToken", s.products.eurShare.address);
+    const [alice, bob] = [s.holders.alice, s.holders.bob];
+    await verify(s, alice);
+    await verify(s, bob);
+    const minter = s.wallets.minter.account;
+
+    // The USD fund is full with one investor, and the EUR fund does not care.
+    await usdShare.write.mint([alice.account.address, 1n], { account: minter });
+    assert.deepEqual(await usdShare.read.canTransferWithReason([zeroAddress, bob.account.address, 1n]), [false, REASONS.MAX_HOLDERS]);
+    await eurShare.write.mint([alice.account.address, 1n], { account: minter });
+    await eurShare.write.mint([bob.account.address, 1n], { account: minter });
+    assert.equal(await usd.fund.read.holderCount(), 1n);
+    assert.equal(await eur.fund.read.holderCount(), 2n);
+  });
+
+  async function fullStack() {
+    return deployStack(connection);
+  }
+
+  it("a later class launches at once with nothing half-done, and is inert until the timelock registers it", async function () {
+    const s = await networkHelpers.loadFixture(fullStack);
+    const late: Product = { key: "late", template: "IntentToken", name: "Late", symbol: "LATE", rules: FUND_RULES, fund: "main" };
+    const before = await s.fund.read.classCount();
+    const launched = await deployProduct(s, late);
+    const token = await viem.getContractAt("IntentToken", launched.address);
+
+    // Fully launched: the operations account holds nothing, and the timelock administers it.
+    assert.equal(await token.read.hasRole([await token.read.DEFAULT_ADMIN_ROLE(), s.timelock.address]), true);
+    assert.equal(await token.read.hasRole([await token.read.DEFAULT_ADMIN_ROLE(), s.wallets.operations.account.address]), false);
+    assert.equal(await s.fund.read.classCount(), before);
+
+    // Inert: every movement is refused until it is a class of the fund.
+    const alice = s.holders.alice.account.address;
+    assert.deepEqual(await token.read.canTransferWithReason([zeroAddress, alice, 1n]), [false, REASONS.NOT_FUND_CLASS]);
+
+    const governance = s.wallets.governance.account;
+    const data = encodeFunctionData({ abi: s.fund.abi, functionName: "registerClass", args: [token.address] });
+    const args = [s.fund.address, 0n, data, zeroHash, keccak256(toHex("late-class"))] as const;
+    const delay = await s.timelock.read.getMinDelay();
+    await s.timelock.write.schedule([...args, delay], { account: governance });
+    await networkHelpers.time.increase(delay);
+    await s.timelock.write.execute(args, { account: governance });
+
+    assert.equal(await s.fund.read.classCount(), before + 1n);
+    assert.deepEqual(await token.read.canTransferWithReason([zeroAddress, alice, 1n]), [true, REASONS.TRANSFER_OK]);
+  });
+
+  it("opening a fund that the timelock already owns reverts and changes nothing", async function () {
+    const s = await networkHelpers.loadFixture(fullStack);
+    const module = fundOpenModule("main", ["intent"]);
+    await assert.rejects(
+      ignition.deploy(module, {
+        parameters: {
+          [module.id]: {
+            fundContract: s.fund.address,
+            fundHoldersRule: s.rules.fundHoldersRule.address,
+            holderCap: 9n,
+            timelock: s.timelock.address,
+            class_intent: s.token.address,
+          },
+        },
+        defaultSender: s.wallets.operations.account.address,
+      }),
+      /OwnableUnauthorizedAccount|0x118cdaa7/,
+    );
+    assert.notEqual(await s.fund.read.holderCap(), 9n);
+  });
+
+  it("a product must name its fund if it lists the fund rule, and list the rule if it names a fund", function () {
+    const noFund: Product = { key: "a", template: "GatedToken", name: "A", symbol: "A", rules: FUND_RULES };
+    assert.throws(() => productModule(noFund), /a: fundHoldersRule needs a fund/);
+    const noRule: Product = { key: "b", template: "GatedToken", name: "B", symbol: "B", rules: ["credentialRule"], fund: "usd" };
+    assert.throws(() => productModule(noRule), /b: names a fund without fundHoldersRule/);
+  });
+});
+
+describe("a token's decimals", async function () {
+  const connection = await network.create();
+  const { viem, networkHelpers } = connection;
+
+  const twoDecimals: Profile = {
+    id: "twoDecimals",
+    products: [
+      {
+        key: "deposit",
+        template: "GatedToken",
+        name: "Bank Deposit",
+        symbol: "bUSD",
+        decimals: 2,
+        rules: ["credentialRule"],
+        policy: { requireAll: 0, requireAny: QUALS.CUSTOMER | QUALS.INFRA, forbidAny: 0, attesters: 1n },
+      },
+      { key: "fund", template: "Gated4626Vault", name: "Bank Fund", symbol: "bFUND", rules: PLAIN, assetProduct: "deposit" },
+    ],
+  };
+
+  it("a deposit token matches the ledger's precision, and a vault over it follows", async function () {
+    const s = await networkHelpers.loadFixture(async function decimals() {
+      return deployProfile(connection, twoDecimals);
+    });
+    const deposit = await viem.getContractAt("GatedToken", s.products.deposit.address);
+    const vault = await viem.getContractAt("Gated4626Vault", s.products.fund.address);
+    assert.equal(await deposit.read.decimals(), 2);
+    assert.equal(await vault.read.decimals(), 8);
+  });
+
+  it("a plain token states its own or takes 18", async function () {
+    const s = await networkHelpers.loadFixture(async function token() {
+      return deployProfile(connection, PROFILES.token);
+    });
+    const token = await viem.getContractAt("GatedToken", s.products.token.address);
+    assert.equal(await token.read.decimals(), 18);
   });
 });

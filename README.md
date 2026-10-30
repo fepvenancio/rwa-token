@@ -147,7 +147,7 @@ exact sequence on the local network, playing the council and the KYC attester, a
    - `ProxyDeployer` (owner = deployer until `CoreHandover`, registry = the `PolicyRegistry`);
    - and only what the profile's products use:
      - the `CredentialRegistry` (admin = deployer until `CoreHandover`, guardian = the guardian multisig) and the `CredentialRule` that reads it;
-     - each other listed rule: `MinPositionRule`, `HolderRestrictionRule`, `SettlementWindowRule`, and the `Fund` (owner = deployer) with the `FundHoldersRule` that points at it;
+     - each other listed rule: `MinPositionRule`, `HolderRestrictionRule`, `SettlementWindowRule`;
      - one implementation per template, shared by every product of that template;
      - `IntentExecutor` and `DvPExecutor` (neither is attested).
 
@@ -161,9 +161,6 @@ exact sequence on the local network, playing the council and the KYC attester, a
      its `immutableSlots` with the bytes at the same positions in the deployed code, and confirm those bytes are the
      expected constructor arguments (e.g. `CredentialRule`'s credential registry; the hook's registry; an implementation's own
      address). Then confirm the keccak256 of the result equals `extcodehash`.
-   - For `FundHoldersRule`, also read the `Fund` it points at (`FUND()`): the rule's codehash covers the fund's address,
-     not the fund's code. Check the fund's runtime code against the manifest's `Fund` entry, filling its `immutableSlots`
-     (the registry address) as for the rules, and that its `owner()` is the deployer. `Fund` itself is not attested.
    - For `CredentialRule`, also read the `CredentialRegistry` it points at (`REGISTRY()`): the rule's codehash covers the
      registry's address, not the registry's code. Check the registry's runtime code against the manifest's
      `CredentialRegistry` entry, filling its `immutableSlots` as for the rules, that its admin is the deployer and its
@@ -184,12 +181,17 @@ exact sequence on the local network, playing the council and the KYC attester, a
 3. **`CoreHandover`** (deployer):
    - configure the credential layer (parameter `kycAttester`, the KYC function's account, and optionally `kycAllowedQuals`,
      255 by default): add it to the registry as attester 0;
-   - configure the fund (parameter `fundHolderCap`): install its rule and set its cap;
    - grant the core's roles: CANCELLER on the timelock to the guardian, RECOVERY on the credential registry and on each
      executor to the recovery timelock, OPERATOR on each executor to the relayer;
    - hand over: DEFAULT_ADMIN_ROLE to the timelock on the credential registry and on each executor; the deployer renounces it
-     there and on both timelocks; `ProxyDeployer` and `Fund` ownership move to the operations account (parameter `operations`).
-4. **`Product`** (the operations account), once per product. The first and the fiftieth follow this same path, and none waits
+     there and on both timelocks; `ProxyDeployer` ownership moves to the operations account (parameter `operations`).
+4. **`Fund`** (the operations account), once per fund, if the products use one: a `Fund` (owner = the operations account) and
+   the `FundHoldersRule` that points at it. A bank has as many as it has funds, each with its own cap, and `FUND` chooses one
+   for `hardhat ignition deploy`. Then the council attests the rule as in step 2, after reading the `Fund` it points at
+   (`FUND()`): the rule's codehash covers the fund's address, not the fund's code. Check the fund's runtime code against the
+   manifest's `Fund` entry, filling its `immutableSlots` (the registry address) as for the rules, and that its `owner()` is the
+   operations account. `Fund` itself is not attested.
+5. **`Product`** (the operations account), once per product. The first and the fiftieth follow this same path, and none waits
    for a timelock, because a launch only adds a proxy over attested code:
    - `ProxyDeployer.deploy(symbol, implementation, initData, hook, expectedRules)`. The init data carries the
      token's rule list, which the token installs on the shared hook itself. `deploy` first refuses an implementation
@@ -200,19 +202,25 @@ exact sequence on the local network, playing the council and the KYC attester, a
      call waits for it, so a token that fails its checks grants nothing;
    - configure what the product lists: its credential policy ("`KYC` from attester 0" unless the profile states another; until
      a token has its policy its rule admits no receiver), its settlement window, its minimum position (parameter
-     `minPosition`; 0, the default, switches the rule off), and its place as a class of the fund. Registration refuses a hook
-     that does not list the rule and a token that has supply. Nothing is set for the escrow: the 7540 vault is the token
-     itself, which neither the fund rule nor the minimum counts;
+     `minPosition`; 0, the default, switches the rule off). A product that lists the fund rule names its fund, and takes that
+     fund's rule as the parameter `fundHoldersRule`, but never touches the fund, so a launch cannot fail on one. Nothing is set
+     for the escrow: the 7540 vault is the token itself, which neither the fund rule nor the minimum counts;
    - grant roles: AGENT to the issuer's account, **UPGRADER to the timelock only**, RECOVERY to the recovery timelock; MINTER and
      BURNER on a `GatedToken` or `IntentToken`; EXECUTOR on an `IntentToken` to the executors the product names; FULFILLER on a
      7540 vault to the bank;
    - hand over: DEFAULT_ADMIN_ROLE to the timelock, and the operations account renounces it.
-5. **`FundHandover`** (the operations account), once a fund's first classes are in: `Fund` ownership moves to the timelock, so
-   any later class or rule change goes through governance (schedule, wait out the delay, execute).
-6. **KYC attester:** credential a 7540 vault, which escrows pending redemptions, and then every holder
+6. **`FundOpen`** (the operations account), once per fund, after its first classes are placed (parameters `fundContract`,
+   `fundHoldersRule`, `holderCap`, `timelock` and a `class_<key>` for each class): install the rule, set the cap, register the
+   classes in order and move `Fund` ownership to the timelock. Registration refuses a hook that does not list the rule and a
+   token that has supply. A class has no supply until then, because every movement on it is refused with `NOT_FUND_CLASS`.
+
+   Any later class or rule change goes through governance (schedule, wait out the delay, execute), because either can
+   change the room existing investors have under the cap. A later class launches through `Product` like any other, handed
+   to the timelock and inert until `registerClass` runs.
+7. **KYC attester:** credential a 7540 vault, which escrows pending redemptions, and then every holder
    (`CredentialRegistry.set`, or a signed credential that anyone submits). A vault whose asset is a gated token needs a
    credential that token's policy accepts.
-7. **Post-deploy checks** (the fixture's `assertHandedOver`):
+8. **Post-deploy checks** (the fixture's `assertHandedOver`):
    - the deployer and the operations account hold no role on either timelock, the policy registry, the credential registry, the products or the executors;
    - the timelock holds DEFAULT_ADMIN_ROLE everywhere and is the only UPGRADER;
    - every product's `policyHook()` is the hook the council attested, that hook's `REGISTRY()` is the registry, and its
@@ -227,10 +235,10 @@ exact sequence on the local network, playing the council and the KYC attester, a
    - each executor's operator and guardian are the stack's, and `EXECUTOR_ROLE` on an `IntentToken` is held by the
      executors it names and by no account the stack knows about;
    - no rule exposes `hasRole` or `owner`: rules take their authority from the token's roles at call time;
-   - `ProxyDeployer.owner()` is the operations account, and `Fund.owner()` the timelock;
-   - the fund's rule is the attested `FundHoldersRule`, whose `FUND()` is the fund, its cap is the intended one, its
-     classes are the products that list its rule, in order, and every class is intact (`firstBrokenClass()` is the zero
-     address);
+   - `ProxyDeployer.owner()` is the operations account;
+   - each fund's owner is the timelock, its rule is the attested `FundHoldersRule` whose `FUND()` is that fund, its cap is the
+     intended one, its classes are the ones it opened with, in order, and every class is intact (`firstBrokenClass()` is the
+     zero address);
    - `getMinDelay() ≥ 24 hours` on both timelocks.
 
    The recovery timelock's proposer and executor is the governance multisig. A compromised governance multisig is

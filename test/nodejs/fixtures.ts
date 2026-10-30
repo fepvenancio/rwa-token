@@ -19,11 +19,14 @@ import {
 
 import { coreModule } from "../../ignition/modules/Core.js";
 import { coreHandoverModule } from "../../ignition/modules/CoreHandover.js";
-import FundHandover from "../../ignition/modules/FundHandover.js";
+import { fundModule } from "../../ignition/modules/Fund.js";
+import { fundOpenModule } from "../../ignition/modules/FundOpen.js";
 import { productModule } from "../../ignition/modules/Product.js";
 import { QUALS, ROLES } from "../../ignition/modules/roles.js";
 import {
+  classesOf,
   DEFAULT_POLICY,
+  fundsOf,
   IMPLEMENTATION_KEY,
   PROFILES,
   type Product,
@@ -35,8 +38,9 @@ import {
  * Runs the production deployment: the Ignition modules, which are where deployment order lives (Phase 6 Q2), with this
  * file playing the parties Ignition cannot sign for:
  *
- *   Core → council attests rules, the hook and implementations → CoreHandover → a Product for each product, run by the
- *   operations account → FundHandover → hand-over check.
+ *   Core → council attests rules, the hook and implementations → CoreHandover → a Fund for each fund, whose rule the
+ *   council attests → a Product for each product → a FundOpen for each fund → hand-over check. The operations account runs
+ *   everything after CoreHandover.
  *
  * Each stage gets the previous stage's addresses as parameters, as a live deployment does between council steps
  * (Ignition is also ephemeral per `deploy` call on the in-process network, so stages cannot share a journal here).
@@ -102,9 +106,9 @@ export async function deployStack(connection: NetworkConnection) {
 }
 
 /** Any profile, from the core to its last product, with no holder verified yet. */
-export async function deployProfile(connection: NetworkConnection, profile: Profile) {
+export async function deployProfile(connection: NetworkConnection, profile: Profile, overrides: Parameters_ = {}) {
   const { launch, parameters } = await stages(connection, profile);
-  return launch(parameters);
+  return launch({ ...parameters, ...overrides });
 }
 
 /** A later product on a stack that is already handed over, run by the operations account. */
@@ -148,7 +152,7 @@ export async function deployUntilProducts(connection: NetworkConnection) {
 
 export type Stack = Awaited<ReturnType<typeof deployStack>>;
 export type ProfileStack = Awaited<ReturnType<typeof deployProfile>>;
-type HandedOverKeys = "publicClient" | "wallets" | "timelock" | "recoveryTimelock" | "registry" | "hook" | "proxyDeployer" | "credentials" | "fund" | "executor" | "dvpExecutor" | "rules" | "deployed";
+type HandedOverKeys = "publicClient" | "wallets" | "timelock" | "recoveryTimelock" | "registry" | "hook" | "proxyDeployer" | "credentials" | "funds" | "executor" | "dvpExecutor" | "rules" | "deployed";
 type Parameters_ = Record<string, Address | bigint | number>;
 
 /** `Core`, then the council step. Returns what the later stages need, and a function that runs them. */
@@ -197,7 +201,6 @@ async function stages(connection: NetworkConnection, profile: Profile) {
   const hook = await viem.getContractAt("ComplianceHook", components.hook.address);
   const proxyDeployer = await viem.getContractAt("ProxyDeployer", components.proxyDeployer.address);
   const credentials = has("credentialRegistry") ? await viem.getContractAt("CredentialRegistry", components.credentialRegistry.address) : undefined;
-  const fund = has("fundContract") ? await viem.getContractAt("Fund", components.fundContract.address) : undefined;
   const executor = has("executor") ? await viem.getContractAt("IntentExecutor", components.executor.address) : undefined;
   const dvpExecutor = has("dvpExecutor") ? await viem.getContractAt("DvPExecutor", components.dvpExecutor.address) : undefined;
   const rules = {
@@ -205,7 +208,6 @@ async function stages(connection: NetworkConnection, profile: Profile) {
     minPositionRule: has("minPositionRule") ? await viem.getContractAt("MinPositionRule", components.minPositionRule.address) : undefined,
     holderRestrictionRule: has("holderRestrictionRule") ? await viem.getContractAt("HolderRestrictionRule", components.holderRestrictionRule.address) : undefined,
     windowRule: has("windowRule") ? await viem.getContractAt("SettlementWindowRule", components.windowRule.address) : undefined,
-    fundHoldersRule: has("fundHoldersRule") ? await viem.getContractAt("FundHoldersRule", components.fundHoldersRule.address) : undefined,
   };
 
   const attest = async (target: Address, kind: number, uri: string) => {
@@ -236,13 +238,22 @@ async function stages(connection: NetworkConnection, profile: Profile) {
     agent: address(agent),
     operator: address(operator),
     fulfiller: address(fulfiller),
-    fundHolderCap: FUND_HOLDER_CAP,
     windowOpen: WINDOW_OPEN,
     windowClose: WINDOW_CLOSE,
     windowDays: rules.windowRule === undefined ? 0 : await rules.windowRule.read.MON_TO_FRI(),
   };
 
   const wallets = { deployer, governance, attester, guardian, minter, burner, agent, operator, fulfiller, custody, recovery, kyc, operations };
+
+  /** A fund as the stack knows it: its contract, its rule, its intended cap and the classes it opened with. */
+  type FundStack = {
+    fund: Awaited<ReturnType<typeof attachFund>>;
+    rule: Awaited<ReturnType<typeof attachFundRule>>;
+    cap: bigint;
+    classes: string[];
+  };
+  const attachFund = (target: Address) => viem.getContractAt("Fund", target);
+  const attachFundRule = (target: Address) => viem.getContractAt("FundHoldersRule", target);
 
   /** Attaches a placed product with its own template's ABI, so a role scan sees that template's roles. */
   const attach = async (template: Template, target: Address) => {
@@ -262,6 +273,24 @@ async function stages(connection: NetworkConnection, profile: Profile) {
     const handover = coreHandoverModule(profile);
     await ignition.deploy(handover, { parameters: { [handover.id]: p } });
 
+    // Each fund, with the council attesting its rule: a class cannot list the rule before that.
+    const funds: Record<string, FundStack> = {};
+    for (const key of fundsOf(profile)) {
+      const module = fundModule(key);
+      const pair = await ignition.deploy(module, {
+        parameters: { [module.id]: { operations: address(operations), registry: registry.address } },
+        defaultSender: address(operations),
+      });
+      await attest(pair.rule.address, ATTEST.RULE, `ipfs://rule-review/${pair.rule.address}`);
+      funds[key] = {
+        fund: await attachFund(pair.fund.address),
+        rule: await attachFundRule(pair.rule.address),
+        cap: (p[`${key}HolderCap`] as bigint | undefined) ?? FUND_HOLDER_CAP,
+        classes: classesOf(profile, key),
+      };
+    }
+    const [firstFund] = Object.values(funds);
+
     const placed: Record<string, Awaited<ReturnType<typeof attach>>> = {};
 
     /** Runs `Product` as the operations account, with the parameters that are specific to this product. */
@@ -274,6 +303,7 @@ async function stages(connection: NetworkConnection, profile: Profile) {
             implementation: p[IMPLEMENTATION_KEY[product.template]],
             minPosition: p[`${product.key}MinPosition`] ?? 0n,
             asset: product.assetProduct === undefined ? p.asset : placed[product.assetProduct].address,
+            ...(product.fund === undefined ? {} : { fundHoldersRule: funds[product.fund].rule.address }),
           },
         },
         defaultSender: address(operations),
@@ -291,8 +321,20 @@ async function stages(connection: NetworkConnection, profile: Profile) {
     const products: { product: Product; contract: Awaited<ReturnType<typeof attach>> }[] = [];
     for (const product of profile.products) products.push({ product, contract: await place(product) });
 
-    if (fund !== undefined) {
-      await ignition.deploy(FundHandover, { parameters: { FundHandover: p }, defaultSender: address(operations) });
+    for (const [key, { fund, rule, cap, classes }] of Object.entries(funds)) {
+      const module = fundOpenModule(key, classes);
+      await ignition.deploy(module, {
+        parameters: {
+          [module.id]: {
+            fundContract: fund.address,
+            fundHoldersRule: rule.address,
+            holderCap: cap,
+            timelock: timelock.address,
+            ...Object.fromEntries(classes.map((name) => [`class_${name}`, placed[name].address])),
+          },
+        },
+        defaultSender: address(operations),
+      });
     }
 
     const stack = {
@@ -306,10 +348,11 @@ async function stages(connection: NetworkConnection, profile: Profile) {
       hook,
       proxyDeployer,
       credentials,
-      fund,
+      funds,
+      fund: firstFund?.fund,
       executor,
       dvpExecutor,
-      rules,
+      rules: { ...rules, fundHoldersRule: firstFund?.rule },
       asset,
       deployed: products,
       products: placed,
@@ -335,9 +378,9 @@ async function stages(connection: NetworkConnection, profile: Profile) {
  * - the guardian can cancel timelock operations but cannot propose or execute them, and both timelocks wait at least 24
  *   hours;
  * - `ProxyDeployer` is owned by the operations account, so products launch without waiting;
- * - a fund is owned by the timelock, runs the attested rule that points back at it, has the intended cap, and holds the
- *   products that list its rule as its classes, in order, each intact (its hook lists the fund's rule:
- *   `firstBrokenClass()` is the zero address);
+ * - each fund is owned by the timelock, runs the attested rule that points back at it, has the intended cap, and holds the
+ *   classes it opened with, in order, each intact (its hook lists the fund's rule: `firstBrokenClass()` is the zero
+ *   address);
  * - the recovery timelock holds exactly RECOVERY_ROLE on each product, the executors, the credential registry and the
  *   main timelock (nothing else, nowhere else), has no cancellers, and the guardian holds nothing on it.
  */
@@ -428,7 +471,7 @@ export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
   assert.ok(isAddressEqual(await s.hook.read.REGISTRY(), s.registry.address), `hook ${s.hook.address} names another registry`);
   for (const { product, contract } of s.deployed) {
     assert.ok(isAddressEqual(await contract.read.policyHook(), s.hook.address), `token ${contract.address} runs another hook`);
-    const expected = product.rules.map((name) => s.rules[name]!.address);
+    const expected = product.rules.map((name) => (name === "fundHoldersRule" ? s.funds[product.fund!].rule.address : s.rules[name]!.address));
     const actual = await s.hook.read.rules([contract.address]);
     assert.equal(actual.length, expected.length, `token ${contract.address} rule count`);
     actual.forEach((rule, i) => assert.ok(isAddressEqual(rule, expected[i]), `token ${contract.address} rule ${i}`));
@@ -439,20 +482,19 @@ export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
     assert.ok(!names.includes("hasRole") && !names.includes("owner"), `rule ${rule.address} has its own access control`);
   }
   assert.ok(isAddressEqual(await s.proxyDeployer.read.owner(), operations), "ProxyDeployer is not owned by the operations account");
-  if (s.fund !== undefined) {
-    const fundRule = s.rules.fundHoldersRule!;
-    assert.ok(isAddressEqual(await s.fund.read.owner(), timelock), "the fund is not owned by the timelock");
-    assert.ok(isAddressEqual(await s.fund.read.rule(), fundRule.address), "the fund runs another rule");
-    assert.ok(isAddressEqual(await fundRule.read.FUND(), s.fund.address), "the fund rule points at another fund");
-    assert.equal(await s.registry.read.isAttested([fundRule.address, ATTEST.RULE]), true, "the fund rule is not attested");
-    assert.equal(await s.fund.read.holderCap(), FUND_HOLDER_CAP, "fund cap");
-    const classes = s.deployed.filter(({ product }) => product.rules.includes("fundHoldersRule")).map(({ contract }) => contract);
-    assert.equal(await s.fund.read.classCount(), BigInt(classes.length), "class count");
-    for (const [i, t] of classes.entries()) {
-      assert.ok(isAddressEqual(await s.fund.read.classAt([BigInt(i + 1)]), t.address), `class ${i + 1} is not ${t.address}`);
-      assert.equal(await s.fund.read.isClassIntact([t.address]), true, `class ${i + 1} no longer lists the fund's rule`);
+  for (const { fund, rule, cap, classes } of Object.values(s.funds)) {
+    assert.ok(isAddressEqual(await fund.read.owner(), timelock), "the fund is not owned by the timelock");
+    assert.ok(isAddressEqual(await fund.read.rule(), rule.address), "the fund runs another rule");
+    assert.ok(isAddressEqual(await rule.read.FUND(), fund.address), "the fund rule points at another fund");
+    assert.equal(await s.registry.read.isAttested([rule.address, ATTEST.RULE]), true, "the fund rule is not attested");
+    assert.equal(await fund.read.holderCap(), cap, "fund cap");
+    assert.equal(await fund.read.classCount(), BigInt(classes.length), "class count");
+    for (const [i, name] of classes.entries()) {
+      const t = s.deployed.find(({ product }) => product.key === name)!.contract;
+      assert.ok(isAddressEqual(await fund.read.classAt([BigInt(i + 1)]), t.address), `class ${i + 1} is not ${t.address}`);
+      assert.equal(await fund.read.isClassIntact([t.address]), true, `class ${i + 1} no longer lists the fund's rule`);
     }
-    assert.ok(isAddressEqual(await s.fund.read.firstBrokenClass(), zeroAddress), "the fund has a broken class");
+    assert.ok(isAddressEqual(await fund.read.firstBrokenClass(), zeroAddress), "the fund has a broken class");
   }
   // The credential layer: the guardian can stop (block, kill) and nothing else; one attester, the KYC function, and each
   // product trusts it and asks for what it lists; the rule reads this registry and the council attested it.

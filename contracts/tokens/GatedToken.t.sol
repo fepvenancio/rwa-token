@@ -60,7 +60,7 @@ contract GatedTokenIntegrationTest is Test {
         'gUSD',
         address(_impl),
         abi.encodeCall(
-          GatedToken.initialize, ('Gated USD', 'gUSD', _admin, _guardian, address(_registry), address(_hook), _rules)
+          GatedToken.initialize, ('Gated USD', 'gUSD', 2, _admin, _guardian, address(_registry), address(_hook), _rules)
         ),
         address(_hook),
         _rules
@@ -86,7 +86,7 @@ contract GatedTokenIntegrationTest is Test {
   function test_WhenPlaced_ItIsLiveWithItsPolicy() external view {
     assertEq(_token.name(), 'Gated USD');
     assertEq(_token.symbol(), 'gUSD');
-    assertEq(_token.decimals(), 18);
+    assertEq(_token.decimals(), 2);
     assertTrue(_token.hasRole(_token.DEFAULT_ADMIN_ROLE(), _admin));
     assertTrue(_token.hasRole(_token.GUARDIAN_ROLE(), _guardian));
     assertEq(_token.registry(), address(_registry));
@@ -94,14 +94,41 @@ contract GatedTokenIntegrationTest is Test {
     assertEq(address(_hook.rules(address(_token))[0]), address(_rule));
   }
 
+  function testFuzz_ItReportsTheDecimalsItWasGiven(
+    uint8 _decimals
+  ) external {
+    IComplianceRule[] memory _rules = _ruleList();
+    ProxyDeployer _proxyDeployer = new ProxyDeployer(address(this), _registry);
+    GatedToken _other = GatedToken(
+      _proxyDeployer.deploy(
+        'OTHER',
+        address(_impl),
+        abi.encodeCall(
+          GatedToken.initialize,
+          ('Other', 'OTHER', _decimals, _admin, _guardian, address(_registry), address(_hook), _rules)
+        ),
+        address(_hook),
+        _rules
+      )
+    );
+    assertEq(_other.decimals(), _decimals);
+  }
+
+  function test_TheErc7201LocationHoldsTheDecimals() external view {
+    bytes32 _location =
+      keccak256(abi.encode(uint256(keccak256('gated.storage.GatedToken')) - 1)) & ~bytes32(uint256(0xff));
+    assertEq(_location, 0x8ecbb7c7992ff85ff8c7609447e9e2c8c5afb116431053f717237fde2f251600);
+    assertEq(uint256(vm.load(address(_token), _location)), 2);
+  }
+
   function test_WhenInitialisedAgain_ItReverts() external {
     vm.expectRevert(Initializable.InvalidInitialization.selector);
-    _token.initialize('x', 'x', _admin, _guardian, address(_registry), address(_hook), _ruleList());
+    _token.initialize('x', 'x', 6, _admin, _guardian, address(_registry), address(_hook), _ruleList());
   }
 
   function test_TheImplementationCannotBeInitialised() external {
     vm.expectRevert(Initializable.InvalidInitialization.selector);
-    _impl.initialize('x', 'x', _admin, _guardian, address(_registry), address(_hook), _ruleList());
+    _impl.initialize('x', 'x', 6, _admin, _guardian, address(_registry), address(_hook), _ruleList());
   }
 
   function test_ItOffersTheStandardsAndNoSignedIntents() external {

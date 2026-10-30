@@ -15,6 +15,10 @@ export type Product = {
   rules: readonly RuleKey[];
   /** Who may receive it. KYC from attester 0 unless stated. */
   policy?: Policy;
+  /** The decimals of a `GatedToken`: for a tokenised deposit, the ledger's precision. 18 unless stated. */
+  decimals?: number;
+  /** The key of the fund it is a class of. Needed exactly when it lists `fundHoldersRule`. */
+  fund?: string;
   /** For a vault: the key of an earlier product that is its asset. Otherwise the `asset` parameter. */
   assetProduct?: string;
   /** The executors that hold EXECUTOR_ROLE on an `IntentToken`. */
@@ -44,7 +48,19 @@ export function assertUsable(product: Product) {
       throw new Error(`${product.key}: ${product.template} cannot use ${rule}`);
     }
   }
+  const listsFundRule = product.rules.includes("fundHoldersRule");
+  if (listsFundRule && product.fund === undefined) throw new Error(`${product.key}: fundHoldersRule needs a fund`);
+  if (!listsFundRule && product.fund !== undefined) throw new Error(`${product.key}: names a fund without fundHoldersRule`);
 }
+
+/** The funds a profile's products name, each once, in the order they first appear. */
+export const fundsOf = (profile: Profile) => [
+  ...new Set(profile.products.flatMap((product) => (product.fund === undefined ? [] : [product.fund]))),
+];
+
+/** The products that open as a fund's first classes, in order. */
+export const classesOf = (profile: Profile, fund: string) =>
+  profile.products.filter((product) => product.fund === fund).map((product) => product.key);
 
 /** The core and a few plain rules: who may hold it, and each holder's lockup and freeze. */
 const PLAIN_RULES: readonly RuleKey[] = ["credentialRule", "holderRestrictionRule"];
@@ -69,9 +85,9 @@ export const PROFILES = {
   full: {
     id: "full",
     products: [
-      { key: "intent", template: "IntentToken", ...TOKENS.intent, rules: RULE_ORDER.intent, executors: ["intent", "dvp"] },
-      { key: "fund", template: "Gated4626Vault", ...TOKENS.fund, rules: RULE_ORDER.fund },
-      { key: "asyncFund", template: "Gated7540Vault", ...TOKENS.asyncFund, rules: RULE_ORDER.asyncFund },
+      { key: "intent", template: "IntentToken", ...TOKENS.intent, rules: RULE_ORDER.intent, fund: "main", executors: ["intent", "dvp"] },
+      { key: "fund", template: "Gated4626Vault", ...TOKENS.fund, rules: RULE_ORDER.fund, fund: "main" },
+      { key: "asyncFund", template: "Gated7540Vault", ...TOKENS.asyncFund, rules: RULE_ORDER.asyncFund, fund: "main" },
     ],
   },
 } as const satisfies Record<string, Profile>;
@@ -82,6 +98,11 @@ export function activeProfile(): Profile {
   const profile = PROFILES[id];
   if (profile === undefined) throw new Error(`Unknown profile ${id}`);
   return profile;
+}
+
+/** The fund the `ignition deploy` command deploys or opens: `FUND`, or the profile's first. */
+export function activeFund(): string {
+  return process.env.FUND ?? fundsOf(activeProfile())[0] ?? "main";
 }
 
 /** The product the `ignition deploy` command places: `PRODUCT` within the profile, or its first. */

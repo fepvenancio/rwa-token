@@ -11,8 +11,8 @@ import { ROLES } from "./roles.js";
  * runs only for a token that came up as intended. Then:
  *
  * 1. Configure while the operations account is the token's admin: its credential policy, settlement window and minimum
- *    position, each if the product lists that rule, and its place as a class of the fund if it lists the fund rule. Until
- *    a class is registered every movement on it is rejected, so no balance exists before it is.
+ *    position, each if the product lists that rule. A product never touches a fund, so its launch cannot fail on one: a
+ *    class is inert, with every movement refused, until `FundOpen` or a timelock operation registers it.
  * 2. Grant the token's roles, after the configuration; UPGRADER_ROLE goes to the timelock only.
  * 3. Hand over: DEFAULT_ADMIN_ROLE to the timelock, and the operations account renounces.
  *
@@ -41,7 +41,10 @@ export function productModule(product: Product) {
         : product.template === "Gated7540Vault"
           ? // The 7540 initialiser takes the custody after the rules.
             [p("asset"), ...base, p("custody")]
-          : base;
+          : product.template === "GatedToken"
+            ? // A `GatedToken` takes its decimals after the symbol.
+              [product.name, product.symbol, product.decimals ?? 18, ...base.slice(2)]
+            : base;
     const data = m.encodeFunctionCall(implementation, "initialize", initArgs, { id: "init" });
     const deployed = m.call(proxyDeployer, "deploy", [product.symbol, implementation, data, hook, ruleList], { id: "deploy" });
     const proxy = m.readEventArgument(deployed, "ProxyDeployed", "_proxy", { id: "proxy" });
@@ -74,10 +77,6 @@ export function productModule(product: Product) {
           { after: [deployed] },
         ),
       );
-    }
-    if (product.rules.includes("fundHoldersRule")) {
-      const fund = m.contractAt("Fund", p("fundContract"));
-      configured.push(m.call(fund, "registerClass", [token], { after: [deployed] }));
     }
 
     // 2. Roles.
