@@ -48,9 +48,9 @@ contract InterfaceFreezeTest is Test {
   function test_WhenThePortfolioLegoCompiles_ItsIdsTopicsAndKindsArePinned() external pure {
     assertEq(type(IAdapter).interfaceId, bytes4(0x4ffb2bfe), 'IAdapter');
     assertEq(type(IERC4626Adapter).interfaceId, bytes4(0x3398a02a), 'IERC4626Adapter');
-    assertEq(type(IPortfolio).interfaceId, bytes4(0xc7ee04eb), 'IPortfolio');
+    assertEq(type(IPortfolio).interfaceId, bytes4(0x7d65c67c), 'IPortfolio');
 
-    assertEq(IPortfolio.AdapterAdded.selector, 0xcf9c2c7f9adbb156bd76affb04df84595f8f5e69cab2e61221b05b05a902fa26);
+    assertEq(IPortfolio.AdapterAdded.selector, 0x9537fb53b49c6ea87760a6c4ea4ce6599f9e1785fcde3ff4f15211b1a4614681);
     assertEq(IPortfolio.AdapterRemoved.selector, 0xdf980d21d8c7bb34800e668dbe003299093bac8e693614151d3c57f73f98a93d);
     assertEq(IPortfolio.AdapterWrittenOff.selector, 0xe27ee757ca32ebdf0e08bbbaa45aaf138381e27c392d6af3329c73ae62ae3655);
     assertEq(IPortfolio.Allocated.selector, 0x9af9811abc6f1b9cf2234f8ed76daa9a577d4ffbbe0af66ec4b748cde6f4c39f);

@@ -95,6 +95,48 @@ contract PortfolioUnitTest is Helpers {
   }
 }
 
+/// @dev An adapter whose reads try to write, once it is told to
+contract WritingAdapter {
+  address public immutable PORTFOLIO;
+  address public immutable asset;
+  bool public writes;
+  uint256 public touched;
+
+  constructor(
+    address _portfolio,
+    address _asset
+  ) {
+    PORTFOLIO = _portfolio;
+    asset = _asset;
+  }
+
+  function setWrites(
+    bool _writes
+  ) external {
+    writes = _writes;
+  }
+
+  function reported() external returns (bool _reported) {
+    if (writes) ++touched;
+    _reported = false;
+  }
+
+  function fresh() external returns (bool _fresh) {
+    if (writes) ++touched;
+    _fresh = !writes;
+  }
+
+  function value() external returns (uint256 _value) {
+    if (writes) ++touched;
+    _value = 0;
+  }
+
+  function riskIds() external pure returns (bytes32[] memory _ids) {
+    _ids = new bytes32[](1);
+    _ids[0] = keccak256('writing');
+  }
+}
+
 contract PortfolioUnit_Constructor is PortfolioUnitTest {
   function test_ItStoresItsSettingsAndLetsTheVaultPullTheIdleMoney() external view {
     assertEq(_portfolio.VAULT(), address(_vault));
@@ -225,11 +267,75 @@ contract PortfolioUnit_AddAdapter is PortfolioUnitTest {
     MockAdapter _adapter = _newAdapter(false, keccak256('new'));
     _attest(address(_adapter), true);
     vm.expectEmit(address(_portfolio));
-    emit IPortfolio.AdapterAdded(address(_adapter));
+    emit IPortfolio.AdapterAdded(address(_adapter), 0);
     vm.prank(_admin);
     _portfolio.addAdapter(address(_adapter));
     assertEq(_portfolio.adapters().length, 3);
     assertEq(_portfolio.adapters()[2], address(_adapter));
+  }
+
+  function test_APositionItAlreadyHoldsCountsAgainstItsCapsAtOnce() external {
+    bytes32 _id = keccak256('funded');
+    MockAdapter _adapter = _newAdapter(false, _id);
+    _adapter.setValue(300e6);
+    _attest(address(_adapter), true);
+    vm.startPrank(_admin);
+    _portfolio.setCaps(_id, 300e6, _NO_RELATIVE_LIMIT);
+    vm.expectEmit(address(_portfolio));
+    emit IPortfolio.AdapterAdded(address(_adapter), 300e6);
+    _portfolio.addAdapter(address(_adapter));
+    vm.stopPrank();
+    assertEq(_portfolio.allocationOf(address(_adapter)), 300e6);
+    assertEq(_portfolio.riskOf(_id).allocation, 300e6);
+    assertEq(_portfolio.riskOf(_SHARED_ID).allocation, 300e6);
+  }
+
+  function test_WhenAPositionItHoldsIsAboveItsAbsoluteCap_ItReverts() external {
+    bytes32 _id = keccak256('funded');
+    MockAdapter _adapter = _newAdapter(false, _id);
+    _adapter.setValue(300e6);
+    _attest(address(_adapter), true);
+    vm.startPrank(_admin);
+    _portfolio.setCaps(_id, 300e6 - 1, _NO_RELATIVE_LIMIT);
+    vm.expectRevert(abi.encodeWithSelector(IPortfolio.Portfolio_CapExceeded.selector, _id, 300e6, 300e6 - 1));
+    _portfolio.addAdapter(address(_adapter));
+    vm.stopPrank();
+    assertEq(_portfolio.adapters().length, 2, 'nothing was installed');
+  }
+
+  function test_WhenAPositionItHoldsIsAboveItsRelativeCap_ItReverts() external {
+    bytes32 _id = keccak256('funded');
+    MockAdapter _adapter = _newAdapter(false, _id);
+    _adapter.setValue(300e6);
+    _attest(address(_adapter), true);
+    _vault.setTotalAssets(1000e6);
+    vm.startPrank(_admin);
+    _portfolio.setCaps(_id, type(uint120).max, 2999);
+    vm.expectRevert(abi.encodeWithSelector(IPortfolio.Portfolio_CapExceeded.selector, _id, 300e6, 299.9e6));
+    _portfolio.addAdapter(address(_adapter));
+    vm.stopPrank();
+  }
+
+  function test_APricedAdapterThatCannotBeReadIsNotInstalled() external {
+    MockAdapter _adapter = _newAdapter(false, keccak256('new'));
+    _adapter.setFresh(false);
+    _attest(address(_adapter), true);
+    vm.expectRevert(abi.encodeWithSelector(IPortfolio.Portfolio_StalePrice.selector, address(_adapter)));
+    vm.prank(_admin);
+    _portfolio.addAdapter(address(_adapter));
+  }
+
+  function test_AReportedAdapterStartsAtZeroWhateverItHolds() external {
+    MockAdapter _adapter = _newAdapter(true, keccak256('new'));
+    _adapter.setFresh(false);
+    _adapter.setValue(300e6);
+    _asset.mint(address(_adapter), 300e6);
+    _attest(address(_adapter), true);
+    vm.expectEmit(address(_portfolio));
+    emit IPortfolio.AdapterAdded(address(_adapter), 0);
+    vm.prank(_admin);
+    _portfolio.addAdapter(address(_adapter));
+    assertEq(_portfolio.allocationOf(address(_adapter)), 0);
   }
 
   function test_ItAsksTheVaultsRegistryForAnAdapterAttestation() external {
@@ -814,7 +920,66 @@ contract PortfolioUnit_WriteOff is PortfolioUnitTest {
     vm.prank(_admin);
     _portfolio.addAdapter(address(_priced));
     assertEq(_portfolio.pricedValue(), _IDLE, 'the value counts again');
-    assertEq(_portfolio.allocationOf(address(_priced)), 0, 'it starts with no allocation');
+    assertEq(_portfolio.allocationOf(address(_priced)), 100e6, 'and so does its place against the caps');
+    assertEq(_portfolio.riskOf(_PRICED_ID).allocation, 100e6);
+    assertEq(_portfolio.riskOf(_SHARED_ID).allocation, 100e6);
+  }
+
+  function test_AddingAPositionBackCannotTakeExposurePastTheCap() external {
+    vm.prank(_admin);
+    _portfolio.setCaps(_PRICED_ID, 500e6, _NO_RELATIVE_LIMIT);
+    _allocate(_priced, 400e6);
+    _priced.setFresh(false);
+    vm.prank(_admin);
+    _portfolio.writeOffAdapter(address(_priced));
+    _priced.setFresh(true);
+    vm.prank(_admin);
+    _portfolio.addAdapter(address(_priced));
+
+    vm.expectRevert(abi.encodeWithSelector(IPortfolio.Portfolio_CapExceeded.selector, _PRICED_ID, 500e6 + 1, 500e6));
+    _allocate(_priced, 100e6 + 1);
+    _allocate(_priced, 100e6);
+    assertEq(_priced.value(), 500e6);
+  }
+
+  function test_AWriteOffIsRememberedForGood() external {
+    assertFalse(_portfolio.writtenOff());
+    _allocate(_priced, 100e6);
+    _priced.setFresh(false);
+    vm.prank(_admin);
+    _portfolio.writeOffAdapter(address(_priced));
+    assertTrue(_portfolio.writtenOff());
+
+    _priced.setFresh(true);
+    vm.prank(_admin);
+    _portfolio.addAdapter(address(_priced));
+    assertTrue(_portfolio.writtenOff(), 'adding it back does not undo it');
+  }
+
+  function test_AReportedWriteOffIsRememberedToo() external {
+    vm.prank(_admin);
+    _portfolio.writeOffAdapter(address(_reported));
+    assertTrue(_portfolio.writtenOff());
+  }
+
+  function test_RemovingAnEmptyAdapterIsNotAWriteOff() external {
+    vm.prank(_admin);
+    _portfolio.removeAdapter(address(_priced));
+    assertFalse(_portfolio.writtenOff());
+  }
+
+  function test_AnAdapterThatWritesDuringARead_MakesTheCallRevert() external {
+    WritingAdapter _adapter = new WritingAdapter(address(_portfolio), address(_asset));
+    _attest(address(_adapter), true);
+    vm.prank(_admin);
+    _portfolio.addAdapter(address(_adapter));
+
+    _adapter.setWrites(true);
+    vm.expectRevert();
+    vm.prank(_admin);
+    _portfolio.writeOffAdapter(address(_adapter));
+    assertEq(_adapter.touched(), 0);
+    assertFalse(_portfolio.writtenOff());
   }
 
   function test_WritingOffTheLiquidityAdapterClearsIt() external {
@@ -1074,6 +1239,20 @@ contract PortfolioIntegrationTest is Helpers {
     vm.prank(_timelock);
     _portfolio.addAdapter(address(_adapter));
     assertApproxEqAbs(_portfolio.pricedValue(), _IDLE, 1);
+    assertTrue(_portfolio.writtenOff());
+    assertApproxEqAbs(_portfolio.riskOf(_adapter.RISK_ID()).allocation, 400e6, 1, 'back against the cap');
+    vm.expectRevert();
+    _allocate(100e6 + 2);
+  }
+
+  function test_AnAdapterThatCannotBeReadCannotBeInstalled() external {
+    MockERC4626Target _outage = new MockERC4626Target(IERC20(address(_asset)));
+    ERC4626Adapter _plug = new ERC4626Adapter(address(_portfolio), _outage, bytes32(0));
+    _attest(address(_plug), IPolicyRegistry.AttestKind.ADAPTER);
+    _outage.setBroken(true);
+    vm.expectRevert(abi.encodeWithSelector(IPortfolio.Portfolio_StalePrice.selector, address(_plug)));
+    vm.prank(_timelock);
+    _portfolio.addAdapter(address(_plug));
   }
 
   function test_AReentrantTargetCannotAllocateAgainMidCall() external {

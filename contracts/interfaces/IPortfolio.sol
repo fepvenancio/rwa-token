@@ -36,8 +36,9 @@ interface IPortfolio {
   /**
    * @notice Emitted when an adapter is installed
    * @param _adapter The adapter
+   * @param _allocation What already counts against its caps: the value of a priced position it holds
    */
-  event AdapterAdded(address indexed _adapter);
+  event AdapterAdded(address indexed _adapter, uint256 _allocation);
 
   /**
    * @notice Emitted when an empty adapter is taken off the list
@@ -215,7 +216,9 @@ interface IPortfolio {
   /**
    * @notice Installs an adapter
    * @dev The vault's DEFAULT_ADMIN_ROLE. The adapter must be attested as ADAPTER in the vault's registry, serve this
-   *      portfolio and this asset, name at least one risk, and be priced unless this portfolio accepts reported adapters
+   *      portfolio and this asset, name at least one risk, and be priced unless this portfolio accepts reported adapters.
+   *      A priced adapter must be readable, and the value it already holds counts against its caps at once, so a position
+   *      cannot come back from a write-off outside them. A reported adapter's money can be off-chain, so it starts at zero
    * @param _adapter The adapter
    */
   function addAdapter(
@@ -235,7 +238,8 @@ interface IPortfolio {
   /**
    * @notice Takes an adapter off the list with whatever it holds, and clears its allocation
    * @dev The vault's DEFAULT_ADMIN_ROLE. A priced adapter qualifies only while it cannot be priced, and the value it stops
-   *      contributing is a loss to the vault. A reported adapter qualifies at any time, and its value was always the report
+   *      contributing is a loss to the vault. A reported adapter qualifies at any time, and its value was always the report.
+   *      Sets `writtenOff` for good
    * @param _adapter The adapter
    */
   function writeOffAdapter(
@@ -373,6 +377,14 @@ interface IPortfolio {
    * @return _adapter The adapter, or zero for none
    */
   function liquidityAdapter() external view returns (address _adapter);
+
+  /**
+   * @notice Whether this portfolio has ever written off an adapter
+   * @dev Stays true for good, even if the adapter is added back. A successor starts clear, so a vault replacing its
+   *      portfolio must keep the answer itself
+   * @return _writtenOff True once `writeOffAdapter` has run
+   */
+  function writtenOff() external view returns (bool _writtenOff);
 
   /**
    * @notice How many times money has crossed between this portfolio and an adapter

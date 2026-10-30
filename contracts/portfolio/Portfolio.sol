@@ -19,7 +19,8 @@ import {IPortfolio} from 'interfaces/IPortfolio.sol';
  * @notice Where one vault's money may go, as specified in `IPortfolio`: to an installed adapter within caps, to the vault,
  *         or by a timelock operation to an attested successor for the same vault. Nowhere else
  * @dev Immutable, attested as PORTFOLIO. A lego that names its vault can be built before the vault exists, so the registry
- *      is read from the vault at call time rather than fixed here. A risk's allocation is always the sum of its adapters'
+ *      is read from the vault at call time rather than fixed here. A risk's allocation is the sum of its adapters';
+ *      an adapter that named an id twice would only reach that cap sooner
  */
 contract Portfolio is ReentrancyGuardTransient, IPortfolio {
   using EnumerableSet for EnumerableSet.AddressSet;
@@ -54,6 +55,9 @@ contract Portfolio is ReentrancyGuardTransient, IPortfolio {
 
   /// @inheritdoc IPortfolio
   uint256 public moves;
+
+  /// @inheritdoc IPortfolio
+  bool public writtenOff;
 
   /// @inheritdoc IPortfolio
   mapping(address _adapter => uint256 _allocation) public allocationOf;
@@ -91,11 +95,16 @@ contract Portfolio is ReentrancyGuardTransient, IPortfolio {
     IAdapter _plug = IAdapter(_adapter);
     if (_plug.PORTFOLIO() != address(this)) revert Portfolio_WrongPortfolio(_adapter);
     if (_plug.asset() != address(ASSET)) revert Portfolio_WrongAsset(_adapter);
-    if (_plug.reported() && !ACCEPTS_REPORTED) revert Portfolio_ReportedNotAccepted(_adapter);
+    bool _priced = !_plug.reported();
+    if (!_priced && !ACCEPTS_REPORTED) revert Portfolio_ReportedNotAccepted(_adapter);
     if (_plug.riskIds().length == 0) revert Portfolio_NoRiskIds(_adapter);
     if (_adapters.length() >= MAX_ADAPTERS) revert Portfolio_TooManyAdapters(MAX_ADAPTERS);
     if (!_adapters.add(_adapter)) revert Portfolio_AdapterExists(_adapter);
-    emit AdapterAdded(_adapter);
+    if (_priced && !_plug.fresh()) revert Portfolio_StalePrice(_adapter);
+    // A position already there counts at once, so it cannot come back from a write-off outside the caps.
+    uint256 _allocation = _priced ? _plug.value() : 0;
+    _addAllocation(_adapter, _allocation, IERC4626(VAULT).totalAssets());
+    emit AdapterAdded(_adapter, _allocation);
   }
 
   /// @inheritdoc IPortfolio
@@ -122,8 +131,11 @@ contract Portfolio is ReentrancyGuardTransient, IPortfolio {
     _requireAdmin();
     _requireInstalled(_adapter);
     IAdapter _plug = IAdapter(_adapter);
+    // View interface: compiled to STATICCALL, so the adapter cannot change state or re-enter before the writes below.
+    // aderyn-ignore-next-line(reentrancy-state-change)
     if (!_plug.reported() && _plug.fresh()) revert Portfolio_StillPriced(_adapter);
     uint256 _cleared = allocationOf[_adapter];
+    writtenOff = true;
     _takeOff(_adapter);
     emit AdapterWrittenOff(_adapter, _cleared);
   }

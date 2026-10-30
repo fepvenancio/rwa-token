@@ -60,7 +60,7 @@ interface IAdapter {
 
   /**
    * @notice The risks this adapter counts against: one for itself and any it shares with other adapters
-   * @return _ids The risk ids, at least one
+   * @return _ids The risk ids, at least one, each once
    */
   function riskIds() external view returns (bytes32[] memory _ids);
 
