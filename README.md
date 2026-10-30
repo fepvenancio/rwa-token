@@ -116,7 +116,9 @@ can change its own.
   during a pause is `forcedTransfer` to a quarantine account, and the burn waits for the unpause. This differs from the
   ERC-3643 reference token, whose agents can mint, burn and force while paused (see [Deployment and governance](docs/deployment.html)).
 - **Fund monitor.** `Fund.firstBrokenClass()` names the first class whose hook no longer lists the fund's rule, which the
-  hook cannot know; the post-deploy check asserts it is the zero address.
+  hook cannot know; the post-deploy check asserts it is the zero address. Alert too when `holderCount()` is above
+  `holderCap()`: a recovery from a 7540 vault can put it there, and the fulfiller should reject deposit requests near
+  the cap (see [SECURITY.md](SECURITY.md)).
 - **Reentrancy.** `_update` is `nonReentrant` (transient storage), so no hook or rule can move balances during a
   movement; `check` is called as a view, and rules are attested.
 - **Reproducible builds.** solc 0.8.30, cancun, optimizer 200 runs, and no metadata hash, in both Hardhat and forge.

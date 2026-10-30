@@ -85,7 +85,7 @@ Build: solc 0.8.30, `evmVersion: cancun`, optimizer 200 runs, no metadata hash, 
        install another hook, which must name the token's own registry (`PolicyGated_HookRegistryMismatch`);
      - `ProxyDeployer` reverts unless the hook holds exactly the expected rules for the new token;
      - the post-deploy check asserts every token runs the one recorded hook and that its list equals `RULE_ORDER`.
-   - Tests: a second hook on the same registry is attested through the shared codehash, `Activate` completes on it, and
+   - Tests: a second hook on the same registry is attested through the shared codehash, `Product` completes on it, and
      the post-deploy check refuses it; a hook on another registry is refused by the token before anything is created
      (`deployment.test.ts`).
 
@@ -135,7 +135,7 @@ Further limits recorded during review:
   and the minimum is refused (`BELOW_MIN_POSITION`), as is an exit that would leave such a remainder. It does not stop 1
   wei being sent to an existing holder at or above the minimum, and an exit of the old exact balance then reverts with
   `BELOW_MIN_POSITION`; the holder exits the current balance (`maxRedeem`). It is off by default (a
-  minimum of 0), and the demo deployment sets none unless `Activate` is given one. Where none is set, the mitigation is
+  minimum of 0), and a product sets none unless `Product` is given one. Where none is set, the mitigation is
   operational: the agent cleans up dust (forced transfer or burn) and monitoring watches slot usage. FORCED and an enforcement
   burn are exempt, so an agent can still leave a remainder. Requiring a credentialed caller on vault mints was rejected
   because it would break custodians depositing for clients.
@@ -144,6 +144,15 @@ Further limits recorded during review:
   admitted, net-zero moves included, until the count comes back down. Existing investors can still move among
   themselves and exit. Pinned by
   `FundHoldersRule.t.sol::test_WhenTheCountIsAboveALoweredCap_ANetZeroMoveIsStillRejected`.
+- **The investor cap does not hold a place for an open 7540 request** (outside review, 3.2 and 3.3; accepted by the owner
+  for the first version, decision P27). A full `requestRedeem` takes the investor out of the count while the shares wait
+  unburned in the escrow, and `requestDeposit` reserves no place. So when the fund fills up meanwhile, a reject that returns
+  the shares, or a deposit claim, is refused with `MAX_HOLDERS`. The agent's recovery always works, and delivering to an
+  account that holds nothing puts the count above the cap, where it stays until investors leave. The mitigation is
+  operational: the fulfiller rejects deposit requests near the cap, and a monitor alerts when `Fund.holderCount()` is
+  above `Fund.holderCap()`. Whether a redeeming investor still counts as a holder is for counsel. Pinned by
+  `FundIntegration.t.sol::test_WhenARejectedRedemptionReturnsSharesToAnInvestorWhoWasReplaced_TheFundCapAppliesAndRecoveryIsCounted`
+  and `Gated7540Vault.t.sol::test_WhenACapFilledAfterFulfilment_TheAgentDeliversTheStrandedShares`.
 - **Dropping the fund rule from a class's list un-caps it silently.** The hook accepts any attested list, and nothing in it
   knows about the fund, so a list without `FundHoldersRule` stops the class from counting investors and from enforcing
   the cap (a fourth investor gets in at a full cap, and the fund's count does not know). Replacing the rule in the fund
@@ -270,12 +279,12 @@ Inline acknowledgements (reason on the line above each `aderyn-ignore`):
 
 | Detector | Where | Verdict | Evidence |
 |---|---|---|---|
-| `contract-locks-ether` (high) | `IntentToken`, `Gated4626Vault`, `Gated7540Vault`, `TokenProxy` | False positive: no path accepts ETH. There is no `receive` or payable function, `upgradeToAndCall` with empty data rejects value (`ERC1967NonPayable`), and with data the value is delegated into a non-payable function | `IntentTokenIntegration_Ether`, `Gated4626VaultUnit_Ether`, `Gated7540VaultUnit_Ether` |
+| `contract-locks-ether` (high) | `GatedToken`, `IntentToken`, `Gated4626Vault`, `Gated7540Vault`, `TokenProxy` | False positive: no path accepts ETH. There is no `receive` or payable function, `upgradeToAndCall` with empty data rejects value (`ERC1967NonPayable`), and with data the value is delegated into a non-payable function | `GatedTokenIntegrationTest::test_WhenEtherIsSent_ItReverts`, `IntentTokenIntegration_Ether`, `Gated4626VaultUnit_Ether`, `Gated7540VaultUnit_Ether` |
 | `reentrancy-state-change` (high) | `HolderRestrictionRule`, `MinPositionRule`, `SettlementWindowRule`, `CredentialRule.setPolicy` and `_checkSender`, `Fund.registerClass`, `Fund.setRule` | False positive: the token, the hook, the fund or the registry is called through view interfaces, which compile to STATICCALL, so nothing it does can change any state | `*Unit_TokenCallsAreStatic` for the rules, `FundHoldersRuleUnit_TokenAndFundCallsAreStatic` and `FundUnit_CallsAreStatic` for the fund layer: a callee whose reads write makes the entry point revert, while a quiet callee succeeds (control) |
 | `arbitrary-transfer-from` (high) | `Gated7540Vault.requestDeposit` | Same as Slither's `arbitrary-send-erc20` (§4 above) | Fuzzed victim-owner test; removing the guard fails 2 tests |
 | `abi-encode-packed-hash-collision` (high) | `ProxyDeployer._initCodeHash` | False positive: only the second operand varies; the first is fixed creation code | Fuzzed `predict` formula test; off-chain CREATE2 test |
 | `storage-array-memory-edit` (high) | `SettlementWindowRule.check`, `isOpen` | False positive: a read-only copy of a storage struct into memory | Window tests |
-| `unused-state-variable` | `Gated7540Vault` ERC-7201 location | False positive: read in assembly | `Gated7540VaultUnit_Storage`: the formula equals the constant and the slot holds custody and `lastPrice` |
+| `unused-state-variable` | `GatedToken` and `Gated7540Vault` ERC-7201 locations | False positive: read in assembly | `GatedTokenIntegrationTest::test_TheErc7201LocationHoldsTheDecimals` and `Gated7540VaultUnit_Storage`: the formula equals the constant and the slot holds the decimals, or custody and `lastPrice` |
 | `unchecked-return` | `_grantRole` in constructors and initialisers (`CredentialRegistry` included), and `_revokeRole` in the `revokeRole` overrides of the base, `GovernanceTimelock`, both executors and `CredentialRegistry` (it returns false only if the role was not held, and either way the account ends up without it); `Address.functionCall` in `ProxyDeployer`; `_executeLeg` in `DvPExecutor` | `_grantRole` returns false only if the role is already held; `initialize` returns nothing; the cash leg's digest is not needed and the securities leg's digest was read before the call | Role, deploy and DvP tests |
 | `costly-loop`, `require-revert-in-loop` | `ComplianceHook._setRules`, `IntentExecutor.executeBatch` | By design: at most 16 rules, and invalid rules must fail closed; batches are atomic | Hook and batch tests |
 | `literal-instead-of-constant` | calendar arithmetic; `10 ** decimals()` | Calendar constants; `decimals()` is read at runtime | Window and vault tests |
