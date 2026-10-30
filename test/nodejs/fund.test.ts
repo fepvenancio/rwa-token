@@ -197,15 +197,8 @@ describe("fund: investors counted across classes", async function () {
       functionName: "initialize",
       args: ["New Class", "NEWF", s.timelock.address, s.wallets.guardian.account.address, s.registry.address, s.hook.address, rules],
     });
-    const deploy = await schedule(
-      s,
-      s.proxyDeployer.address,
-      encodeFunctionData({
-        abi: s.proxyDeployer.abi,
-        functionName: "deploy",
-        args: ["NEWF", implementation, initData, s.hook.address, rules],
-      }),
-    );
+    // The operations account places it at once: it touches nothing that exists.
+    await s.proxyDeployer.write.deploy(["NEWF", implementation, initData, s.hook.address, rules], { account: s.wallets.operations.account });
     // The new class asks for KYC from attester 0, like the others. The timelock administers it, so the policy is its
     // operation too; it can only run once the token exists.
     const policy = await schedule(
@@ -213,8 +206,7 @@ describe("fund: investors counted across classes", async function () {
       s.rules.credentialRule.address,
       encodeFunctionData({ abi: s.rules.credentialRule.abi, functionName: "setPolicy", args: [predicted, QUALS.KYC, 0, 0, 1n] }),
     );
-    await networkHelpers.time.increase(deploy.delay);
-    await deploy.execute();
+    await networkHelpers.time.increase(policy.delay);
     await policy.execute();
     const created = await viem.getContractAt("IntentToken", predicted);
 

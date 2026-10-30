@@ -22,7 +22,7 @@ const DAY = 86_400n;
 
 /**
  * Delivery versus payment through the production deployment: the real security token under the real policy, the real
- * `DvPExecutor` that `Activate` wired, a gated cash token and an ERC-3009 token deployed here as external instruments.
+ * `DvPExecutor` that the deployment wired, a gated cash token and an ERC-3009 token deployed here as external instruments.
  */
 describe("DvP: a share trade against cash, settled in one transaction", async function () {
   const connection = await network.create();

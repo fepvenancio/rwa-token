@@ -58,7 +58,7 @@ contract CredentialRegistry is AccessControl, EIP712, ICredentialRegistry, IIden
 
   /**
    * @notice Deploys the registry
-   * @param _admin The account granted DEFAULT_ADMIN_ROLE. The deployer until `Activate` hands over to the timelock
+   * @param _admin The account granted DEFAULT_ADMIN_ROLE. The deployer until `CoreHandover` hands over to the timelock
    * @param _guardian The guardian multisig, granted GUARDIAN_ROLE; it can only block addresses and kill attesters
    */
   constructor(

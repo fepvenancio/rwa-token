@@ -16,11 +16,11 @@ import {
 } from "viem";
 
 import { ROLES, TOKENS } from "../../ignition/modules/roles.js";
-import { deployStack, deployUntilActivate, REASONS } from "./fixtures.js";
+import { deployStack, deployUntilProducts, REASONS } from "./fixtures.js";
 
 const IDVP_EXECUTOR_ID = "0xe68774e8";
 
-describe("deployment (Ignition: Components → council → Activate)", async function () {
+describe("deployment (Ignition: Core → council → CoreHandover → products)", async function () {
   const connection = await network.create();
   const { networkHelpers } = connection;
   const stack = () => deployStack(connection);
@@ -98,40 +98,40 @@ describe("deployment (Ignition: Components → council → Activate)", async fun
 
 });
 
-describe("deployment with a twin hook passed to Activate", async function () {
+describe("a product given a twin hook", async function () {
   const connection = await network.create();
-  const stages = () => deployUntilActivate(connection);
+  const stages = () => deployUntilProducts(connection);
 
-  it("a second hook on the same registry shares the attested codehash, so Activate completes, and the hand-over check refuses it", async function () {
-    const { activate, parameters, components } = await connection.networkHelpers.loadFixture(stages);
+  it("a second hook on the same registry shares the attested codehash, so the product launches, and the hand-over check refuses it", async function () {
+    const { launch, parameters, registry } = await connection.networkHelpers.loadFixture(stages);
     // Its only immutable is the registry, so the council's attestation of the hook covers any instance on that registry.
-    const twin = await connection.viem.deployContract("ComplianceHook", [components.registry.address]);
-    assert.equal(await components.registry.read.isAttested([twin.address, 1]), true, "the attestation covers the twin");
-    // The tokens come up on the twin with the right rules, so ProxyDeployer is satisfied and Activate completes; the
+    const twin = await connection.viem.deployContract("ComplianceHook", [registry.address]);
+    assert.equal(await registry.read.isAttested([twin.address, 1]), true, "the attestation covers the twin");
+    // The tokens come up on the twin with the right rules, so ProxyDeployer is satisfied and the launch completes; the
     // hand-over check is what insists on the instance the council reviewed.
-    await assert.rejects(activate({ ...parameters, hook: twin.address }), /runs another hook/);
+    await assert.rejects(launch({ ...parameters, hook: twin.address }), /runs another hook/);
   });
 
   it("a hook on another registry is not the attested one, and the token refuses it before anything is created", async function () {
-    const { activate, parameters, components } = await connection.networkHelpers.loadFixture(stages);
-    const other = await connection.viem.deployContract("ComplianceHook", [components.timelock.address]);
-    assert.equal(await components.registry.read.isAttested([other.address, 1]), false, "another registry, another codehash");
+    const { launch, parameters, registry, timelock, proxyDeployer, components } = await connection.networkHelpers.loadFixture(stages);
+    const other = await connection.viem.deployContract("ComplianceHook", [timelock.address]);
+    assert.equal(await registry.read.isAttested([other.address, 1]), false, "another registry, another codehash");
     // The token's initialiser reverts with `PolicyGated_NotAttested(address,uint8)`, which bubbles up through
     // `ProxyDeployer`, whose ABI does not name it: Ignition reports the selector.
-    await assert.rejects(activate({ ...parameters, hook: other.address }), /signature 0x78193cdc/);
-    const predicted = await components.proxyDeployer.read.predict([TOKENS.intent.symbol, components.intentImpl.address]);
+    await assert.rejects(launch({ ...parameters, hook: other.address }), /signature 0x78193cdc/);
+    const predicted = await proxyDeployer.read.predict([TOKENS.intent.symbol, components.intentImpl.address]);
     const client = await connection.viem.getPublicClient();
     assert.equal(await client.getCode({ address: predicted }), undefined, "no proxy was created");
   });
 });
 
-describe("deployment that sets minimum positions", async function () {
+describe("a deployment that sets minimum positions", async function () {
   const connection = await network.create();
-  const stages = () => deployUntilActivate(connection);
+  const stages = () => deployUntilProducts(connection);
 
   it("sets each token's minimum before the hand-over, and the deployed intent token enforces it", async function () {
-    const { activate, parameters } = await connection.networkHelpers.loadFixture(stages);
-    const s = await activate({ ...parameters, intentMinPosition: parseEther("10"), fundMinPosition: 5n, asyncFundMinPosition: 7n });
+    const { launch, parameters } = await connection.networkHelpers.loadFixture(stages);
+    const s = await launch({ ...parameters, intentMinPosition: parseEther("10"), fundMinPosition: 5n, asyncFundMinPosition: 7n });
     const min = s.rules.minPositionRule;
     assert.equal(await min.read.minPosition([s.token.address]), parseEther("10"));
     assert.equal(await min.read.minPosition([s.vault4626.address]), 5n);
@@ -155,66 +155,45 @@ describe("deployment that sets minimum positions", async function () {
   });
 });
 
-describe("deployment with a tampered Activate", async function () {
+describe("a tampered deployment", async function () {
   // A fresh chain: the fixture pins the clock, which only moves forward on a shared connection.
   const connection = await network.create();
-  const stages = () => deployUntilActivate(connection);
+  const stages = () => deployUntilProducts(connection);
 
-  it("an Activate that points the DvP executor at another contract leaves the real one with the deployer, and the hand-over check refuses it", async function () {
-    const { activate, parameters } = await connection.networkHelpers.loadFixture(stages);
+  it("a CoreHandover that points the DvP executor at another contract leaves the real one with the deployer, and the hand-over check refuses it", async function () {
+    const { launch, parameters } = await connection.networkHelpers.loadFixture(stages);
     // The intent executor takes the DvP executor's roles and hand-over; the real DvP executor is never touched.
-    await assert.rejects(activate({ ...parameters, dvpExecutor: parameters.executor }), /deployer holds roles on/);
+    await assert.rejects(launch({ ...parameters, dvpExecutor: parameters.executor }), /deployer holds roles on/);
   });
 
-  it("a rule the council did not attest stops Activate before any role is granted", async function () {
-    const { activate, parameters, components, wallets } = await connection.networkHelpers.loadFixture(stages);
+  /** What a refused product leaves behind: no proxy, the symbol free, and the next product never started. */
+  async function assertNothingPlaced(proxyDeployer: Awaited<ReturnType<typeof stages>>["proxyDeployer"], implementation: `0x${string}`, later: `0x${string}`) {
     const client = await connection.viem.getPublicClient();
+    const predicted = await proxyDeployer.read.predict([TOKENS.intent.symbol, implementation]);
+    assert.equal(await client.getCode({ address: predicted }), undefined, "no proxy was created");
+    assert.equal(await proxyDeployer.read.saltUsed([keccak256(toHex(TOKENS.intent.symbol))]), false);
+    const next = await proxyDeployer.read.predict([TOKENS.fund.symbol, later]);
+    assert.equal(await client.getCode({ address: next }), undefined, "the next product was not started");
+  }
+
+  it("a rule the council did not attest stops the product before anything is placed", async function () {
+    const { launch, parameters, proxyDeployer, components, wallets } = await connection.networkHelpers.loadFixture(stages);
     // The holder-restriction rule's place in every token's rule list names a contract nobody attested as a rule.
     const tampered = { ...parameters, holderRestrictionRule: parameters.asset };
     // `ComplianceHook_NotAttested(address)` from the hook, through the token's initialiser and `ProxyDeployer`: Ignition
     // reports the selector.
-    await assert.rejects(activate(tampered), /signature 0xebefa01e/);
-
-    const pd = components.proxyDeployer;
-    for (const [key, impl] of [
-      ["intent", components.intentImpl],
-      ["fund", components.fundImpl],
-    ] as const) {
-      const predicted = await pd.read.predict([TOKENS[key].symbol, impl.address]);
-      assert.equal(await client.getCode({ address: predicted }), undefined, `${key}: no proxy was created`);
-      assert.equal(await pd.read.saltUsed([keccak256(toHex(TOKENS[key].symbol))]), false);
-    }
-    // The other token may be deployed in the same batch, but nothing after the deploy batch runs.
-    const asyncFund = await pd.read.predict([TOKENS.asyncFund.symbol, components.asyncFundImpl.address]);
-    if ((await client.getCode({ address: asyncFund })) !== undefined) {
-      const vault = await connection.viem.getContractAt("Gated7540Vault", asyncFund);
-      assert.equal(await vault.read.hasRole([ROLES.AGENT, wallets.agent.account.address]), false);
-      assert.equal(await vault.read.hasRole([ROLES.UPGRADER, components.timelock.address]), false);
-      assert.equal(await vault.read.hasRole([ROLES.DEFAULT_ADMIN, components.timelock.address]), false);
-    }
-    assert.equal(await components.executor.read.hasRole([ROLES.OPERATOR, wallets.operator.account.address]), false);
-    assert.equal(await components.timelock.read.hasRole([ROLES.CANCELLER, wallets.guardian.account.address]), false);
-    assert.ok(isAddressEqual(await pd.read.owner(), wallets.deployer.account.address), "ownership not yet handed over");
+    await assert.rejects(launch(tampered), /signature 0xebefa01e/);
+    await assertNothingPlaced(proxyDeployer, components.intentImpl.address, components.fundImpl.address);
+    assert.ok(isAddressEqual(await proxyDeployer.read.owner(), wallets.operations.account.address), "the core was handed over first");
   });
 
-  it("an implementation the council did not attest stops Activate before any role is granted", async function () {
-    const { activate, parameters, components, wallets } = await connection.networkHelpers.loadFixture(stages);
-    const client = await connection.viem.getPublicClient();
+  it("an implementation the council did not attest stops the product before anything is placed", async function () {
+    const { launch, parameters, proxyDeployer, components } = await connection.networkHelpers.loadFixture(stages);
     // A second IntentToken: the same source with its own codehash (UUPS keeps the contract's address in its code), so
     // the council's attestation of the first one does not cover it.
     const unreviewed = await connection.viem.deployContract("IntentToken");
     // `ProxyDeployer_ImplementationNotAttested(address)` from `ProxyDeployer.deploy` itself, before any proxy exists.
-    await assert.rejects(
-      activate({ ...parameters, intentImpl: unreviewed.address }),
-      /ProxyDeployer_ImplementationNotAttested/,
-    );
-
-    const pd = components.proxyDeployer;
-    const predicted = await pd.read.predict([TOKENS.intent.symbol, unreviewed.address]);
-    assert.equal(await client.getCode({ address: predicted }), undefined, "no proxy was created");
-    assert.equal(await pd.read.saltUsed([keccak256(toHex(TOKENS.intent.symbol))]), false);
-    assert.equal(await components.executor.read.hasRole([ROLES.OPERATOR, wallets.operator.account.address]), false);
-    assert.equal(await components.timelock.read.hasRole([ROLES.CANCELLER, wallets.guardian.account.address]), false);
-    assert.ok(isAddressEqual(await pd.read.owner(), wallets.deployer.account.address), "ownership not yet handed over");
+    await assert.rejects(launch({ ...parameters, intentImpl: unreviewed.address }), /ProxyDeployer_ImplementationNotAttested/);
+    await assertNothingPlaced(proxyDeployer, unreviewed.address, components.fundImpl.address);
   });
 });

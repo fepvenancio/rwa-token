@@ -19,6 +19,7 @@ security review.
 PolicyGatedERC20Upgradeable        base: accounting, roles, enforcement, guardian, hook pointer (UUPS)
         ▲                                 every movement → TransferContext → hook.beforeTransfer → balances → afterTransfer
         │
+GatedToken                                the base and nothing else
 IntentToken (+ IntentSettledUpgradeable)  holder-signed EIP-712 TransferIntent, settled by EXECUTOR_ROLE
 Gated4626Vault (ERC-4626, gated max*, decimals offset 6), Gated7540Vault (ERC-7540 async, escrow, fulfiller)
 
@@ -42,7 +43,7 @@ DvPExecutor (immutable)                          role-gated: settles a share tra
 | `contracts/governance/` | `PolicyRegistry`, `GovernanceTimelock` |
 | `contracts/identity/` | `CredentialRegistry` |
 | `contracts/deploy/` | `ProxyDeployer`, `TokenProxy` |
-| `contracts/mixins/`, `contracts/tokens/` | `IntentSettledUpgradeable`, `IntentToken` |
+| `contracts/mixins/`, `contracts/tokens/` | `IntentSettledUpgradeable`, `GatedToken`, `IntentToken` |
 | `contracts/hooks/` | `ComplianceHook`, `BaseRule`, `rules/` `CredentialRule`, `MinPositionRule`, `HolderRestrictionRule`, `SettlementWindowRule`, `FundHoldersRule` (in the recommended order) |
 | `contracts/fund/` | `Fund` |
 | `contracts/intents/` | `IntentExecutor`, `DvPExecutor` |
@@ -57,16 +58,17 @@ Every contract except the abstract `BaseRule` has its `.t.sol` next to it. [`PLA
 The audit package (scope, suppressions, mutation results, findings an auditor should know first) is indexed in
 [`SECURITY.md`](SECURITY.md).
 
-The delays below are the timelocks' `minDelay`, 7 days by default in `Components`. The main timelock refuses less than
-7 days, at deployment and in `updateDelay` (`GovernanceTimelock_DelayBelowFloor`). The recovery timelock is
-OpenZeppelin's own: the post-deploy check asserts at least 7 days there, and an operation of that timelock can change it.
+The delays below are the timelocks' `minDelay`, 24 hours by default in `Core`. The main timelock refuses less than
+1 hour, at deployment and in `updateDelay` (`GovernanceTimelock_DelayBelowFloor`). The recovery timelock is
+OpenZeppelin's own: the post-deploy check asserts at least 24 hours on both, and an operation of the recovery timelock
+can change its own.
 
 | Power | Holder | Delay | Can |
 |---|---|---|---|
-| `DEFAULT_ADMIN_ROLE` | TimelockController | ≥ 7 days | grant/revoke every role, `unpause`, `setPolicyHook`, change the token's rule list on the hook, manage attesters |
+| `DEFAULT_ADMIN_ROLE` | TimelockController | ≥ 24 hours | grant/revoke every role, `unpause`, `setPolicyHook`, change the token's rule list on the hook, manage attesters |
 | `GUARDIAN_ROLE` | multisig | none | `pause` the token and cancel pending main-timelock operations. **It can only stop things:** no unpause, no upgrades, no role or hook changes, and no veto over its own removal (see `RECOVERY_ROLE`) |
-| `RECOVERY_ROLE` | recovery timelock | ≥ 7 days | on every token, vault and both executors: `unpause` and revoke `GUARDIAN_ROLE`; on the main timelock: revoke `CANCELLER_ROLE`; on the credential registry: revoke `GUARDIAN_ROLE`, clear a guardian block, revive an attester. Nothing else. Governance proposes and executes; nobody can cancel |
-| `UPGRADER_ROLE` | timelock | ≥ 7 days | upgrade, only to an implementation attested as `IMPLEMENTATION` |
+| `RECOVERY_ROLE` | recovery timelock | ≥ 24 hours | on every token, vault and both executors: `unpause` and revoke `GUARDIAN_ROLE`; on the main timelock: revoke `CANCELLER_ROLE`; on the credential registry: revoke `GUARDIAN_ROLE`, clear a guardian block, revive an attester. Nothing else. Governance proposes and executes; nobody can cancel |
+| `UPGRADER_ROLE` | timelock | ≥ 24 hours | upgrade, only to an implementation attested as `IMPLEMENTATION` |
 | `MINTER_ROLE` / `BURNER_ROLE` | issuer | none | mint, and burn (enforcement burns can take frozen tokens) |
 | `AGENT_ROLE` | issuer | none | `forcedTransfer` (clawback; bypasses pause, frozen tokens and the sender's address freeze, still policy-checked: an address-frozen receiver refuses it), `setFrozenTokens`; on the 7540 vault, `recoverRedeemRequest` (one controller's escrow → recovery account whose credential the token's policy accepts; out of the vault's own address `forcedTransfer` takes only shares not booked to a pending redemption, and the vault's address cannot be frozen) and `recoverClaimable` (claimable assets and shares → recovery account whose credential the token's policy accepts, even while paused or at a full cap) |
 | `EXECUTOR_ROLE` | `IntentExecutor` and `DvPExecutor` contracts | none | settle holder-signed intents that name no executor or name that executor. `IntentExecutor` settles only intents that state no consideration; `DvPExecutor` settles trades. Neither can alter an intent |
@@ -75,8 +77,9 @@ OpenZeppelin's own: the post-deploy check asserts at least 7 days there, and an 
 | `ATTESTER_ROLE` (registry) | security council | none | attest / revoke codehashes |
 | `GUARDIAN_ROLE` (credential registry) | multisig | none | block an address or kill an attester, and nothing else; the main or recovery timelock undoes it |
 | attester (credential registry) | KYC provider, an account in the registry (≤ 64) | none | write a credential for an address within the qualification bits it may assert, or sign one that anyone submits; it can overwrite only an empty address, a record it wrote, or a killed attester's, and change the status only of records it wrote. The compromise limits are on the [`CredentialRegistry` page](docs/contracts/CredentialRegistry.html#compromise) |
-| token `DEFAULT_ADMIN_ROLE` → rules | timelock | ≥ 7 days | set a token's credential policy, its minimum position and its exemptions and its settlement window |
-| `Fund` owner | timelock | ≥ 7 days | register a class, set the fund's rule and investor cap, exempt an account. Only the installed rule records which classes an account holds |
+| token `DEFAULT_ADMIN_ROLE` → rules | timelock | ≥ 24 hours | set a token's credential policy, its minimum position and its exemptions and its settlement window |
+| `ProxyDeployer` owner | operations account | none | place a new product, only over an attested implementation. It touches nothing that exists |
+| `Fund` owner | timelock | ≥ 24 hours | register a class, set the fund's rule and investor cap, exempt an account. Only the installed rule records which classes an account holds |
 | token `AGENT_ROLE` → rules | issuer | none | set or clear per-holder lockups, freeze or unfreeze a holder (`HolderRestrictionRule`) |
 | `FULFILLER_ROLE` (7540 vault) | bank | none | fulfil deposits/redemptions at off-chain NAV; reject pending requests |
 
@@ -127,22 +130,26 @@ OpenZeppelin's own: the post-deploy check asserts at least 7 days there, and an 
 
 ## Deployment runbook
 
-Two Ignition modules in `ignition/modules/`, with one security-council step between them. `Activate` takes the addresses
-`Components` produced as parameters. `test/nodejs/fixtures.ts` runs this exact sequence on the local network, playing the
-council and the KYC attester, and ends with the post-deploy checks below.
+One core per bank, then one product at a time, so a bank runs many products on one set of timelocks, one guardian, one
+hook and one credential registry, and a client is verified once. Someone who wants one product alone deploys the core and
+that product, with the same code. `ignition/profiles.ts` names the combinations: `full`, `token`, `vault4626`, `vault7540`.
+`PROFILE` chooses one for `hardhat ignition deploy`, and `PRODUCT` one of its products; `full` and its first product are the
+defaults. Each module takes the addresses the earlier ones produced as parameters. `test/nodejs/fixtures.ts` runs this
+exact sequence on the local network, playing the council and the KYC attester, and ends with the post-deploy checks below.
 
-1. **`Components`** (deployer):
-   - the recovery timelock (plain OZ `TimelockController`, ≥ 7 days, governance multisig as proposer and executor),
-     then the main timelock (`GovernanceTimelock`: ≥ 7 days, proposer **and** executor the governance multisig only;
-     OpenZeppelin also makes every proposer a canceller, so governance can cancel there too, and `Activate` adds the
-     guardian; the recovery timelock may revoke `CANCELLER_ROLE` there). The deployer is the admin of both until `Activate`;
+1. **`Core`** (deployer):
+   - the recovery timelock (plain OZ `TimelockController`, 24 hours, governance multisig as proposer and executor),
+     then the main timelock (`GovernanceTimelock`: 24 hours, proposer **and** executor the governance multisig only;
+     OpenZeppelin also makes every proposer a canceller, so governance can cancel there too, and `CoreHandover` adds the
+     guardian; the recovery timelock may revoke `CANCELLER_ROLE` there). The deployer is the admin of both until `CoreHandover`;
    - the `PolicyRegistry`: admin = timelock, attester = council;
    - the one shared `ComplianceHook`, whose only immutable is the registry;
-   - the `CredentialRegistry` (admin = deployer until `Activate`, guardian = the guardian multisig);
-   - the shared rules: `CredentialRule` (reads that registry), `MinPositionRule`, `HolderRestrictionRule`,
-     `SettlementWindowRule`, and the `FundHoldersRule` that points at the fund;
-   - one implementation per template, `ProxyDeployer` (owner = deployer, registry = the `PolicyRegistry`), `IntentExecutor` and `DvPExecutor` (neither is attested);
-   - the `Fund` (owner = deployer).
+   - `ProxyDeployer` (owner = deployer until `CoreHandover`, registry = the `PolicyRegistry`);
+   - and only what the profile's products use:
+     - the `CredentialRegistry` (admin = deployer until `CoreHandover`, guardian = the guardian multisig) and the `CredentialRule` that reads it;
+     - each other listed rule: `MinPositionRule`, `HolderRestrictionRule`, `SettlementWindowRule`, and the `Fund` (owner = deployer) with the `FundHoldersRule` that points at it;
+     - one implementation per template, shared by every product of that template;
+     - `IntentExecutor` and `DvPExecutor` (neither is attested).
 
    Parameters: `governance`, `council`, `guardian`, `minDelay`.
 2. **Council step.** Attest only when two independent sources agree:
@@ -160,13 +167,13 @@ council and the KYC attester, and ends with the post-deploy checks below.
    - For `CredentialRule`, also read the `CredentialRegistry` it points at (`REGISTRY()`): the rule's codehash covers the
      registry's address, not the registry's code. Check the registry's runtime code against the manifest's
      `CredentialRegistry` entry, filling its `immutableSlots` as for the rules, that its admin is the deployer and its
-     guardian the guardian multisig, and that it has no attester yet (`Activate` adds the first). It is not attested.
+     guardian the guardian multisig, and that it has no attester yet (`CoreHandover` adds the first). It is not attested.
    - Then `attest(codehash, RULE | HOOK | IMPLEMENTATION, auditUri)` for each. The record for the change board reads:
      computed from the source at tag X, matched the release build, matched the chain.
 
    The hook has no token binding: its codehash is the same for every token, so one attestation of one hook covers the
    deployment. The rule lists are not part of any attestation; each token's initialiser installs its list, and
-   `ProxyDeployer` and the post-deploy check compare it with `RULE_ORDER` (`ignition/modules/roles.ts`).
+   `ProxyDeployer` and the post-deploy check compare it with the product's list in `ignition/profiles.ts`.
 
    Also compute where each token will live, before it exists:
    `CREATE2(ProxyDeployer, salt = keccak256(utf8(symbol)), initCode = TokenProxy.creationCode ++ abi.encode(implementation, ""))`,
@@ -174,52 +181,57 @@ council and the KYC attester, and ends with the post-deploy checks below.
    manifest's `TokenProxy.creationKeccak`. `ProxyDeployer.predict(symbol,
    implementation)` returns the same address. Builds carry no metadata hash, so this code is the same in every clean
    build at the tag, and `verify:reproducible` checks that `ProxyDeployer` embeds exactly it.
-3. **`Activate`** (deployer):
-   - `ProxyDeployer.deploy(symbol, implementation, initData, hook, expectedRules)` for each token. The init data carries the
+3. **`CoreHandover`** (deployer):
+   - configure the credential layer (parameter `kycAttester`, the KYC function's account, and optionally `kycAllowedQuals`,
+     255 by default): add it to the registry as attester 0;
+   - configure the fund (parameter `fundHolderCap`): install its rule and set its cap;
+   - grant the core's roles: CANCELLER on the timelock to the guardian, RECOVERY on the credential registry and on each
+     executor to the recovery timelock, OPERATOR on each executor to the relayer;
+   - hand over: DEFAULT_ADMIN_ROLE to the timelock on the credential registry and on each executor; the deployer renounces it
+     there and on both timelocks; `ProxyDeployer` and `Fund` ownership move to the operations account (parameter `operations`).
+4. **`Product`** (the operations account), once per product. The first and the fiftieth follow this same path, and none waits
+   for a timelock, because a launch only adds a proxy over attested code:
+   - `ProxyDeployer.deploy(symbol, implementation, initData, hook, expectedRules)`. The init data carries the
      token's rule list, which the token installs on the shared hook itself. `deploy` first refuses an implementation
      that its registry has not attested as `IMPLEMENTATION`. It initialises in the same transaction, then checks that the
      token names that registry, that the hook is installed, that it holds exactly `expectedRules` for the new token, and
      the symbol. A symbol can be used once; a reverted deploy (an unattested implementation, a token or hook that names
-     another registry, an unattested rule, a failed `initialize`) leaves no proxy and does not use up the symbol. Every later call waits for all three deploys, so one
-     token that fails its checks grants nothing anywhere;
-   - configure the credential layer (parameter `kycAttester`, the KYC provider's account, and optionally `kycAllowedQuals`,
-     255 by default): add it to the registry as attester 0, and give each token the policy "`KYC` from attester 0 and
-     nothing more". Until a token has its policy its rule admits no receiver;
-   - configure: the settlement window, and each token's minimum position (parameters `intentMinPosition`,
-     `fundMinPosition` and `asyncFundMinPosition`; 0, the default, switches the rule off). Nothing is set for the
-     escrow: the 7540 vault is the token itself, which neither the fund rule nor the minimum counts;
-   - configure the fund (parameter `fundHolderCap`): install its rule, set its cap, then register the three tokens as
-     classes 1 to 3, one after another. Registration refuses a hook that does not list the rule and a token that has
-     supply, so a mis-built list stops `Activate` before any role is granted;
-   - grant roles: MINTER and BURNER on `IntentToken` and AGENT on every token to the issuer's accounts, EXECUTOR on
-     `IntentToken` to `IntentExecutor` and `DvPExecutor`, FULFILLER to the bank, OPERATOR on both executors to the
-     relayer, **UPGRADER to the timelock only**, CANCELLER on the timelock to the guardian, RECOVERY on every token, on
-     the credential registry and on both executors to the recovery timelock;
-   - hand over: DEFAULT_ADMIN_ROLE to the timelock on every token, on the credential registry and on both executors; the deployer renounces it there
-     and on both timelocks; `ProxyDeployer` and `Fund` ownership move to the timelock, so any later token is placed, and
-     any later class registered, through governance (schedule `deploy`, wait out the delay, execute).
-4. **KYC attester:** credential the 7540 vault, which escrows pending redemptions, and then every holder
-   (`CredentialRegistry.set`, or a signed credential that anyone submits).
-5. **Post-deploy checks** (the fixture's `assertHandedOver`):
-   - the deployer holds no role on either timelock, the policy registry, the credential registry, the tokens or either executor;
+     another registry, an unattested rule, a failed `initialize`) leaves no proxy and does not use up the symbol. Every later
+     call waits for it, so a token that fails its checks grants nothing;
+   - configure what the product lists: its credential policy ("`KYC` from attester 0" unless the profile states another; until
+     a token has its policy its rule admits no receiver), its settlement window, its minimum position (parameter
+     `minPosition`; 0, the default, switches the rule off), and its place as a class of the fund. Registration refuses a hook
+     that does not list the rule and a token that has supply. Nothing is set for the escrow: the 7540 vault is the token
+     itself, which neither the fund rule nor the minimum counts;
+   - grant roles: AGENT to the issuer's account, **UPGRADER to the timelock only**, RECOVERY to the recovery timelock; MINTER and
+     BURNER on a `GatedToken` or `IntentToken`; EXECUTOR on an `IntentToken` to the executors the product names; FULFILLER on a
+     7540 vault to the bank;
+   - hand over: DEFAULT_ADMIN_ROLE to the timelock, and the operations account renounces it.
+5. **`FundHandover`** (the operations account), once a fund's first classes are in: `Fund` ownership moves to the timelock, so
+   any later class or rule change goes through governance (schedule, wait out the delay, execute).
+6. **KYC attester:** credential a 7540 vault, which escrows pending redemptions, and then every holder
+   (`CredentialRegistry.set`, or a signed credential that anyone submits). A vault whose asset is a gated token needs a
+   credential that token's policy accepts.
+7. **Post-deploy checks** (the fixture's `assertHandedOver`):
+   - the deployer and the operations account hold no role on either timelock, the policy registry, the credential registry, the products or the executors;
    - the timelock holds DEFAULT_ADMIN_ROLE everywhere and is the only UPGRADER;
-   - every token's `policyHook()` is the hook the council attested, that hook's `REGISTRY()` is the registry, and its
-     `rules(token)` equals `RULE_ORDER` for that token. A second hook on the same registry carries the same attested
+   - every product's `policyHook()` is the hook the council attested, that hook's `REGISTRY()` is the registry, and its
+     `rules(token)` equals the rule list in the product's profile. A second hook on the same registry carries the same attested
      codehash and passes `ProxyDeployer`; this check is what refuses it;
    - the guardian can cancel main-timelock operations but cannot propose or execute them, and holds nothing on the
      recovery timelock;
-   - the credential registry's guardian holds only `GUARDIAN_ROLE`; it has one attester, the KYC provider, not killed;
-     the credential rule reads that registry and is attested; each token's policy is `KYC` from attester 0;
-   - the recovery timelock holds exactly `RECOVERY_ROLE` on each token, vault, both executors, the credential registry and the main timelock,
-     nothing elsewhere, and has no cancellers (governance's automatic one is revoked in `Activate`);
-   - the DvP executor's operator and guardian are the stack's, and `EXECUTOR_ROLE` on `IntentToken` is held by the two
-     executors and by no account the stack knows about;
+   - the credential registry's guardian holds only `GUARDIAN_ROLE`; it has one attester, the KYC function, not killed;
+     the credential rule reads that registry and is attested; each product's policy is the one in its profile;
+   - the recovery timelock holds exactly `RECOVERY_ROLE` on each product, the executors, the credential registry and the main timelock,
+     nothing elsewhere, and has no cancellers (governance's automatic one is revoked in `CoreHandover`);
+   - each executor's operator and guardian are the stack's, and `EXECUTOR_ROLE` on an `IntentToken` is held by the
+     executors it names and by no account the stack knows about;
    - no rule exposes `hasRole` or `owner`: rules take their authority from the token's roles at call time;
-   - `ProxyDeployer.owner()` and `Fund.owner()` are the timelock;
+   - `ProxyDeployer.owner()` is the operations account, and `Fund.owner()` the timelock;
    - the fund's rule is the attested `FundHoldersRule`, whose `FUND()` is the fund, its cap is the intended one, its
-     classes 1 to 3 are the three tokens, in that order, and every class is intact (`firstBrokenClass()` is the zero
+     classes are the products that list its rule, in order, and every class is intact (`firstBrokenClass()` is the zero
      address);
-   - `getMinDelay() ≥ 7 days` on both timelocks.
+   - `getMinDelay() ≥ 24 hours` on both timelocks.
 
    The recovery timelock's proposer and executor is the governance multisig. A compromised governance multisig is
    out of scope for this control, by design: recovery bounds the guardian, not governance.

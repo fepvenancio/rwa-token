@@ -30,7 +30,7 @@ In scope, all under `contracts/` (`.t.sol` files and `contracts/test/` are test 
 | Area | Contracts |
 |---|---|
 | Base | `base/PolicyGatedERC20Upgradeable` |
-| Templates | `tokens/IntentToken`, `vaults/Gated4626Vault`, `vaults/Gated7540Vault` |
+| Templates | `tokens/GatedToken`, `tokens/IntentToken`, `vaults/Gated4626Vault`, `vaults/Gated7540Vault` |
 | Mixin | `mixins/IntentSettledUpgradeable` |
 | Policy | `hooks/ComplianceHook` (one per deployment, shared by every token), `hooks/BaseRule`, `hooks/rules/{Credential,MinPosition,HolderRestriction,SettlementWindow,FundHolders}Rule` |
 | Credentials | `identity/CredentialRegistry` (immutable, not a proxy, not attested; the `CredentialRule` codehash covers its address, not its code) |
@@ -40,8 +40,8 @@ In scope, all under `contracts/` (`.t.sol` files and `contracts/test/` are test 
 | Deployment | `deploy/ProxyDeployer`, `deploy/TokenProxy` |
 | Interfaces | `interfaces/*` (frozen; ERC-165 ids, event topics and reason codes pinned by `contracts/test/InterfaceFreeze.t.sol`; the owner has reopened them on instruction, most recently 2026-10-23 to 24 for the review items and 2026-10-27 for `IProxyDeployer`, and they are frozen again) |
 
-Also in scope: `ignition/modules/{Components,Activate,roles}.ts`, which carry the deployment order, role grants,
-the hand-over to the timelock and each token's rule list (`RULE_ORDER`).
+Also in scope: `ignition/modules/{Core,CoreHandover,Product,FundHandover,roles}.ts` and `ignition/profiles.ts`, which carry
+the deployment order, role grants, the hand-over to the timelock and each product's rule list.
 
 Out of scope: OpenZeppelin 5.6.1 (`@openzeppelin/contracts`, `-upgradeable`; `TimelockController` is used unmodified for the recovery timelock and as the base of `GovernanceTimelock`),
 the KYC attesters' off-chain verification, and test mocks.
@@ -55,7 +55,7 @@ Build: solc 0.8.30, `evmVersion: cancun`, optimizer 200 runs, no metadata hash, 
    token. `ProxyDeployer` instead CREATE2s `TokenProxy(impl, "")` with salt `keccak256(symbol)`, so the address depends
    only on the deployer, the symbol and the implementation, and the council can compute it off-chain. `deploy`:
    - is owner-only. The address does not cover the init data, so anyone else could otherwise occupy it with their own
-     admin. Ownership moves to the timelock in `Activate`;
+     admin. Ownership moves to the operations account in `CoreHandover`, so a product launches without a timelock delay;
    - refuses, before it creates the proxy, an implementation that its registry (fixed at construction) has not attested
      as `IMPLEMENTATION` (`ProxyDeployer_ImplementationNotAttested`). The token cannot check this itself: its
      initialiser is the implementation's own code;
@@ -201,9 +201,16 @@ Further limits recorded during review:
   a controller. One controller's redemption is held by not fulfilling it, or moved with `recoverRedeemRequest`. Tooling
   that calls `setFrozenTokens` on the vault's address, or forces booked shares out of it, sees a revert. Pinned by
   `Gated7540VaultUnit_Escrow`.
-- **The main timelock's delay has a floor of 7 days.** `GovernanceTimelock` refuses less at deployment and in
-  `updateDelay` (`GovernanceTimelock_DelayBelowFloor`). The recovery timelock is OpenZeppelin's own, without a floor;
-  its powers only undo the guardian's. Pinned by `GovernanceTimelockUnitTest`.
+- **The timelocks wait 24 hours by default, and the main one has a floor of 1 hour.** `GovernanceTimelock` refuses less
+  than the floor at deployment and in `updateDelay` (`GovernanceTimelock_DelayBelowFloor`). The post-deploy check asserts
+  at least 24 hours on both timelocks at hand-over. So the guardian has a day to cancel a bad change, and governance can
+  later lower the main delay to 1 hour through a delayed operation. The recovery timelock is OpenZeppelin's own, without
+  a floor; its powers only undo the guardian's. Pinned by `GovernanceTimelockUnitTest`.
+- **The operations account places products without a delay.** It owns `ProxyDeployer`, because a launch only adds a proxy
+  over attested code and touches nothing that exists. A stolen operations key can still place a token over an attested
+  implementation with its own admin, and can use up a symbol. It cannot change an existing product, and such a token is
+  not one the bank published: holders and integrators should take addresses from the bank's list, and the post-deploy
+  check runs on each real product. Recovery from a stolen key is a new `ProxyDeployer`, which changes where later tokens land.
 - **Revoking an attestation does not affect live tokens.** Attestation is checked at install and upgrade time only.
   The guardian pauses while the timelock removes the component.
 - **`totalAssets` of the 7540 vault is indicative** (the last fulfilment price); `preview*` revert, as ERC-7540
@@ -285,7 +292,7 @@ solhint (Wonderland config, `--max-warnings 0`):
 
 ## 5. Mutation-testing results
 
-Each row is a bug deliberately planted, the tests that caught it, then the file restored from git. Counts are the failing tests in the run that recorded the row. The shared hook's own authority (who may call `setRules`, the per-token keying, `afterTransfer` from the token only) is pinned by unit and integration tests, not by a planted-bug row.
+Each row is a bug deliberately planted, the tests that caught it, then the file restored from git. Rows before 2026-10-30 name `Components` and `Activate`, now `Core`, `CoreHandover` and `Product`. Counts are the failing tests in the run that recorded the row. The shared hook's own authority (who may call `setRules`, the per-token keying, `afterTransfer` from the token only) is pinned by unit and integration tests, not by a planted-bug row.
 
 | Area | Planted bug | Caught by |
 |---|---|---|
@@ -301,6 +308,7 @@ Each row is a bug deliberately planted, the tests that caught it, then the file 
 | Phase 6 (TS) | executor hand-over skipped; `canExecute` skips the hook; NAV price rounds up; deadline exclusive | 46 / 8 / 1 / 1 failing |
 | `ProxyDeployer` | no hook-binding check; no salt check | unit test + Ignition tamper test; unit test |
 | `ProxyDeployer` implementation check (2026-10-27, audit finding 1) | the check removed; the check moved after CREATE2; the wrong kind asked (`HOOK`); the check moved before the salt check; the constructor not storing its registry; the zero-registry check removed; the token-registry check removed; `Components` passing the timelock as the registry | 8 of 8. The seven contract bugs fail 7, 1, 5, 1, 25, 1 and 1 of the 30 `ProxyDeployer.t.sol` tests. `deployment.test.ts` fails 1, 9, 10 and 10 of its 10 tests for the check removed, the wrong kind, the registry not stored and the timelock in `Components`. The check moved after CREATE2 is caught only by the implementation with no code: a revert undoes the proxy either way, so the order shows only in the error a bad implementation gets |
+| Core and products (2026-10-30) | The timelock floor at 7 days, 2 hours or zero; `GatedToken` reporting another template, or its implementation left initialisable; the default delay at 7 days or 23 hours; `Core` always deploying the fund or the window rule; `ProxyDeployer` left with the deployer or moved to the timelock; the deployer keeping the timelock admin; the guardian not made a canceller; the fund not moved to the operations account or left there; the operations account keeping a product's admin, or the admin going elsewhere; UPGRADER to the agent; RECOVERY skipped; a product's stated policy ignored; a fund class not registered; MINTER not granted on a plain token; the window rule allowed on any template | 23 of 23 caught, by `GatedToken.t.sol`, `GovernanceTimelock.t.sol`, `products.test.ts` and `deployment.test.ts` |
 | Ignition `Activate` | UPGRADER to an ops account; deployer keeps timelock admin; deployer keeps `ProxyDeployer` ownership | 54 / 54 / 55 failing |
 | upgrades-core | upgrade-unsafe state initialiser | `validate` FAILED |
 | Aderyn gate | one inline suppression removed | `npm run aderyn` fails (1 high) |

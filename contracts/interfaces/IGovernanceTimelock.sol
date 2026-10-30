@@ -17,9 +17,9 @@ interface IGovernanceTimelock {
   error GovernanceTimelock_ZeroAddress();
 
   /**
-   * @notice Thrown when the delay, at deployment or in `updateDelay`, is below seven days
+   * @notice Thrown when the delay, at deployment or in `updateDelay`, is below one hour
    * @param _delay The delay asked for
-   * @param _floor The lowest delay allowed, seven days
+   * @param _floor The lowest delay allowed, one hour
    */
   error GovernanceTimelock_DelayBelowFloor(uint256 _delay, uint256 _floor);
 

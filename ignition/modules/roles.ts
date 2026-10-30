@@ -22,7 +22,7 @@ export const ROLES = {
  */
 export const QUALS = { KYC: 1, PROFESSIONAL: 2, QUALIFIED: 4, INSTITUTIONAL: 8, FUND: 16, BANK: 32, CUSTOMER: 64, INFRA: 128 } as const;
 
-/** Default token identities. A token's symbol is its CREATE2 salt, so the symbols predicted before `Activate` must be the ones it uses. */
+/** Default token identities. A token's symbol is its CREATE2 salt, so the symbols predicted before a product launches must be the ones it uses. */
 export const TOKENS = {
   intent: { name: "Intent Token", symbol: "INT" },
   fund: { name: "Gated Fund", symbol: "gFUND" },
@@ -35,7 +35,7 @@ export const TOKENS = {
  * real positions rather than dust), then
  * HolderRestriction, then the SettlementWindow for the intent token (vaults have no EXECUTED transfers to window), then
  * the fund-wide `FundHoldersRule` last: the investor count that matters for a fund is fund-wide.
- * `Activate` passes each list through the token's init data and `ProxyDeployer`
+ * `Product` passes each list through the token's init data and `ProxyDeployer`
  * checks it; the post-deploy check compares `hook.rules()` against it, since a hook's attested codehash covers its
  * immutables, not this list.
  */

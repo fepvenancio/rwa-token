@@ -11,7 +11,8 @@ import {GovernanceTimelock} from 'contracts/governance/GovernanceTimelock.sol';
 
 /// @dev M-1: the recovery timelock can strip the guardian's cancel right on the main timelock, and do nothing else
 contract GovernanceTimelockUnitTest is Test {
-  uint256 internal constant _DELAY = 7 days;
+  uint256 internal constant _DELAY = 1 days;
+  uint256 internal constant _FLOOR = 1 hours;
   GovernanceTimelock internal _timelock;
   address internal _governance = makeAddr('governance');
   address internal _guardian = makeAddr('guardian');
@@ -115,7 +116,7 @@ contract GovernanceTimelockUnitTest is Test {
     uint256 _delay
   ) internal pure returns (bytes memory _revertData) {
     _revertData =
-      abi.encodeWithSelector(IGovernanceTimelock.GovernanceTimelock_DelayBelowFloor.selector, _delay, 7 days);
+      abi.encodeWithSelector(IGovernanceTimelock.GovernanceTimelock_DelayBelowFloor.selector, _delay, _FLOOR);
   }
 
   /// @dev Schedules `updateDelay(_delay)`, the only way it can run (an operation of the timelock on itself), and
@@ -140,27 +141,25 @@ contract GovernanceTimelockUnitTest is Test {
     );
   }
 
-  function test_WhenDeployedWithADelayBelowSevenDays_ItReverts() external {
+  function test_WhenDeployedWithADelayBelowTheFloor_ItReverts() external {
     address[] memory _members = new address[](1);
     _members[0] = _governance;
-    vm.expectRevert(_belowFloor(7 days - 1));
-    new GovernanceTimelock(7 days - 1, _members, _members, address(0), _recovery);
+    vm.expectRevert(_belowFloor(_FLOOR - 1));
+    new GovernanceTimelock(_FLOOR - 1, _members, _members, address(0), _recovery);
   }
 
-  function test_WhenGovernanceLowersTheDelayBelowSevenDays_TheOperationReverts() external {
-    _scheduleUpdateDelay(1 hours);
-    vm.expectRevert(_belowFloor(1 hours));
-    _executeUpdateDelay(1 hours);
+  function test_WhenGovernanceLowersTheDelayBelowTheFloor_TheOperationReverts() external {
+    _scheduleUpdateDelay(_FLOOR - 1);
+    vm.expectRevert(_belowFloor(_FLOOR - 1));
+    _executeUpdateDelay(_FLOOR - 1);
     assertEq(_timelock.getMinDelay(), _DELAY);
   }
 
-  /// @dev The floor itself is allowed: exactly seven days
-  function test_WhenGovernanceSetsTheDelayToExactlySevenDays_ItApplies() external {
-    _scheduleUpdateDelay(8 days);
-    _executeUpdateDelay(8 days);
-    _scheduleUpdateDelay(7 days); // waits out the new 8-day delay
-    _executeUpdateDelay(7 days);
-    assertEq(_timelock.getMinDelay(), 7 days);
+  /// @dev The floor itself is allowed
+  function test_WhenGovernanceSetsTheDelayToExactlyTheFloor_ItApplies() external {
+    _scheduleUpdateDelay(_FLOOR);
+    _executeUpdateDelay(_FLOOR);
+    assertEq(_timelock.getMinDelay(), _FLOOR);
   }
 
   function test_WhenGovernanceRaisesTheDelay_ItApplies() external {
@@ -176,14 +175,14 @@ contract GovernanceTimelockUnitTest is Test {
     _timelock.updateDelay(1 hours);
   }
 
-  function testFuzz_TheDelayNeverDropsBelowSevenDays(
+  function testFuzz_TheDelayNeverDropsBelowTheFloor(
     uint256 _delay
   ) external {
     _delay = bound(_delay, 0, 30 days);
     _scheduleUpdateDelay(_delay);
-    if (_delay < 7 days) vm.expectRevert(_belowFloor(_delay));
+    if (_delay < _FLOOR) vm.expectRevert(_belowFloor(_delay));
     _executeUpdateDelay(_delay);
-    assertGe(_timelock.getMinDelay(), 7 days);
+    assertGe(_timelock.getMinDelay(), _FLOOR);
   }
 
   /// @dev RECOVERY_ROLE revokes CANCELLER_ROLE from any holder, governance's own included: OpenZeppelin makes every

@@ -20,8 +20,8 @@ import {TokenProxy} from 'contracts/deploy/TokenProxy.sol';
  *         refuses an implementation the council did not attest, and refuses to finish unless the token came up on the
  *         same registry with the shared hook and exactly the reviewed rule set
  * @dev Immutable code, owner-gated. The owner gate matters: the address does not cover the init data, so anyone else
- *      could otherwise occupy it with the same symbol and implementation but their own admin. The deployer owns it only
- *      during deployment; `Activate` transfers ownership to the timelock, so any later token goes through governance.
+ *      could otherwise occupy it with the same symbol and implementation but their own admin. An operations account owns
+ *      it, so a new product launches without waiting: it only adds a proxy over attested code and touches nothing else.
  *      The implementation is checked here because the token cannot check it: its initialiser is the implementation's own
  *      code. The registry is read at deploy time only, like the other gates; a later revocation leaves tokens alone
  */
@@ -35,7 +35,7 @@ contract ProxyDeployer is Ownable, IProxyDeployer {
   /**
    * @notice Deploys the helper
    * @param _initialOwner The deployer account, the only one allowed to deploy proxies until ownership moves to the
-   *        timelock
+   *        operations account
    * @param _registry The registry that attests the implementations and that every token must name as its own
    */
   constructor(

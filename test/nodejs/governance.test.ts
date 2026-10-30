@@ -190,7 +190,7 @@ describe("governance through the timelock", async function () {
     assert.deepEqual(await s.hook.read.rules([s.vault4626.address]), [getAddress(credentialRule.address)]);
   });
 
-  it("after hand-over a new token can be placed only through the timelock, on the attested hook with exactly its rules", async function () {
+  it("after hand-over only the operations account can place a new token, at once, on the attested hook with exactly its rules", async function () {
     const s = await networkHelpers.loadFixture(stack);
     const implementation = s.implementations.token.address;
     const predicted = await s.proxyDeployer.read.predict(["NEW", implementation]);
@@ -200,11 +200,6 @@ describe("governance through the timelock", async function () {
       functionName: "initialize",
       args: ["New Token", "NEW", s.timelock.address, s.wallets.guardian.account.address, s.registry.address, s.hook.address, rules],
     });
-    const deploy = encodeFunctionData({
-      abi: s.proxyDeployer.abi,
-      functionName: "deploy",
-      args: ["NEW", implementation, initData, s.hook.address, rules],
-    });
 
     await viem.assertions.revertWithCustomErrorWithArgs(
       s.proxyDeployer.write.deploy(["NEW", implementation, initData, s.hook.address, rules], { account: s.wallets.deployer.account }),
@@ -212,9 +207,7 @@ describe("governance through the timelock", async function () {
       "OwnableUnauthorizedAccount",
       [getAddress(s.wallets.deployer.account.address)],
     );
-    const op = await schedule(s, s.proxyDeployer.address, deploy);
-    await networkHelpers.time.increase(op.delay);
-    await op.execute();
+    await s.proxyDeployer.write.deploy(["NEW", implementation, initData, s.hook.address, rules], { account: s.wallets.operations.account });
     const token = await viem.getContractAt("IntentToken", predicted);
     assert.ok(isAddressEqual(await token.read.policyHook(), s.hook.address));
     assert.deepEqual(await s.hook.read.rules([predicted]), rules.map((rule) => getAddress(rule)));
