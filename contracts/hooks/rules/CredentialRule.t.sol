@@ -344,7 +344,7 @@ contract CredentialRuleUnit_Policy is CredentialRuleUnitTest {
     assertEq(_receiver(Quals.KYC, 0), Reasons.RECEIVER_NOT_ELIGIBLE);
     assertEq(_receiver(Quals.CUSTOMER, 0), Reasons.RECEIVER_NOT_ELIGIBLE);
     assertEq(_receiver(Quals.KYC | Quals.CUSTOMER, 0), Reasons.TRANSFER_OK);
-    assertEq(_receiver(Quals.KYC | Quals.CUSTOMER | Quals.BANK, 0), Reasons.TRANSFER_OK);
+    assertEq(_receiver(Quals.KYC | Quals.CUSTOMER | Quals.LICENSED, 0), Reasons.TRANSFER_OK);
   }
 
   function test_WhenNoneOfTheAnyBitsIsPresent_ItIsNotEligible() external {
@@ -363,7 +363,7 @@ contract CredentialRuleUnit_Policy is CredentialRuleUnitTest {
   function test_WhenAForbiddenBitIsPresent_ItIsNotEligible() external {
     _policy(Quals.KYC, 0, Quals.FUND, 1);
     assertEq(_receiver(Quals.KYC | Quals.FUND, 0), Reasons.RECEIVER_NOT_ELIGIBLE);
-    assertEq(_receiver(Quals.KYC | Quals.BANK, 0), Reasons.TRANSFER_OK);
+    assertEq(_receiver(Quals.KYC | Quals.LICENSED, 0), Reasons.TRANSFER_OK);
   }
 
   function test_WhenTheAttesterIsNotTrusted_ItIsNotEligible() external {

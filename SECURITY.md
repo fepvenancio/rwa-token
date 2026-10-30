@@ -218,7 +218,7 @@ Further limits recorded during review:
 - **The operations account places products without a delay.** It owns `ProxyDeployer`, because a launch only adds a proxy
   over attested code and touches nothing that exists. A stolen operations key can still place a token over an attested
   implementation with its own admin, and can use up a symbol. It cannot change an existing product, and such a token is
-  not one the bank published: holders and integrators should take addresses from the bank's list, and the post-deploy
+  not one the issuer published: holders and integrators should take addresses from the issuer's list, and the post-deploy
   check runs on each real product. Recovery from a stolen key is a new `ProxyDeployer`, which changes where later tokens land.
 - **Revoking an attestation does not affect live tokens.** Attestation is checked at install and upgrade time only.
   The guardian pauses while the timelock removes the component.

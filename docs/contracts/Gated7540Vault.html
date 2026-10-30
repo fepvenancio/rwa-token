@@ -26,7 +26,7 @@
 <header class="top">
   <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Vaults</div>
   <h1>Gated7540Vault</h1>
-  <p class="lede">An ERC-7540 vault, where nothing settles at once. An investor files a request, the bank settles it later at a price it names, and the investor then claims the result. The shares are a gated token. The vault checks the account a request is booked under when the request is filed and again when it is claimed, and the mint itself judges the account that receives the shares.</p>
+  <p class="lede">An ERC-7540 vault, where nothing settles at once. An investor files a request, the issuer settles it later at a price it names, and the investor then claims the result. The shares are a gated token. The vault checks the account a request is booked under when the request is filed and again when it is claimed, and the mint itself judges the account that receives the shares.</p>
   <div class="facts">
     <span class="fact"><b>contracts/vaults/Gated7540Vault.sol</b></span>
     <span class="fact">upgradeable: <b>UUPS</b> behind a TokenProxy</span>
@@ -38,7 +38,7 @@
 <section id="in-one-minute">
   <div class="callout">
     <h3>In one minute</h3>
-    <p>Many funds cannot settle a subscription the moment it arrives, because the price is worked out later, off chain. ERC-7540 is the standard vault for that: the investor files a request, the fund settles it, and the investor then claims the result. Here the settling is done by an account with <code>FULFILLER_ROLE</code>, the bank, which names both the assets and the shares of each settlement. The contract computes no price of its own.</p>
+    <p>Many funds cannot settle a subscription the moment it arrives, because the price is worked out later, off chain. ERC-7540 is the standard vault for that: the investor files a request, the fund settles it, and the investor then claims the result. Here the settling is done by an account with <code>FULFILLER_ROLE</code>, the issuer, which names both the assets and the shares of each settlement. The contract computes no price of its own.</p>
     <p>Deposited assets wait in the vault until the settlement sends them to a custody address. Shares being redeemed wait in the vault too, in escrow (held on the investor's behalf until the request is settled), and the settlement burns them. The shares are a gated token, so each step that moves shares passes the compliance checks, and the vault checks the investor again at the claim, because a lot can change between a request and its settlement. When an investor is not allowed to claim, an agent can deliver what is owed to a verified account.</p>
   </div>
 </section>
@@ -64,7 +64,7 @@
         <rect class="act" x="385" y="12" width="200" height="62" rx="8"/>
         <text x="399" y="32" class="bold">2. Fulfil</text>
         <text x="399" y="50" class="mono sm">fulfillDeposit</text>
-        <text x="399" y="66" class="m">FULFILLER_ROLE (the bank)</text>
+        <text x="399" y="66" class="m">FULFILLER_ROLE (the issuer)</text>
         <rect class="act" x="600" y="12" width="200" height="62" rx="8"/>
         <text x="614" y="32" class="bold">3. Claim</text>
         <text x="614" y="50" class="mono sm">deposit or mint</text>
@@ -135,7 +135,7 @@
         <text x="614" y="460" class="mono sm rej">or …TransferRejected</text>
       </svg>
     </div>
-    <figcaption><b>A deposit, step by step.</b> Example: 1,000 assets that the bank prices at 800 shares. Between request and fulfilment the assets sit in the vault. From the fulfilment on they sit in custody, and the shares exist only as a number owed to the controller until the claim mints them.</figcaption>
+    <figcaption><b>A deposit, step by step.</b> Example: 1,000 assets that the issuer prices at 800 shares. Between request and fulfilment the assets sit in the vault. From the fulfilment on they sit in custody, and the shares exist only as a number owed to the controller until the claim mints them.</figcaption>
   </figure>
   <ol class="steps">
     <li><div><b>Request.</b> <code>requestDeposit(assets, controller, owner)</code>, called by the owner or an operator of the owner. The checks run in this order: assets not zero (<code>Gated7540Vault_ZeroAmount</code>), controller not zero (<code>Gated7540Vault_ZeroAddress</code>), the caller allowed (<code>Gated7540Vault_Unauthorized(caller)</code>), then the mint probe on the controller (<code>Gated7540Vault_ControllerNotEligible(reason)</code>). The assets come from the owner, which must have approved the vault on the asset. The owner's own credential is not checked. Emits <code>DepositRequest</code>.</div></li>
@@ -158,7 +158,7 @@
         <rect class="act" x="385" y="12" width="200" height="62" rx="8"/>
         <text x="399" y="32" class="bold">2. Fulfil</text>
         <text x="399" y="50" class="mono sm">fulfillRedeem</text>
-        <text x="399" y="66" class="m">FULFILLER_ROLE (the bank)</text>
+        <text x="399" y="66" class="m">FULFILLER_ROLE (the issuer)</text>
         <rect class="act" x="600" y="12" width="200" height="62" rx="8"/>
         <text x="614" y="32" class="bold">3. Claim</text>
         <text x="614" y="50" class="mono sm">redeem or withdraw</text>
@@ -226,7 +226,7 @@
         <text x="614" y="460" class="mono sm rej">paused: EnforcedPause</text>
       </svg>
     </div>
-    <figcaption><b>A redemption, step by step.</b> Example: 400 shares that the bank pays 500 assets for. The shares wait in the vault, in escrow, until the fulfilment burns them. The payout comes from the fulfiller's own wallet and waits in the vault until the claim.</figcaption>
+    <figcaption><b>A redemption, step by step.</b> Example: 400 shares that the issuer pays 500 assets for. The shares wait in the vault, in escrow, until the fulfilment burns them. The payout comes from the fulfiller's own wallet and waits in the vault until the claim.</figcaption>
   </figure>
   <ol class="steps">
     <li><div><b>Request.</b> <code>requestRedeem(shares, controller, owner)</code>, called by the owner, an operator of the owner, or any account with the owner's share allowance, which it spends. Shares and controller must be non-zero. The shares move from the owner into the vault as an ordinary <span class="k k-transfer">TRANSFER</span> through the hook, so pause, the owner's frozen amount, credential, lockup, address freeze and minimum position all apply, and the vault itself must be able to receive. The controller is not checked at this step. Emits <code>RedeemRequest</code>.</div></li>

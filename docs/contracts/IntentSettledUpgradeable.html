@@ -38,7 +38,7 @@
 <section id="in-one-minute">
   <div class="callout">
     <h3>In one minute</h3>
-    <p>An <b>intent</b> is a transfer instruction the holder signs with their key: "send this amount to that account, before this deadline". Signing costs nothing and needs no transaction. The bank's settlement system then submits it through an <b>executor</b>, a contract the token has authorised, at the time it chooses.</p>
+    <p>An <b>intent</b> is a transfer instruction the holder signs with their key: "send this amount to that account, before this deadline". Signing costs nothing and needs no transaction. The issuer's settlement system then submits it through an <b>executor</b>, a contract the token has authorised, at the time it chooses.</p>
     <p>The token checks that the intent has not expired, has not been used or cancelled, is submitted by the executor it names, and carries the holder's valid signature. Then the transfer runs through the compliance hook like any other movement, labelled <span class="k k-executed">EXECUTED</span>. The executor cannot change a single field: any change breaks the signature. Until it runs, the holder can cancel it.</p>
   </div>
 </section>
@@ -46,7 +46,7 @@
 <section id="how">
   <div class="prose">
     <h2>How an intent is settled</h2>
-    <p>Four parties take part. The holder signs. An operator key (a bank or relayer key with <code>OPERATOR_ROLE</code> on the executor) submits. The executor contract holds the token's <code>EXECUTOR_ROLE</code> and calls the token. The token runs the checks and asks the hook.</p>
+    <p>Four parties take part. The holder signs. An operator key (an issuer or relayer key with <code>OPERATOR_ROLE</code> on the executor) submits. The executor contract holds the token's <code>EXECUTOR_ROLE</code> and calls the token. The token runs the checks and asks the hook.</p>
   </div>
   <figure>
     <div class="fig-scroll">
@@ -348,7 +348,7 @@
   <div class="prose">
     <h2>Why it is built this way</h2>
     <ul class="plain">
-      <li><b>The holder keeps the keys; the bank keeps the timing.</b> The holder authorises once, off-chain, and pays no gas. Settlement happens when the executor runs the intent, not when it is signed.</li>
+      <li><b>The holder keeps the keys; the issuer keeps the timing.</b> The holder authorises once, off-chain, and pays no gas. Settlement happens when the executor runs the intent, not when it is signed.</li>
       <li><b>The executor can only run it or not.</b> Every field is inside the signed digest, so there is nothing an executor can adjust.</li>
       <li><b>Message checks live in the mixin, policy lives in the hook.</b> Deadline, nonce, executor, payment field, start time and signature are facts about the signed message, not decisions about who may hold the token, so they are not rules. Once the message is sound, the movement takes the same path as every other and the same rules decide.</li>
       <li><b>Binding stops a leg from running alone.</b> An intent written for a delivery-versus-payment trade names the DvP executor, so no other executor can deliver its tokens without the cash leg.</li>

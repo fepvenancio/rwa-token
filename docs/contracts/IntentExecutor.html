@@ -38,7 +38,7 @@
 <section id="in-one-minute">
   <div class="callout">
     <h3>In one minute</h3>
-    <p>A holder can sign a transfer instruction, called an intent, without sending a transaction or paying gas: who receives, how much, until when, and a single-use number (the nonce). Someone else has to submit it. On an <a href="IntentToken.html">IntentToken</a> only an account with <code>EXECUTOR_ROLE</code> may do that, and in the deployment that is this contract and the <a href="DvPExecutor.html">DvPExecutor</a>. The bank's or relayer's keys hold <code>OPERATOR_ROLE</code> here and call it. The executor never holds tokens or money and never changes an intent. Its one check: it refuses any intent that says the signer is to be paid something in return, because it cannot make that payment happen. Operators can submit one intent, or a batch that settles all or nothing. The guardian can stop it at once.</p>
+    <p>A holder can sign a transfer instruction, called an intent, without sending a transaction or paying gas: who receives, how much, until when, and a single-use number (the nonce). Someone else has to submit it. On an <a href="IntentToken.html">IntentToken</a> only an account with <code>EXECUTOR_ROLE</code> may do that, and in the deployment that is this contract and the <a href="DvPExecutor.html">DvPExecutor</a>. The issuer's or a relayer's keys hold <code>OPERATOR_ROLE</code> here and call it. The executor never holds tokens or money and never changes an intent. Its one check: it refuses any intent that says the signer is to be paid something in return, because it cannot make that payment happen. Operators can submit one intent, or a batch that settles all or nothing. The guardian can stop it at once.</p>
   </div>
 </section>
 
@@ -236,7 +236,7 @@
       <li><b>Forward only.</b> The token is the single source of truth for the signature, nonce, deadline, executor binding, freeze, pause and policy. The executor checks none of them, so nothing is checked twice and the two can never disagree.</li>
       <li><b>No funds, no state.</b> It stores its roles and its pause flag, nothing else: no intents, no nonces, no balances.</li>
       <li><b>Replaceable.</b> It is a plain contract, not a proxy. Replacing it means deploying a new one and moving the token's <code>EXECUTOR_ROLE</code>, which is a timelock operation.</li>
-      <li><b>Operators are separate from the token.</b> A bank or relayer key holds a role on the executor, not on the token, and the guardian can stop that route alone.</li>
+      <li><b>Operators are separate from the token.</b> An issuer or relayer key holds a role on the executor, not on the token, and the guardian can stop that route alone.</li>
       <li><b>Refuse rather than half-settle.</b> An intent that states a payment is refused outright, so a holder never sees shares leave without what the message promised.</li>
     </ul>
   </div>

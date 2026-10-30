@@ -1269,7 +1269,7 @@ contract Gated7540VaultIntegrationTest is Test {
     _vault.grantRole(_vault.FULFILLER_ROLE(), _fulfiller);
     _vault.grantRole(_vault.AGENT_ROLE(), _agent);
     _fund.registerClass(address(_vault));
-    // The escrow vault is a bank-controlled, verified account (owner decisions V2 and R1). The fund never counts the
+    // The escrow vault is an issuer-controlled, verified account (owner decisions V2 and R1). The fund never counts the
     // class itself, so the escrow takes no investor slot.
     _identity.set(address(_vault), true);
 

@@ -216,7 +216,7 @@ totalAssets = asset.balanceOf(vault)</pre>
 <section id="v7540">
   <div class="prose">
     <h2><code>Gated7540Vault</code>: request, fulfil, claim</h2>
-    <p><a href="contracts/Gated7540Vault.html"><code>Gated7540Vault</code></a> is asynchronous (ERC-7540): a holder requests, a bank with <code>FULFILLER_ROLE</code> fulfils later at a price it names, and the holder then claims. A request is booked under a <b>controller</b>, the account entitled to claim it; a controller's requests add up under one entry. The deposited asset does not stay in the vault: at fulfilment it goes to a <b>custody</b> address, a plain address set at initialisation that the main timelock can change with <code>setCustody</code>.</p>
+    <p><a href="contracts/Gated7540Vault.html"><code>Gated7540Vault</code></a> is asynchronous (ERC-7540): a holder requests, an account with <code>FULFILLER_ROLE</code> fulfils later at a price it names, and the holder then claims. A request is booked under a <b>controller</b>, the account entitled to claim it; a controller's requests add up under one entry. The deposited asset does not stay in the vault: at fulfilment it goes to a <b>custody</b> address, a plain address set at initialisation that the main timelock can change with <code>setCustody</code>.</p>
   </div>
   <figure>
     <div class="fig-scroll">

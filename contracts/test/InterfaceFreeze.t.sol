@@ -260,7 +260,7 @@ contract InterfaceFreezeTest is Test {
     assertEq(Quals.QUALIFIED, uint32(4));
     assertEq(Quals.INSTITUTIONAL, uint32(8));
     assertEq(Quals.FUND, uint32(16));
-    assertEq(Quals.BANK, uint32(32));
+    assertEq(Quals.LICENSED, uint32(32));
     assertEq(Quals.CUSTOMER, uint32(64));
     assertEq(Quals.INFRA, uint32(128));
   }

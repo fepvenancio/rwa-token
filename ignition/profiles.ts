@@ -6,7 +6,7 @@ export type Template = "GatedToken" | "IntentToken" | "Gated4626Vault" | "Gated7
 /** `ICredentialRule.Policy`: the qualification bits a receiver needs, and the attesters this token trusts. */
 export type Policy = { requireAll: number; requireAny: number; forbidAny: number; attesters: bigint };
 
-/** One product of the bank: a proxy over its template's implementation, with its own rule list and policy. */
+/** One product of the issuer: a proxy over its template's implementation, with its own rule list and policy. */
 export type Product = {
   key: string;
   template: Template;
@@ -15,7 +15,7 @@ export type Product = {
   rules: readonly RuleKey[];
   /** Who may receive it. KYC from attester 0 unless stated. */
   policy?: Policy;
-  /** The decimals of a `GatedToken`: for a tokenised deposit, the ledger's precision. 18 unless stated. */
+  /** The decimals of a `GatedToken`: for a cash token, its ledger's precision. 18 unless stated. */
   decimals?: number;
   /** The key of the fund it is a class of. Needed exactly when it lists `fundHoldersRule`. */
   fund?: string;
@@ -25,7 +25,7 @@ export type Product = {
   executors?: readonly ("intent" | "dvp")[];
 };
 
-/** A combination the bank deploys: what `Core` must contain follows from it. */
+/** A combination the issuer deploys: what `Core` must contain follows from it. */
 export type Profile = { id: string; products: readonly Product[] };
 
 export const DEFAULT_POLICY: Policy = { requireAll: QUALS.KYC, requireAny: 0, forbidAny: 0, attesters: 1n };

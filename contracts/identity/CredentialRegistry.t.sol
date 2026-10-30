@@ -24,7 +24,7 @@ contract CredentialRegistryUnitTest is Helpers {
   address internal _guardian = makeAddr('guardian');
   address internal _recovery = makeAddr('recovery');
   address internal _kyc = makeAddr('kyc'); // attester 0, limited to _KYC_MASK
-  address internal _bank = makeAddr('bank'); // attester 1
+  address internal _attester1 = makeAddr('attester1'); // attester 1
   address internal _signer; // attester 2, a key we can sign with
   uint256 internal _signerPk;
   address internal _walletOwner; // owns attester 3, a contract account
@@ -42,7 +42,7 @@ contract CredentialRegistryUnitTest is Helpers {
     vm.startPrank(_admin);
     _registry.grantRole(_registry.RECOVERY_ROLE(), _recovery);
     _registry.addAttester(_kyc, _KYC_MASK);
-    _registry.addAttester(_bank, _ALL);
+    _registry.addAttester(_attester1, _ALL);
     _registry.addAttester(_signer, _ALL);
     _registry.addAttester(address(_wallet), _ALL);
     vm.stopPrank();
@@ -235,9 +235,9 @@ contract CredentialRegistryUnit_AttesterAdmin is CredentialRegistryUnitTest {
     vm.prank(_admin);
     _registry.setAttesterAccount(0, address(0));
 
-    vm.expectRevert(abi.encodeWithSelector(ICredentialRegistry.CredentialRegistry_AttesterExists.selector, _bank));
+    vm.expectRevert(abi.encodeWithSelector(ICredentialRegistry.CredentialRegistry_AttesterExists.selector, _attester1));
     vm.prank(_admin);
-    _registry.setAttesterAccount(0, _bank);
+    _registry.setAttesterAccount(0, _attester1);
   }
 
   function test_WhenTheAccountIsRotated_TheOldOneStopsWritingAndTheNewOneStarts() external {
@@ -377,7 +377,7 @@ contract CredentialRegistryUnit_Set is CredentialRegistryUnitTest {
     vm.expectRevert(
       abi.encodeWithSelector(ICredentialRegistry.CredentialRegistry_RecordOwnedByAnotherAttester.selector, _subject, 0)
     );
-    vm.prank(_bank);
+    vm.prank(_attester1);
     _registry.set(_subject, uint64(_NOW + 1 days), Quals.KYC, _CH);
   }
 
@@ -388,7 +388,7 @@ contract CredentialRegistryUnit_Set is CredentialRegistryUnitTest {
     vm.expectRevert(
       abi.encodeWithSelector(ICredentialRegistry.CredentialRegistry_RecordOwnedByAnotherAttester.selector, _subject, 0)
     );
-    vm.prank(_bank);
+    vm.prank(_attester1);
     _registry.set(_subject, uint64(_NOW + 1 days), Quals.KYC, _CH);
   }
 
@@ -396,7 +396,7 @@ contract CredentialRegistryUnit_Set is CredentialRegistryUnitTest {
     _active(_kyc, _subject);
     vm.prank(_guardian);
     _registry.killAttester(0);
-    _set(_bank, _subject, uint64(_NOW + 30 days), Quals.KYC | Quals.BANK);
+    _set(_attester1, _subject, uint64(_NOW + 30 days), Quals.KYC | Quals.LICENSED);
     ICredentialRegistry.Record memory _r = _registry.recordOf(_subject);
     assertEq(_r.attester, 1);
     assertEq(uint8(_status(_subject)), uint8(ICredentialRegistry.Status.ACTIVE));
@@ -428,7 +428,7 @@ contract CredentialRegistryUnit_Register is CredentialRegistryUnitTest {
 
   function test_WhenSignedByAContractAttester_ItIsAcceptedThroughErc1271() external {
     ICredentialRegistry.Credential memory _c =
-      _credential(_subject, uint64(_NOW + 30 days), Quals.KYC | Quals.BANK, uint64(_NOW), 3);
+      _credential(_subject, uint64(_NOW + 30 days), Quals.KYC | Quals.LICENSED, uint64(_NOW), 3);
     bytes memory _sig = _sign(_walletPk, _c);
     vm.prank(_stranger);
     _registry.register(_c, _sig);
@@ -559,7 +559,7 @@ contract CredentialRegistryUnit_Register is CredentialRegistryUnitTest {
     vm.prank(_admin);
     _twin.addAttester(_kyc, _KYC_MASK);
     vm.startPrank(_admin);
-    _twin.addAttester(_bank, _ALL);
+    _twin.addAttester(_attester1, _ALL);
     _twin.addAttester(_signer, _ALL);
     vm.stopPrank();
     _expect(ICredentialRegistry.CredentialRegistry_BadSignature.selector);
@@ -613,7 +613,7 @@ contract CredentialRegistryUnit_SetStatus is CredentialRegistryUnitTest {
     vm.expectRevert(
       abi.encodeWithSelector(ICredentialRegistry.CredentialRegistry_NotRecordAttester.selector, _subject, 0)
     );
-    vm.prank(_bank);
+    vm.prank(_attester1);
     _registry.setStatus(_subject, ICredentialRegistry.Status.BLOCKED);
   }
 
@@ -875,10 +875,10 @@ contract CredentialRegistryUnit_ProfileOf is CredentialRegistryUnitTest {
   }
 
   function test_WhenActiveAndWithinValidity_ItReadsActiveWithTheStoredFields() external {
-    _set(_bank, _subject, uint64(_NOW + 5 days), Quals.KYC | Quals.BANK);
+    _set(_attester1, _subject, uint64(_NOW + 5 days), Quals.KYC | Quals.LICENSED);
     (ICredentialRegistry.Status _s, uint32 _quals, uint16 _country, uint8 _attester) = _registry.profileOf(_subject);
     assertEq(uint8(_s), uint8(ICredentialRegistry.Status.ACTIVE));
-    assertEq(_quals, Quals.KYC | Quals.BANK);
+    assertEq(_quals, Quals.KYC | Quals.LICENSED);
     assertEq(_country, _CH);
     assertEq(_attester, 1);
     assertTrue(_registry.isVerified(_subject));
@@ -1165,7 +1165,7 @@ contract CredentialRegistryInvariantTest is CredentialRegistryUnitTest {
 
   function setUp() public override {
     super.setUp();
-    address[3] memory _atts = [_kyc, _bank, _signer];
+    address[3] memory _atts = [_kyc, _attester1, _signer];
     _handler = new CredentialRegistryHandler(_registry, _admin, _guardian, _recovery, _atts, _signerPk);
     targetContract(address(_handler));
   }

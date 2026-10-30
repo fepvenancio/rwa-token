@@ -4,13 +4,13 @@ import type { NamedArtifactContractDeploymentFuture } from "@nomicfoundation/ign
 import { activeProfile, IMPLEMENTATION_KEY, type Profile } from "../profiles.js";
 
 /**
- * Stage 1, once per bank. Everything that does not depend on a product:
+ * Stage 1, once per issuer. Everything that does not depend on a product:
  *
  * - The recovery timelock (plain OZ TimelockController, governance as proposer and executor) and the main timelock
  *   (`GovernanceTimelock`: proposer and executor are the governance multisig only; the recovery timelock may revoke
  *   CANCELLER_ROLE there and nothing else). The deployer is the admin of both only until `CoreHandover` finishes.
  * - The registry, administered by the timelock from the start, and the one shared `ComplianceHook` that every product
- *   uses. Its only immutable is the registry, so the council attests one codehash for the whole bank, and each product's
+ *   uses. Its only immutable is the registry, so the council attests one codehash for all of them, and each product's
  *   rules are installed by the product itself when it is placed.
  * - `ProxyDeployer`, which `CoreHandover` moves to the operations account.
  *
@@ -24,7 +24,7 @@ import { activeProfile, IMPLEMENTATION_KEY, type Profile } from "../profiles.js"
  *   `CoreHandover`). Neither is attested: neither is a hook, a rule or an implementation, and each token authorises it by
  *   granting it EXECUTOR_ROLE.
  *
- * A fund is not part of the core: a bank has as many as it needs, each with its own `Fund` module.
+ * A fund is not part of the core: an issuer has as many as it needs, each with its own `Fund` module.
  *
  * Next: the council attests the rules, the hook and the implementations, then `CoreHandover`, then a `Fund` for each fund
  * and a `Product` for each product.

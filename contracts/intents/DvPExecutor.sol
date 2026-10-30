@@ -16,7 +16,7 @@ import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
 /**
  * @title DvPExecutor
  * @notice Settles a trade of a gated security against cash atomically. Tokens authorise it by granting it their
- *         EXECUTOR_ROLE; operators (bank / relayer keys) hold OPERATOR_ROLE here
+ *         EXECUTOR_ROLE; operators (issuer / relayer keys) hold OPERATOR_ROLE here
  * @dev Immutable, not a proxy: replacing it means deploying a new executor and moving the tokens' EXECUTOR_ROLE. It keeps
  *      no state beyond its roles and its pause flag, and it never keeps settlement funds: a gated cash leg moves
  *      directly between the parties, and an ERC-3009 cash leg passes through it inside one call, which succeeds only if

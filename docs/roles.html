@@ -173,7 +173,7 @@
         <text x="614" y="642" class="m sm">they call IntentToken.executeTransfer</text>
 
         <rect class="b" x="20" y="662" width="170" height="44" rx="8"/>
-        <text x="105" y="680" class="bold" text-anchor="middle">Fulfiller (bank)</text>
+        <text x="105" y="680" class="bold" text-anchor="middle">Fulfiller (issuer)</text>
         <text x="105" y="697" class="mono sm" text-anchor="middle">FULFILLER_ROLE</text>
         <line class="ln" x1="190" y1="684" x2="598" y2="684" marker-end="url(#ro-arrow)"/>
         <text x="394" y="677" class="m" text-anchor="middle">fulfillDeposit, fulfillRedeem, reject requests</text>
@@ -213,8 +213,8 @@
         <tr><td>Agent (the issuer's compliance desk)</td><td>each token</td><td><code>AGENT_ROLE</code></td><td><code>Activate</code></td></tr>
         <tr><td>Minter, burner (the issuer)</td><td><code>IntentToken</code></td><td><code>MINTER_ROLE</code>, <code>BURNER_ROLE</code></td><td><code>Activate</code></td></tr>
         <tr><td><code>IntentExecutor</code> and <code>DvPExecutor</code></td><td><code>IntentToken</code></td><td><code>EXECUTOR_ROLE</code></td><td><code>Activate</code>, to these two contracts and to no one else</td></tr>
-        <tr><td>Operator key (a bank or relayer)</td><td>both executors</td><td><code>OPERATOR_ROLE</code></td><td><code>Activate</code></td></tr>
-        <tr><td>Fulfiller (the bank)</td><td><code>Gated7540Vault</code></td><td><code>FULFILLER_ROLE</code></td><td><code>Activate</code></td></tr>
+        <tr><td>Operator key (an issuer or relayer)</td><td>both executors</td><td><code>OPERATOR_ROLE</code></td><td><code>Activate</code></td></tr>
+        <tr><td>Fulfiller (the issuer)</td><td><code>Gated7540Vault</code></td><td><code>FULFILLER_ROLE</code></td><td><code>Activate</code></td></tr>
       </tbody>
     </table>
   </div>

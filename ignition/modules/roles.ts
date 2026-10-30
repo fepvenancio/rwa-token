@@ -20,7 +20,7 @@ export const ROLES = {
  * `Quals.sol`: the qualification bits an attester asserts and a token's policy asks for. `InterfaceFreeze` pins them in
  * Solidity, so a change there fails the build before it can disagree with this copy.
  */
-export const QUALS = { KYC: 1, PROFESSIONAL: 2, QUALIFIED: 4, INSTITUTIONAL: 8, FUND: 16, BANK: 32, CUSTOMER: 64, INFRA: 128 } as const;
+export const QUALS = { KYC: 1, PROFESSIONAL: 2, QUALIFIED: 4, INSTITUTIONAL: 8, FUND: 16, LICENSED: 32, CUSTOMER: 64, INFRA: 128 } as const;
 
 /** Default token identities. A token's symbol is its CREATE2 salt, so the symbols predicted before a product launches must be the ones it uses. */
 export const TOKENS = {
