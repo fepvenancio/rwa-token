@@ -25,6 +25,7 @@ const ATTESTED = {
   SettlementWindowRule: "hooks/rules",
   FundHoldersRule: "hooks/rules",
   ComplianceHook: "hooks",
+  GatedToken: "tokens",
   IntentToken: "tokens",
   Gated4626Vault: "vaults",
   Gated7540Vault: "vaults",

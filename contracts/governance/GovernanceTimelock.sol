@@ -10,7 +10,7 @@ import {IGovernanceTimelock} from 'interfaces/IGovernanceTimelock.sol';
 
 /**
  * @title GovernanceTimelock
- * @notice The main governance timelock: OZ's TimelockController with a seven-day floor on its delay and one recovery
+ * @notice The main governance timelock: OZ's TimelockController with a one-hour floor on its delay and one recovery
  *         power. The recovery timelock (its own delay, governance as proposer and executor, no cancellers) holds
  *         RECOVERY_ROLE here and may revoke CANCELLER_ROLE, so a guardian that vetoes its own removal can be stripped of
  *         its cancel right
@@ -22,11 +22,11 @@ contract GovernanceTimelock is TimelockController, IGovernanceTimelock {
   bytes32 public constant RECOVERY_ROLE = keccak256('RECOVERY_ROLE');
 
   /// @notice The lowest delay the timelock accepts, at deployment and in `updateDelay`
-  uint256 private constant _MIN_DELAY = 7 days;
+  uint256 private constant _MIN_DELAY = 1 hours;
 
   /**
    * @notice Deploys the timelock
-   * @param _initialMinDelay The minimum delay, at least 7 days (`GovernanceTimelock_DelayBelowFloor` otherwise)
+   * @param _initialMinDelay The minimum delay, at least 1 hour (`GovernanceTimelock_DelayBelowFloor` otherwise)
    * @param _proposers The proposers (and, per OZ, cancellers): the governance multisig
    * @param _executors The executors: the governance multisig
    * @param _admin The optional bootstrap admin (the deployer), renounced after configuration
@@ -65,7 +65,7 @@ contract GovernanceTimelock is TimelockController, IGovernanceTimelock {
 
   /**
    * @inheritdoc TimelockController
-   * @dev Reverts with `GovernanceTimelock_DelayBelowFloor` below seven days. OpenZeppelin's caller check (only the
+   * @dev Reverts with `GovernanceTimelock_DelayBelowFloor` below one hour. OpenZeppelin's caller check (only the
    *      timelock itself) runs first; a delay below the floor then reverts the whole call
    */
   function updateDelay(

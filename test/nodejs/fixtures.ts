@@ -17,16 +17,30 @@ import {
   zeroAddress,
 } from "viem";
 
-import Activate from "../../ignition/modules/Activate.js";
-import Components from "../../ignition/modules/Components.js";
-import { QUALS, ROLES, RULE_ORDER } from "../../ignition/modules/roles.js";
+import { coreModule } from "../../ignition/modules/Core.js";
+import { coreHandoverModule } from "../../ignition/modules/CoreHandover.js";
+import { fundModule } from "../../ignition/modules/Fund.js";
+import { fundOpenModule } from "../../ignition/modules/FundOpen.js";
+import { productModule } from "../../ignition/modules/Product.js";
+import { QUALS, ROLES } from "../../ignition/modules/roles.js";
+import {
+  classesOf,
+  DEFAULT_POLICY,
+  fundsOf,
+  IMPLEMENTATION_KEY,
+  PROFILES,
+  type Product,
+  type Profile,
+  type Template,
+} from "../../ignition/profiles.js";
 
 /**
- * Runs the production deployment: the three Ignition modules, which are where deployment order lives (Phase 6 Q2),
- * with this file playing the parties Ignition cannot sign for:
+ * Runs the production deployment: the Ignition modules, which are where deployment order lives (Phase 6 Q2), with this
+ * file playing the parties Ignition cannot sign for:
  *
- *   Components → council attests rules, the hook and implementations → Activate
- *   → the KYC attester vouches for holders and the 7540 escrow vault → hand-over check.
+ *   Core → council attests rules, the hook and implementations → CoreHandover → a Fund for each fund, whose rule the
+ *   council attests → a Product for each product → a FundOpen for each fund → hand-over check. The operations account runs
+ *   everything after CoreHandover.
  *
  * Each stage gets the previous stage's addresses as parameters, as a live deployment does between council steps
  * (Ignition is also ephemeral per `deploy` call on the in-process network, so stages cannot share a journal here).
@@ -74,6 +88,8 @@ export const WINDOW_CLOSE = 17 * 3_600;
 export const FUND_HOLDER_CAP = 3n;
 
 const ATTEST = { HOOK: 1, RULE: 2, IMPLEMENTATION: 3 } as const;
+/** The timelocks' delay: the least the hand-over check accepts. */
+const DAY = 86_400n;
 
 /** The qualification bits, from the deployment's own copy of `Quals.sol` (`InterfaceFreeze` pins the Solidity side). */
 export { QUALS };
@@ -85,15 +101,62 @@ export const COUNTRY = 756;
 export const DEMO_VALIDITY = 3_650n * 86_400n;
 
 export async function deployStack(connection: NetworkConnection) {
-  const { activate, parameters } = await deployUntilActivate(connection);
-  return activate(parameters);
+  const { launch, parameters } = await deployUntilProducts(connection);
+  return launch(parameters);
 }
 
+/** Any profile, from the core to its last product, with no holder verified yet. */
+export async function deployProfile(connection: NetworkConnection, profile: Profile, overrides: Parameters_ = {}) {
+  const { launch, parameters } = await stages(connection, profile);
+  return launch({ ...parameters, ...overrides });
+}
+
+/** A later product on a stack that is already handed over, run by the operations account. */
+export const deployProduct = (s: ProfileStack, product: Product) => s.place(product);
+
 /**
- * Stage 1 and the council step. Returns `Activate`'s parameters and a function that runs stage 2 with them and
- * finishes the deployment, so a test can run stage 2 on tampered parameters and inspect what was left behind.
+ * The demo stack up to the council step. Returns the parameters and a function that runs the rest and finishes the
+ * deployment, so a test can run it on tampered parameters and inspect what was left behind.
  */
-export async function deployUntilActivate(connection: NetworkConnection) {
+export async function deployUntilProducts(connection: NetworkConnection) {
+  const { viem } = connection;
+  const stage = await stages(connection, PROFILES.full);
+
+  const launch = async (parameters: Parameters_) => {
+    const s = await stage.launch(parameters);
+    const { alice, bob, carol, dave } = s.holders;
+    const validUntil = (await s.publicClient.getBlock()).timestamp + DEMO_VALIDITY;
+    // The KYC attester vouches for the holders used by the tests and the recovery account.
+    for (const w of [alice, bob, carol, dave, s.wallets.recovery]) {
+      await s.credentials!.write.set([w.account.address, validUntil, QUALS.KYC, COUNTRY], { account: s.wallets.kyc.account });
+    }
+    return {
+      ...s,
+      credentials: s.credentials!,
+      fund: s.fund!,
+      executor: s.executor!,
+      dvpExecutor: s.dvpExecutor!,
+      rules: s.rules as { [K in keyof typeof s.rules]: NonNullable<(typeof s.rules)[K]> },
+      token: await viem.getContractAt("IntentToken", s.products.intent.address),
+      vault4626: await viem.getContractAt("Gated4626Vault", s.products.fund.address),
+      vault7540: await viem.getContractAt("Gated7540Vault", s.products.asyncFund.address),
+      implementations: {
+        token: stage.components.intentImpl,
+        vault4626: stage.components.fundImpl,
+        vault7540: stage.components.asyncFundImpl,
+      },
+    };
+  };
+  return { ...stage, launch };
+}
+
+export type Stack = Awaited<ReturnType<typeof deployStack>>;
+export type ProfileStack = Awaited<ReturnType<typeof deployProfile>>;
+type HandedOverKeys = "publicClient" | "wallets" | "timelock" | "recoveryTimelock" | "registry" | "hook" | "proxyDeployer" | "credentials" | "funds" | "executor" | "dvpExecutor" | "rules" | "deployed";
+type Parameters_ = Record<string, Address | bigint | number>;
+
+/** `Core`, then the council step. Returns what the later stages need, and a function that runs them. */
+async function stages(connection: NetworkConnection, profile: Profile) {
   const { viem, networkHelpers, ignition } = connection;
   const publicClient = await viem.getPublicClient();
   const [
@@ -114,40 +177,39 @@ export async function deployUntilActivate(connection: NetworkConnection) {
     dave,
     eve,
     kyc,
+    operations,
   ] = await viem.getWalletClients();
   const address = (w: typeof deployer) => w.account.address;
 
-  // Deterministic calendar: everything below happens inside the settlement window (Mon 10:00 UTC onwards).
-  await networkHelpers.time.increaseTo(MONDAY_10AM);
+  // Deterministic calendar: everything below happens inside the settlement window (Mon 10:00 UTC onwards). A second
+  // fixture on the same connection is already past it.
+  if (BigInt(await networkHelpers.time.latest()) < MONDAY_10AM) await networkHelpers.time.increaseTo(MONDAY_10AM);
 
   // External to the stack: the vaults' asset.
   const asset = await viem.deployContract("MockAsset", [6]);
 
-  const components = await ignition.deploy(Components, {
-    parameters: {
-      Components: {
-        governance: address(governance),
-        council: address(attester),
-        guardian: address(guardian),
-      },
-    },
+  const core = coreModule(profile);
+  const deployed = await ignition.deploy(core, {
+    parameters: { [core.id]: { governance: address(governance), council: address(attester), guardian: address(guardian) } },
   });
-  const {
-    timelock,
-    recoveryTimelock,
-    registry,
-    hook,
-    credentialRegistry,
-    credentialRule,
-    minPositionRule,
-    holderRestrictionRule,
-    windowRule,
-    fundContract,
-    fundHoldersRule,
-    proxyDeployer,
-    executor,
-    dvpExecutor,
-  } = components;
+  const components = Object.fromEntries(Object.entries(deployed).map(([key, c]) => [key, { address: c.address as Address }]));
+  const has = (key: string) => components[key] !== undefined;
+
+  const timelock = await viem.getContractAt("GovernanceTimelock", components.timelock.address);
+  const recoveryTimelock = await viem.getContractAt("TimelockController", components.recoveryTimelock.address);
+  const registry = await viem.getContractAt("PolicyRegistry", components.registry.address);
+  const hook = await viem.getContractAt("ComplianceHook", components.hook.address);
+  const proxyDeployer = await viem.getContractAt("ProxyDeployer", components.proxyDeployer.address);
+  const credentials = has("credentialRegistry") ? await viem.getContractAt("CredentialRegistry", components.credentialRegistry.address) : undefined;
+  const executor = has("executor") ? await viem.getContractAt("IntentExecutor", components.executor.address) : undefined;
+  const dvpExecutor = has("dvpExecutor") ? await viem.getContractAt("DvPExecutor", components.dvpExecutor.address) : undefined;
+  const rules = {
+    credentialRule: has("credentialRule") ? await viem.getContractAt("CredentialRule", components.credentialRule.address) : undefined,
+    minPositionRule: has("minPositionRule") ? await viem.getContractAt("MinPositionRule", components.minPositionRule.address) : undefined,
+    holderRestrictionRule: has("holderRestrictionRule") ? await viem.getContractAt("HolderRestrictionRule", components.holderRestrictionRule.address) : undefined,
+    windowRule: has("windowRule") ? await viem.getContractAt("SettlementWindowRule", components.windowRule.address) : undefined,
+  };
+
   const attest = async (target: Address, kind: number, uri: string) => {
     const code = await publicClient.getCode({ address: target });
     await registry.write.attest([keccak256(code!), kind, uri], { account: attester.account });
@@ -155,34 +217,20 @@ export async function deployUntilActivate(connection: NetworkConnection) {
 
   // Council step: the rules, the one shared hook and the implementations. The credential rule's codehash covers the
   // registry's address and not its code, so the council reads the registry first (its admin, its attesters, its code).
-  for (const rule of [credentialRule, minPositionRule, holderRestrictionRule, windowRule, fundHoldersRule]) {
-    await attest(rule.address, ATTEST.RULE, `ipfs://rule-review/${rule.address}`);
+  for (const rule of Object.values(rules)) {
+    if (rule !== undefined) await attest(rule.address, ATTEST.RULE, `ipfs://rule-review/${rule.address}`);
   }
   await attest(hook.address, ATTEST.HOOK, `ipfs://hook-review/${hook.address}`);
-  for (const impl of [components.intentImpl, components.fundImpl, components.asyncFundImpl]) {
-    await attest(impl.address, ATTEST.IMPLEMENTATION, `ipfs://impl-review/${impl.address}`);
+  for (const key of Object.values(IMPLEMENTATION_KEY)) {
+    if (has(key)) await attest(components[key].address, ATTEST.IMPLEMENTATION, `ipfs://impl-review/${components[key].address}`);
   }
 
-  const parameters = {
-    timelock: timelock.address,
-    registry: registry.address,
-    proxyDeployer: proxyDeployer.address,
-    hook: hook.address,
-    credentialRegistry: credentialRegistry.address,
-    credentialRule: credentialRule.address,
+  const parameters: Parameters_ = {
+    ...Object.fromEntries(Object.entries(components).map(([key, c]) => [key, c.address])),
     kycAttester: address(kyc),
-    minPositionRule: minPositionRule.address,
-    holderRestrictionRule: holderRestrictionRule.address,
-    windowRule: windowRule.address,
-    fundHoldersRule: fundHoldersRule.address,
-    intentImpl: components.intentImpl.address,
-    fundImpl: components.fundImpl.address,
-    asyncFundImpl: components.asyncFundImpl.address,
-    executor: executor.address,
-    dvpExecutor: dvpExecutor.address,
     guardian: address(guardian),
     governance: address(governance),
-    recoveryTimelock: recoveryTimelock.address,
+    operations: address(operations),
     asset: asset.address,
     custody: address(custody),
     minter: address(minter),
@@ -190,83 +238,160 @@ export async function deployUntilActivate(connection: NetworkConnection) {
     agent: address(agent),
     operator: address(operator),
     fulfiller: address(fulfiller),
-    // The minimum position of each token; 0 switches the rule off, as in every deployment that sets none.
-    intentMinPosition: 0n,
-    fundMinPosition: 0n,
-    asyncFundMinPosition: 0n,
-    fundContract: fundContract.address,
-    fundHolderCap: FUND_HOLDER_CAP,
     windowOpen: WINDOW_OPEN,
     windowClose: WINDOW_CLOSE,
-    windowDays: await windowRule.read.MON_TO_FRI(),
+    windowDays: rules.windowRule === undefined ? 0 : await rules.windowRule.read.MON_TO_FRI(),
   };
 
-  const activate = async (activateParameters: typeof parameters) => {
-    const tokens = await ignition.deploy(Activate, { parameters: { Activate: activateParameters } });
-    const token = tokens.intent;
-    const vault4626 = tokens.fund;
-    const vault7540 = tokens.asyncFund;
+  const wallets = { deployer, governance, attester, guardian, minter, burner, agent, operator, fulfiller, custody, recovery, kyc, operations };
 
-    // The KYC attester vouches for the holders used by the tests, the recovery account and the 7540 escrow vault.
-    const validUntil = (await publicClient.getBlock()).timestamp + DEMO_VALIDITY;
-    for (const w of [alice, bob, carol, dave, recovery]) {
-      await credentialRegistry.write.set([address(w), validUntil, QUALS.KYC, COUNTRY], { account: kyc.account });
+  /** A fund as the stack knows it: its contract, its rule, its intended cap and the classes it opened with. */
+  type FundStack = {
+    fund: Awaited<ReturnType<typeof attachFund>>;
+    rule: Awaited<ReturnType<typeof attachFundRule>>;
+    cap: bigint;
+    classes: string[];
+  };
+  const attachFund = (target: Address) => viem.getContractAt("Fund", target);
+  const attachFundRule = (target: Address) => viem.getContractAt("FundHoldersRule", target);
+
+  /** Attaches a placed product with its own template's ABI, so a role scan sees that template's roles. */
+  const attach = async (template: Template, target: Address) => {
+    switch (template) {
+      case "GatedToken":
+        return viem.getContractAt("GatedToken", target);
+      case "IntentToken":
+        return viem.getContractAt("IntentToken", target);
+      case "Gated4626Vault":
+        return viem.getContractAt("Gated4626Vault", target);
+      case "Gated7540Vault":
+        return viem.getContractAt("Gated7540Vault", target);
     }
-    await credentialRegistry.write.set([vault7540.address, validUntil, QUALS.KYC | QUALS.INFRA, COUNTRY], { account: kyc.account });
+  };
+
+  const launch = async (p: Parameters_) => {
+    const handover = coreHandoverModule(profile);
+    await ignition.deploy(handover, { parameters: { [handover.id]: p } });
+
+    // Each fund, with the council attesting its rule: a class cannot list the rule before that.
+    const funds: Record<string, FundStack> = {};
+    for (const key of fundsOf(profile)) {
+      const module = fundModule(key);
+      const pair = await ignition.deploy(module, {
+        parameters: { [module.id]: { operations: address(operations), registry: registry.address } },
+        defaultSender: address(operations),
+      });
+      await attest(pair.rule.address, ATTEST.RULE, `ipfs://rule-review/${pair.rule.address}`);
+      funds[key] = {
+        fund: await attachFund(pair.fund.address),
+        rule: await attachFundRule(pair.rule.address),
+        cap: (p[`${key}HolderCap`] as bigint | undefined) ?? FUND_HOLDER_CAP,
+        classes: classesOf(profile, key),
+      };
+    }
+    const [firstFund] = Object.values(funds);
+
+    const placed: Record<string, Awaited<ReturnType<typeof attach>>> = {};
+
+    /** Runs `Product` as the operations account, with the parameters that are specific to this product. */
+    const place = async (product: Product) => {
+      const module = productModule(product);
+      const { token } = await ignition.deploy(module, {
+        parameters: {
+          [module.id]: {
+            ...p,
+            implementation: p[IMPLEMENTATION_KEY[product.template]],
+            minPosition: p[`${product.key}MinPosition`] ?? 0n,
+            asset: product.assetProduct === undefined ? p.asset : placed[product.assetProduct].address,
+            ...(product.fund === undefined ? {} : { fundHoldersRule: funds[product.fund].rule.address }),
+          },
+        },
+        defaultSender: address(operations),
+      });
+      const contract = await attach(product.template, token.address);
+      // A 7540 vault escrows pending redemptions, so the KYC attester credentials it.
+      if (product.template === "Gated7540Vault" && credentials !== undefined) {
+        const validUntil = (await publicClient.getBlock()).timestamp + DEMO_VALIDITY;
+        await credentials.write.set([contract.address, validUntil, QUALS.KYC | QUALS.INFRA, COUNTRY], { account: kyc.account });
+      }
+      placed[product.key] = contract;
+      return contract;
+    };
+
+    const products: { product: Product; contract: Awaited<ReturnType<typeof attach>> }[] = [];
+    for (const product of profile.products) products.push({ product, contract: await place(product) });
+
+    for (const [key, { fund, rule, cap, classes }] of Object.entries(funds)) {
+      const module = fundOpenModule(key, classes);
+      await ignition.deploy(module, {
+        parameters: {
+          [module.id]: {
+            fundContract: fund.address,
+            fundHoldersRule: rule.address,
+            holderCap: cap,
+            timelock: timelock.address,
+            ...Object.fromEntries(classes.map((name) => [`class_${name}`, placed[name].address])),
+          },
+        },
+        defaultSender: address(operations),
+      });
+    }
 
     const stack = {
       publicClient,
-      wallets: { deployer, governance, attester, guardian, minter, burner, agent, operator, fulfiller, custody, recovery, kyc },
+      wallets,
       holders: { alice, bob, carol, dave, eve },
+      components,
       timelock,
       recoveryTimelock,
       registry,
-      credentials: credentialRegistry,
-      rules: { credentialRule, minPositionRule, holderRestrictionRule, windowRule, fundHoldersRule },
-      fund: fundContract,
+      hook,
       proxyDeployer,
-      asset,
-      token,
-      vault4626,
-      vault7540,
+      credentials,
+      funds,
+      fund: firstFund?.fund,
       executor,
       dvpExecutor,
-      hook,
-      implementations: {
-        token: components.intentImpl,
-        vault4626: components.fundImpl,
-        vault7540: components.asyncFundImpl,
-      },
+      rules: { ...rules, fundHoldersRule: firstFund?.rule },
+      asset,
+      deployed: products,
+      products: placed,
+      place,
     };
     await assertHandedOver(stack);
     return stack;
   };
-  return { activate, parameters, components, wallets: { deployer, agent, operator, governance, guardian } };
-}
 
-export type Stack = Awaited<ReturnType<typeof deployStack>>;
+  return { launch, parameters, components, wallets, timelock, registry, proxyDeployer, executor };
+}
 
 /**
  * Hand-over check, the same one the runbook prescribes after a live deployment:
- * - the deployer holds no role (every `*_ROLE()` getter, so later roles are covered) on the timelock, registry,
- *   tokens or either executor, while the timelock holds DEFAULT_ADMIN_ROLE on each, so the check is not vacuous;
- * - the DvP executor's operator is the stack's operator and its guardian the stack's guardian, and EXECUTOR_ROLE on the
- *   intent token is held by the intent executor and the DvP executor and by no account the stack knows about;
+ * - the deployer and the operations account hold no role (every `*_ROLE()` getter, so later roles are covered) on the
+ *   timelock, registry, products or executors, while the timelock holds DEFAULT_ADMIN_ROLE on each, so the check is not
+ *   vacuous;
+ * - each executor's operator is the stack's operator and its guardian the stack's guardian, and EXECUTOR_ROLE on an intent
+ *   token is held by the executors the product names and by no account the stack knows about;
  * - UPGRADER_ROLE is held by the timelock and nobody else that the stack knows about;
- * - every token runs the one shared hook the council reviewed, which names the stack's registry and holds the intended
- *   ordered rule list for that token (`RULE_ORDER`); rules have no access control of their own;
- * - the guardian can cancel timelock operations but cannot propose or execute them;
- * - `ProxyDeployer` is owned by the timelock, so no token can be placed outside governance;
- * - the fund is owned by the timelock, runs the attested rule that points back at it, has the intended cap, and holds
- *   the three tokens as its classes, in that order, each intact (its hook lists the fund's rule: `firstBrokenClass()`
- *   is the zero address);
- * - the recovery timelock holds exactly RECOVERY_ROLE on each token, both executors, the credential registry and the
+ * - every product runs the one shared hook the council reviewed, which names the stack's registry and holds the intended
+ *   ordered rule list for that product; rules have no access control of their own;
+ * - the guardian can cancel timelock operations but cannot propose or execute them, and both timelocks wait at least 24
+ *   hours;
+ * - `ProxyDeployer` is owned by the operations account, so products launch without waiting;
+ * - each fund is owned by the timelock, runs the attested rule that points back at it, has the intended cap, and holds the
+ *   classes it opened with, in order, each intact (its hook lists the fund's rule: `firstBrokenClass()` is the zero
+ *   address);
+ * - the recovery timelock holds exactly RECOVERY_ROLE on each product, the executors, the credential registry and the
  *   main timelock (nothing else, nowhere else), has no cancellers, and the guardian holds nothing on it.
  */
-export async function assertHandedOver(s: Omit<Stack, "holders" | "asset" | "implementations">) {
+export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
   const deployer = s.wallets.deployer.account.address;
+  const operations = s.wallets.operations.account.address;
+  const guardian = s.wallets.guardian.account.address;
   const timelock = s.timelock.address;
   const known = Object.values(s.wallets).map((w) => w.account.address);
+  const tokens = s.deployed.map(({ contract }) => contract);
+  const executors = [s.executor, s.dvpExecutor].filter((c) => c !== undefined);
   type Gated = { address: Address; abi: unknown };
   /** Every role id the contract exposes through a `*_ROLE()` getter, so a role added later is covered. */
   const rolesOf = async (c: Gated) => {
@@ -291,105 +416,112 @@ export async function assertHandedOver(s: Omit<Stack, "holders" | "asset" | "imp
     }
     return held.sort();
   };
-  for (const c of [s.timelock, s.recoveryTimelock, s.registry, s.credentials, s.token, s.vault4626, s.vault7540, s.executor, s.dvpExecutor]) {
+  const administered: Gated[] = [s.timelock, s.registry, ...tokens, ...executors, ...(s.credentials === undefined ? [] : [s.credentials])];
+  for (const c of [s.recoveryTimelock, ...administered]) {
     assert.deepEqual(await heldBy(c, deployer), [], `deployer holds roles on ${c.address}`);
+    assert.deepEqual(await heldBy(c, operations), [], `the operations account holds roles on ${c.address}`);
   }
-  for (const c of [s.timelock, s.registry, s.credentials, s.token, s.vault4626, s.vault7540, s.executor, s.dvpExecutor]) {
+  for (const c of administered) {
     assert.ok((await heldBy(c, timelock)).includes(ROLES.DEFAULT_ADMIN), `timelock lacks DEFAULT_ADMIN_ROLE on ${c.address}`);
   }
   // M-1: the recovery timelock's complete role set, pinned so a change that widens it fails the deploy.
   const recovery = s.recoveryTimelock.address;
   const expectedRecoveryRoles: [Gated, Hex[]][] = [
     [s.timelock, [ROLES.RECOVERY]],
-    [s.token, [ROLES.RECOVERY]],
-    [s.vault4626, [ROLES.RECOVERY]],
-    [s.vault7540, [ROLES.RECOVERY]],
-    [s.executor, [ROLES.RECOVERY]],
-    [s.dvpExecutor, [ROLES.RECOVERY]],
     [s.registry, []],
-    [s.credentials, [ROLES.RECOVERY]], // it may clear a guardian block, revive an attester and remove the guardian
+    ...[...tokens, ...executors].map((c): [Gated, Hex[]] => [c, [ROLES.RECOVERY]]),
+    // It may clear a guardian block, revive an attester and remove the guardian.
+    ...(s.credentials === undefined ? [] : [[s.credentials, [ROLES.RECOVERY]] as [Gated, Hex[]]]),
     [s.recoveryTimelock, [ROLES.DEFAULT_ADMIN]], // OZ makes every timelock its own admin
   ];
   for (const [c, roles] of expectedRecoveryRoles) {
     assert.deepEqual(await heldBy(c, recovery), [...roles].sort(), `recovery timelock role set on ${c.address}`);
   }
-  assert.deepEqual(await heldBy(s.recoveryTimelock, s.wallets.guardian.account.address), [], "guardian holds roles on the recovery timelock");
+  assert.deepEqual(await heldBy(s.recoveryTimelock, guardian), [], "guardian holds roles on the recovery timelock");
   for (const account of known) {
     assert.equal(await s.recoveryTimelock.read.hasRole([ROLES.CANCELLER, account]), false, `${account} can cancel recovery`);
   }
   const governance = s.wallets.governance.account.address;
   assert.equal(await s.recoveryTimelock.read.hasRole([await s.recoveryTimelock.read.PROPOSER_ROLE(), governance]), true);
   assert.equal(await s.recoveryTimelock.read.hasRole([await s.recoveryTimelock.read.EXECUTOR_ROLE(), governance]), true);
-  assert.ok((await s.recoveryTimelock.read.getMinDelay()) >= 7n * 86_400n, "recovery timelock delay below 7 days");
-  // The DvP executor: the stack's operator submits through it and the guardian can pause it.
-  assert.deepEqual(await heldBy(s.dvpExecutor, s.wallets.operator.account.address), [ROLES.OPERATOR], "DvP executor operator");
-  assert.deepEqual(await heldBy(s.dvpExecutor, s.wallets.guardian.account.address), [ROLES.GUARDIAN], "DvP executor guardian");
-  // EXECUTOR_ROLE on the intent token: the two executor contracts and no account the stack knows about, so nothing
-  // can run a signed intent without going through one of them.
-  for (const executor of [s.executor, s.dvpExecutor]) {
-    assert.equal(await s.token.read.hasRole([ROLES.EXECUTOR, executor.address]), true, `${executor.address} lacks EXECUTOR_ROLE on the intent token`);
+  assert.ok((await s.recoveryTimelock.read.getMinDelay()) >= DAY, "recovery timelock delay below 24 hours");
+  // Each executor: the stack's operator submits through it and the guardian can pause it.
+  for (const executor of executors) {
+    assert.deepEqual(await heldBy(executor, s.wallets.operator.account.address), [ROLES.OPERATOR], `executor operator on ${executor.address}`);
+    assert.deepEqual(await heldBy(executor, guardian), [ROLES.GUARDIAN], `executor guardian on ${executor.address}`);
   }
-  for (const account of known) {
-    assert.equal(await s.token.read.hasRole([ROLES.EXECUTOR, account]), false, `${account} holds EXECUTOR_ROLE on the intent token`);
+  // EXECUTOR_ROLE on an intent token: the executors it names and no account the stack knows about, so nothing can run a
+  // signed intent without going through one of them.
+  for (const { product, contract } of s.deployed) {
+    if (product.template !== "IntentToken") continue;
+    const named = (product.executors ?? []).map((kind) => (kind === "intent" ? s.executor : s.dvpExecutor));
+    for (const executor of named) {
+      assert.equal(await contract.read.hasRole([ROLES.EXECUTOR, executor!.address]), true, `${executor!.address} lacks EXECUTOR_ROLE on the intent token`);
+    }
+    for (const account of known) {
+      assert.equal(await contract.read.hasRole([ROLES.EXECUTOR, account]), false, `${account} holds EXECUTOR_ROLE on the intent token`);
+    }
   }
-  for (const t of [s.token, s.vault4626, s.vault7540]) {
+  for (const t of tokens) {
     assert.equal(await t.read.hasRole([ROLES.UPGRADER, timelock]), true, `timelock lacks UPGRADER_ROLE on ${t.address}`);
     for (const account of known) assert.equal(await t.read.hasRole([ROLES.UPGRADER, account]), false, `${account} can upgrade`);
   }
   // `s.hook` is the hook the council reviewed. A second instance on the same registry shares its attested codehash, so
-  // check each token runs that exact instance and that the token's rule list on it is the intended one.
+  // check each product runs that exact instance and that its rule list on it is the intended one.
   assert.ok(isAddressEqual(await s.hook.read.REGISTRY(), s.registry.address), `hook ${s.hook.address} names another registry`);
-  const bound = [
-    [s.token, RULE_ORDER.intent],
-    [s.vault4626, RULE_ORDER.fund],
-    [s.vault7540, RULE_ORDER.asyncFund],
-  ] as const;
-  for (const [t, order] of bound) {
-    assert.ok(isAddressEqual(await t.read.policyHook(), s.hook.address), `token ${t.address} runs another hook`);
-    const expected = order.map((name) => s.rules[name].address);
-    const actual = await s.hook.read.rules([t.address]);
-    assert.equal(actual.length, expected.length, `token ${t.address} rule count`);
-    actual.forEach((rule, i) => assert.ok(isAddressEqual(rule, expected[i]), `token ${t.address} rule ${i}`));
+  for (const { product, contract } of s.deployed) {
+    assert.ok(isAddressEqual(await contract.read.policyHook(), s.hook.address), `token ${contract.address} runs another hook`);
+    const expected = product.rules.map((name) => (name === "fundHoldersRule" ? s.funds[product.fund!].rule.address : s.rules[name]!.address));
+    const actual = await s.hook.read.rules([contract.address]);
+    assert.equal(actual.length, expected.length, `token ${contract.address} rule count`);
+    actual.forEach((rule, i) => assert.ok(isAddressEqual(rule, expected[i]), `token ${contract.address} rule ${i}`));
   }
   for (const rule of Object.values(s.rules)) {
+    if (rule === undefined) continue;
     const names = (rule.abi as Abi).flatMap((item) => (item.type === "function" ? [item.name] : []));
     assert.ok(!names.includes("hasRole") && !names.includes("owner"), `rule ${rule.address} has its own access control`);
   }
-  assert.ok(isAddressEqual(await s.proxyDeployer.read.owner(), timelock), "ProxyDeployer is not owned by the timelock");
-  assert.ok(isAddressEqual(await s.fund.read.owner(), timelock), "the fund is not owned by the timelock");
-  assert.ok(isAddressEqual(await s.fund.read.rule(), s.rules.fundHoldersRule.address), "the fund runs another rule");
-  assert.ok(isAddressEqual(await s.rules.fundHoldersRule.read.FUND(), s.fund.address), "the fund rule points at another fund");
-  assert.equal(await s.registry.read.isAttested([s.rules.fundHoldersRule.address, ATTEST.RULE]), true, "the fund rule is not attested");
-  assert.equal(await s.fund.read.holderCap(), FUND_HOLDER_CAP, "fund cap");
-  const classes = [s.token, s.vault4626, s.vault7540];
-  assert.equal(await s.fund.read.classCount(), BigInt(classes.length), "class count");
-  for (const [i, t] of classes.entries()) {
-    assert.ok(isAddressEqual(await s.fund.read.classAt([BigInt(i + 1)]), t.address), `class ${i + 1} is not ${t.address}`);
-    assert.equal(await s.fund.read.isClassIntact([t.address]), true, `class ${i + 1} no longer lists the fund's rule`);
+  assert.ok(isAddressEqual(await s.proxyDeployer.read.owner(), operations), "ProxyDeployer is not owned by the operations account");
+  for (const { fund, rule, cap, classes } of Object.values(s.funds)) {
+    assert.ok(isAddressEqual(await fund.read.owner(), timelock), "the fund is not owned by the timelock");
+    assert.ok(isAddressEqual(await fund.read.rule(), rule.address), "the fund runs another rule");
+    assert.ok(isAddressEqual(await rule.read.FUND(), fund.address), "the fund rule points at another fund");
+    assert.equal(await s.registry.read.isAttested([rule.address, ATTEST.RULE]), true, "the fund rule is not attested");
+    assert.equal(await fund.read.holderCap(), cap, "fund cap");
+    assert.equal(await fund.read.classCount(), BigInt(classes.length), "class count");
+    for (const [i, name] of classes.entries()) {
+      const t = s.deployed.find(({ product }) => product.key === name)!.contract;
+      assert.ok(isAddressEqual(await fund.read.classAt([BigInt(i + 1)]), t.address), `class ${i + 1} is not ${t.address}`);
+      assert.equal(await fund.read.isClassIntact([t.address]), true, `class ${i + 1} no longer lists the fund's rule`);
+    }
+    assert.ok(isAddressEqual(await fund.read.firstBrokenClass(), zeroAddress), "the fund has a broken class");
   }
-  assert.ok(isAddressEqual(await s.fund.read.firstBrokenClass(), zeroAddress), "the fund has a broken class");
-  // The credential layer: the guardian can stop (block, kill) and nothing else; one attester, the demo KYC provider, and
-  // every token trusts it and asks for KYC and nothing more; the rule reads this registry and the council attested it.
-  const guardian = s.wallets.guardian.account.address;
-  assert.deepEqual(await heldBy(s.credentials, guardian), [ROLES.GUARDIAN], "credential registry guardian");
-  assert.equal(await s.credentials.read.attesterCount(), 1n, "attester count");
-  const kycAttester = await s.credentials.read.attesterAt([0]);
-  assert.ok(isAddressEqual(kycAttester.account, s.wallets.kyc.account.address), "attester 0 is not the KYC provider");
-  assert.equal(kycAttester.killed, false, "the KYC attester is killed");
-  assert.ok(isAddressEqual(await s.rules.credentialRule.read.REGISTRY(), s.credentials.address), "the credential rule reads another registry");
-  assert.equal(await s.registry.read.isAttested([s.rules.credentialRule.address, ATTEST.RULE]), true, "the credential rule is not attested");
-  for (const t of [s.token, s.vault4626, s.vault7540]) {
-    const policy = await s.rules.credentialRule.read.policyOf([t.address]);
-    assert.deepEqual(
-      [policy.requireAll, policy.requireAny, policy.forbidAny, policy.attesters],
-      [QUALS.KYC, 0, 0, 1n],
-      `policy of ${t.address}`,
-    );
+  // The credential layer: the guardian can stop (block, kill) and nothing else; one attester, the KYC function, and each
+  // product trusts it and asks for what it lists; the rule reads this registry and the council attested it.
+  if (s.credentials !== undefined) {
+    const credentialRule = s.rules.credentialRule!;
+    assert.deepEqual(await heldBy(s.credentials, guardian), [ROLES.GUARDIAN], "credential registry guardian");
+    assert.equal(await s.credentials.read.attesterCount(), 1n, "attester count");
+    const kycAttester = await s.credentials.read.attesterAt([0]);
+    assert.ok(isAddressEqual(kycAttester.account, s.wallets.kyc.account.address), "attester 0 is not the KYC provider");
+    assert.equal(kycAttester.killed, false, "the KYC attester is killed");
+    assert.ok(isAddressEqual(await credentialRule.read.REGISTRY(), s.credentials.address), "the credential rule reads another registry");
+    assert.equal(await s.registry.read.isAttested([credentialRule.address, ATTEST.RULE]), true, "the credential rule is not attested");
+    for (const { product, contract } of s.deployed) {
+      if (!product.rules.includes("credentialRule")) continue;
+      const expected = product.policy ?? DEFAULT_POLICY;
+      const policy = await credentialRule.read.policyOf([contract.address]);
+      assert.deepEqual(
+        [policy.requireAll, policy.requireAny, policy.forbidAny, policy.attesters],
+        [expected.requireAll, expected.requireAny, expected.forbidAny, expected.attesters],
+        `policy of ${contract.address}`,
+      );
+    }
   }
   assert.equal(await s.timelock.read.hasRole([await s.timelock.read.CANCELLER_ROLE(), guardian]), true);
   assert.equal(await s.timelock.read.hasRole([await s.timelock.read.PROPOSER_ROLE(), guardian]), false);
   assert.equal(await s.timelock.read.hasRole([await s.timelock.read.EXECUTOR_ROLE(), guardian]), false);
-  assert.ok((await s.timelock.read.getMinDelay()) >= 7n * 86_400n, "timelock delay below 7 days");
+  assert.ok((await s.timelock.read.getMinDelay()) >= DAY, "timelock delay below 24 hours");
 }
 
 export const INTENT_TYPES = {
@@ -637,14 +769,14 @@ const addressOf = (who: Who) => (typeof who === "string" ? who : who.account.add
  * The demo KYC attester vouches for `who`: a credential from now, valid for `validFor` seconds (far past any test by
  * default) with `quals`. Writes over an earlier credential of the same attester.
  */
-export async function verify(s: Stack, who: Who, opts: { quals?: number; validFor?: bigint } = {}) {
+export async function verify(s: Pick<ProfileStack, "publicClient" | "credentials" | "wallets">, who: Who, opts: { quals?: number; validFor?: bigint } = {}) {
   const now = (await s.publicClient.getBlock()).timestamp;
-  await s.credentials.write.set([addressOf(who), now + (opts.validFor ?? DEMO_VALIDITY), opts.quals ?? QUALS.KYC, COUNTRY], {
+  await s.credentials!.write.set([addressOf(who), now + (opts.validFor ?? DEMO_VALIDITY), opts.quals ?? QUALS.KYC, COUNTRY], {
     account: s.wallets.kyc.account,
   });
 }
 
 /** The KYC attester blocks `who`: it can no longer send or receive. (The old "de-verified".) */
-export async function deverify(s: Stack, who: Who) {
-  await s.credentials.write.setStatus([addressOf(who), STATUS.BLOCKED], { account: s.wallets.kyc.account });
+export async function deverify(s: Pick<ProfileStack, "credentials" | "wallets">, who: Who) {
+  await s.credentials!.write.setStatus([addressOf(who), STATUS.BLOCKED], { account: s.wallets.kyc.account });
 }

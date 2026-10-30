@@ -12,7 +12,7 @@ import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
  * @dev CREATE2 with salt `keccak256(bytes(symbol))` over `TokenProxy(implementation, "")`: the address depends on
  *      this contract, the symbol and the implementation, never on the init data, which carries the hook and the initial
  *      rules. The proxy is initialised in the same transaction, so no one can initialise it first. Holds no roles and no
- *      funds. Ownership (OZ `Ownable`) gates `deploy`; after deployment it belongs to the timelock
+ *      funds. Ownership (OZ `Ownable`) gates `deploy`; after the core is handed over it belongs to the operations account
  */
 interface IProxyDeployer {
   /*///////////////////////////////////////////////////////////////

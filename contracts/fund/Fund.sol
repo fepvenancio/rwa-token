@@ -17,8 +17,8 @@ import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
  * @title Fund
  * @notice The set of share classes of one fund, with the investor count and each investor's class mask, as specified in
  *         `IFund`. Not a proxy, and it holds no policy: the installed rule decides, the fund only records
- * @dev `Ownable` like `ProxyDeployer`: the deployer owns it while it is configured and `Activate` hands ownership to the
- *      timelock. An immutable admin would force a timelock operation, and its delay, onto every first deployment.
+ * @dev `Ownable` like `ProxyDeployer`: the deployer owns it while it is configured, the operations account while its first
+ *      classes are registered, and `FundHandover` hands ownership to the timelock. An immutable admin would force a timelock operation, and its delay, onto every first deployment.
  *      An account's state is one slot: bit `n - 1` for class `n`, and the top bit for "exempt". The installed rule, the
  *      investor count and the cap share one slot. The first count write is then never a write to an empty slot, and the
  *      rule, which the rule checks on every movement, is read together with the count and the cap at no extra cost

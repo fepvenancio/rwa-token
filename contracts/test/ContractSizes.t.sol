@@ -20,6 +20,7 @@ import {SettlementWindowRule} from 'contracts/hooks/rules/SettlementWindowRule.s
 import {CredentialRegistry} from 'contracts/identity/CredentialRegistry.sol';
 import {DvPExecutor} from 'contracts/intents/DvPExecutor.sol';
 import {IntentExecutor} from 'contracts/intents/IntentExecutor.sol';
+import {GatedToken} from 'contracts/tokens/GatedToken.sol';
 import {IntentToken} from 'contracts/tokens/IntentToken.sol';
 import {Gated4626Vault} from 'contracts/vaults/Gated4626Vault.sol';
 import {Gated7540Vault} from 'contracts/vaults/Gated7540Vault.sol';
@@ -39,6 +40,7 @@ contract ContractSizesTest is Test {
     // Under `--coverage` the bytecode is instrumented and larger than what deploys; the limit applies to real builds.
     vm.skip(_isInstrumented(address(new IntentToken()).code));
     address _registry = address(new PolicyRegistry(address(this), address(this)));
+    _assertFits('GatedToken', address(new GatedToken()));
     _assertFits('IntentToken', address(new IntentToken()));
     _assertFits('Gated4626Vault', address(new Gated4626Vault()));
     _assertFits('Gated7540Vault', address(new Gated7540Vault()));
@@ -57,7 +59,7 @@ contract ContractSizesTest is Test {
     _assertFits('FundHoldersRule', address(new FundHoldersRule(IFund(address(_fund)))));
     _assertFits(
       'GovernanceTimelock',
-      address(new GovernanceTimelock(7 days, new address[](0), new address[](0), address(this), address(this)))
+      address(new GovernanceTimelock(1 days, new address[](0), new address[](0), address(this), address(this)))
     );
   }
 

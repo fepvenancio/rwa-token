@@ -30,7 +30,7 @@ In scope, all under `contracts/` (`.t.sol` files and `contracts/test/` are test 
 | Area | Contracts |
 |---|---|
 | Base | `base/PolicyGatedERC20Upgradeable` |
-| Templates | `tokens/IntentToken`, `vaults/Gated4626Vault`, `vaults/Gated7540Vault` |
+| Templates | `tokens/GatedToken`, `tokens/IntentToken`, `vaults/Gated4626Vault`, `vaults/Gated7540Vault` |
 | Mixin | `mixins/IntentSettledUpgradeable` |
 | Policy | `hooks/ComplianceHook` (one per deployment, shared by every token), `hooks/BaseRule`, `hooks/rules/{Credential,MinPosition,HolderRestriction,SettlementWindow,FundHolders}Rule` |
 | Credentials | `identity/CredentialRegistry` (immutable, not a proxy, not attested; the `CredentialRule` codehash covers its address, not its code) |
@@ -40,8 +40,8 @@ In scope, all under `contracts/` (`.t.sol` files and `contracts/test/` are test 
 | Deployment | `deploy/ProxyDeployer`, `deploy/TokenProxy` |
 | Interfaces | `interfaces/*` (frozen; ERC-165 ids, event topics and reason codes pinned by `contracts/test/InterfaceFreeze.t.sol`; the owner has reopened them on instruction, most recently 2026-10-23 to 24 for the review items and 2026-10-27 for `IProxyDeployer`, and they are frozen again) |
 
-Also in scope: `ignition/modules/{Components,Activate,roles}.ts`, which carry the deployment order, role grants,
-the hand-over to the timelock and each token's rule list (`RULE_ORDER`).
+Also in scope: `ignition/modules/{Core,CoreHandover,Fund,Product,FundOpen,roles}.ts` and `ignition/profiles.ts`, which carry
+the deployment order, role grants, the hand-over to the timelock and each product's rule list.
 
 Out of scope: OpenZeppelin 5.6.1 (`@openzeppelin/contracts`, `-upgradeable`; `TimelockController` is used unmodified for the recovery timelock and as the base of `GovernanceTimelock`),
 the KYC attesters' off-chain verification, and test mocks.
@@ -55,7 +55,7 @@ Build: solc 0.8.30, `evmVersion: cancun`, optimizer 200 runs, no metadata hash, 
    token. `ProxyDeployer` instead CREATE2s `TokenProxy(impl, "")` with salt `keccak256(symbol)`, so the address depends
    only on the deployer, the symbol and the implementation, and the council can compute it off-chain. `deploy`:
    - is owner-only. The address does not cover the init data, so anyone else could otherwise occupy it with their own
-     admin. Ownership moves to the timelock in `Activate`;
+     admin. Ownership moves to the operations account in `CoreHandover`, so a product launches without a timelock delay;
    - refuses, before it creates the proxy, an implementation that its registry (fixed at construction) has not attested
      as `IMPLEMENTATION` (`ProxyDeployer_ImplementationNotAttested`). The token cannot check this itself: its
      initialiser is the implementation's own code;
@@ -85,7 +85,7 @@ Build: solc 0.8.30, `evmVersion: cancun`, optimizer 200 runs, no metadata hash, 
        install another hook, which must name the token's own registry (`PolicyGated_HookRegistryMismatch`);
      - `ProxyDeployer` reverts unless the hook holds exactly the expected rules for the new token;
      - the post-deploy check asserts every token runs the one recorded hook and that its list equals `RULE_ORDER`.
-   - Tests: a second hook on the same registry is attested through the shared codehash, `Activate` completes on it, and
+   - Tests: a second hook on the same registry is attested through the shared codehash, `Product` completes on it, and
      the post-deploy check refuses it; a hook on another registry is refused by the token before anything is created
      (`deployment.test.ts`).
 
@@ -135,7 +135,7 @@ Further limits recorded during review:
   and the minimum is refused (`BELOW_MIN_POSITION`), as is an exit that would leave such a remainder. It does not stop 1
   wei being sent to an existing holder at or above the minimum, and an exit of the old exact balance then reverts with
   `BELOW_MIN_POSITION`; the holder exits the current balance (`maxRedeem`). It is off by default (a
-  minimum of 0), and the demo deployment sets none unless `Activate` is given one. Where none is set, the mitigation is
+  minimum of 0), and a product sets none unless `Product` is given one. Where none is set, the mitigation is
   operational: the agent cleans up dust (forced transfer or burn) and monitoring watches slot usage. FORCED and an enforcement
   burn are exempt, so an agent can still leave a remainder. Requiring a credentialed caller on vault mints was rejected
   because it would break custodians depositing for clients.
@@ -144,6 +144,15 @@ Further limits recorded during review:
   admitted, net-zero moves included, until the count comes back down. Existing investors can still move among
   themselves and exit. Pinned by
   `FundHoldersRule.t.sol::test_WhenTheCountIsAboveALoweredCap_ANetZeroMoveIsStillRejected`.
+- **The investor cap does not hold a place for an open 7540 request** (outside review, 3.2 and 3.3; accepted by the owner
+  for the first version, decision P27). A full `requestRedeem` takes the investor out of the count while the shares wait
+  unburned in the escrow, and `requestDeposit` reserves no place. So when the fund fills up meanwhile, a reject that returns
+  the shares, or a deposit claim, is refused with `MAX_HOLDERS`. The agent's recovery always works, and delivering to an
+  account that holds nothing puts the count above the cap, where it stays until investors leave. The mitigation is
+  operational: the fulfiller rejects deposit requests near the cap, and a monitor alerts when `Fund.holderCount()` is
+  above `Fund.holderCap()`. Whether a redeeming investor still counts as a holder is for counsel. Pinned by
+  `FundIntegration.t.sol::test_WhenARejectedRedemptionReturnsSharesToAnInvestorWhoWasReplaced_TheFundCapAppliesAndRecoveryIsCounted`
+  and `Gated7540Vault.t.sol::test_WhenACapFilledAfterFulfilment_TheAgentDeliversTheStrandedShares`.
 - **Dropping the fund rule from a class's list un-caps it silently.** The hook accepts any attested list, and nothing in it
   knows about the fund, so a list without `FundHoldersRule` stops the class from counting investors and from enforcing
   the cap (a fourth investor gets in at a full cap, and the fund's count does not know). Replacing the rule in the fund
@@ -201,9 +210,16 @@ Further limits recorded during review:
   a controller. One controller's redemption is held by not fulfilling it, or moved with `recoverRedeemRequest`. Tooling
   that calls `setFrozenTokens` on the vault's address, or forces booked shares out of it, sees a revert. Pinned by
   `Gated7540VaultUnit_Escrow`.
-- **The main timelock's delay has a floor of 7 days.** `GovernanceTimelock` refuses less at deployment and in
-  `updateDelay` (`GovernanceTimelock_DelayBelowFloor`). The recovery timelock is OpenZeppelin's own, without a floor;
-  its powers only undo the guardian's. Pinned by `GovernanceTimelockUnitTest`.
+- **The timelocks wait 24 hours by default, and the main one has a floor of 1 hour.** `GovernanceTimelock` refuses less
+  than the floor at deployment and in `updateDelay` (`GovernanceTimelock_DelayBelowFloor`). The post-deploy check asserts
+  at least 24 hours on both timelocks at hand-over. So the guardian has a day to cancel a bad change, and governance can
+  later lower the main delay to 1 hour through a delayed operation. The recovery timelock is OpenZeppelin's own, without
+  a floor; its powers only undo the guardian's. Pinned by `GovernanceTimelockUnitTest`.
+- **The operations account places products without a delay.** It owns `ProxyDeployer`, because a launch only adds a proxy
+  over attested code and touches nothing that exists. A stolen operations key can still place a token over an attested
+  implementation with its own admin, and can use up a symbol. It cannot change an existing product, and such a token is
+  not one the bank published: holders and integrators should take addresses from the bank's list, and the post-deploy
+  check runs on each real product. Recovery from a stolen key is a new `ProxyDeployer`, which changes where later tokens land.
 - **Revoking an attestation does not affect live tokens.** Attestation is checked at install and upgrade time only.
   The guardian pauses while the timelock removes the component.
 - **`totalAssets` of the 7540 vault is indicative** (the last fulfilment price); `preview*` revert, as ERC-7540
@@ -263,12 +279,12 @@ Inline acknowledgements (reason on the line above each `aderyn-ignore`):
 
 | Detector | Where | Verdict | Evidence |
 |---|---|---|---|
-| `contract-locks-ether` (high) | `IntentToken`, `Gated4626Vault`, `Gated7540Vault`, `TokenProxy` | False positive: no path accepts ETH. There is no `receive` or payable function, `upgradeToAndCall` with empty data rejects value (`ERC1967NonPayable`), and with data the value is delegated into a non-payable function | `IntentTokenIntegration_Ether`, `Gated4626VaultUnit_Ether`, `Gated7540VaultUnit_Ether` |
+| `contract-locks-ether` (high) | `GatedToken`, `IntentToken`, `Gated4626Vault`, `Gated7540Vault`, `TokenProxy` | False positive: no path accepts ETH. There is no `receive` or payable function, `upgradeToAndCall` with empty data rejects value (`ERC1967NonPayable`), and with data the value is delegated into a non-payable function | `GatedTokenIntegrationTest::test_WhenEtherIsSent_ItReverts`, `IntentTokenIntegration_Ether`, `Gated4626VaultUnit_Ether`, `Gated7540VaultUnit_Ether` |
 | `reentrancy-state-change` (high) | `HolderRestrictionRule`, `MinPositionRule`, `SettlementWindowRule`, `CredentialRule.setPolicy` and `_checkSender`, `Fund.registerClass`, `Fund.setRule` | False positive: the token, the hook, the fund or the registry is called through view interfaces, which compile to STATICCALL, so nothing it does can change any state | `*Unit_TokenCallsAreStatic` for the rules, `FundHoldersRuleUnit_TokenAndFundCallsAreStatic` and `FundUnit_CallsAreStatic` for the fund layer: a callee whose reads write makes the entry point revert, while a quiet callee succeeds (control) |
 | `arbitrary-transfer-from` (high) | `Gated7540Vault.requestDeposit` | Same as Slither's `arbitrary-send-erc20` (§4 above) | Fuzzed victim-owner test; removing the guard fails 2 tests |
 | `abi-encode-packed-hash-collision` (high) | `ProxyDeployer._initCodeHash` | False positive: only the second operand varies; the first is fixed creation code | Fuzzed `predict` formula test; off-chain CREATE2 test |
 | `storage-array-memory-edit` (high) | `SettlementWindowRule.check`, `isOpen` | False positive: a read-only copy of a storage struct into memory | Window tests |
-| `unused-state-variable` | `Gated7540Vault` ERC-7201 location | False positive: read in assembly | `Gated7540VaultUnit_Storage`: the formula equals the constant and the slot holds custody and `lastPrice` |
+| `unused-state-variable` | `GatedToken` and `Gated7540Vault` ERC-7201 locations | False positive: read in assembly | `GatedTokenIntegrationTest::test_TheErc7201LocationHoldsTheDecimals` and `Gated7540VaultUnit_Storage`: the formula equals the constant and the slot holds the decimals, or custody and `lastPrice` |
 | `unchecked-return` | `_grantRole` in constructors and initialisers (`CredentialRegistry` included), and `_revokeRole` in the `revokeRole` overrides of the base, `GovernanceTimelock`, both executors and `CredentialRegistry` (it returns false only if the role was not held, and either way the account ends up without it); `Address.functionCall` in `ProxyDeployer`; `_executeLeg` in `DvPExecutor` | `_grantRole` returns false only if the role is already held; `initialize` returns nothing; the cash leg's digest is not needed and the securities leg's digest was read before the call | Role, deploy and DvP tests |
 | `costly-loop`, `require-revert-in-loop` | `ComplianceHook._setRules`, `IntentExecutor.executeBatch` | By design: at most 16 rules, and invalid rules must fail closed; batches are atomic | Hook and batch tests |
 | `literal-instead-of-constant` | calendar arithmetic; `10 ** decimals()` | Calendar constants; `decimals()` is read at runtime | Window and vault tests |
@@ -285,7 +301,7 @@ solhint (Wonderland config, `--max-warnings 0`):
 
 ## 5. Mutation-testing results
 
-Each row is a bug deliberately planted, the tests that caught it, then the file restored from git. Counts are the failing tests in the run that recorded the row. The shared hook's own authority (who may call `setRules`, the per-token keying, `afterTransfer` from the token only) is pinned by unit and integration tests, not by a planted-bug row.
+Each row is a bug deliberately planted, the tests that caught it, then the file restored from git. Rows before 2026-10-30 name `Components` and `Activate`, now `Core`, `CoreHandover` and `Product`. Counts are the failing tests in the run that recorded the row. The shared hook's own authority (who may call `setRules`, the per-token keying, `afterTransfer` from the token only) is pinned by unit and integration tests, not by a planted-bug row.
 
 | Area | Planted bug | Caught by |
 |---|---|---|
@@ -301,6 +317,7 @@ Each row is a bug deliberately planted, the tests that caught it, then the file 
 | Phase 6 (TS) | executor hand-over skipped; `canExecute` skips the hook; NAV price rounds up; deadline exclusive | 46 / 8 / 1 / 1 failing |
 | `ProxyDeployer` | no hook-binding check; no salt check | unit test + Ignition tamper test; unit test |
 | `ProxyDeployer` implementation check (2026-10-27, audit finding 1) | the check removed; the check moved after CREATE2; the wrong kind asked (`HOOK`); the check moved before the salt check; the constructor not storing its registry; the zero-registry check removed; the token-registry check removed; `Components` passing the timelock as the registry | 8 of 8. The seven contract bugs fail 7, 1, 5, 1, 25, 1 and 1 of the 30 `ProxyDeployer.t.sol` tests. `deployment.test.ts` fails 1, 9, 10 and 10 of its 10 tests for the check removed, the wrong kind, the registry not stored and the timelock in `Components`. The check moved after CREATE2 is caught only by the implementation with no code: a revert undoes the proxy either way, so the order shows only in the error a bad implementation gets |
+| Core and products (2026-10-30) | The timelock floor at 7 days, 2 hours or zero; `GatedToken` reporting another template, its implementation left initialisable, ignoring the decimals it is given, reporting 18 whatever it was given, or keeping them at another location; the default delay at 7 days or 23 hours; `Core` always deploying the window rule; `ProxyDeployer` left with the deployer or moved to the timelock; the deployer keeping the timelock admin; the guardian not made a canceller; the operations account keeping a product's admin, or the admin going elsewhere; UPGRADER to the agent; RECOVERY skipped; a product's stated policy ignored, or its decimals ignored, or a plain token defaulting to 6; MINTER not granted on a plain token; the window rule allowed on any template; a fund rule without a fund accepted, or a fund without the fund rule; every fund opening with every class; a fund starting with the deployer; opening without installing the rule or setting the cap; a fund left with the operations account; classes opening in reverse order | 32 of 32 caught, by `GatedToken.t.sol`, `GovernanceTimelock.t.sol`, `products.test.ts` and `deployment.test.ts` |
 | Ignition `Activate` | UPGRADER to an ops account; deployer keeps timelock admin; deployer keeps `ProxyDeployer` ownership | 54 / 54 / 55 failing |
 | upgrades-core | upgrade-unsafe state initialiser | `validate` FAILED |
 | Aderyn gate | one inline suppression removed | `npm run aderyn` fails (1 high) |

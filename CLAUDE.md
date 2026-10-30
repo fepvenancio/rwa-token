@@ -9,9 +9,9 @@ A family of permissioned ERC-20-derived templates for institutional RWAs. All sh
 ```
 PolicyGatedERC20Upgradeable          abstract base: roles, enforcement core, _update → hook
         ▲
-   ┌────┴──────────────┬────────────────────┬────────────────────┐
-IntentToken         Gated4626Vault       Gated7540Vault       (later: Gated3643, 721/1155)
-(+IntentSettled)    OZ ERC4626 + base    async request/claim + base
+   ┌────┴──────────┬──────────────────┬────────────────────┬────────────────────┐
+GatedToken     IntentToken         Gated4626Vault       Gated7540Vault       (later: Gated3643, 721/1155)
+the base       (+IntentSettled)    OZ ERC4626 + base    async request/claim + base
 ```
 
 Separate contracts, separate concerns:
@@ -35,7 +35,7 @@ Separate contracts, separate concerns:
 10. Mirror OZ's own patterns (`ERC20Permit`, `EIP712Upgradeable`, `AccessControlUpgradeable`, `ERC4626Upgradeable`) rather than inventing.
 11. No business logic in the base. If you write an `if` about who, where or when inside the base or a template, stop — it is a rule.
 12. Hooks and rules are immutable contracts, never proxies. They are installed only if their `codehash` is attested in the `PolicyRegistry`. Changing one means deploying a new one and swapping.
-13. Base upgrades fix bugs; features migrate. Any upgrade goes through the timelock (≥7 days) and must target an implementation attested in the registry.
+13. Base upgrades fix bugs; features migrate. Any upgrade goes through the timelock (24 hours by default, never below the contract's 1-hour floor) and must target an implementation attested in the registry.
 14. Events and reason codes are part of the frozen interface. Extend `TransferContext` only through `extra`, whose layout is fixed in §5.
 15. Proprietary code, all rights reserved: any use requires the owners' approval. Every source file carries `// SPDX-License-Identifier: UNLICENSED`, and `package.json` has `"license": "UNLICENSED"` and `"private": true`. Do not add, suggest or switch to an open-source license. Do not change this rule without an explicit instruction.
 16. Wonderland Solidity standards (handbook.wonderland.xyz → Development/Solidity, Testing):
@@ -59,7 +59,7 @@ contracts/
   identity/     CredentialRegistry.sol  CredentialRegistry.t.sol
   deploy/       ProxyDeployer.sol  TokenProxy.sol  (+ .t.sol)
   mixins/       IntentSettledUpgradeable.sol  IntentSettledUpgradeable.t.sol
-  tokens/       IntentToken.sol  IntentToken.t.sol
+  tokens/       GatedToken.sol  IntentToken.sol  (+ .t.sol)
   vaults/       Gated4626Vault.sol  Gated7540Vault.sol  (+ .t.sol)
   hooks/        ComplianceHook.sol  ComplianceHook.t.sol  BaseRule.sol
   hooks/rules/  CredentialRule.sol  MinPositionRule.sol  HolderRestrictionRule.sol  SettlementWindowRule.sol  FundHoldersRule.sol  (+ .t.sol, RuleSetIntegration.t.sol)
@@ -67,7 +67,7 @@ contracts/
   intents/      IntentExecutor.sol  IntentExecutor.t.sol  DvPExecutor.sol  DvPExecutor.t.sol
   test/         Helpers.sol  PolicyGatedHarness.sol  MockReentrantRule.sol  MockIdentityRegistry.sol  MockIdentityRule.sol  MockAsset.sol  MockERC3009Token.sol  MockReentrantCashToken.sol  MockReentrantGatedToken.sol  MockFakeSecurityToken.sol  MockStatefulToken.sol  MockStatefulFund.sol  MockERC1271Wallet.sol  InterfaceFreeze.t.sol  ContractSizes.t.sol  halmos/
 test/nodejs/    *.test.ts   (viem + node:test: EIP-712 signing, settlement flows, vault flows)
-ignition/modules/
+ignition/modules/  ignition/profiles.ts
 PLAN.md
 ```
 
@@ -125,13 +125,13 @@ The base also implements ERC-2612 `permit` (`ERC20PermitUpgradeable`); it shares
 
 **Guardian** (built into the base, by default). `GUARDIAN_ROLE`, held by a multisig, is the only power with no delay. It can: `pause()`; and cancel any pending timelock operation (it holds the timelock's `CANCELLER_ROLE`). It cannot `unpause()`, change the hook, grant roles, or upgrade — those are timelock-only. Asymmetry is deliberate: the guardian can only stop things. `PAUSER_ROLE` is therefore replaced by `GUARDIAN_ROLE` for `pause()`; `unpause()` is `onlyTimelock`. Guardian membership changes go through the timelock.
 
-**Recovery timelock** (owner decision M-1). A guardian that could cancel its own removal would not be stop-only, so a second `TimelockController` (same ≥7-day delay, governance multisig as proposer and executor, no cancellers, guardian holds nothing on it) holds `RECOVERY_ROLE`. On every token, vault and executor that role allows exactly `unpause()` and `revokeRole(GUARDIAN_ROLE, …)`; on the main timelock (`GovernanceTimelock`, an OZ subclass) exactly `revokeRole(CANCELLER_ROLE, …)`; on the credential registry exactly `clearGuardianBlock`, `reviveAttester` and `revokeRole(GUARDIAN_ROLE, …)`. (The registry has its own guardian, whose only powers are `blockSubject` and `killAttester`, with no delay, and the same recovery path undoes them.) It cannot grant roles, change hooks, upgrade, or propose on the main timelock. Governance keeps a path the guardian cannot block; the guardian can still stop everything else. A compromised governance multisig is out of scope for this control, by design. No expiring pause: it would turn a security control into a timer.
+**Recovery timelock** (owner decision M-1). A guardian that could cancel its own removal would not be stop-only, so a second `TimelockController` (same delay, governance multisig as proposer and executor, no cancellers, guardian holds nothing on it) holds `RECOVERY_ROLE`. On every token, vault and executor that role allows exactly `unpause()` and `revokeRole(GUARDIAN_ROLE, …)`; on the main timelock (`GovernanceTimelock`, an OZ subclass) exactly `revokeRole(CANCELLER_ROLE, …)`; on the credential registry exactly `clearGuardianBlock`, `reviveAttester` and `revokeRole(GUARDIAN_ROLE, …)`. (The registry has its own guardian, whose only powers are `blockSubject` and `killAttester`, with no delay, and the same recovery path undoes them.) It cannot grant roles, change hooks, upgrade, or propose on the main timelock. Governance keeps a path the guardian cannot block; the guardian can still stop everything else. A compromised governance multisig is out of scope for this control, by design. No expiring pause: it would turn a security control into a timer.
 
 **Policy registry** (one per deployment, `PolicyRegistry`). Immutable contract. Maps `codehash → attested kind` (`HOOK`, `RULE`, `IMPLEMENTATION`). `ATTESTER_ROLE` (security council multisig) attests after review and revokes; `DEFAULT_ADMIN_ROLE` (timelock) manages attesters. Checks are by `extcodehash` of the target, so targets must be plain contracts (rule 12). Enforced at:
 
 * `setPolicyHook(newHook)` and the initialiser — `isAttested(newHook, HOOK)`, and `newHook.REGISTRY()` must be the token's own registry, because a shared hook vets rules against its own.
 * `ComplianceHook.setRules(token, rules)` (also how a token installs its initial rules) — `isAttested(rule, RULE)` for every rule.
-* `ProxyDeployer.deploy(symbol, implementation, …)` — `isAttested(implementation, IMPLEMENTATION)` before the proxy is created, and the new token's `registry()` must be the deployer's own. The token cannot check its first implementation itself: its initialiser is the implementation's code.
+* `ProxyDeployer.deploy(symbol, implementation, …)` — `isAttested(implementation, IMPLEMENTATION)` before the proxy is created, and the new token's `registry()` must be the deployer's own. An operations account owns it, so a product launches without a timelock delay: it only adds a proxy over attested code and touches nothing that exists. The token cannot check its first implementation itself: its initialiser is the implementation's code.
 * `_authorizeUpgrade(newImpl)` — `isAttested(newImpl, IMPLEMENTATION)`, and `ITemplated(newImpl).templateId()` must equal the proxy's own, so a proxy cannot be moved onto another template.
 
 Attestation is checked at install time only. Revocation emits `AttestationRevoked(codehash)` and does not alter running tokens; governance removes the component, guardian can pause meanwhile. This avoids a revoke silently dropping a check or bricking transfers.
@@ -285,7 +285,7 @@ Each phase: update `PLAN.md` → tests → impl → `npx hardhat test` → stop 
 * **Phase 4 — hooks.** `ComplianceHook` (shared, rules per token), `BaseRule`, initial rules, mocks. Ordering, short-circuit, reentrancy, cap.
 * **Phase 5 — vaults.** `Gated4626Vault`, `Gated7540Vault`. Share mint/burn gated; gating-aware `max*`; 7540 request/fulfil/claim lifecycle; operator semantics.
 * **Phase 6 — viem integration.** `signTypedData` → execute; vault flows; event decoding; pre-flight parity from the TypeScript side.
-* **Phase 7 — deploy + security.** Ignition modules: `Components` (the timelocks, ≥7d; the registry; the one shared hook; the rules; one implementation per template; `ProxyDeployer`; the executors; the fund) → the council attests the rules, the hook and the implementations once (UUPS gives each implementation deployment its own codehash) → `Activate` (one proxy per token through `ProxyDeployer`, with its rule list in the init data; per-token configuration; roles, the guardian becoming a timelock canceller; hand-over to the timelock). The post-deploy check pins each token's hook and rule list and asserts every fund class is intact (`firstBrokenClass()` is the zero address). `npx @openzeppelin/upgrades-core validate`. Slither clean (`slither .`, accepted findings documented in `slither.config.json` and inline). Halmos on the nonce/signature and frozen-balance paths (`npm run test:halmos`; verified on 2026-10-16 that it runs on the proxied token with transient storage and kills planted bugs). **No Mythril:** it has no Cancun support (TSTORE/TLOAD/MCOPY), so it cannot analyse `ReentrancyGuardTransient` or the transient context slots.
+* **Phase 7 — deploy + security.** Ignition modules, one core per bank and one module run per product, with `ignition/profiles.ts` naming the combinations: `Core` (the timelocks, 24 hours; the registry; the one shared hook; `ProxyDeployer`; and what the profile's products use: the rules, one implementation per template, the executors) → the council attests the rules, the hook and the implementations once (UUPS gives each implementation deployment its own codehash) → `CoreHandover` (the first attester; the core's roles, the guardian becoming a timelock canceller; hand-over to the timelock; `ProxyDeployer` to the operations account) → a `Fund` per fund, run by the operations account (the fund and its `FundHoldersRule`, which the council attests) → a `Product` per product, run by the operations account with no wait (one proxy through `ProxyDeployer`, with its rule list in the init data; its configuration and roles; hand-over to the timelock; it never touches a fund) → a `FundOpen` per fund (its rule, its cap, its first classes in order, then the fund to the timelock; a later class launches the same way and is inert until a timelock operation registers it). The post-deploy check pins each token's hook and rule list and asserts every fund class is intact (`firstBrokenClass()` is the zero address). `npx @openzeppelin/upgrades-core validate`. Slither clean (`slither .`, accepted findings documented in `slither.config.json` and inline). Halmos on the nonce/signature and frozen-balance paths (`npm run test:halmos`; verified on 2026-10-16 that it runs on the proxied token with transient storage and kills planted bugs). **No Mythril:** it has no Cancun support (TSTORE/TLOAD/MCOPY), so it cannot analyse `ReentrancyGuardTransient` or the transient context slots.
 
 ## 9. Hardhat 3 specifics
 

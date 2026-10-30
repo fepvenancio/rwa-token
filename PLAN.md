@@ -2320,8 +2320,8 @@ Numbers 1 to 10 are the assessment's section 6, adopted at the owner's instructi
 | 5 | Signed credential in v1 | Yes |
 | 6 | Qualification bits | The eight in `Quals`; counsel reviews the wording before any bank relies on it |
 | 7 | Target chain and the Cancun EVM | Closed 2026-10-23 by the owner: Cancun and signed intents are accepted, and the code is not designed around chains that lack them. A deployment still has to confirm its chain has EIP-1153 |
-| 8 | Fast emergency upgrade path | Open. Not part of track A |
-| 9 | ERC-7943 adapter | Open. Track B |
+| 8 | Fast emergency upgrade path | Decided by the owner, 2026-10-30: none. Upgrades keep the 7-day timelock, and the guardian can pause meanwhile |
+| 9 | ERC-7943 adapter | Closed, 2026-10-30: not needed. The base implements the fungible interface directly (`0x3edbb4c4`, pinned in `InterfaceFreeze.t.sol`) |
 | 10 | Omnibus and entities | Out of v1 (C7) |
 | 11 | Who reverses a guardian action | The main timelock **and** the recovery timelock. The assessment said the timelock only. The guardian holds `CANCELLER_ROLE` on the main timelock and could cancel the operation that unblocks what it blocked, which is the reason the recovery timelock exists (owner decision M-1). So `clearGuardianBlock` and `reviveAttester` accept `DEFAULT_ADMIN_ROLE` or `RECOVERY_ROLE` |
 | 12 | One attester overwriting another's record | Allowed only if the slot is `NONE`, the same attester wrote it, or the previous attester is killed. Otherwise it reverts. The assessment did not say |
@@ -2707,5 +2707,393 @@ The owner accepted B1, B2 and B4 and kept B3 and B5 unchanged. Before the code, 
 - `npx hardhat test` 1145 passing; lint, fmt, the type check, Slither (0), Aderyn (0), `verify:reproducible` and `validate:upgrades` pass. README, SECURITY section 3 and the brief describe the new rules; the HTML pages follow in their own change, pinned to the merged commit.
 - Merged as `1708ddf` (PR #6). The check of the HTML pages then found that the vault's two overrides ran the escrow rule before the role check, so a caller without `AGENT_ROLE` got the escrow error. Both overrides now carry `onlyRole(AGENT_ROLE)`, tested first and with its mutant caught; 1146 passing.
 
+## One stack per bank, legos, and vaults that invest (planned 2026-10-30, awaiting review)
+
+Source: the owner, 2026-10-30, after an assessment of the code at `0350937`. A client may want only one token, one vault or one NFT, and the vaults should be more like Morpho's. The owner's answer on where vault money goes: **on-chain and to a custodian.** Later the same day the owner parked the NFT, asked for the whole stack to be simple legos, deployed together or alone, and said to think about everything as if we are the bank and our clients, investors and funds use the code. Nothing below is built. The decisions are at the end of this section.
+
+### Starting point
+
+- Baseline at `0350937`: `1146 passing (1021 solidity, 125 nodejs)`, CI green. Deployed sizes against the 24,576 limit: `Gated7540Vault` 23,988 (588 left), `Gated4626Vault` 18,552 (6,024 left), `IntentToken` 17,945 (6,631 left).
+- `Components` and `Activate` always deploy 17 contracts and 3 proxies. One product needs about 10 of those 20. The contracts already allow it (`Gated4626Vault.t.sol:377` deploys one vault alone); the scripts do not.
+- `Gated4626Vault` has no function that moves assets except a redemption, so the money cannot be invested. `Gated7540Vault` sends fulfilled assets to one `custody` address and takes each price from the fulfiller with no limit. Neither has adapters, caps, an allocator or fees. A vault takes one ERC-20, fixed at initialisation.
+- The policy judges the shares and not the cash: `withdraw` and `redeem` pay assets to any `receiver` (OpenZeppelin's `_withdraw`, `Gated7540Vault.sol:771`).
+- No NFT exists. `TransferContext.id` is reserved for one.
+
+### Not in this work
+
+- Several banks on one stack: each bank runs its own (P1).
+- Morpho's code. `VaultV2.sol` and `VaultV2Factory.sol` are `GPL-2.0-or-later`, which rule 15 cannot take, and rule 1 keeps us on OpenZeppelin. We take the design and write our own.
+- A Morpho Blue market adapter, a tokenised-fund adapter, automatic allocation on deposit, forced or in-kind exit, per-period dealing limits and pro-rata redemption gates (P11), fiat handling inside a vault (clients pay with the tokenised deposit, P25), request cancellation, investor-level fee equalisation, proof of reserves.
+- For the NFT: signed intents and DvP, the `Fund` holder cap, `MinPositionRule`, permit, royalties, enumeration.
+
+### The lego rules
+
+These apply to everything in this section, and the existing stack is held to them too.
+
+1. **One job, one sentence.** If the sentence needs "and", split the contract. A lego that passes about 300 lines of code gets looked at again.
+2. **Small plugs.** A lego knows a neighbour only through a small interface.
+3. **Optional means unplugged.** An optional lego left out is the zero address, and the lego above it still works. One `if`, never a mode.
+4. **No shared state.** A lego keeps its own data. Roles live on the token or vault and legos ask for them live, so there is one place to grant and one hand-over.
+5. **Swap, do not upgrade.** Only tokens and vaults are proxies. Everything else is immutable and attested, and a change is a new deployment and a timelock swap (rule 12). A lego's defining settings are immutables where possible, so the attested codehash covers them.
+6. **Alone or together, the same code.** There is no protocol mode. Every combination is a profile with its own deployment test.
+
+The existing stack already follows these: the hook and rules plug in by list, the executors by role, `Fund` through one rule. What does not yet: the deploy scripts and a token that always carries intents (step 1), and the code the two vaults duplicate (step 3).
+
+### Seen from the bank
+
+The bank runs the stack, and investors and funds are its clients. Every power below sits with the bank except a fund manager's, and one function must never hold two roles that check each other.
+
+| Who | On-chain | Bank function | Client? |
+|---|---|---|---|
+| Change control | Governance multisig, proposes on the timelock | Change board with risk and technology | |
+| Code review | Security council, `ATTESTER_ROLE` on the registry | Second line: security and model validation, independent of the developers | |
+| Emergency stop | `GUARDIAN_ROLE` | 24/7 operations or security centre | |
+| Recovery | Recovery timelock | A separate quorum, so that a compromised guardian can be removed | |
+| Onboarding | KYC attester on `CredentialRegistry` | Compliance onboarding, fed by the customer system | |
+| Enforcement | `AGENT_ROLE` | Compliance and legal, acting on an order | |
+| Issuance | `MINTER_ROLE`, `BURNER_ROLE` | Treasury operations, driven by the core banking ledger | |
+| Investing | `ALLOCATOR_ROLE` on one vault | Portfolio manager, or a **fund client's** manager, limited by that vault's caps and validators | Yes |
+| NAV maker | `REPORTER_ROLE` | Fund administration | |
+| NAV checker | `CHECKER_ROLE` | Risk, or the depositary function | |
+| Settlement | `OPERATOR_ROLE` on the executors | Settlement operations, paying the gas | |
+| Investors | Holders and controllers | Clients, using the bank's app | Yes |
+
+What this changes:
+
+- **One stack per bank, many products (P1).** One set of timelocks, one guardian, one credential registry, one hook. A client is verified once and can hold every product, and blocking a sanctioned address applies everywhere, which is what a bank wants. A fund's money stays apart in its own `Portfolio` (P12). Someone who wants one product alone deploys the core and one product, with the same code.
+- **Launching a product does not wait (P26).** It adds a proxy over attested code and touches nothing that exists, so `ProxyDeployer` stays with an operations multisig instead of moving to the timelock. A timelock delay still protects what can hurt existing holders: upgrades, the hook, rule lists, roles, adapters, raised caps and fee models.
+- **Caps and validators are the fund's mandate.** A fund client's manager can invest only where the bank allowed, up to the limits it set. That is the oversight a depositary has to perform, enforced by the contract.
+- **Clients pay with our tokenised deposit (P25).** A `GatedToken` limited to bank customers: debit the account and mint, burn and credit on the way back. It is the asset of every vault and the cash leg of `DvPExecutor`, so wires work with no fiat code in a vault. Vaults, portfolios and accounts hold the `INFRA` bit and clients the `CUSTOMER` bit. It must meet depositor-protection rules; the UK PRA expects banks to innovate in this form and to keep stablecoins and e-money out of the deposit-taking entity.
+- **Custody before on-chain yield.** The money sits with the bank or its custodians, so `GuardedAccount` comes before `ERC4626Adapter`, and the 4626 comes last.
+- **Clients do not need wallets or gas (P24).** With one address per client in the bank's custody, holder caps count clients rather than wallets, so entity ids can wait. The cost is concentration: a custody compromise is the worst case.
+- **Confidentiality decides the chain (P23).** On a public chain anyone can see each client's balances and movements. No contract fixes that. The code needs an EVM with Cancun: the base uses transient storage.
+
+### Step 1: deployment profiles (TypeScript, plus one small token contract; built 2026-10-30, awaiting review)
+
+A module cannot branch on `m.getParameter`, which is a future at build time, so the module builders take a description of what to deploy.
+
+```ts
+type Product = { key: string; template: "GatedToken" | "IntentToken" | "Gated4626Vault" | "Gated7540Vault"; name: string; symbol: string; rules: RuleKey[]; decimals?: number; fund?: string };
+```
+
+- **`Core`, once per bank:** both timelocks, the registry, the hook, `ProxyDeployer`, the credential registry and the rules in use. The council attests them, and one implementation per template, once: every product over a template shares that implementation.
+- **`Product`, once per product:** a proxy through `ProxyDeployer`, its rule list, its configuration and its roles, then its admin handed to the timelock, as `Activate` does today. It runs with the operations multisig as deployer (P26), so the first product and the fiftieth follow the same path, and a later one does not wait. A product that lists `fundHoldersRule` names its fund, and never touches it.
+- **`Fund`, once per fund:** a `Fund` and the `FundHoldersRule` that points at it, run by the operations account, each with its own cap. The council attests the rule, as it does any rule.
+- **`FundOpen`, once per fund, after its first classes are placed:** installs the rule, sets the cap, registers the classes in order and moves the fund to the timelock. A later class launches through `Product` like any other and is inert until a timelock operation registers it, because a new class changes the room existing investors have under the cap.
+- `ignition/profiles.ts` names the combinations in the table in step 3. `full` is today's demo: the core and three products, with the same order and the same rule lists.
+- `contracts/tokens/GatedToken.sol`: the base and its decimals, fixed at initialisation (P3), used for the tokenised deposit with a policy that asks for the `CUSTOMER` or `INFRA` bit, with its `.t.sol`. `IntentToken` is the same token plus the intent mixin.
+- `fixtures.ts`: `deployCore`, `deployProduct` and `assertHandedOver(stack, products)`, which checks what the products contain. Existing tests keep passing on `full`.
+- **The delay (P26).** The timelock delay is 24 hours, set at deployment on both timelocks, and `GovernanceTimelock`'s floor becomes a constant of 1 hour. Rule 13, the brief, `Components.ts`, the hand-over check, the timelock's tests and the docs follow.
+
+Tests first, in `deployment.test.ts`: the core and one product deploy and pass the hand-over check, with exactly the expected contracts; a second product launches after hand-over, with no wait, and leaves the first alone; a client verified once can hold both; a block applies to both; a product over an unattested implementation is refused; a vault whose asset is the tokenised deposit works end to end. A rule list that a template cannot use throws when the module is built.
+
+Done when: those pass, the runbook in `README.md` and `docs/deployment.html` describe core and products, and the brief's §8 Phase 7 says so.
+
+**Result (2026-10-30).** Built on branch `step-1-core-products`, in [PR #9](https://github.com/fepvenancio/rwa-token/pull/9), and corrected the same day after the outside review (L-1, L-2 below). `GatedToken` is 15,300 bytes, against `IntentToken`'s 17,945. A deployment of one product is the core plus that product: 9 contracts and a proxy for a plain token. Red runs first: Solidity 3 failing (the timelock refused 24 hours, and the token was a stub), Node 10 failing; then for the correction Solidity 3 and Node 5. Then `npx hardhat test` 1178 passing (1037 Solidity, 141 Node). Mutants 32 of 32 caught, in `SECURITY.md` section 5.
+
+Where it differs from the plan:
+- One more small module: `CoreHandover` sits after the council step, because the core must be attested before its roles and hand-over run.
+- **A fund is its own lego (review finding L-1).** The first version held one `Fund` in the core, registered classes from `Product` and moved the fund to the timelock in a `FundHandover` module. After that a later class reverted at `registerClass`, leaving a live proxy with the operations account as its admin and its symbol used up, and a bank could run only one fund. So `Product` no longer touches a fund and cannot half-fail on one, and a bank has as many funds as it wants. Until `FundOpen` runs the operations account owns the fund, so a first class does not wait either.
+- **Decimals (review finding L-2).** A `GatedToken` takes its decimals at initialisation, in ERC-7201 storage at `gated.storage.GatedToken`, 18 unless the product states otherwise. A deposit token at the ledger's 2 decimals gives a 4626 over it 8, where it would have had 24. Taking the extra argument means `memory` strings, as the 7540 already does, which costs the 1,532 bytes above; the token has room.
+- The operations account is whichever account runs Ignition, for example an MPC custody wallet whose policy engine requires two approvers. It is not a Safe, because Ignition cannot sign through one. Step 4b's hand-over check covers this as a named exception.
+- `vault7540` exists today with a plain fulfiller and custody; step 3b changes it.
+- `deployProduct(s, product)` takes the stack, and `assertHandedOver(stack)` checks the products the stack holds.
+- `PROFILE` and `PRODUCT` choose the profile and product for the `hardhat ignition deploy` command.
+
+The HTML pages are not updated yet. They pin the commit they describe, so they follow in their own change once this one has a commit, as they did for the escrow rules. They still say 7 days and name `Components` and `Activate`.
+
+### Step 2: `Gated721` (parked by the owner, 2026-10-30)
+
+Not to be built until the owner reopens it. What follows is kept as the design for that day. While it is parked, the base split, the `IPolicyGated` re-pin and the `nft` profile do not apply.
+
+**The split.** The ERC-20 base cannot be inherited by an ERC-721: `_update` has another shape, and frozen amounts have another meaning. The generic part moves to an abstract `contracts/base/PolicyGatedCoreUpgradeable.sol`: role constants, pause and unpause, the hook pointer and `_setHook`, `registry`, `revokeRole`, `_authorizeUpgrade`, the transient kind slots and `_consumePending`, `_inferKind`, `_accountAllowed`, and the init that grants roles and installs hook and rules. `PolicyGatedERC20Upgradeable` keeps `_update`, `_moveAs`, `_mintAs`, frozen amounts, `_check`, `_context`, `_canTransfer`, `_mintProbe`, mint, burn, `forcedTransfer` and `setFrozenTokens`.
+
+- Behaviour does not change. Existing tests pass with edits only to pins and storage locations (nothing is deployed, so the layout is free: the core gets its own ERC-7201 location, and `frozen` stays with the ERC-20 base).
+- `canSend` and `canReceive` stay thin wrappers on each token over the core's `_accountAllowed`, because both ERC-7943 interfaces declare them and `IERC7943Fungible`'s id must stay `0x3edbb4c4`.
+- Interfaces: a new `IPolicyGatedCore` takes `pause`, `unpause`, `setPolicyHook`, `policyHook` and `registry` with their events and errors; `IPolicyGated` inherits it and its id is re-pinned (P2). Event topics do not change.
+- The split is its own commit, before any NFT code. `Gated7540Vault` must stay under the limit; if it does not, stop and report.
+
+**The token.** `contracts/tokens/Gated721.sol`, one concrete contract on `ERC721URIStorageUpgradeable` and the core, implementing ERC-7943's non-fungible interface (`0xbf1ef5fe`).
+
+| Function | Who | Note |
+|---|---|---|
+| `mint(to, tokenId, uri)` | `MINTER_ROLE` | Plain `_mint`, no receiver callback |
+| `burn(from, tokenId)` | `BURNER_ROLE` | Enforcement: may take a frozen token and clears the freeze |
+| `forcedTransfer(from, to, tokenId)` | `AGENT_ROLE` | May take a frozen token and clears the freeze; `Frozen` before `Transfer`; `ForcedTransfer` and the base's `ForcedTransferBy` equivalent |
+| `setFrozenTokens(account, tokenId, frozen)` | `AGENT_ROLE` | A bool per token, as the standard says; may name a token the account does not hold |
+| `setTokenURI(tokenId, uri)` | `AGENT_ROLE` | Corrects metadata (P4) |
+| `canTransfer`, `canTransferWithReason`, `getFrozenTokens`, `canSend`, `canReceive` | anyone | `canTransfer` leaves ownership to ERC-721, as the standard does, and is false for a frozen token or a policy rejection. `canTransferWithReason` says why the write would revert, ownership included |
+
+- One `_update(to, tokenId, auth)` builds the context: `id = tokenId`, `amount = 1`, `extra = abi.encode(balanceOf(from), balanceOf(to))`. It runs the same order as the ERC-20: pause (except FORCED), frozen token (except FORCED and a burner's burn), hook, move, `afterTransfer`.
+- A frozen token reverts with the standard's `ERC7943InsufficientUnfrozenBalance(account, tokenId)`, reason `INSUFFICIENT_UNFROZEN`. A policy rejection is `PolicyGated_TransferRejected(reason)`.
+- `ProxyDeployer`, `ComplianceHook`, `CredentialRule`, `HolderRestrictionRule` and `SettlementWindowRule` take no change. That comes from reading them and the integration test must prove it. New profile `nft`; the profile check refuses `minPositionRule` and `fundHoldersRule` on it.
+
+Tests first, `Gated721.t.sol`: every role gate; freeze, forced and burn with the `Frozen` order; a hook rejection changes nothing; pre-flight parity with the write; ids from solc against the standard's; upgrade checks; a reentrant `onERC721Received`; invariant that a holder can move exactly its unfrozen tokens. `RuleSetIntegration`: real hook, real rules, deployed through `ProxyDeployer`. Also `InterfaceFreeze`, `ContractSizes`, and `verify-reproducible.ts`'s list.
+
+### Step 3: vaults that invest
+
+Rewritten on 2026-10-30. The owner asked for institution-grade vaults from the best available ideas, written as our own code, made of simple legos that can be deployed together or alone. Nothing below is built. The sizes were measured on a throwaway copy that was then deleted.
+
+**The legos**
+
+```
+                                 optional                    optional
+investor ⇄ Gated4626Vault ────────────────────▶ Portfolio ⇄ ERC4626Adapter ⇄ a Morpho vault, any 4626
+investor ⇄ Gated7540Vault ⇄ NavDesk ──────────▶ Portfolio ⇄ GuardedAccount ⇄ a custodian, a strategy
+                              │ optional                        │
+                              FeeModel                     CallValidators
+```
+
+| Lego | Its one job | Plugged into | Needed? |
+|---|---|---|---|
+| `GatedVaultBase` (abstract) | Holds what both vaults share | Both vaults | Always |
+| `Gated4626Vault` | Issues shares with instant deposit and exit | Hook | Works alone |
+| `Gated7540Vault` | Issues shares dealt in periods at one price | Hook, a settler | Needs `NavDesk` |
+| `NavDesk` | Turns a reported value into an approved price, on a schedule | One 7540 vault | Required by a 7540 |
+| `Portfolio` | Holds the money and limits where it may go | One vault | Optional |
+| `ERC4626Adapter` | Holds one on-chain vault's shares and reads their value | Portfolio | Optional |
+| `GuardedAccount` | Runs only the calls its validators allow | Portfolio | Optional |
+| `ERC20CallValidator`, `ERC4626CallValidator` | Checks one call's parameters | `GuardedAccount` | Optional |
+| `FeeModel` | Computes a period's fee | `NavDesk` or a 4626 | Optional |
+
+**What the bank launches.** Every row is a product on the same core, with the rules it lists. Someone who wants one product alone deploys the core and that row.
+
+| Product | Legos | Profile |
+|---|---|---|
+| A tokenised deposit or a plain token | `GatedToken` | `token` |
+| A fund whose money sits with one custodian | `Gated7540Vault`, `NavDesk` (cash account is the custodian) | `vault7540` |
+| A fund with several custodians, a mandate and fees | + `Portfolio`, `GuardedAccount`, validators, `FeeModel` | `bank-fund` |
+| A gated vault, money stays in it | `Gated4626Vault` | `vault4626` |
+| Liquid yield in on-chain vaults | + `Portfolio`, `ERC4626Adapter` | `vault4626-invest` |
+| Everything | All of it | `full` |
+
+**Who owns the money.** Both vaults use priced money the same way: it goes to the vault's `Portfolio`, which decides where it goes through adapters. There are two kinds of money, and they never mix.
+
+| Money | Belongs to | Where it sits | Who keeps the record |
+|---|---|---|---|
+| A pending deposit, claimable redemption cash (7540 only) | One investor | The 7540 vault, checked by the balance audit | The vault's `Request` per controller |
+| Priced, working money | The vault as a whole | The `Portfolio` and its adapters | Share balances |
+
+The `Portfolio` therefore has one owner, its vault, and no record per investor. A second per-investor record would be a second ledger that must always agree with the first, which rule 4 forbids. What differs between the vaults is the timing and the price, not the path:
+
+| | `Gated4626Vault` | `Gated7540Vault` |
+|---|---|---|
+| Money reaches the `Portfolio` | At each deposit | At settlement, only the net |
+| Price | Live, with a rate limit | Approved per period |
+| It may invest in | On-chain only | On-chain, custodians, strategies |
+| Money comes back | Instantly, if liquid | The desk raises it before proposing |
+
+There is one `Portfolio` per vault (P12). Two vaults that want the same on-chain strategy each hold their own position in the target. One does not invest in the other: a gated 4626 whose price is stale still answers `totalAssets()` with its last value, so an `ERC4626Adapter` over it would read that value as fresh (outside review, flaw 4).
+
+**Does `Gated7540Vault` inherit `Gated4626Vault`? No.** Of the 12 functions the 4626 defines, only `mint`, `burn`, `decimals` and `_update` are the same in the 7540. The 7540 would have to override the other 8 and claim to be a synchronous vault while its previews revert. Inheritance would add work and hide a false claim. Both inherit `GatedVaultBase` instead: those four functions and the cash check, with one `GatedVault_Unsupported` error.
+
+**The cash check (P4).** On `withdraw` and `redeem` in both vaults, a `receiver` other than the owner (4626) or the controller (7540) must pass the policy as the receiver of an enforcement move, the zero-amount FORCED probe `recoverClaimable` uses. A holder paying itself is not checked, because a holder whose credential lapsed or whose attester was killed must still be able to leave. The brief's §6, `SECURITY.md:176` and `CredentialRuleVaults.t.sol` pin that and stay as they are. On the 7540, `requestRedeem` runs the same probe on a `controller` other than the owner; otherwise a holder could name a lapsed address as controller, and that address, paying itself, would collect the cash.
+
+**The payer check (P16).** Money coming in gets the same probe. A payer other than the receiver (`deposit` and `mint` on the 4626) or the controller (`requestDeposit` on the 7540) must pass the policy. A receiver paying for itself is already judged by the mint probe. A custodian depositing for clients therefore needs its own credential, which replaces the earlier decision not to check the caller (`SECURITY.md:140`).
+
+**The token's own address (outside review, item 3.4).** Today a 7540 vault needs a credential of its own to hold its escrow, so when that credential lapses every `requestRedeem` reverts with `CREDENTIAL_EXPIRED`. `CredentialRule` will pass `_account == _token` on both sides: on receive, so the escrow takes shares, and on send, so a settlement burn and a reject can move them out. `MinPositionRule` and `FundHoldersRule` already exempt that address. Stopping a vault stays with `pause()` and `HolderRestrictionRule`. A vault whose asset is gated still needs a credential on that asset's policy, because there it is an ordinary holder. The cost: a holder can now send tokens to the token's own address by mistake, and the agent recovers them with `forcedTransfer`, which on the 7540 is the case the surplus rule already allows. Step 3a also stops the test setup credentialing every 7540 vault (`fixtures.ts:313`) and keeps that only where the asset is gated, so the suite proves a vault works with no credential of its own. It also changes the brief's §7 and the runbook's KYC step (`README.md:222`), which say the attester credentials the vault (outside review of `016a005`).
+
+#### `Gated7540Vault`: dealing periods (P5)
+
+One period is open and requests join it. Everyone in a period gets the same price, settled in one transaction however many investors there are, and each investor claims later.
+
+- `closePeriod()` (`SETTLER_ROLE`) closes the open period and opens the next. It reverts while an earlier closed period is unsettled, so at most one is closed.
+- `requestDeposit` and `requestRedeem` keep their signatures and keep returning request id 0, which ERC-7540 defines as aggregated per controller, so the `IERC7540*` interfaces do not change. A controller's settled request rolls into its claimable amounts first. A controller with a request in an earlier unsettled period waits until it settles (`Gated7540Vault_EarlierRequestUnsettled`).
+- `settlePeriod(nav, fee, cash, feeRecipient)` (`SETTLER_ROLE`, not while paused). The price takes the 4626's own form, so `decimals()` becomes the asset's plus 6. With `supply = totalSupply() + unclaimedShares`: shares for all deposits are `deposits × (supply + 1e6) / (nav + 1)`, assets for all redemptions are `redemptions × (nav + 1) / (supply + 1e6)`, both rounded down. The virtual amounts stop a donation inflating the price, and the extra decimals keep them from moving an honest one: across the whole fund they move value by `price − 1` smallest asset units, whatever its size. At a price of 10.00 on a 2-decimal asset that is 9 cents, which is 0.9 bps of a $1,000 fund and 0.0009 bps of a $1m one. It also means the first period needs no special case. Checked with a script on 2026-10-30, with a 1-unit first investor donating $1,000 before a victim's $1,000 period: in this form the victim keeps 99.99% and the attacker loses half the donation. The outside review found the earlier form of this plan (1e6 on both sides) pulled the price towards 1.00, −98 bps on a 2-decimal token holding $1m. Its proposed fix, exact NAV with par for an empty vault, is not taken: the victim gets 0 shares and the attacker doubles the money. It burns the redeemed escrow, then nets: only the difference between deposits and `assets + fee` moves to or from `cash`, so subscriptions pay redemptions. It pays the fee, then reverts unless the vault holds at least pending deposits plus claimable redemption cash (`Gated7540Vault_BalanceAudit`).
+- Claims look the same from outside: `deposit`, `mint`, `redeem`, `withdraw`, with the existing eligibility checks. Given what was paid, the other side rounds down; given what is owed, the paid side rounds up. Shares are still minted at the claim, so every rule behaves as today (the minimum, the cap), and no rule judging an investor can block a whole period's settlement. The escrow burn does go through the hook, so freezing or locking the vault's own address with `HolderRestrictionRule` stops settlement, and that is a deliberate stop; its credential plays no part (step 3a). Rounding each claim down leaves at most one share unit per investor per period in `unclaimedShares`, for good. That is accepted, with a test that bounds it: 1,000 investors dealing daily for 10 years leave 3.65m units, against 1e20 units in 100m shares at 12 decimals, under a billionth of a basis point (outside review, flaw 3).
+- `rejectDepositRequest`, `rejectRedeemRequest` and `recoverRedeemRequest` take `AGENT_ROLE` while the request's period is open. In a closed period they take `SETTLER_ROLE`, so `NavDesk` decides when (below). After settlement the agent uses `recoverClaimable`.
+- One `Request { period, pending, paid, owed }` model and one set of private helpers serve both sides. This is what makes it fit, and it removes four near-identical claim bodies.
+- Gone: `fulfillDeposit`, `fulfillRedeem`, `custody`, `setCustody`, `CustodyChanged`, `Fulfilled`, `FULFILLER_ROLE`, and `recoverRedeemRequest`'s `_releaseFrozen(address(this), …)`, which is dead code now that the escrow cannot be frozen. New: `SETTLER_ROLE`, `closePeriod`, `settlePeriod`, `openPeriod()`, `settledPeriod()`, `PeriodSettled(period, nav, supply, deposits, shares, redemptions, assets, fee)`, which is the on-chain NAV history.
+- Kept: operators, gating `max*`, the escrow and its surplus rule, the refusal to freeze the escrow, indicative `totalAssets` and `convertTo*`, now counting unclaimed shares. `recoverClaimable` also lowers `unclaimedShares` by what it delivers, because its mint raises `totalSupply()` and those shares would otherwise count twice.
+
+Measured on the throwaway copy, with the cash check, without the new getters and event: **24,228 bytes, 348 left.** Three getters and the 8-argument event measured another 242 on today's vault, 147 of it the getters, and one `dealingState()` view returning all three should cost less. The fixes above are not measured, so expect it to sit at or over the limit without a lever. Moving code into `GatedVaultBase` saves nothing, because each vault still contains it, and `_releaseFrozen` saves only 10. Removing OpenZeppelin's 4626 parent saves 240 bytes and removes the 8 unreachable-code warnings, since the 7540 overrides almost all of that parent (P13). 100 optimizer runs saved about 530 on an earlier version, but changes every contract's gas and bytecode, so it is the last resort. Per-period dealing limits cost another 225 and stay out of the first version (P11).
+
+#### `NavDesk`: from a reported value to an approved price
+
+Immutable, one per 7540 vault. It holds no money and has no role table: it asks the vault live. Immutable: `VAULT`. Timelock settings: `portfolio` (attested, or zero; when plugged it is both the cash account and the source of on-chain value), `custodianAccount` (the cash account when no portfolio is plugged; it approves the vault to pull), `periodLength`, `cooldown` (constants: at least 1 hour, at most 3 days), `maxReportAge`, `feeModel` (attested, or zero). Adding a `Portfolio` later is one timelock operation.
+
+| Step | Function | Who | What it enforces |
+|---|---|---|---|
+| 1 | `closePeriod()` | Anyone, once `periodLength` has passed | Nobody chooses the cut-off |
+| 2 | `propose(reported, reportHash, asOf, moves)` | `REPORTER_ROLE` | One at a time. `asOf` is not before the cut-off and not in the future, so a price is always struck after requests close. `moves` equals the source's count, so money crossing between reported and on-chain after the valuation cannot count twice. The source's prices are fresh. `nav = reported + pricedValue() - fee`, and it must be above zero while shares exist. The NAV, the fee, the new high-water mark and `reportHash` are frozen |
+| 3 | `accept()` | `CHECKER_ROLE`, never the proposer | Two people on every price (P6) |
+| - | `cancel()` | `GUARDIAN_ROLE` or `CHECKER_ROLE` | Any time before execution |
+| 4 | `execute()` | Anyone, after the cooldown and acceptance | The report is not older than `maxReportAge`. Calls `settlePeriod` with the frozen numbers. Reverts if the cash account is short, so the desk raises cash before proposing |
+
+`reported` is one number covering everything not priced on-chain; the breakdown goes in the off-chain NAV pack that `reportHash` commits to. Because the price is frozen at the proposal, a move during the cooldown does not change it; the cooldown is when the guardian and checker look at it. If nothing can be approved, the period stays closed and new requests wait in the next one, which is a dealing suspension: nobody trades at a wrong price, and a large real loss takes hours rather than a timelock delay.
+
+**A stuck period cannot trap a request.** A loss, an outage, a pause or short cash can all stop settlement. `refundRequest(controller, isDeposit)` and `recoverRequest(controller, to)` (`AGENT_ROLE`) forward to the vault's reject and recover, and work only with no proposal pending and the period closed for longer than `maxReportAge`. So cash that was never invested can always go back, one controller at a time, and because no price is on the table nobody can use a refund as a free option on a known price.
+
+Replacing a `NavDesk`: with no proposal pending, one timelock batch swaps `SETTLER_ROLE` and calls the successor's one-shot `adopt(oldDesk)`, which reads the high-water mark, the fee clocks and the last cut-off live at that moment, so nothing is charged twice however long the timelock took.
+
+#### `Portfolio`: where the money may go
+
+Immutable, one per vault. Holds idle money. It asks the vault for roles live. Immutable: `VAULT`, `ASSET`, `ACCEPTS_REPORTED` (false for a 4626 vault, which refuses a portfolio that says otherwise). It gives its vault an allowance at construction.
+
+| Action | Who | Delay |
+|---|---|---|
+| `addAdapter` (attested, this portfolio, this asset), `removeAdapter`, raise a cap, `writeOffAdapter`, `migrateTo` | The vault's `DEFAULT_ADMIN_ROLE` (the timelock) | The timelock delay (P26) |
+| `allocate`, `deallocate`, `setLiquidityAdapter` | `ALLOCATOR_ROLE` | None, within caps |
+| `deallocate`, lower a cap | `GUARDIAN_ROLE` | None (P7) |
+| `raise(assets)`: pull a shortfall from the liquidity adapter | The vault | None |
+
+- **Where money can go.** To an installed adapter, to the vault, or by a timelock operation to an attested successor for the same vault. Nowhere else.
+- **Caps.** Each adapter names its risk ids at construction: one for itself and any it shares, for example one bank. Each id has an absolute cap in assets and a relative cap as a share of the vault's `totalAssets()`. Checked on allocate only, so exits can push an id above its relative cap, as in Morpho. Allocations move by the amount moved, never below zero, and for a priced adapter by the change in its value across the call. At most 8 adapters.
+- **Plug to the vault and `NavDesk`.** `pricedValue()` (idle money plus every priced adapter), `priceFresh()`, `moves()` (counts allocations and deallocations), `liquidAssets()`.
+- **An adapter that cannot be priced.** A failed read gives 0 with `fresh()` false, and that never counts as a loss: `priceFresh()` is false, dealing stops, and the last value stands.
+- **What empty means.** A priced adapter is empty when it is fresh and its `value()` is zero. A reported adapter's money can be off-chain, so `value()` says nothing about it: it is empty when its on-chain balance and its allocation are both zero. `removeAdapter` needs an empty adapter, so an outage cannot orphan a position.
+- **Write-off (P10).** `writeOffAdapter` (timelock) takes an adapter off the list and clears its allocation. A priced adapter qualifies only while it is not fresh, and the loss counts from the next accrual. A reported adapter qualifies at any time, which is how a custodian's loss clears the cap it left behind; its value was always the report, so the NAV does not move. The adapter keeps what it holds. Adding it back brings the value in under the normal rules: at once through the next report or read on a 7540, under the rate limit on a 4626.
+- **Replacing a `Portfolio`.** `migrateTo(successor)` needs no adapter installed. It moves the idle money. A timelock batch runs it with the plug change. A reported adapter's `PORTFOLIO` is immutable, so money still at a custodian is returned to the successor off-chain and appears in the next report.
+
+#### Adapters
+
+`IAdapter`: `allocate(assets)`, `deallocate(assets, to)`, `value()`, `liquid()`, `fresh()`, `reported()`, `riskIds()`, `PORTFOLIO()`, `asset()`. Each is immutable and attested.
+
+- **`ERC4626Adapter`.** Immutable `PORTFOLIO` and `TARGET`. Deposits into the target, withdraws to the portfolio, values with `previewRedeem` of its whole balance, and reads liquidity with `maxWithdraw`. Not reported. This reaches Morpho's vaults as an ordinary depositor. Morpho Vault V2's `max*` always return 0 by design while its `withdraw` and `redeem` work, so against a V2 target `liquid()` reads 0: a 4626 holder's instant exit is limited to idle money, and the desk keeps that buffer. MetaMorpho V1 and standard vaults report real liquidity. A 7540 is unaffected, since the desk raises cash before it proposes. The council reads the target's curator and caps before attesting, because the codehash covers the target's address and not its behaviour, and it does not attest an adapter whose target is a gated vault of ours.
+- **`GuardedAccount`.** Runs strategies and custody with one contract. `execute(Call[] calls)` (`ALLOCATOR_ROLE`, atomic) makes plain calls only: no delegatecall, no value, no modules, no ERC-7579 and no ERC-4337. Each call needs a permission for its target and function, and the permission's validator must accept the parameters. **No validator means refused**, so nothing passes by omission. `setPermission(target, selector, validator)` is timelock and attested; `revokePermission` is timelock or guardian. Reported, so it refuses a `Portfolio` that does not accept reported adapters. `deallocate` pays only from its own balance to its portfolio.
+- **`ERC20CallValidator`.** Immutable `who` and `maxPerCall`: allows `transfer` to exactly that address or `approve` of exactly that spender, up to that amount, and nothing else. All settings are immutables, so the attested codehash covers them. A custodian is a `GuardedAccount` with one permission: the asset's `transfer` with a validator naming the custodian. The custodian returns money by sending it to the account.
+- **`ERC4626CallValidator`.** Allows `deposit`, `mint`, `withdraw`, `redeem` when the receiver and owner are the calling account.
+
+#### `FeeModel`
+
+Immutable, no storage, one view: `quote(grossNav, supply, mark, markAge, feeAge)` returns `(fee, newMark, markMoved)`. Immutables: management rate, performance rate, hurdle rate, hard or soft hurdle, recipient, each under a constant ceiling (50% performance, 5% a year management, as in Morpho). Changing fees means deploying a new one and a timelock swap, and the attested codehash covers the rates. The caller keeps `mark`, the time the mark last moved and the time of the last fee.
+
+- **Management fee:** the gross value × rate × `feeAge` / one year.
+- **Performance fee (P14):** the hurdle compounds from when the mark last moved: `hurdled = mark × (1 + hurdle rate × markAge / one year)`. Below `hurdled`, no fee and the mark stays. Above it, a hard hurdle charges `rate × (gross - hurdled)`, a soft hurdle charges `min(rate × (gross - mark), gross - hurdled)`, and the mark moves to the price after fees, which is never below `hurdled`. The cap is a full catch-up: the investor keeps everything up to `hurdled`, then the manager takes what is above it until it has its rate of the whole gain, so net value never falls as gross rises (outside review, flaw 2). Because the hurdle runs on `markAge` and not on the time since the last call, it cannot be cleared by slicing a gain across many periods or calls, and it does not matter who calls. The price is measured after the management fee.
+- **Starting mark:** the opening price, so the first gain is measured from there and principal is never charged.
+- **No shares:** with `supply` at zero it returns no fee and the mark unchanged, so value donated before the first period is not charged, and the caller restarts both clocks, so the first investors do not pay for time before they arrived. A fund that empties and reopens keeps its old mark while its price restarts at par, which only favours the new investors, and that is accepted (outside review of `016a005`).
+
+Fees are paid in assets, so no shares are minted and the policy and the holder cap are not touched (P9). It must not revert on any input.
+
+#### `Gated4626Vault` with a `Portfolio`
+
+With none plugged it behaves exactly as today. `setPortfolio` (timelock) checks the attestation, `VAULT()`, that the portfolio refuses reported adapters, and that the old one is empty. It forwards the vault's balance to the new portfolio and sets `last` to that amount, so plugging one into a vault that already holds money does not move the price. Once plugged the vault holds no working money:
+
+- `_deposit` forwards the assets to the portfolio. `_withdraw` calls `raise`, pulls, then pays.
+- `totalAssets() = min(pricedValue() - feesOwed, last + last × elapsed × maxRate)`, with the subtraction stopping at zero: after a near-total loss the fees owed can exceed the value, and ERC-4626 says `totalAssets` must not revert (outside review of `016a005`). Losses count at once, gains are limited, and none count again in the same block. Deposits and withdrawals move `last` by exactly their amount. A donation cannot jump the price. `maxRate` is raised by the timelock and lowered by the guardian, and plugging a portfolio must set it. This limit lives here because this is the only vault with a live price; `NavDesk` has the checker and cooldown instead.
+- While `priceFresh()` is false, `totalAssets()` returns the last counted value, and deposits and withdrawals stop.
+- Once its portfolio has written off an adapter, the vault is exit-only: `maxDeposit` and `maxMint` are zero for good (P15). Someone depositing at the written-down price would otherwise take part of any recovery from the holders who bore the loss, and a recovery counts only under the rate limit. New money goes to a new vault.
+- `maxWithdraw` and `maxRedeem` are limited by `liquidAssets()`, so `redeem(maxRedeem(o))` still succeeds.
+- With a `FeeModel` plugged, each accrual quotes it on the counted value, so fees are charged only on gains that have passed the rate limit, and adds to `feesOwed`; `collectFees()` pays the recipient from idle money.
+
+#### Attestation and deployment
+
+`AttestKind` gains `PORTFOLIO`, `ADAPTER`, `VALIDATOR` and `FEE_MODEL`, appended so existing values keep their numbers (P2). `setPortfolio`, `addAdapter`, `setPermission` and `setFeeModel` enforce them. `SETTLER_ROLE` is a plain role grant, since checking it in the vault would spend its margin, so the hand-over check pins the holder and `NavDesk.isWired()` shows it to monitors.
+
+A lego that names its vault is built before the vault exists: `ProxyDeployer.predict(symbol, implementation)` gives the address, and the council attests the product's legos before the launch. A profile gains optional `nav`, `portfolio`, `adapters` and `fees` sections, and the product module plugs only what is listed, while the operations multisig is still admin. `assertHandedOver` checks `SETTLER_ROLE`, `REPORTER_ROLE`, `CHECKER_ROLE` and `ALLOCATOR_ROLE` explicitly, since these ids live outside the vault's role scan, and that the reporter, the checker and the allocator are three different accounts. Adding a lego later is a timelock operation.
+
+#### Built in this order, one PR each, stopping for review after each
+
+| # | Content | Result |
+|---|---|---|
+| 3a | `GatedVaultBase`, the cash check, the payer check and the token's own address in `CredentialRule` | Money in and money out are both screened, and a vault's own credential cannot stop it |
+| 3b | `Gated7540Vault` dealing periods and `NavDesk` | A real fund with one custodian (`vault7540`) |
+| 3c | `Portfolio`, `GuardedAccount` and the two validators, on the 7540 | Several custodians and a mandate (`bank-fund`) |
+| 3d | `FeeModel` on `NavDesk` | The fund charges fees |
+| 3e | The 4626 with a `Portfolio`, `ERC4626Adapter`, fees on the 4626 | Morpho-style on-chain investing (`vault4626-invest`) |
+
+#### Tests first
+
+3b rewrites the 7540's test file and helpers: 78 lines of `Gated7540Vault.t.sol` use the old functions, with smaller changes in `CredentialRuleVaults.t.sol`, `FundIntegration.t.sol`, `FundInvariant.t.sol`, `vaults.test.ts`, `fund.test.ts`, `fixtures.ts`, `Product.ts` and `roles.ts`. New mocks: `MockERC4626Target` and a V2-shaped variant (`max*` 0), `MockReentrantTarget`, `MockRevertingTarget`.
+
+- **Cash check:** a lapsed holder and a holder of a killed attester still redeem to themselves; a payment to an uncredentialed third party reverts on both vaults; a credentialed third party is paid; `requestRedeem` naming a lapsed controller reverts. **Payer check:** an uncredentialed payer is refused on both vaults; a credentialed custodian paying for a client works; a receiver paying for itself is unaffected. **The token's own address:** with the vault's credential lapsed, blocked or never issued, `requestRedeem`, a reject and the escrow burn all work, on both `check` and the account-level answers; a vault still needs a credential on a gated asset; shares sent to the token's own address by mistake come back through `forcedTransfer`.
+- **Periods:** a whole cycle; two investors in one period get one price, and investors in different periods get their own; a request after the cut-off joins the next period; a controller waits while an earlier request is unsettled; reject and recover only while open; netting in both directions and at exactly zero; the balance audit fires when money is missing. **The price:** away from 1.00, at 2, 6 and 18 asset decimals and at small and large NAVs, all of `supply` valued at the period's price stays within `|price − 1| + 1` smallest asset units of `nav`, and `decimals()` is the asset's plus 6. **The inflation attack:** a 1-unit first investor donates to the portfolio and to the custodian before a victim's period, and the victim keeps its value. **A stuck period:** total loss, outage, pause and short cash each leave every request refundable once `maxReportAge` has passed, and `refundRequest` refuses while a proposal is pending and before that time. Fuzz: the sum of all claims never exceeds what the period booked, and falls short by at most one unit per investor; `recoverClaimable` leaves `supply` unchanged. Invariant: the vault always holds pending deposits plus claimable redemption cash. Gas: `settlePeriod` costs the same for 1 investor and 200.
+- **`NavDesk`:** each gate, with `asOf` at the exact cut-off, a stale report, a wrong `moves`, the proposer accepting its own proposal, execution before the cooldown and without acceptance, cancel by each role, a proposal over a total loss, and `adopt` after a long timelock delay charging nothing twice.
+- **`Portfolio`:** every gate reads the vault live, and a revoked guardian loses its powers at once; caps at the exact boundary, shared ids, allocate only; refused adapters (unattested, wrong portfolio, wrong asset, reported on a 4626); money moves only along the listed paths; an outage holds the value, and after recovery the price is what it was; `removeAdapter` refuses during an outage and on a reported adapter with money or an allocation; a write-off counts the loss on a priced adapter, leaves the NAV alone on a reported one, and adding either back works; a reentrant target and a reverting target.
+- **`GuardedAccount` and validators:** no validator refuses; each validator's boundary (`maxPerCall`, the wrong address, every other function); `transferFrom` and `increaseAllowance` refused; a revoked permission refuses at once; a call to the portfolio or vault refused; atomic failure; custody out and back.
+- **`FeeModel`:** fuzz that it never reverts and that a fee never exceeds the gross value; no performance fee below the mark; hard against soft at the hurdle; fuzz that the net price never falls as the gross rises, and is never below `hurdled` once a fee is charged; a steady return below the hurdle pays no performance fee however many periods it is split into, and the same on the 4626 however many calls; the first gain is measured from the opening price; the frozen fee is the fee paid; with no shares there is no fee and the mark stays, even with value present, and the first investors pay nothing for time before they arrived.
+- **4626 with a portfolio:** a withdrawal above idle uses the liquidity adapter; `redeem(maxRedeem(o))` succeeds and one more reverts; a target outage stops deposits and withdrawals; a donation cannot pass the limit; `setPortfolio` on a vault holding money keeps the price; after a write-off deposits stay closed and exits work; with the V2-shaped mock, exit is limited to idle money; a loss below the fees owed reads as zero, and `totalAssets` and `maxRedeem` do not revert. Fuzz: a round trip in one block never profits.
+- **Each profile:** deploys alone, passes the hand-over check, and contains exactly its legos.
+- **Node:** both flows end to end with event decoding, rebuilding the NAV history from `PeriodSettled`.
+- **Mutants**, recorded in `SECURITY.md` section 5: each gate, cap, freshness check, money path, the rounding, the netting, the balance audit, the forward-pricing check, the checker-not-proposer check, the cash check and its exemption. **Halmos:** the sum of claims against the booked total, and an allocation never passes a cap on allocate.
+
+### Step 4: what a bank will ask for
+
+Added on 2026-10-30 after an assessment against what banks work under: mainly the Basel cryptoasset standard (SCO60) and the UK PRA's letter of 18 May 2026, with DORA, the OCC's letters, FATF and the EDPB from summaries. A codebase cannot be compliant on its own: a bank's supervisor judges the legal terms, the operators, the chain and the code together. This step covers the code. Step 5 covers the rest.
+
+| # | Gap | Design | Decision |
+|---|---|---|---|
+| 4a | Every record publishes a country on-chain, and no rule reads it | Remove `country` from `Record`, `Credential`, `CredentialSet`, `profileOf` and the EIP-712 type. Name jurisdiction groups as qualification bits, for example `US_PERSON` or `EEA`, in `Quals` bits 8 to 15. A token's existing `requireAny` and `forbidAny` already express an offering restriction, so no new rule is needed. The attester publishes only what a policy needs, not where someone lives | P18 |
+| 4b | A stolen minter key mints without limit, and nothing requires two people on mint, burn or forced transfer | `SupplyCapRule`: refuses a `MINT` above a per-token cap set by the token's admin; FORCED mints are exempt; on tokens only, because it would refuse the vaults' mint probe. `assertHandedOver` requires `MINTER_ROLE`, `BURNER_ROLE` and `AGENT_ROLE` to be held by a Safe with a threshold of at least 2, unless the profile names an exception, for example an MPC custody wallet whose policy engine does the same job | P17 |
+| 4c | A plain transfer carries no reference to the bank's message | `ExecutedOnlyRule`: refuses `TRANSFER`, so every movement between holders is a signed intent with its `ref` (the ISO 20022 message hash) and goes through an executor. About 30 lines, optional. Originator and beneficiary data stay off-chain, in the bank's own message | P22 |
+| 4d | No dividends, coupons or record dates, while Basel names rights to cash flows (SCO60.9) | `Distributor`: immutable, one per token, one job: pays a funded distribution to holders. The record is a Merkle root of `(holder, amount)` built off-chain at the record date. A maker and a different checker approve it, then holders claim with a proof. A holder who may not receive cannot claim. Unclaimed money returns to the issuer after an expiry. The token gains no snapshots or checkpoints, so it stays small and transfers cost the same. Built when the first bond or equity client needs it | P19 |
+| 4e | Clients' holdings are not the bank's exposure, but its own seed money, warehousing and market-making are, and indirect exposure through funds counts against the Group 2 limit of 1% of Tier 1 capital, and never above 2% (SCO60.116 and 60.117). Offering clients on-chain yield also brings suitability and product-approval duties | A `bank-fund` profile: `Gated7540Vault`, `NavDesk`, `Portfolio` and custodian `GuardedAccount`s only. The profile check refuses `ERC4626Adapter` and any validator that reaches a non-custody target. The bank can launch `vault4626-invest` as a separate product once risk has approved it and any exposure of its own is classified with the supervisor | P21 |
+
+A lapsed holder can still transfer out (`SECURITY.md:176`), deliberately, so that a holder can always leave. A bank's AML team may prefer redemption only. It needs no code: an attester can set a holder's status to blocked, and an agent can freeze it (P20).
+
+Tests first, as for every rule: `SupplyCapRule.t.sol` and `ExecutedOnlyRule.t.sol` (accept, each reject, fuzz, view-ness, integration with a real hook); `Distributor.t.sol` (a proof for the wrong holder, a double claim, a blocked holder, the expiry, the checker not being the maker, and a sum of claims above the funding); `CredentialRegistry.t.sol` and every fixture updated for the removed field, with the EIP-712 type re-pinned; the hand-over check refusing a single-signer role holder and accepting a named exception.
+
+### Step 5: before real money (the owner's, not built here)
+
+We are the bank, so this falls on us. The country is not yet known, and the rules differ by country.
+
+- **Legal.** A legal review showing the rights are enforceable and settlement is final (SCO60.14), and terms for every product. Whether the chain is the legal register or a copy of one must be decided.
+- **Ring-fencing.** A fund's assets must stay out of reach if the bank fails. Contracts can keep them apart, but only the legal structure protects them.
+- **The tokenised deposit.** Depositor-protection rules and the record of each customer's deposits.
+- **Supervisor.** Tell the supervisor before acting, classify each asset the bank is exposed to, and accept that it can override us (SCO60.20 to 60.23).
+- **Our own operational rules.** The bank is the regulated operator (SCO60.18), so ICT risk management, incident reporting, resilience testing and an exit plan from the chain are ours under DORA or its local equivalent. Custody, cloud and node suppliers are our third parties.
+- **Daily reconciliation.** On-chain supply and positions against the core banking ledger, with client statements and regulatory reports built from the events.
+- **Insider risk.** Signers drawn from functions that check each other, and surveillance over the events. A maker and a checker from one team defeat the design.
+- **Written procedures.** AML, sanctions and travel-rule process, key management and business continuity. None is written today, and the docs never mention AML, sanctions or the travel rule. Test coverage and a bug bounty are also missing.
+- **An external audit** of everything, which must include the vaults, the credential layer and every new lego: the 2026-10-26 review left out the first two.
+
+### What this does not solve
+
+- **A custodian's honesty.** A report is a claim, and the hash only proves which report was used. It does not prove the money exists.
+- **A maker and checker who collude.** The cooldown, the guardian's cancel and the published hash make that harder and traceable. They do not prevent it.
+- **A custodian that does not return money.** That risk stays off-chain.
+- **A run.** There are no redemption gates in the first version. If redemptions exceed the cash the desk can raise, settlement cannot run and dealing stops for everyone until it can.
+- **A total loss.** With nothing to count and shares outstanding, dealing stops. Unsettled requests can still be refunded. Beyond that it is a wind-down, not a state the contracts recover from.
+- **A gap in a `GuardedAccount`'s permissions.** It is the most dangerous new lego. Default deny, one narrow validator per call and a timelock on every grant reduce that, and only a review of each permission set closes it. An `approve` gives the spender up to what it allows.
+- **Fairness between investors on the performance fee.** One high-water mark per vault, no investor-level equalisation, so someone entering below the mark pays no performance fee until it is passed.
+- **Target liquidity.** A 4626 holder's exit is limited to idle money plus what the liquidity adapter can return, which is nothing against a Morpho V2 target.
+- **Bad choices within limits.** The desk can pick a poor but allowed allocation. The timelock decides what is allowed.
+- **Who holds `SETTLER_ROLE`.** The timelock can grant it to any address, and that holder sets any price and can name any `cash` account, so it can pull from any wallet that has approved the vault. That is delayed and visible, not prevented, and an upgrade through the timelock could do the same.
+- **The investor cap while requests are open (P27, accepted for the first version).** A full `requestRedeem` frees the investor's slot while the shares are still unburned, and `requestDeposit` reserves none, so a reject or a second claim can revert with `MAX_HOLDERS`. The agent's recovery always works, and then counts the investor above the cap.
+- **A wrong report inside the checker's approval.** Two people can approve a wrong price, and a correction moves it back. Whoever dealt in between keeps the difference.
+- **`redeem(maxRedeem(o))` with a minimum.** On a 4626 limited by liquidity, with a minimum position set, the remainder can fall below the minimum and the exact call reverts.
+
+### Decisions for the owner (recommendation first)
+
+P2 to P22 were answered by the owner on 2026-10-30, every row as recommended, with the reasoning of P21 updated when the owner said to think as the bank. P1 changed on the same instruction, and P26 and P27 were decided the same day. P23 to P25 are open. The last column stays as the record of what was not taken.
+
+| # | Question | Recommendation | Alternative |
+|---|---|---|---|
+| P1 | One stack per bank, or one per client? | **Changed by the owner's instruction of 2026-10-30, replacing "one stack per client".** One stack per bank, with many products inside. A client is verified once, a block applies everywhere, and each fund keeps its own `Portfolio`. | One stack per client or fund. Full isolation, with many copies to run and a client verified once per stack. |
+| P2 | Reopen the freeze (rule 4) for: `IGated7540Vault` rewritten; new functions on `IGated4626Vault`; four appended `AttestKind` values; new interfaces for the new legos; `GatedVault_Unsupported`? | Yes, one reopening per row of step 3, each pinned in `InterfaceFreeze.t.sol`. Deployed code does not exist, so nothing migrates. | None that keeps this design. |
+| P3 | A plain `GatedToken` template? | Yes, about 30 lines over the base. A client who wants one token gets no signed-intent code, and `IntentToken` becomes the same token plus one mixin. | `IntentToken` with `EXECUTOR_ROLE` left empty. No new contract, more code in every token. |
+| P4 | Must the receiver of redemption cash pass the policy? | Yes when the receiver is someone else. A holder paying itself is exempt. A client's omnibus or bank account needs a credential. | Leave it open and record it as accepted in `SECURITY.md`. |
+| P5 | Dealing periods instead of per-investor fulfilment? | Yes. One price for everyone, one transaction however many investors, no desk timing or favouring, netting. An investor with an unsettled earlier request waits until it settles. It rewrites the 7540's core, so it is the highest audit priority. | Keep per-investor fulfilment with a fixed price per round. Far less change, and the desk still picks who deals in which round. |
+| P6 | Two people on every price? | Yes: maker and checker every time. It is what an institution expects, and it removes the tolerance logic entirely. Two signers are needed every dealing day. | A checker only above a tolerance. Fewer signers, more code, and small moves get one pair of eyes. |
+| P7 | Does the guardian get Morpho's sentinel powers (pull money back, lower caps and the max rate), plus cancelling a price and revoking a call permission? | Yes. They only reduce risk, so "the guardian can only stop things" still holds. | A separate sentinel role, or none, which leaves pause as the only fast response. |
+| P8 | Reported prices only behind the 7540? | Yes. On an instant vault a stale price is free money for whoever notices first. | None recommended. |
+| P9 | Fees in assets, with a high-water mark and a hurdle, in an immutable `FeeModel`? | Yes. Simple, no policy interaction, and the terms institutions expect. | Fee shares, which need a credentialed recipient and a free holder slot. Or no hurdle, which is less code and fewer terms to offer. |
+| P10 | What happens to an on-chain adapter that can never be priced again? | A timelock write-off, with the delay as public notice. Holders take the loss and the vault deals again. A reported adapter's value is reported and approved by two people, so its write-off only clears the cap it left behind. | Suspension until it answers. Nobody takes a loss they did not choose, and the whole vault may stay frozen forever. |
+| P11 | Left out of the first version: per-period dealing limits, pro-rata redemption gates, Morpho's forced exit. Agreed? | Yes. Limits cost 225 of the 7540's 348 spare bytes, and gates need requests that part-settle across periods. | Add limits now and accept 123 spare bytes, before the new getters and event. |
+| P12 | One `Portfolio` per vault, or one shared by several? | **Decided by the owner, 2026-10-30: one per vault.** A shared one would need an internal ledger between vaults, one vault's exit would drain another's liquidity, and a 4626 would inherit reported prices, which P8 rules out. Two vaults that want the same on-chain strategy each hold their own position in the target. | Not taken. |
+| P13 | How does the 7540 fit the size limit? | Drop OpenZeppelin's 4626 parent from the 7540 only, as an exception to rule 10. It saves 240 bytes, removes dead inheritance and its 8 compiler warnings, and touches no other contract. | 100 optimizer runs. Saves about 530 and keeps rule 10, but changes every contract's gas and bytecode. |
+| P14 | How does the hurdle work over time? | It compounds from when the mark last moved, and the mark moves only when a performance fee is charged. A slow fund pays no performance fee, and it cannot be gamed by frequent calls. | It restarts each period. Simpler to explain, but a return below the hurdle can still pay a performance fee. |
+| P15 | What can a 4626 do after a write-off? | Exit only, for good. Nobody buys a recovery from the holders who took the loss. New money goes to a new vault. | Deposits reopen at the written-down price. The vault lives on, and a depositor in the trough takes a share of any recovery. |
+| P16 | Who may pay into a vault? | A payer other than the receiver or controller must pass the policy. Source of funds is a bank's first AML question. A custodian needs a credential. | Leave it open, as today, and rely on off-chain screening. |
+| P17 | How are mint, burn and forced transfer limited? | `SupplyCapRule` on tokens, and a hand-over check that those roles sit with a Safe of at least 2 signers, or a named exception. No new money-moving contract, and banks keep their own approval tools. | An on-chain maker-checker lego for enforcement actions, with a delay. Stronger and self-enforcing, but one more contract to audit and slower in an emergency. |
+| P18 | How is jurisdiction expressed? | Qualification bits, and remove `country`. No new rule, and fewer personal details on a public chain. Whether an address with a credential is still personal data is for counsel. | Keep `country` and build a `JurisdictionRule`. Finer control, and every holder's country stays public. |
+| P19 | How are distributions paid? | A `Distributor` with an approved Merkle root, built when the first bond or equity client needs it. No change to the token. | Checkpoints in the token, so the record is on-chain. No off-chain step, and more gas on every transfer and more bytes in every token. |
+| P20 | Can a lapsed holder still transfer? | Yes, as built, and documented. The tools to stop one exist: block or freeze. | A per-token switch in `CredentialRule`. More code, and a holder may have no way to leave a token that has no redemption. |
+| P21 | Should bank funds exclude on-chain yield by default? | Yes, through the `bank-fund` profile. Clients' holdings are not the bank's exposure, but its own seed money and market-making are, and clients bring suitability and product-approval duties. `vault4626-invest` stays available as a separate product once risk has approved it. | Offer it from the start and classify case by case. |
+| P22 | Build `ExecutedOnlyRule`? | Yes, as an optional rule of about 30 lines. It ties every holder-to-holder movement to the bank's message. | Leave plain transfers open and reconcile off-chain. |
+| P23 | Which chain? | **Unconfirmed.** A permissioned EVM with Cancun. It avoids publishing client balances and movements, and the bank chooses the validators. It gives up Morpho and public stablecoins, which `bank-fund` leaves out anyway. | A public chain or L2. Reaches public liquidity, with client positions public unless a privacy layer is added, and validators outside the bank's control. |
+| P24 | Who holds clients' keys? | **Unconfirmed.** Bank custody by default, one address per client, in MPC or HSM. Clients need no wallet or gas. Institutions can bring their own wallet with a credential. A custody compromise is the worst case. | Clients hold their own keys. Less custody risk, but clients need wallets and gas, a lost key becomes a forced-transfer case, and the vaults need signed operator approvals. |
+| P25 | What do clients pay with? | **Unconfirmed.** Our own tokenised deposit, a `GatedToken` limited to customers. | An external stablecoin. Nothing to issue and no deposit rules, with another issuer's risk, and it needs a public chain or a bridge. |
+| P26 | How long is the timelock delay, and what waits for it? | **Decided by the owner, 2026-10-30: 24 hours,** replacing 7 days. Set at deployment, with a constant floor of 1 hour so that a compromised governance cannot take it to zero. The guardian has a day to cancel a bad change. A product launch does not wait at all. | 48 hours, for more cancel time. Or keep 7 days for upgrades only, which needs a second timelock. |
+| P27 | Does an investor with an open request count under a fund's investor cap? | **Decided by the owner, 2026-10-30: accept the first version as it is** (outside review, items 3.2 and 3.3). The agent rejects deposits near the cap, a monitor watches the count going over it, and recovery always works. No cheap contract fix exists: the 7540 has almost no room and settlement cannot loop over investors. Whether a redeeming investor still counts as a holder remains a question for counsel, and a different answer reopens this row. | Count an investor until the redemption settles, and reserve a slot at `requestDeposit`. The count is always exact, and it needs its own design in `Fund` and per-request bookkeeping in a vault with no room. |
+
+### Order of work after approval
+
+1. The owner approves the plan as a whole and answers P23 to P25. Step 1 does not depend on them: it builds the core, products and `GatedToken` on any EVM with Cancun.
+2. Step 1, then each row of step 3, then each row of step 4, each on its own short-lived branch from `main`: interface changes, tests with the red run shown, implementation, both runners, lint, fmt, the type check, Slither, Aderyn, `validate:upgrades`, `verify:reproducible`, the mutants.
+3. Docs in the same step: the brief, `README.md`, `SECURITY.md`, a contract page for each new lego, the affected topic pages, the pin in the footers, and a fresh claim check.
+4. Stop for review after each. Nothing is committed, pushed or merged without an instruction.
+
 ## Open questions for the owner
-1. Credential layer: decisions 11 to 17 in its section came up while planning and still wait for your confirmation (11: the recovery timelock can also reverse a guardian block; 12: the rule for one attester overwriting another; 14: the demo deployment uses `CredentialRule`; 17: the gas stop line). Decisions 8 and 9 (fast upgrade path, ERC-7943) are open.
+1. One stack per bank, legos, and vaults that invest: P23 to P25 in that section, the bank's country, counsel's view on P27, and approval of the plan as a whole.
+2. Credential layer: none left. On 2026-10-30 the owner confirmed decisions 11, 12, 13, 15, 16 and 17 as built (17 at the measured +8,179 gas on a transfer). Decision 14 is moot, since `IdentityRule` was removed in the cleanup. Decisions 8 and 9 are recorded in the credential section's table.
