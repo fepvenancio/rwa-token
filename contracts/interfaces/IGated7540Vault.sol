@@ -8,7 +8,7 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 /**
  * @title IGated7540Vault
  * @notice ERC-7540 asynchronous vault whose shares are a policy-gated token. Requests aggregate per controller
- *         (`requestId = 0`); `FULFILLER_ROLE` (the bank) fulfils with explicit, off-chain-priced amounts
+ *         (`requestId = 0`); `FULFILLER_ROLE` (the issuer) fulfils with explicit, off-chain-priced amounts
  * @dev Deposit flow: `requestDeposit` takes the assets into the vault (the controller must be able to hold shares);
  *      `fulfillDeposit` sends them to custody and makes shares claimable; the claim MINTs shares to the receiver
  *      through the hook. Redeem flow: `requestRedeem` escrows the shares into the vault as a TRANSFER through the

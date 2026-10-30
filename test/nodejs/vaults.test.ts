@@ -62,7 +62,7 @@ describe("vault flows", async function () {
       assert.equal(await s.vault7540.read.pendingDepositRequest([0n, a]), usd("1000"));
       assert.equal(await s.vault7540.read.maxDeposit([a]), 0n, "nothing claimable before fulfilment");
 
-      // The bank prices the request at 1.25 assets per share; the assets go to custody.
+      // The fulfiller prices the request at 1.25 assets per share; the assets go to custody.
       await s.vault7540.write.fulfillDeposit([a, usd("1000"), usd("800")], { account: fulfiller });
       assert.equal(await s.asset.read.balanceOf([custody]), usd("1000"));
       assert.equal(await s.vault7540.read.maxDeposit([a]), usd("1000"));

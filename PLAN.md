@@ -143,7 +143,7 @@ What's left is the executor.
 
 ### Design (defaults; changes need review)
 - **Immutable, not a proxy.** "Replaceable" means deploy a new executor, have the token's timelock grant it `EXECUTOR_ROLE`, and revoke the old one. There is no registry attestation (`AttestKind` has no EXECUTOR kind); the token's role grant is the authorisation.
-- **Access:** OZ `AccessControl`. `DEFAULT_ADMIN_ROLE` is the timelock. `OPERATOR_ROLE` is the bank/relayer keys allowed to submit. (The token-side role stays `EXECUTOR_ROLE`, held by this contract.)
+- **Access:** OZ `AccessControl`. `DEFAULT_ADMIN_ROLE` is the timelock. `OPERATOR_ROLE` is the issuer/relayer keys allowed to submit. (The token-side role stays `EXECUTOR_ROLE`, held by this contract.)
 - **Forward only.** The executor calls `ITransferIntent(token).executeTransfer(intent, sig)` and returns its hash. The token stays the single source of truth for signature, nonce, deadline, freeze, pause and policy, so nothing is checked twice. Token reverts bubble up unchanged (`PolicyGated_TransferRejected(reason)`).
 - **Audit trail.** The token's `IntentExecuted` records the executor contract; the operator is the transaction's caller. No extra executor event: the executor has no state of its own.
 - **Interface:** `IIntentExecutor` stays frozen. `executeBatch`, its error and (if chosen) pause semantics go in a **new** `IIntentExecutorBatch` interface, which is ERC-165-advertised and added to `InterfaceFreeze.t.sol` once approved.
@@ -300,7 +300,7 @@ npm run test:halmos  →  4 passed; 0 failed
 
 ### Owner decisions (2026-10-17, all defaults)
 - **V1 (a):** `LockupRule` exempts BURN **only** when `ctx.operator` holds the token's `BURNER_ROLE`. Holder-initiated burns (vault redemptions, 7540 requests) respect the lockup.
-- **V2 (owner reversed, 2026-10-17): ESCROW.** `requestRedeem` *transfers* the shares to the vault, as a TRANSFER, so the lockup, frozen, identity and pause checks all apply. They are BURNed at fulfilment. Brief §7 stays as written. The vault address must be registered as a verified holder in the identity registry (a bank-controlled contract, normal practice in ERC-3643 deployments).
+- **V2 (owner reversed, 2026-10-17): ESCROW.** `requestRedeem` *transfers* the shares to the vault, as a TRANSFER, so the lockup, frozen, identity and pause checks all apply. They are BURNed at fulfilment. Brief §7 stays as written. The vault address must be registered as a verified holder in the identity registry (an issuer-controlled contract, normal practice in ERC-3643 deployments).
   - Note: the hole cited for the reversal (a locked holder exiting through a redemption BURN) was already closed by V1. Escrow is kept for its other benefits: reversible via reject, and pending state visible for reconciliation.
 - **V3 (a):** `FULFILLER_ROLE` fulfils with explicit amounts priced off-chain at NAV, with partial fulfilment allowed. Deposited assets go to a custody address at fulfilment; redemption assets are pulled from the fulfiller at fulfilment.
 - **V4:**
@@ -959,7 +959,7 @@ Order: M-3, then M-2, then M-1, then the L-5 and L-1 docs. Each M is its own com
 
 ## Docs: `docs/` (built 2026-10-17, awaiting review)
 
-There is no `docs/` folder. The README has the security model and the deployment runbook. Nothing explains how the contracts connect, or follows a holder, an operator or the bank through a flow. The request: an architecture page, plus diagrams of the user flows, the roles, the money and how the protocol works, exact against the code.
+There is no `docs/` folder. The README has the security model and the deployment runbook. Nothing explains how the contracts connect, or follows a holder, an operator or the issuer through a flow. The request: an architecture page, plus diagrams of the user flows, the roles, the money and how the protocol works, exact against the code.
 
 ### Source of truth
 - The Solidity in `contracts/` and the modules in `ignition/modules/`, read in full on 2026-10-17. Non-test source is identical at `2caf004` and `dc26f25`. The OpenZeppelin 5.6.1 behaviour the pages rely on (timelock constructor roles, ERC-4626 order of transfer and mint, EIP-712 version string) was read in `node_modules`.
@@ -2232,7 +2232,7 @@ Source: [the assessment](docs/superpowers/specs/2026-10-23-credential-layer-asse
 
 ### Goal
 
-Today identity is one yes or no per address (`IdentityRule` over `IIdentityRegistry.isVerified`). A bank needs to know, per address, who vouched for it, what it is (customer, professional investor, fund, bank, infrastructure), until when, and its standing, and each token needs to say which of those it accepts. A holder whose credential lapses must still be able to exit.
+Today identity is one yes or no per address (`IdentityRule` over `IIdentityRegistry.isVerified`). An issuer needs to know, per address, who vouched for it, what it is (customer, professional investor, fund, licensed institution, infrastructure), until when, and its standing, and each token needs to say which of those it accepts. A holder whose credential lapses must still be able to exit.
 
 - One small registry holds the record. One small rule applies a per-token policy to it.
 - The record is written by attesters, either directly or from an EIP-712 credential the attester signed off chain. That signed record is the verifiable-credential part: W3C credentials stay off chain, the issuer's service verifies them and signs this record.
@@ -2254,7 +2254,7 @@ C1 to C12 are the assessment's defaults. Say which you want changed.
 | C4 | The registry stores flags only. No names, no evidence hashes, no URIs, no hashes of personal data. | EDPB Guidelines 02/2025: hashes of personal data stay personal data. The link from address to person stays with the attester. |
 | C5 | `validUntil` is required and non-zero for an `ACTIVE` record. There is no cap on validity. | A credential that cannot lapse is the failure seen in Securitize. A cap is arbitrary and left to the attester's process. |
 | C6 | At most 64 attesters. Ids are never reused. | The rule's per-token trust is a `uint64` bitmap. Reusing an id would revive old records. |
-| C7 | Holder caps still count addresses (finding A5). Omnibus wallets and entity ids are out of v1. | Needs an entity map. Say so in anything bank-facing. |
+| C7 | Holder caps still count addresses (finding A5). Omnibus wallets and entity ids are out of v1. | Needs an entity map. Say so in anything client-facing. |
 | C8 | No change for ERC-7943. | Track B (assessment decision 9). |
 | C9 | The rule has no `after_` and no running state. | The pitfalls in assessment 3.2: counters by type drift and state is missed while a rule is out of the list. |
 | C10 | A token's policy is set by the token's `DEFAULT_ADMIN_ROLE`, read live with `hasRole`, as `SettlementWindowRule.setWindow` does. | Same authority as the other per-token configuration. |
@@ -2318,7 +2318,7 @@ Numbers 1 to 10 are the assessment's section 6, adopted at the owner's instructi
 | 3 | Enforcement burn | A burn by `BURNER_ROLE` skips the sender check, unlike `IdentityRule` today |
 | 4 | Forced receiver | A `FORCED` move needs an eligible receiver (stricter than JPMD) |
 | 5 | Signed credential in v1 | Yes |
-| 6 | Qualification bits | The eight in `Quals`; counsel reviews the wording before any bank relies on it |
+| 6 | Qualification bits | The eight in `Quals`; counsel reviews the wording before any issuer relies on it |
 | 7 | Target chain and the Cancun EVM | Closed 2026-10-23 by the owner: Cancun and signed intents are accepted, and the code is not designed around chains that lack them. A deployment still has to confirm its chain has EIP-1153 |
 | 8 | Fast emergency upgrade path | Decided by the owner, 2026-10-30: none. Upgrades keep the 7-day timelock, and the guardian can pause meanwhile |
 | 9 | ERC-7943 adapter | Closed, 2026-10-30: not needed. The base implements the fungible interface directly (`0x3edbb4c4`, pinned in `InterfaceFreeze.t.sol`) |
@@ -2403,9 +2403,9 @@ Measured with the harness in `docs/superpowers/specs/fund-gas-bench/` on the rea
 
 1. Attesters are the trust root. A compromised attester can credential any wallet for every token that trusts it. The limits are the per-attester allowed qualifications, the per-token attester bitmap, and the guardian's kill. There is no on-chain proof of the KYC itself.
 2. The rule's codehash does not cover the registry's code (assessment A6). The council check and the runbook carry it. A registry attestation kind is a later option and needs an interface change.
-3. The meaning of each qualification bit is legal. A wrongly defined bit is a misclassification. Counsel reviews `Quals` before any bank relies on it.
-4. Public flags. Even a status bit and a country can identify a customer under bank secrecy rules. The registry stores no personal data, but on a public chain the pattern is visible. Deployment choice, not a contract fix.
-5. Exit-only lets a lapsed holder sell to an eligible buyer. A bank that wants a lapsed holder frozen uses `setStatus(BLOCKED)`.
+3. The meaning of each qualification bit is legal. A wrongly defined bit is a misclassification. Counsel reviews `Quals` before any issuer relies on it.
+4. Public flags. Even a status bit and a country can identify a customer under secrecy rules. The registry stores no personal data, but on a public chain the pattern is visible. Deployment choice, not a contract fix.
+5. Exit-only lets a lapsed holder sell to an eligible buyer. An issuer that wants a lapsed holder frozen uses `setStatus(BLOCKED)`.
 6. One record per address (C1): a second provider for the same wallet needs the overwrite rule, and the earlier attester's view is lost.
 7. A compromised guardian can block every address. The recovery timelock removes it after its delay, the same class of risk as a guardian that pauses.
 8. The enforcement-burn exemption lets a `BURNER_ROLE` holder burn from an unregistered address. Today it can already burn from any verified holder, so the extra reach is small, but it is new.
@@ -2419,7 +2419,7 @@ Entity ids and omnibus handling, the follow-on rules (`SupplyCapRule`, `Issuance
 
 ### Track B, on the same pieces (noted 2026-10-23, not planned or approved)
 
-The owner's direction: Cancun and signatures are not a concern, and the aim is code that is easy to reuse. I checked the token: `mint`, `burn`, `forcedTransfer` and `setFrozen` are gated only by a role, and a contract can hold a role (the two executors already hold `EXECUTOR_ROLE`). So a tokenised deposit needs no change to `PolicyGatedERC20Upgradeable`. Policy goes in rules. Privileged workflow goes in contracts that hold the token's existing roles. The one token-level item is a thin template.
+The owner's direction: Cancun and signatures are not a concern, and the aim is code that is easy to reuse. I checked the token: `mint`, `burn`, `forcedTransfer` and `setFrozen` are gated only by a role, and a contract can hold a role (the two executors already hold `EXECUTOR_ROLE`). So a cash token needs no change to `PolicyGatedERC20Upgradeable`. Policy goes in rules. Privileged workflow goes in contracts that hold the token's existing roles. The one token-level item is a thin template.
 
 | Need (assessment 4.3) | Where it goes | Touches the base? |
 |---|---|---|
@@ -2707,9 +2707,9 @@ The owner accepted B1, B2 and B4 and kept B3 and B5 unchanged. Before the code, 
 - `npx hardhat test` 1145 passing; lint, fmt, the type check, Slither (0), Aderyn (0), `verify:reproducible` and `validate:upgrades` pass. README, SECURITY section 3 and the brief describe the new rules; the HTML pages follow in their own change, pinned to the merged commit.
 - Merged as `1708ddf` (PR #6). The check of the HTML pages then found that the vault's two overrides ran the escrow rule before the role check, so a caller without `AGENT_ROLE` got the escrow error. Both overrides now carry `onlyRole(AGENT_ROLE)`, tested first and with its mutant caught; 1146 passing.
 
-## One stack per bank, legos, and vaults that invest (planned 2026-10-30, awaiting review)
+## One stack per issuer, legos, and vaults that invest (planned 2026-10-30, awaiting review)
 
-Source: the owner, 2026-10-30, after an assessment of the code at `0350937`. A client may want only one token, one vault or one NFT, and the vaults should be more like Morpho's. The owner's answer on where vault money goes: **on-chain and to a custodian.** Later the same day the owner parked the NFT, asked for the whole stack to be simple legos, deployed together or alone, and said to think about everything as if we are the bank and our clients, investors and funds use the code. Nothing below is built. The decisions are at the end of this section.
+Source: the owner, 2026-10-30, after an assessment of the code at `0350937`. A client may want only one token, one vault or one NFT, and the vaults should be more like Morpho's. The owner's answer on where vault money goes: **on-chain and to a custodian.** Later the same day the owner parked the NFT, asked for the whole stack to be simple legos, deployed together or alone, and said to think about everything as if we are the issuer and our clients, investors and funds use the code. Nothing below is built. The decisions are at the end of this section.
 
 ### Starting point
 
@@ -2721,9 +2721,9 @@ Source: the owner, 2026-10-30, after an assessment of the code at `0350937`. A c
 
 ### Not in this work
 
-- Several banks on one stack: each bank runs its own (P1).
+- Several issuers on one stack: each issuer runs its own (P1).
 - Morpho's code. `VaultV2.sol` and `VaultV2Factory.sol` are `GPL-2.0-or-later`, which rule 15 cannot take, and rule 1 keeps us on OpenZeppelin. We take the design and write our own.
-- A Morpho Blue market adapter, a tokenised-fund adapter, automatic allocation on deposit, forced or in-kind exit, per-period dealing limits and pro-rata redemption gates (P11), fiat handling inside a vault (clients pay with the tokenised deposit, P25), request cancellation, investor-level fee equalisation, proof of reserves.
+- A Morpho Blue market adapter, a tokenised-fund adapter, automatic allocation on deposit, forced or in-kind exit, per-period dealing limits and pro-rata redemption gates (P11), fiat handling inside a vault (clients pay with the cash token, P25), request cancellation, investor-level fee equalisation, proof of reserves.
 - For the NFT: signed intents and DvP, the `Fund` holder cap, `MinPositionRule`, permit, royalties, enumeration.
 
 ### The lego rules
@@ -2739,11 +2739,11 @@ These apply to everything in this section, and the existing stack is held to the
 
 The existing stack already follows these: the hook and rules plug in by list, the executors by role, `Fund` through one rule. What does not yet: the deploy scripts and a token that always carries intents (step 1), and the code the two vaults duplicate (step 3).
 
-### Seen from the bank
+### Seen from the issuer
 
-The bank runs the stack, and investors and funds are its clients. Every power below sits with the bank except a fund manager's, and one function must never hold two roles that check each other.
+The issuer runs the stack, and investors and funds are its clients. Every power below sits with the issuer except a fund manager's, and one function must never hold two roles that check each other.
 
-| Who | On-chain | Bank function | Client? |
+| Who | On-chain | Issuer function | Client? |
 |---|---|---|---|
 | Change control | Governance multisig, proposes on the timelock | Change board with risk and technology | |
 | Code review | Security council, `ATTESTER_ROLE` on the registry | Second line: security and model validation, independent of the developers | |
@@ -2751,21 +2751,21 @@ The bank runs the stack, and investors and funds are its clients. Every power be
 | Recovery | Recovery timelock | A separate quorum, so that a compromised guardian can be removed | |
 | Onboarding | KYC attester on `CredentialRegistry` | Compliance onboarding, fed by the customer system | |
 | Enforcement | `AGENT_ROLE` | Compliance and legal, acting on an order | |
-| Issuance | `MINTER_ROLE`, `BURNER_ROLE` | Treasury operations, driven by the core banking ledger | |
+| Issuance | `MINTER_ROLE`, `BURNER_ROLE` | Treasury operations, driven by the issuer's ledger | |
 | Investing | `ALLOCATOR_ROLE` on one vault | Portfolio manager, or a **fund client's** manager, limited by that vault's caps and validators | Yes |
 | NAV maker | `REPORTER_ROLE` | Fund administration | |
 | NAV checker | `CHECKER_ROLE` | Risk, or the depositary function | |
 | Settlement | `OPERATOR_ROLE` on the executors | Settlement operations, paying the gas | |
-| Investors | Holders and controllers | Clients, using the bank's app | Yes |
+| Investors | Holders and controllers | Clients, using the issuer's app | Yes |
 
 What this changes:
 
-- **One stack per bank, many products (P1).** One set of timelocks, one guardian, one credential registry, one hook. A client is verified once and can hold every product, and blocking a sanctioned address applies everywhere, which is what a bank wants. A fund's money stays apart in its own `Portfolio` (P12). Someone who wants one product alone deploys the core and one product, with the same code.
+- **One stack per issuer, many products (P1).** One set of timelocks, one guardian, one credential registry, one hook. A client is verified once and can hold every product, and blocking a sanctioned address applies everywhere, which is what an issuer wants. A fund's money stays apart in its own `Portfolio` (P12). Someone who wants one product alone deploys the core and one product, with the same code.
 - **Launching a product does not wait (P26).** It adds a proxy over attested code and touches nothing that exists, so `ProxyDeployer` stays with an operations multisig instead of moving to the timelock. A timelock delay still protects what can hurt existing holders: upgrades, the hook, rule lists, roles, adapters, raised caps and fee models.
-- **Caps and validators are the fund's mandate.** A fund client's manager can invest only where the bank allowed, up to the limits it set. That is the oversight a depositary has to perform, enforced by the contract.
-- **Clients pay with our tokenised deposit (P25).** A `GatedToken` limited to bank customers: debit the account and mint, burn and credit on the way back. It is the asset of every vault and the cash leg of `DvPExecutor`, so wires work with no fiat code in a vault. Vaults, portfolios and accounts hold the `INFRA` bit and clients the `CUSTOMER` bit. It must meet depositor-protection rules; the UK PRA expects banks to innovate in this form and to keep stablecoins and e-money out of the deposit-taking entity.
-- **Custody before on-chain yield.** The money sits with the bank or its custodians, so `GuardedAccount` comes before `ERC4626Adapter`, and the 4626 comes last.
-- **Clients do not need wallets or gas (P24).** With one address per client in the bank's custody, holder caps count clients rather than wallets, so entity ids can wait. The cost is concentration: a custody compromise is the worst case.
+- **Caps and validators are the fund's mandate.** A fund client's manager can invest only where the issuer allowed, up to the limits it set. That is the oversight a depositary has to perform, enforced by the contract.
+- **Clients pay with our own cash token (P25).** A `GatedToken` limited to customers: take payment off-chain and mint, burn and pay out on the way back. It is the asset of every vault and the cash leg of `DvPExecutor`, so wires work with no fiat code in a vault. Vaults, portfolios and accounts hold the `INFRA` bit and clients the `CUSTOMER` bit. It must meet the rules that apply to holding client money.
+- **Custody before on-chain yield.** The money sits with the issuer or its custodians, so `GuardedAccount` comes before `ERC4626Adapter`, and the 4626 comes last.
+- **Clients do not need wallets or gas (P24).** With one address per client in the issuer's custody, holder caps count clients rather than wallets, so entity ids can wait. The cost is concentration: a custody compromise is the worst case.
 - **Confidentiality decides the chain (P23).** On a public chain anyone can see each client's balances and movements. No contract fixes that. The code needs an EVM with Cancun: the base uses transient storage.
 
 ### Step 1: deployment profiles (TypeScript, plus one small token contract; built 2026-10-30, awaiting review)
@@ -2776,16 +2776,16 @@ A module cannot branch on `m.getParameter`, which is a future at build time, so 
 type Product = { key: string; template: "GatedToken" | "IntentToken" | "Gated4626Vault" | "Gated7540Vault"; name: string; symbol: string; rules: RuleKey[]; decimals?: number; fund?: string };
 ```
 
-- **`Core`, once per bank:** both timelocks, the registry, the hook, `ProxyDeployer`, the credential registry and the rules in use. The council attests them, and one implementation per template, once: every product over a template shares that implementation.
+- **`Core`, once per issuer:** both timelocks, the registry, the hook, `ProxyDeployer`, the credential registry and the rules in use. The council attests them, and one implementation per template, once: every product over a template shares that implementation.
 - **`Product`, once per product:** a proxy through `ProxyDeployer`, its rule list, its configuration and its roles, then its admin handed to the timelock, as `Activate` does today. It runs with the operations multisig as deployer (P26), so the first product and the fiftieth follow the same path, and a later one does not wait. A product that lists `fundHoldersRule` names its fund, and never touches it.
 - **`Fund`, once per fund:** a `Fund` and the `FundHoldersRule` that points at it, run by the operations account, each with its own cap. The council attests the rule, as it does any rule.
 - **`FundOpen`, once per fund, after its first classes are placed:** installs the rule, sets the cap, registers the classes in order and moves the fund to the timelock. A later class launches through `Product` like any other and is inert until a timelock operation registers it, because a new class changes the room existing investors have under the cap.
 - `ignition/profiles.ts` names the combinations in the table in step 3. `full` is today's demo: the core and three products, with the same order and the same rule lists.
-- `contracts/tokens/GatedToken.sol`: the base and its decimals, fixed at initialisation (P3), used for the tokenised deposit with a policy that asks for the `CUSTOMER` or `INFRA` bit, with its `.t.sol`. `IntentToken` is the same token plus the intent mixin.
+- `contracts/tokens/GatedToken.sol`: the base and its decimals, fixed at initialisation (P3), used for a cash token with a policy that asks for the `CUSTOMER` or `INFRA` bit, with its `.t.sol`. `IntentToken` is the same token plus the intent mixin.
 - `fixtures.ts`: `deployCore`, `deployProduct` and `assertHandedOver(stack, products)`, which checks what the products contain. Existing tests keep passing on `full`.
 - **The delay (P26).** The timelock delay is 24 hours, set at deployment on both timelocks, and `GovernanceTimelock`'s floor becomes a constant of 1 hour. Rule 13, the brief, `Components.ts`, the hand-over check, the timelock's tests and the docs follow.
 
-Tests first, in `deployment.test.ts`: the core and one product deploy and pass the hand-over check, with exactly the expected contracts; a second product launches after hand-over, with no wait, and leaves the first alone; a client verified once can hold both; a block applies to both; a product over an unattested implementation is refused; a vault whose asset is the tokenised deposit works end to end. A rule list that a template cannot use throws when the module is built.
+Tests first, in `deployment.test.ts`: the core and one product deploy and pass the hand-over check, with exactly the expected contracts; a second product launches after hand-over, with no wait, and leaves the first alone; a client verified once can hold both; a block applies to both; a product over an unattested implementation is refused; a vault whose asset is a gated cash token works end to end. A rule list that a template cannot use throws when the module is built.
 
 Done when: those pass, the runbook in `README.md` and `docs/deployment.html` describe core and products, and the brief's §8 Phase 7 says so.
 
@@ -2793,8 +2793,8 @@ Done when: those pass, the runbook in `README.md` and `docs/deployment.html` des
 
 Where it differs from the plan:
 - One more small module: `CoreHandover` sits after the council step, because the core must be attested before its roles and hand-over run.
-- **A fund is its own lego (review finding L-1).** The first version held one `Fund` in the core, registered classes from `Product` and moved the fund to the timelock in a `FundHandover` module. After that a later class reverted at `registerClass`, leaving a live proxy with the operations account as its admin and its symbol used up, and a bank could run only one fund. So `Product` no longer touches a fund and cannot half-fail on one, and a bank has as many funds as it wants. Until `FundOpen` runs the operations account owns the fund, so a first class does not wait either.
-- **Decimals (review finding L-2).** A `GatedToken` takes its decimals at initialisation, in ERC-7201 storage at `gated.storage.GatedToken`, 18 unless the product states otherwise. A deposit token at the ledger's 2 decimals gives a 4626 over it 8, where it would have had 24. Taking the extra argument means `memory` strings, as the 7540 already does, which costs the 1,532 bytes above; the token has room.
+- **A fund is its own lego (review finding L-1).** The first version held one `Fund` in the core, registered classes from `Product` and moved the fund to the timelock in a `FundHandover` module. After that a later class reverted at `registerClass`, leaving a live proxy with the operations account as its admin and its symbol used up, and an issuer could run only one fund. So `Product` no longer touches a fund and cannot half-fail on one, and an issuer has as many funds as it wants. Until `FundOpen` runs the operations account owns the fund, so a first class does not wait either.
+- **Decimals (review finding L-2).** A `GatedToken` takes its decimals at initialisation, in ERC-7201 storage at `gated.storage.GatedToken`, 18 unless the product states otherwise. A cash token at its ledger's 2 decimals gives a 4626 over it 8, where it would have had 24. Taking the extra argument means `memory` strings, as the 7540 already does, which costs the 1,532 bytes above; the token has room.
 - The operations account is whichever account runs Ignition, for example an MPC custody wallet whose policy engine requires two approvers. It is not a Safe, because Ignition cannot sign through one. Step 4b's hand-over check covers this as a named exception.
 - `vault7540` exists today with a plain fulfiller and custody; step 3b changes it.
 - `deployProduct(s, product)` takes the stack, and `assertHandedOver(stack)` checks the products the stack holds.
@@ -2856,13 +2856,13 @@ investor ⇄ Gated7540Vault ⇄ NavDesk ──────────▶ Portfo
 | `ERC20CallValidator`, `ERC4626CallValidator` | Checks one call's parameters | `GuardedAccount` | Optional |
 | `FeeModel` | Computes a period's fee | `NavDesk` or a 4626 | Optional |
 
-**What the bank launches.** Every row is a product on the same core, with the rules it lists. Someone who wants one product alone deploys the core and that row.
+**What the issuer launches.** Every row is a product on the same core, with the rules it lists. Someone who wants one product alone deploys the core and that row.
 
 | Product | Legos | Profile |
 |---|---|---|
-| A tokenised deposit or a plain token | `GatedToken` | `token` |
+| A cash token or a plain token | `GatedToken` | `token` |
 | A fund whose money sits with one custodian | `Gated7540Vault`, `NavDesk` (cash account is the custodian) | `vault7540` |
-| A fund with several custodians, a mandate and fees | + `Portfolio`, `GuardedAccount`, validators, `FeeModel` | `bank-fund` |
+| A fund with several custodians, a mandate and fees | + `Portfolio`, `GuardedAccount`, validators, `FeeModel` | `managed-fund` |
 | A gated vault, money stays in it | `Gated4626Vault` | `vault4626` |
 | Liquid yield in on-chain vaults | + `Portfolio`, `ERC4626Adapter` | `vault4626-invest` |
 | Everything | All of it | `full` |
@@ -2938,7 +2938,7 @@ Immutable, one per vault. Holds idle money. It asks the vault for roles live. Im
 | `raise(assets)`: pull a shortfall from the liquidity adapter | The vault | None |
 
 - **Where money can go.** To an installed adapter, to the vault, or by a timelock operation to an attested successor for the same vault. Nowhere else.
-- **Caps.** Each adapter names its risk ids at construction: one for itself and any it shares, for example one bank. Each id has an absolute cap in assets and a relative cap as a share of the vault's `totalAssets()`. Checked on allocate only, so exits can push an id above its relative cap, as in Morpho. Allocations move by the amount moved, never below zero, and for a priced adapter by the change in its value across the call. At most 8 adapters.
+- **Caps.** Each adapter names its risk ids at construction: one for itself and any it shares, for example one custodian. Each id has an absolute cap in assets and a relative cap as a share of the vault's `totalAssets()`. Checked on allocate only, so exits can push an id above its relative cap, as in Morpho. Allocations move by the amount moved, never below zero, and for a priced adapter by the change in its value across the call. At most 8 adapters.
 - **Plug to the vault and `NavDesk`.** `pricedValue()` (idle money plus every priced adapter), `priceFresh()`, `moves()` (counts allocations and deallocations), `liquidAssets()`.
 - **An adapter that cannot be priced.** A failed read gives 0 with `fresh()` false, and that never counts as a loss: `priceFresh()` is false, dealing stops, and the last value stands.
 - **What empty means.** A priced adapter is empty when it is fresh and its `value()` is zero. A reported adapter's money can be off-chain, so `value()` says nothing about it: it is empty when its on-chain balance and its allocation are both zero. `removeAdapter` needs an empty adapter, so an outage cannot orphan a position.
@@ -2988,7 +2988,7 @@ A lego that names its vault is built before the vault exists: `ProxyDeployer.pre
 |---|---|---|
 | 3a | `GatedVaultBase`, the cash check, the payer check and the token's own address in `CredentialRule` | Money in and money out are both screened, and a vault's own credential cannot stop it |
 | 3b | `Gated7540Vault` dealing periods and `NavDesk` | A real fund with one custodian (`vault7540`) |
-| 3c | `Portfolio`, `GuardedAccount` and the two validators, on the 7540 | Several custodians and a mandate (`bank-fund`) |
+| 3c | `Portfolio`, `GuardedAccount` and the two validators, on the 7540 | Several custodians and a mandate (`managed-fund`) |
 | 3d | `FeeModel` on `NavDesk` | The fund charges fees |
 | 3e | The 4626 with a `Portfolio`, `ERC4626Adapter`, fees on the 4626 | Morpho-style on-chain investing (`vault4626-invest`) |
 
@@ -3007,32 +3007,32 @@ A lego that names its vault is built before the vault exists: `ProxyDeployer.pre
 - **Node:** both flows end to end with event decoding, rebuilding the NAV history from `PeriodSettled`.
 - **Mutants**, recorded in `SECURITY.md` section 5: each gate, cap, freshness check, money path, the rounding, the netting, the balance audit, the forward-pricing check, the checker-not-proposer check, the cash check and its exemption. **Halmos:** the sum of claims against the booked total, and an allocation never passes a cap on allocate.
 
-### Step 4: what a bank will ask for
+### Step 4: what an institution will ask for
 
-Added on 2026-10-30 after an assessment against what banks work under: mainly the Basel cryptoasset standard (SCO60) and the UK PRA's letter of 18 May 2026, with DORA, the OCC's letters, FATF and the EDPB from summaries. A codebase cannot be compliant on its own: a bank's supervisor judges the legal terms, the operators, the chain and the code together. This step covers the code. Step 5 covers the rest.
+Added on 2026-10-30 after an assessment against what regulated institutions work under. A codebase cannot be compliant on its own: a regulator judges the legal terms, the operators, the chain and the code together. This step covers the code. Step 5 covers the rest.
 
 | # | Gap | Design | Decision |
 |---|---|---|---|
 | 4a | Every record publishes a country on-chain, and no rule reads it | Remove `country` from `Record`, `Credential`, `CredentialSet`, `profileOf` and the EIP-712 type. Name jurisdiction groups as qualification bits, for example `US_PERSON` or `EEA`, in `Quals` bits 8 to 15. A token's existing `requireAny` and `forbidAny` already express an offering restriction, so no new rule is needed. The attester publishes only what a policy needs, not where someone lives | P18 |
 | 4b | A stolen minter key mints without limit, and nothing requires two people on mint, burn or forced transfer | `SupplyCapRule`: refuses a `MINT` above a per-token cap set by the token's admin; FORCED mints are exempt; on tokens only, because it would refuse the vaults' mint probe. `assertHandedOver` requires `MINTER_ROLE`, `BURNER_ROLE` and `AGENT_ROLE` to be held by a Safe with a threshold of at least 2, unless the profile names an exception, for example an MPC custody wallet whose policy engine does the same job | P17 |
-| 4c | A plain transfer carries no reference to the bank's message | `ExecutedOnlyRule`: refuses `TRANSFER`, so every movement between holders is a signed intent with its `ref` (the ISO 20022 message hash) and goes through an executor. About 30 lines, optional. Originator and beneficiary data stay off-chain, in the bank's own message | P22 |
-| 4d | No dividends, coupons or record dates, while Basel names rights to cash flows (SCO60.9) | `Distributor`: immutable, one per token, one job: pays a funded distribution to holders. The record is a Merkle root of `(holder, amount)` built off-chain at the record date. A maker and a different checker approve it, then holders claim with a proof. A holder who may not receive cannot claim. Unclaimed money returns to the issuer after an expiry. The token gains no snapshots or checkpoints, so it stays small and transfers cost the same. Built when the first bond or equity client needs it | P19 |
-| 4e | Clients' holdings are not the bank's exposure, but its own seed money, warehousing and market-making are, and indirect exposure through funds counts against the Group 2 limit of 1% of Tier 1 capital, and never above 2% (SCO60.116 and 60.117). Offering clients on-chain yield also brings suitability and product-approval duties | A `bank-fund` profile: `Gated7540Vault`, `NavDesk`, `Portfolio` and custodian `GuardedAccount`s only. The profile check refuses `ERC4626Adapter` and any validator that reaches a non-custody target. The bank can launch `vault4626-invest` as a separate product once risk has approved it and any exposure of its own is classified with the supervisor | P21 |
+| 4c | A plain transfer carries no reference to the issuer's message | `ExecutedOnlyRule`: refuses `TRANSFER`, so every movement between holders is a signed intent with its `ref` (the ISO 20022 message hash) and goes through an executor. About 30 lines, optional. Originator and beneficiary data stay off-chain, in the issuer's own message | P22 |
+| 4d | No dividends, coupons or record dates, while rights to cash flows are part of what a token can represent | `Distributor`: immutable, one per token, one job: pays a funded distribution to holders. The record is a Merkle root of `(holder, amount)` built off-chain at the record date. A maker and a different checker approve it, then holders claim with a proof. A holder who may not receive cannot claim. Unclaimed money returns to the issuer after an expiry. The token gains no snapshots or checkpoints, so it stays small and transfers cost the same. Built when the first bond or equity client needs it | P19 |
+| 4e | Clients' holdings are not the issuer's exposure, but its own seed money, warehousing and market-making are. Offering clients on-chain yield also brings suitability and product-approval duties | A `managed-fund` profile: `Gated7540Vault`, `NavDesk`, `Portfolio` and custodian `GuardedAccount`s only. The profile check refuses `ERC4626Adapter` and any validator that reaches a non-custody target. The issuer can launch `vault4626-invest` as a separate product once risk has approved it and any exposure of its own is classified with its regulator | P21 |
 
-A lapsed holder can still transfer out (`SECURITY.md:176`), deliberately, so that a holder can always leave. A bank's AML team may prefer redemption only. It needs no code: an attester can set a holder's status to blocked, and an agent can freeze it (P20).
+A lapsed holder can still transfer out (`SECURITY.md:176`), deliberately, so that a holder can always leave. An issuer's AML team may prefer redemption only. It needs no code: an attester can set a holder's status to blocked, and an agent can freeze it (P20).
 
 Tests first, as for every rule: `SupplyCapRule.t.sol` and `ExecutedOnlyRule.t.sol` (accept, each reject, fuzz, view-ness, integration with a real hook); `Distributor.t.sol` (a proof for the wrong holder, a double claim, a blocked holder, the expiry, the checker not being the maker, and a sum of claims above the funding); `CredentialRegistry.t.sol` and every fixture updated for the removed field, with the EIP-712 type re-pinned; the hand-over check refusing a single-signer role holder and accepting a named exception.
 
 ### Step 5: before real money (the owner's, not built here)
 
-We are the bank, so this falls on us. The country is not yet known, and the rules differ by country.
+We are the issuer, so this falls on us. The country is not yet known, and the rules differ by country.
 
-- **Legal.** A legal review showing the rights are enforceable and settlement is final (SCO60.14), and terms for every product. Whether the chain is the legal register or a copy of one must be decided.
-- **Ring-fencing.** A fund's assets must stay out of reach if the bank fails. Contracts can keep them apart, but only the legal structure protects them.
-- **The tokenised deposit.** Depositor-protection rules and the record of each customer's deposits.
-- **Supervisor.** Tell the supervisor before acting, classify each asset the bank is exposed to, and accept that it can override us (SCO60.20 to 60.23).
-- **Our own operational rules.** The bank is the regulated operator (SCO60.18), so ICT risk management, incident reporting, resilience testing and an exit plan from the chain are ours under DORA or its local equivalent. Custody, cloud and node suppliers are our third parties.
-- **Daily reconciliation.** On-chain supply and positions against the core banking ledger, with client statements and regulatory reports built from the events.
+- **Legal.** A legal review showing the rights are enforceable and settlement is final, and terms for every product. Whether the chain is the legal register or a copy of one must be decided.
+- **Ring-fencing.** A fund's assets must stay out of reach if the issuer fails. Contracts can keep them apart, but only the legal structure protects them.
+- **The cash token.** The rules on holding client money, and the record of each customer's balance.
+- **Regulator.** Tell the regulator before acting, classify each asset the issuer is exposed to, and accept that it can override us.
+- **Our own operational rules.** The issuer is the regulated operator, so ICT risk management, incident reporting, resilience testing and an exit plan from the chain are ours under the local rules. Custody, cloud and node suppliers are our third parties.
+- **Daily reconciliation.** On-chain supply and positions against the issuer's ledger, with client statements and regulatory reports built from the events.
 - **Insider risk.** Signers drawn from functions that check each other, and surveillance over the events. A maker and a checker from one team defeat the design.
 - **Written procedures.** AML, sanctions and travel-rule process, key management and business continuity. None is written today, and the docs never mention AML, sanctions or the travel rule. Test coverage and a bug bounty are also missing.
 - **An external audit** of everything, which must include the vaults, the credential layer and every new lego: the 2026-10-26 review left out the first two.
@@ -3055,14 +3055,14 @@ We are the bank, so this falls on us. The country is not yet known, and the rule
 
 ### Decisions for the owner (recommendation first)
 
-P2 to P22 were answered by the owner on 2026-10-30, every row as recommended, with the reasoning of P21 updated when the owner said to think as the bank. P1 changed on the same instruction, and P26 and P27 were decided the same day. P23 to P25 are open. The last column stays as the record of what was not taken.
+P2 to P22 were answered by the owner on 2026-10-30, every row as recommended, with the reasoning of P21 updated when the owner said to think as the issuer. P1 changed on the same instruction, and P26 and P27 were decided the same day. P23 to P25 are open. The last column stays as the record of what was not taken.
 
 | # | Question | Recommendation | Alternative |
 |---|---|---|---|
-| P1 | One stack per bank, or one per client? | **Changed by the owner's instruction of 2026-10-30, replacing "one stack per client".** One stack per bank, with many products inside. A client is verified once, a block applies everywhere, and each fund keeps its own `Portfolio`. | One stack per client or fund. Full isolation, with many copies to run and a client verified once per stack. |
+| P1 | One stack per issuer, or one per client? | **Changed by the owner's instruction of 2026-10-30, replacing "one stack per client".** One stack per issuer, with many products inside. A client is verified once, a block applies everywhere, and each fund keeps its own `Portfolio`. | One stack per client or fund. Full isolation, with many copies to run and a client verified once per stack. |
 | P2 | Reopen the freeze (rule 4) for: `IGated7540Vault` rewritten; new functions on `IGated4626Vault`; four appended `AttestKind` values; new interfaces for the new legos; `GatedVault_Unsupported`? | Yes, one reopening per row of step 3, each pinned in `InterfaceFreeze.t.sol`. Deployed code does not exist, so nothing migrates. | None that keeps this design. |
 | P3 | A plain `GatedToken` template? | Yes, about 30 lines over the base. A client who wants one token gets no signed-intent code, and `IntentToken` becomes the same token plus one mixin. | `IntentToken` with `EXECUTOR_ROLE` left empty. No new contract, more code in every token. |
-| P4 | Must the receiver of redemption cash pass the policy? | Yes when the receiver is someone else. A holder paying itself is exempt. A client's omnibus or bank account needs a credential. | Leave it open and record it as accepted in `SECURITY.md`. |
+| P4 | Must the receiver of redemption cash pass the policy? | Yes when the receiver is someone else. A holder paying itself is exempt. A client's omnibus or settlement account needs a credential. | Leave it open and record it as accepted in `SECURITY.md`. |
 | P5 | Dealing periods instead of per-investor fulfilment? | Yes. One price for everyone, one transaction however many investors, no desk timing or favouring, netting. An investor with an unsettled earlier request waits until it settles. It rewrites the 7540's core, so it is the highest audit priority. | Keep per-investor fulfilment with a fixed price per round. Far less change, and the desk still picks who deals in which round. |
 | P6 | Two people on every price? | Yes: maker and checker every time. It is what an institution expects, and it removes the tolerance logic entirely. Two signers are needed every dealing day. | A checker only above a tolerance. Fewer signers, more code, and small moves get one pair of eyes. |
 | P7 | Does the guardian get Morpho's sentinel powers (pull money back, lower caps and the max rate), plus cancelling a price and revoking a call permission? | Yes. They only reduce risk, so "the guardian can only stop things" still holds. | A separate sentinel role, or none, which leaves pause as the only fast response. |
@@ -3074,16 +3074,16 @@ P2 to P22 were answered by the owner on 2026-10-30, every row as recommended, wi
 | P13 | How does the 7540 fit the size limit? | Drop OpenZeppelin's 4626 parent from the 7540 only, as an exception to rule 10. It saves 240 bytes, removes dead inheritance and its 8 compiler warnings, and touches no other contract. | 100 optimizer runs. Saves about 530 and keeps rule 10, but changes every contract's gas and bytecode. |
 | P14 | How does the hurdle work over time? | It compounds from when the mark last moved, and the mark moves only when a performance fee is charged. A slow fund pays no performance fee, and it cannot be gamed by frequent calls. | It restarts each period. Simpler to explain, but a return below the hurdle can still pay a performance fee. |
 | P15 | What can a 4626 do after a write-off? | Exit only, for good. Nobody buys a recovery from the holders who took the loss. New money goes to a new vault. | Deposits reopen at the written-down price. The vault lives on, and a depositor in the trough takes a share of any recovery. |
-| P16 | Who may pay into a vault? | A payer other than the receiver or controller must pass the policy. Source of funds is a bank's first AML question. A custodian needs a credential. | Leave it open, as today, and rely on off-chain screening. |
-| P17 | How are mint, burn and forced transfer limited? | `SupplyCapRule` on tokens, and a hand-over check that those roles sit with a Safe of at least 2 signers, or a named exception. No new money-moving contract, and banks keep their own approval tools. | An on-chain maker-checker lego for enforcement actions, with a delay. Stronger and self-enforcing, but one more contract to audit and slower in an emergency. |
+| P16 | Who may pay into a vault? | A payer other than the receiver or controller must pass the policy. Source of funds is the first AML question. A custodian needs a credential. | Leave it open, as today, and rely on off-chain screening. |
+| P17 | How are mint, burn and forced transfer limited? | `SupplyCapRule` on tokens, and a hand-over check that those roles sit with a Safe of at least 2 signers, or a named exception. No new money-moving contract, and issuers keep their own approval tools. | An on-chain maker-checker lego for enforcement actions, with a delay. Stronger and self-enforcing, but one more contract to audit and slower in an emergency. |
 | P18 | How is jurisdiction expressed? | Qualification bits, and remove `country`. No new rule, and fewer personal details on a public chain. Whether an address with a credential is still personal data is for counsel. | Keep `country` and build a `JurisdictionRule`. Finer control, and every holder's country stays public. |
 | P19 | How are distributions paid? | A `Distributor` with an approved Merkle root, built when the first bond or equity client needs it. No change to the token. | Checkpoints in the token, so the record is on-chain. No off-chain step, and more gas on every transfer and more bytes in every token. |
 | P20 | Can a lapsed holder still transfer? | Yes, as built, and documented. The tools to stop one exist: block or freeze. | A per-token switch in `CredentialRule`. More code, and a holder may have no way to leave a token that has no redemption. |
-| P21 | Should bank funds exclude on-chain yield by default? | Yes, through the `bank-fund` profile. Clients' holdings are not the bank's exposure, but its own seed money and market-making are, and clients bring suitability and product-approval duties. `vault4626-invest` stays available as a separate product once risk has approved it. | Offer it from the start and classify case by case. |
-| P22 | Build `ExecutedOnlyRule`? | Yes, as an optional rule of about 30 lines. It ties every holder-to-holder movement to the bank's message. | Leave plain transfers open and reconcile off-chain. |
-| P23 | Which chain? | **Unconfirmed.** A permissioned EVM with Cancun. It avoids publishing client balances and movements, and the bank chooses the validators. It gives up Morpho and public stablecoins, which `bank-fund` leaves out anyway. | A public chain or L2. Reaches public liquidity, with client positions public unless a privacy layer is added, and validators outside the bank's control. |
-| P24 | Who holds clients' keys? | **Unconfirmed.** Bank custody by default, one address per client, in MPC or HSM. Clients need no wallet or gas. Institutions can bring their own wallet with a credential. A custody compromise is the worst case. | Clients hold their own keys. Less custody risk, but clients need wallets and gas, a lost key becomes a forced-transfer case, and the vaults need signed operator approvals. |
-| P25 | What do clients pay with? | **Unconfirmed.** Our own tokenised deposit, a `GatedToken` limited to customers. | An external stablecoin. Nothing to issue and no deposit rules, with another issuer's risk, and it needs a public chain or a bridge. |
+| P21 | Should managed funds exclude on-chain yield by default? | Yes, through the `managed-fund` profile. Clients' holdings are not the issuer's exposure, but its own seed money and market-making are, and clients bring suitability and product-approval duties. `vault4626-invest` stays available as a separate product once risk has approved it. | Offer it from the start and classify case by case. |
+| P22 | Build `ExecutedOnlyRule`? | Yes, as an optional rule of about 30 lines. It ties every holder-to-holder movement to the issuer's message. | Leave plain transfers open and reconcile off-chain. |
+| P23 | Which chain? | **Unconfirmed.** A permissioned EVM with Cancun. It avoids publishing client balances and movements, and the issuer chooses the validators. It gives up Morpho and public stablecoins, which `managed-fund` leaves out anyway. | A public chain or L2. Reaches public liquidity, with client positions public unless a privacy layer is added, and validators outside the issuer's control. |
+| P24 | Who holds clients' keys? | **Unconfirmed.** Custody by the issuer by default, one address per client, in MPC or HSM. Clients need no wallet or gas. Institutions can bring their own wallet with a credential. A custody compromise is the worst case. | Clients hold their own keys. Less custody risk, but clients need wallets and gas, a lost key becomes a forced-transfer case, and the vaults need signed operator approvals. |
+| P25 | What do clients pay with? | **Unconfirmed.** Our own cash token, a `GatedToken` limited to customers. | An external stablecoin. Nothing to issue and none of the rules on holding client money, with another issuer's risk, and it needs a public chain or a bridge. |
 | P26 | How long is the timelock delay, and what waits for it? | **Decided by the owner, 2026-10-30: 24 hours,** replacing 7 days. Set at deployment, with a constant floor of 1 hour so that a compromised governance cannot take it to zero. The guardian has a day to cancel a bad change. A product launch does not wait at all. | 48 hours, for more cancel time. Or keep 7 days for upgrades only, which needs a second timelock. |
 | P27 | Does an investor with an open request count under a fund's investor cap? | **Decided by the owner, 2026-10-30: accept the first version as it is** (outside review, items 3.2 and 3.3). The agent rejects deposits near the cap, a monitor watches the count going over it, and recovery always works. No cheap contract fix exists: the 7540 has almost no room and settlement cannot loop over investors. Whether a redeeming investor still counts as a holder remains a question for counsel, and a different answer reopens this row. | Count an investor until the redemption settles, and reserve a slot at `requestDeposit`. The count is always exact, and it needs its own design in `Fund` and per-request bookkeeping in a vault with no room. |
 
@@ -3095,5 +3095,5 @@ P2 to P22 were answered by the owner on 2026-10-30, every row as recommended, wi
 4. Stop for review after each. Nothing is committed, pushed or merged without an instruction.
 
 ## Open questions for the owner
-1. One stack per bank, legos, and vaults that invest: P23 to P25 in that section, the bank's country, counsel's view on P27, and approval of the plan as a whole.
+1. One stack per issuer, legos, and vaults that invest: P23 to P25 in that section, the issuer's country, counsel's view on P27, and approval of the plan as a whole.
 2. Credential layer: none left. On 2026-10-30 the owner confirmed decisions 11, 12, 13, 15, 16 and 17 as built (17 at the measured +8,179 gas on a transfer). Decision 14 is moot, since `IdentityRule` was removed in the cleanup. Decisions 8 and 9 are recorded in the credential section's table.

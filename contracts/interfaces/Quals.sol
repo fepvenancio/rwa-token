@@ -7,7 +7,7 @@ pragma solidity ^0.8.28;
  *         interprets them: an attester sets the bits it vouches for, and each token's policy says which bits it needs.
  *         Bits 0 to 7 are named here, bits 8 to 15 are reserved for later shared meanings, and bits 16 to 31 are free
  *         for a deployment's own use
- * @dev What a bit means in law is for the attester and its counsel to define, and a bank should have the wording
+ * @dev What a bit means in law is for the attester and its counsel to define, and an issuer should have the wording
  *      reviewed before relying on it. The names are conveniences, not legal categories
  */
 // public bit values, read as `Quals.X`; `internal` only so they inline
@@ -23,9 +23,9 @@ library Quals {
   uint32 internal constant INSTITUTIONAL = 1 << 3;
   /// @notice A fund holding on its own account
   uint32 internal constant FUND = 1 << 4;
-  /// @notice A regulated credit institution
-  uint32 internal constant BANK = 1 << 5;
-  /// @notice A customer of the bank that issues the token (the nominative relationship of a deposit token)
+  /// @notice A licensed financial institution
+  uint32 internal constant LICENSED = 1 << 5;
+  /// @notice A customer of the token's issuer (a direct relationship with the issuer)
   uint32 internal constant CUSTOMER = 1 << 6;
   /// @notice Infrastructure: a vault, escrow, treasury or other address that holds tokens for the system
   uint32 internal constant INFRA = 1 << 7;

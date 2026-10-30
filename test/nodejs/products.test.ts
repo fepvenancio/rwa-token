@@ -82,7 +82,7 @@ describe("one product alone: the core and that product, and nothing else", async
 describe("one core, many products", async function () {
   const connection = await network.create();
   const { viem, networkHelpers } = connection;
-  const bond: Product = { key: "bond", template: "GatedToken", name: "Bank Bond", symbol: "BOND", rules: PLAIN };
+  const bond: Product = { key: "bond", template: "GatedToken", name: "Corporate Bond", symbol: "BOND", rules: PLAIN };
 
   async function coreAndToken() {
     return deployProfile(connection, PROFILES.token);
@@ -149,63 +149,63 @@ describe("one core, many products", async function () {
   });
 });
 
-describe("a vault whose asset is the bank's tokenised deposit", async function () {
+describe("a vault whose asset is a gated cash token", async function () {
   const connection = await network.create();
   const { viem, networkHelpers } = connection;
 
-  const depositAndFund: Profile = {
-    id: "depositAndFund",
+  const cashAndFund: Profile = {
+    id: "cashAndFund",
     products: [
       {
-        key: "deposit",
+        key: "cash",
         template: "GatedToken",
-        name: "Bank Deposit",
-        symbol: "bUSD",
+        name: "Cash Token",
+        symbol: "cUSD",
         rules: ["credentialRule"],
         policy: { requireAll: 0, requireAny: QUALS.CUSTOMER | QUALS.INFRA, forbidAny: 0, attesters: 1n },
       },
-      { key: "fund", template: "Gated4626Vault", name: "Bank Fund", symbol: "bFUND", rules: PLAIN, assetProduct: "deposit" },
+      { key: "fund", template: "Gated4626Vault", name: "Cash Fund", symbol: "cFUND", rules: PLAIN, assetProduct: "cash" },
     ],
   };
 
-  async function deposited() {
-    const s = await deployProfile(connection, depositAndFund);
-    const deposit = await viem.getContractAt("GatedToken", s.products.deposit.address);
+  async function funded() {
+    const s = await deployProfile(connection, cashAndFund);
+    const cash = await viem.getContractAt("GatedToken", s.products.cash.address);
     const vault = await viem.getContractAt("Gated4626Vault", s.products.fund.address);
-    return { s, deposit, vault };
+    return { s, cash, vault };
   }
 
-  it("a customer pays in deposits, receives shares and gets the deposits back", async function () {
-    const { s, deposit, vault } = await networkHelpers.loadFixture(deposited);
+  it("a customer pays in cash tokens, receives shares and gets them back", async function () {
+    const { s, cash, vault } = await networkHelpers.loadFixture(funded);
     const alice = s.holders.alice;
     const a = alice.account.address;
-    assert.ok(isAddressEqual(await vault.read.asset(), deposit.address));
+    assert.ok(isAddressEqual(await vault.read.asset(), cash.address));
 
     await verify(s, alice, { quals: QUALS.KYC | QUALS.CUSTOMER });
     await verify(s, vault.address, { quals: QUALS.KYC | QUALS.INFRA });
     // The account is debited off-chain and treasury mints.
-    await deposit.write.mint([a, 1_000n], { account: s.wallets.minter.account });
-    await deposit.write.approve([vault.address, maxUint256], { account: alice.account });
+    await cash.write.mint([a, 1_000n], { account: s.wallets.minter.account });
+    await cash.write.approve([vault.address, maxUint256], { account: alice.account });
     await vault.write.deposit([1_000n, a], { account: alice.account });
-    assert.equal(await deposit.read.balanceOf([a]), 0n);
-    assert.equal(await deposit.read.balanceOf([vault.address]), 1_000n);
+    assert.equal(await cash.read.balanceOf([a]), 0n);
+    assert.equal(await cash.read.balanceOf([vault.address]), 1_000n);
 
     await vault.write.redeem([await vault.read.maxRedeem([a]), a, a], { account: alice.account });
-    assert.equal(await deposit.read.balanceOf([a]), 1_000n);
+    assert.equal(await cash.read.balanceOf([a]), 1_000n);
   });
 
-  it("the deposit stays with customers and the vault, and a vault without the infrastructure bit cannot take it", async function () {
-    const { s, deposit, vault } = await networkHelpers.loadFixture(deposited);
+  it("the cash token stays with customers and the vault, and a vault without the infrastructure bit cannot take it", async function () {
+    const { s, cash, vault } = await networkHelpers.loadFixture(funded);
     const [alice, bob] = [s.holders.alice, s.holders.bob];
     await verify(s, alice, { quals: QUALS.KYC | QUALS.CUSTOMER });
     await verify(s, bob); // verified, but not a customer
-    await deposit.write.mint([alice.account.address, 1_000n], { account: s.wallets.minter.account });
-    assert.deepEqual(await deposit.read.canTransferWithReason([alice.account.address, bob.account.address, 1n]), [false, REASONS.RECEIVER_NOT_ELIGIBLE]);
+    await cash.write.mint([alice.account.address, 1_000n], { account: s.wallets.minter.account });
+    assert.deepEqual(await cash.read.canTransferWithReason([alice.account.address, bob.account.address, 1n]), [false, REASONS.RECEIVER_NOT_ELIGIBLE]);
 
-    await deposit.write.approve([vault.address, maxUint256], { account: alice.account });
+    await cash.write.approve([vault.address, maxUint256], { account: alice.account });
     await viem.assertions.revertWithCustomError(
       vault.write.deposit([1_000n, alice.account.address], { account: alice.account }),
-      deposit,
+      cash,
       "PolicyGated_TransferRejected",
     );
   });
@@ -224,7 +224,7 @@ describe("each fund is its own lego", async function () {
     ],
   };
 
-  it("a bank runs two funds, each with its own contract, rule and cap", async function () {
+  it("an issuer runs two funds, each with its own contract, rule and cap", async function () {
     const s = await networkHelpers.loadFixture(async function two() {
       return deployProfile(connection, twoFunds, { usdHolderCap: 1n, eurHolderCap: 2n });
     });
@@ -322,25 +322,25 @@ describe("a token's decimals", async function () {
     id: "twoDecimals",
     products: [
       {
-        key: "deposit",
+        key: "cash",
         template: "GatedToken",
-        name: "Bank Deposit",
-        symbol: "bUSD",
+        name: "Cash Token",
+        symbol: "cUSD",
         decimals: 2,
         rules: ["credentialRule"],
         policy: { requireAll: 0, requireAny: QUALS.CUSTOMER | QUALS.INFRA, forbidAny: 0, attesters: 1n },
       },
-      { key: "fund", template: "Gated4626Vault", name: "Bank Fund", symbol: "bFUND", rules: PLAIN, assetProduct: "deposit" },
+      { key: "fund", template: "Gated4626Vault", name: "Cash Fund", symbol: "cFUND", rules: PLAIN, assetProduct: "cash" },
     ],
   };
 
-  it("a deposit token matches the ledger's precision, and a vault over it follows", async function () {
+  it("a cash token matches its ledger's precision, and a vault over it follows", async function () {
     const s = await networkHelpers.loadFixture(async function decimals() {
       return deployProfile(connection, twoDecimals);
     });
-    const deposit = await viem.getContractAt("GatedToken", s.products.deposit.address);
+    const cash = await viem.getContractAt("GatedToken", s.products.cash.address);
     const vault = await viem.getContractAt("Gated4626Vault", s.products.fund.address);
-    assert.equal(await deposit.read.decimals(), 2);
+    assert.equal(await cash.read.decimals(), 2);
     assert.equal(await vault.read.decimals(), 8);
   });
 

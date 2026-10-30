@@ -4,7 +4,7 @@ import { activeProfile, type Profile } from "../profiles.js";
 import { ROLES } from "./roles.js";
 
 /**
- * Stage 2, once per bank, after the council has attested the core. It takes the addresses `Core` produced as parameters.
+ * Stage 2, once per issuer, after the council has attested the core. It takes the addresses `Core` produced as parameters.
  *
  * 1. Configure what only the deployer can: the first KYC attester.
  * 2. Grant the core's roles: the guardian becomes a timelock canceller; the recovery timelock gets RECOVERY_ROLE (unpause
@@ -42,7 +42,7 @@ export function coreHandoverModule(profile: Profile) {
 
     if (rules.has("credentialRule")) {
       const credentials = m.contractAt("CredentialRegistry", p("credentialRegistry"));
-      // The one attester is the bank's KYC function, id 0. It may assert the eight named qualification bits unless the
+      // The one attester is the issuer's KYC function, id 0. It may assert the eight named qualification bits unless the
       // deployment narrows that.
       configured.push(
         m.call(credentials, "addAttester", [p("kycAttester"), m.getParameter<number>("kycAllowedQuals", 255)]),

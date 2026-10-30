@@ -41,7 +41,7 @@ contract GatedToken is PolicyGatedERC20Upgradeable {
    * @notice Initializes a proxy
    * @param _name The token name, also the EIP-712 domain name
    * @param _symbol The token symbol
-   * @param _decimals The token's decimals, fixed from here on: for a tokenised deposit, the ledger's precision
+   * @param _decimals The token's decimals, fixed from here on: for a cash token, its ledger's precision
    * @param _admin Holds DEFAULT_ADMIN_ROLE and grants every other role; ends up with the timelock
    * @param _guardian The guardian multisig. Can pause and, through the timelock's CANCELLER_ROLE, veto; nothing else
    * @param _registry The policy registry, fixed after initialization

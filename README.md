@@ -72,7 +72,7 @@ can change its own.
 | `MINTER_ROLE` / `BURNER_ROLE` | issuer | none | mint, and burn (enforcement burns can take frozen tokens) |
 | `AGENT_ROLE` | issuer | none | `forcedTransfer` (clawback; bypasses pause, frozen tokens and the sender's address freeze, still policy-checked: an address-frozen receiver refuses it), `setFrozenTokens`; on the 7540 vault, `recoverRedeemRequest` (one controller's escrow → recovery account whose credential the token's policy accepts; out of the vault's own address `forcedTransfer` takes only shares not booked to a pending redemption, and the vault's address cannot be frozen) and `recoverClaimable` (claimable assets and shares → recovery account whose credential the token's policy accepts, even while paused or at a full cap) |
 | `EXECUTOR_ROLE` | `IntentExecutor` and `DvPExecutor` contracts | none | settle holder-signed intents that name no executor or name that executor. `IntentExecutor` settles only intents that state no consideration; `DvPExecutor` settles trades. Neither can alter an intent |
-| `OPERATOR_ROLE` (executors) | bank / relayer keys | none | submit intents via `execute` / `executeBatch` (all-or-nothing), or trades via `executeDvPGated` / `executeDvP3009` (both legs or neither) |
+| `OPERATOR_ROLE` (executors) | issuer / relayer keys | none | submit intents via `execute` / `executeBatch` (all-or-nothing), or trades via `executeDvPGated` / `executeDvP3009` (both legs or neither) |
 | `GUARDIAN_ROLE` (executors) | multisig | none | pause an executor only; the timelock or the recovery timelock unpauses |
 | `ATTESTER_ROLE` (registry) | security council | none | attest / revoke codehashes |
 | `GUARDIAN_ROLE` (credential registry) | multisig | none | block an address or kill an attester, and nothing else; the main or recovery timelock undoes it |
@@ -81,7 +81,7 @@ can change its own.
 | `ProxyDeployer` owner | operations account | none | place a new product, only over an attested implementation. It touches nothing that exists |
 | `Fund` owner | timelock | ≥ 24 hours | register a class, set the fund's rule and investor cap, exempt an account. Only the installed rule records which classes an account holds |
 | token `AGENT_ROLE` → rules | issuer | none | set or clear per-holder lockups, freeze or unfreeze a holder (`HolderRestrictionRule`) |
-| `FULFILLER_ROLE` (7540 vault) | bank | none | fulfil deposits/redemptions at off-chain NAV; reject pending requests |
+| `FULFILLER_ROLE` (7540 vault) | issuer | none | fulfil deposits/redemptions at off-chain NAV; reject pending requests |
 
 - **Attested code only.** Hooks, rules and implementations are installed only if their runtime codehash is attested.
   Attestation is checked at install time; revoking it later does not silently change a live token.
@@ -132,7 +132,7 @@ can change its own.
 
 ## Deployment runbook
 
-One core per bank, then one product at a time, so a bank runs many products on one set of timelocks, one guardian, one
+One core per issuer, then one product at a time, so an issuer runs many products on one set of timelocks, one guardian, one
 hook and one credential registry, and a client is verified once. Someone who wants one product alone deploys the core and
 that product, with the same code. `ignition/profiles.ts` names the combinations: `full`, `token`, `vault4626`, `vault7540`.
 `PROFILE` chooses one for `hardhat ignition deploy`, and `PRODUCT` one of its products; `full` and its first product are the
@@ -188,7 +188,7 @@ exact sequence on the local network, playing the council and the KYC attester, a
    - hand over: DEFAULT_ADMIN_ROLE to the timelock on the credential registry and on each executor; the deployer renounces it
      there and on both timelocks; `ProxyDeployer` ownership moves to the operations account (parameter `operations`).
 4. **`Fund`** (the operations account), once per fund, if the products use one: a `Fund` (owner = the operations account) and
-   the `FundHoldersRule` that points at it. A bank has as many as it has funds, each with its own cap, and `FUND` chooses one
+   the `FundHoldersRule` that points at it. An issuer has as many as it has funds, each with its own cap, and `FUND` chooses one
    for `hardhat ignition deploy`. Then the council attests the rule as in step 2, after reading the `Fund` it points at
    (`FUND()`): the rule's codehash covers the fund's address, not the fund's code. Check the fund's runtime code against the
    manifest's `Fund` entry, filling its `immutableSlots` (the registry address) as for the rules, and that its `owner()` is the
@@ -209,7 +209,7 @@ exact sequence on the local network, playing the council and the KYC attester, a
      for the escrow: the 7540 vault is the token itself, which neither the fund rule nor the minimum counts;
    - grant roles: AGENT to the issuer's account, **UPGRADER to the timelock only**, RECOVERY to the recovery timelock; MINTER and
      BURNER on a `GatedToken` or `IntentToken`; EXECUTOR on an `IntentToken` to the executors the product names; FULFILLER on a
-     7540 vault to the bank;
+     7540 vault to the issuer;
    - hand over: DEFAULT_ADMIN_ROLE to the timelock, and the operations account renounces it.
 6. **`FundOpen`** (the operations account), once per fund, after its first classes are placed (parameters `fundContract`,
    `fundHoldersRule`, `holderCap`, `timelock` and a `class_<key>` for each class): install the rule, set the cap, register the
