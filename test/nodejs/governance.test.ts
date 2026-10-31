@@ -198,7 +198,7 @@ describe("governance through the timelock", async function () {
     const initData = encodeFunctionData({
       abi: s.token.abi,
       functionName: "initialize",
-      args: ["New Token", "NEW", s.timelock.address, s.wallets.guardian.account.address, s.registry.address, s.hook.address, rules],
+      args: ["New Token", "NEW", 18, s.timelock.address, s.wallets.guardian.account.address, s.registry.address, s.hook.address, rules],
     });
 
     await viem.assertions.revertWithCustomErrorWithArgs(

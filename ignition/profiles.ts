@@ -15,7 +15,7 @@ export type Product = {
   rules: readonly RuleKey[];
   /** Who may receive it. KYC from attester 0 unless stated. */
   policy?: Policy;
-  /** The decimals of a `GatedToken`: for a cash token, its ledger's precision. 18 unless stated. */
+  /** The decimals of a `GatedToken` or an `IntentToken`: for a cash token, its ledger's precision. 18 unless stated. */
   decimals?: number;
   /** The key of the fund it is a class of. Needed exactly when it lists `fundHoldersRule`. */
   fund?: string;

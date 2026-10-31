@@ -115,7 +115,7 @@ contract MockERC4626Target is ERC4626 {
     if (_reenterInto != address(0)) {
       // Once, so a guard that is missing shows as a call that succeeds, not as endless recursion.
       reenterInto = address(0);
-      IPortfolio(_reenterInto).allocate(reenterAdapter, 1);
+      IPortfolio(_reenterInto).allocate(reenterAdapter, 1, 0);
     }
     if (readsPriceOf != address(0)) IPortfolio(readsPriceOf).pricedValue();
     super._deposit(_caller, _receiver, _assets, _shares);

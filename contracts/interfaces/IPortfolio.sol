@@ -206,6 +206,14 @@ interface IPortfolio {
    */
   error Portfolio_ShortReturn(address _adapter, uint256 _expected, uint256 _received);
 
+  /**
+   * @notice Thrown when an allocation grows by less than the allocator accepted
+   * @param _adapter The adapter
+   * @param _minAdded The least the allocator accepted
+   * @param _added What the allocation would have grown by
+   */
+  error Portfolio_ShortAllocation(address _adapter, uint256 _minAdded, uint256 _added);
+
   /// @notice Thrown when `raise` needs an adapter and none is set
   error Portfolio_NoLiquidityAdapter();
 
@@ -264,10 +272,13 @@ interface IPortfolio {
    * @dev The vault's ALLOCATOR_ROLE. Caps are checked here only, so an exit can leave a risk above its relative cap
    * @param _adapter The adapter
    * @param _assets The assets to send
+   * @param _minAdded The least the allocation may grow by: the change in value for a priced adapter, the assets sent
+   *        for a reported one. An allocator approves what it sends, and the target decides what comes back
    */
   function allocate(
     address _adapter,
-    uint256 _assets
+    uint256 _assets,
+    uint256 _minAdded
   ) external;
 
   /**

@@ -168,11 +168,11 @@ contract DvPExecutor is AccessControl, Pausable, ReentrancyGuardTransient, IDvPE
     } else {
       // The token's `ok` is `reason == TRANSFER_OK`, so the reason carries it.
       // slither-disable-next-line unused-return
-      (, _reason) = ITransferIntent(_cashToken).canExecute(_cashIntent, _cashSig);
+      (, _reason) = ITransferIntent(_cashToken).canExecute(_cashIntent, _cashSig, address(this));
       if (_reason == Reasons.TRANSFER_OK) {
         // As above.
         // slither-disable-next-line unused-return
-        (, _reason) = ITransferIntent(_securityToken).canExecute(_securitiesIntent, _securitiesSig);
+        (, _reason) = ITransferIntent(_securityToken).canExecute(_securitiesIntent, _securitiesSig, address(this));
       }
     }
     _ok = _reason == Reasons.TRANSFER_OK;
@@ -201,7 +201,7 @@ contract DvPExecutor is AccessControl, Pausable, ReentrancyGuardTransient, IDvPE
       if (_reason == Reasons.TRANSFER_OK) {
         // The token's `ok` is `reason == TRANSFER_OK`, so the reason carries it.
         // slither-disable-next-line unused-return
-        (, _reason) = ITransferIntent(_securityToken).canExecute(_securitiesIntent, _securitiesSig);
+        (, _reason) = ITransferIntent(_securityToken).canExecute(_securitiesIntent, _securitiesSig, address(this));
       }
     }
     _ok = _reason == Reasons.TRANSFER_OK;

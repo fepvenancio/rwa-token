@@ -169,8 +169,8 @@ interface IDvPExecutor {
   /**
    * @notice Pre-flight for `executeDvPGated`
    * @dev Runs the pause check, the mirror check and both legs' `canExecute` from this executor's address, cash first.
-   *      It does not check OPERATOR_ROLE, nor that this executor holds EXECUTOR_ROLE on the two tokens (the tokens'
-   *      own `canExecute` checks neither role). Legs on tokens that share policy state, such as two classes of one
+   *      It does not check OPERATOR_ROLE; a token on which this executor holds no EXECUTOR_ROLE answers `NOT_EXECUTOR`
+   *      from its own `canExecute`. Legs on tokens that share policy state, such as two classes of one
    *      fund, are each checked against the current state, and the first leg's movement can change the second's answer
    * @param _securityToken The security token
    * @param _cashToken The cash token
@@ -195,7 +195,8 @@ interface IDvPExecutor {
    * @dev Runs the pause check, the match check, then for the authorization its window (not yet valid, then expired,
    *      both ends exclusive), its state and the buyer's balance, then the securities leg's `canExecute`. It cannot
    *      check the buyer's signature, which the cash token exposes no view for, nor a pause or blocklist on the cash
-   *      token. It does not check OPERATOR_ROLE, nor that this executor holds EXECUTOR_ROLE on the security token
+   *      token. It does not check OPERATOR_ROLE; a security token on which this executor holds no EXECUTOR_ROLE answers
+   *      `NOT_EXECUTOR` from its own `canExecute`
    * @param _securityToken The security token
    * @param _cashToken The ERC-3009 cash token
    * @param _securitiesIntent The seller's signed intent

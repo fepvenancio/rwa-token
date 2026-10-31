@@ -41,8 +41,8 @@ export function productModule(product: Product) {
         : product.template === "Gated7540Vault"
           ? // The 7540 initialiser takes the custody after the rules.
             [p("asset"), ...base, p("custody")]
-          : product.template === "GatedToken"
-            ? // A `GatedToken` takes its decimals after the symbol.
+          : product.template === "GatedToken" || product.template === "IntentToken"
+            ? // Both token templates take their decimals after the symbol.
               [product.name, product.symbol, product.decimals ?? 18, ...base.slice(2)]
             : base;
     const data = m.encodeFunctionCall(implementation, "initialize", initArgs, { id: "init" });

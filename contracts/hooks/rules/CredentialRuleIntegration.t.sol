@@ -264,8 +264,7 @@ contract CredentialRuleIntegration_Enforcement is CredentialRuleIntegrationTest 
 contract CredentialRuleIntegration_Intents is CredentialRuleIntegrationTest {
   function test_WhenTheReceiverHoldsACredential_ASignedIntentSettlesAndPreflightAgrees() external {
     (ITransferIntent.TransferIntent memory _i, bytes memory _sig) = _signedIntent(_bob, 10 ether, bytes32('n1'));
-    vm.prank(_executor);
-    (bool _ok, bytes32 _reason) = _token.canExecute(_i, _sig);
+    (bool _ok, bytes32 _reason) = _token.canExecute(_i, _sig, _executor);
     assertTrue(_ok);
     assertEq(_reason, Reasons.TRANSFER_OK);
 
@@ -279,8 +278,7 @@ contract CredentialRuleIntegration_Intents is CredentialRuleIntegrationTest {
     (ITransferIntent.TransferIntent memory _i, bytes memory _sig) = _signedIntent(_bob, 10 ether, bytes32('n2'));
     vm.warp(_NOW + 2 hours);
 
-    vm.prank(_executor);
-    (bool _ok, bytes32 _reason) = _token.canExecute(_i, _sig);
+    (bool _ok, bytes32 _reason) = _token.canExecute(_i, _sig, _executor);
     assertFalse(_ok);
     assertEq(_reason, Reasons.CREDENTIAL_EXPIRED);
 

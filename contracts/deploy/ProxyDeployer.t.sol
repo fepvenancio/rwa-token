@@ -83,7 +83,7 @@ contract ProxyDeployerUnitTest is Helpers {
     address _withHook
   ) internal view returns (bytes memory _data) {
     _data = abi.encodeCall(
-      IntentToken.initialize, ('Intent Token', _symbol, _admin, _guardian, _registry, _withHook, _rules)
+      IntentToken.initialize, ('Intent Token', _symbol, 18, _admin, _guardian, _registry, _withHook, _rules)
     );
   }
 
@@ -150,7 +150,7 @@ contract ProxyDeployerUnit_Deploy is ProxyDeployerUnitTest {
   function test_WhenInitialisedInTheSameTransaction_NoOneCanInitialiseItAgain() external {
     address _proxy = _deploy('INT', _init('INT', _hook), _hook);
     vm.expectRevert(Initializable.InvalidInitialization.selector);
-    IntentToken(_proxy).initialize('Evil', 'INT', makeAddr('attacker'), _guardian, _registry, _hook, _rules);
+    IntentToken(_proxy).initialize('Evil', 'INT', 18, makeAddr('attacker'), _guardian, _registry, _hook, _rules);
   }
 
   function test_WhenTheCallerIsNotTheOwner_ItReverts(
@@ -327,7 +327,7 @@ contract ProxyDeployerUnit_Deploy is ProxyDeployerUnitTest {
     _hookHolds(_otherHook, _predicted, _rules);
 
     bytes memory _data = abi.encodeCall(
-      IntentToken.initialize, ('Intent Token', 'INT', _admin, _guardian, _otherRegistry, _otherHook, _rules)
+      IntentToken.initialize, ('Intent Token', 'INT', 18, _admin, _guardian, _otherRegistry, _otherHook, _rules)
     );
     vm.expectRevert(
       abi.encodeWithSelector(IProxyDeployer.ProxyDeployer_RegistryMismatch.selector, _registry, _otherRegistry)
@@ -366,7 +366,7 @@ contract ProxyDeployerIntegration_RealRegistry is Helpers {
     address _implementation
   ) internal returns (address _proxy) {
     bytes memory _data = abi.encodeCall(
-      IntentToken.initialize, ('Intent Token', 'INT', _admin, _guardian, address(_registry), address(_hook), _rules)
+      IntentToken.initialize, ('Intent Token', 'INT', 18, _admin, _guardian, address(_registry), address(_hook), _rules)
     );
     _proxy = _deployer.deploy('INT', _implementation, _data, address(_hook), _rules);
   }

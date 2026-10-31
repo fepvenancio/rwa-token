@@ -92,9 +92,10 @@ Build: solc 0.8.30, `evmVersion: cancun`, optimizer 200 runs, no metadata hash, 
 
 Further limits recorded during review:
 
-- **`canExecute` checks the signature, and the executor binding.** An intent that names an executor pre-flights only
-  from that address: from any other, once the deadline and nonce checks pass, it returns `WRONG_EXECUTOR`.
-  `canExecute` does not check the caller's `EXECUTOR_ROLE` (`intents.test.ts`).
+- **`canExecute` takes the account that would call, so the answer does not depend on who asks.** It says
+  `NOT_EXECUTOR` first when that account lacks `EXECUTOR_ROLE`, then runs the checks `executeTransfer` runs, with that
+  account as the rules' operator. An intent that names an executor pre-flights true only for that account: for any
+  other, once the deadline and nonce checks pass, it returns `WRONG_EXECUTOR` (`intents.test.ts`).
 - **The token does not enforce a stated consideration.** An intent can state what its signer is to receive
   (`considerationToken`, `considerationAmount`). The token hashes both fields into the digest the holder signs and reads
   them only to reject an intent that states a consideration without naming an executor

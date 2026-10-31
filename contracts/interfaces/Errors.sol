@@ -58,5 +58,9 @@ library Reasons {
   bytes32 internal constant CREDENTIAL_EXPIRED = keccak256('CREDENTIAL_EXPIRED');
   /// @notice The receiver holds an active credential that the token's policy does not accept, or the token has no policy
   bytes32 internal constant RECEIVER_NOT_ELIGIBLE = keccak256('RECEIVER_NOT_ELIGIBLE');
+  /// @notice The account named to execute an intent does not hold EXECUTOR_ROLE on this token
+  bytes32 internal constant NOT_EXECUTOR = keccak256('NOT_EXECUTOR');
+  /// @notice The intent pays the zero address
+  bytes32 internal constant ZERO_RECEIVER = keccak256('ZERO_RECEIVER');
 }
 // solhint-enable private-vars-leading-underscore
