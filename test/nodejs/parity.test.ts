@@ -23,6 +23,8 @@ type Condition = {
   transfer: Expect;
   intent: Expect;
   deposit: Expect;
+  /** What the deposit's payer (alice, paying for bob) is refused with, where the mint itself would pass. */
+  payer?: Expect;
   redeem: Expect;
 };
 
@@ -45,7 +47,8 @@ const CONDITIONS: Condition[] = [
     setup: async (s) => deverify(s, s.holders.alice),
     transfer: "SENDER_NOT_VERIFIED",
     intent: "SENDER_NOT_VERIFIED",
-    deposit: "TRANSFER_OK", // the asset leg is not hooked and bob receives the shares
+    deposit: "TRANSFER_OK", // bob may receive the shares
+    payer: "RECEIVER_NOT_VERIFIED",
     redeem: "SENDER_NOT_VERIFIED",
   },
   {
@@ -55,6 +58,7 @@ const CONDITIONS: Condition[] = [
     transfer: "TRANSFER_OK",
     intent: "TRANSFER_OK",
     deposit: "TRANSFER_OK",
+    payer: "RECEIVER_NOT_VERIFIED",
     redeem: "TRANSFER_OK",
   },
   {
@@ -73,6 +77,7 @@ const CONDITIONS: Condition[] = [
     transfer: "TRANSFER_OK",
     intent: "TRANSFER_OK",
     deposit: "TRANSFER_OK",
+    payer: "CREDENTIAL_EXPIRED",
     redeem: "TRANSFER_OK",
   },
   {
@@ -90,6 +95,7 @@ const CONDITIONS: Condition[] = [
     transfer: "SENDER_NOT_VERIFIED",
     intent: "SENDER_NOT_VERIFIED",
     deposit: "TRANSFER_OK",
+    payer: "RECEIVER_NOT_VERIFIED",
     redeem: "SENDER_NOT_VERIFIED",
   },
   {
@@ -247,12 +253,17 @@ describe("pre-flight parity matrix", async function () {
         assert.equal(reasonName(reason), c.deposit);
         const max = await s.vault4626.read.maxDeposit([bob.account.address]);
         assert.equal(max, ok ? maxUint256 : 0n, "maxDeposit agrees with the mint probe");
+        const refusal = !ok
+          ? { errorName: "ERC4626ExceededMaxDeposit", args: [getAddress(bob.account.address), 1n, 0n] }
+          : c.payer
+            ? { errorName: "GatedVault_ThirdPartyNotEligible", args: [getAddress(alice.account.address), REASONS[c.payer]] }
+            : undefined;
         await assertCallParity(
           "deposit",
           () => s.vault4626.simulate.deposit([1n, bob.account.address], { account: alice.account.address }),
           () => s.vault4626.write.deposit([1n, bob.account.address], { account: alice.account }),
           s.vault4626.abi,
-          ok ? undefined : { errorName: "ERC4626ExceededMaxDeposit", args: [getAddress(bob.account.address), 1n, 0n] },
+          refusal,
         );
       });
 

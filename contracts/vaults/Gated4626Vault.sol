@@ -11,12 +11,10 @@ import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IGated4626Vault} from 'interfaces/IGated4626Vault.sol';
-// Needed by the compiler to resolve `@inheritdoc IPolicyGated`; solhint does not see NatSpec usage.
-// solhint-disable-next-line no-unused-vars
-import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {ITemplated} from 'interfaces/ITemplated.sol';
 
 import {PolicyGatedERC20Upgradeable} from 'contracts/base/PolicyGatedERC20Upgradeable.sol';
+import {GatedVaultBase} from 'contracts/vaults/GatedVaultBase.sol';
 
 /**
  * @title Gated4626Vault
@@ -26,7 +24,7 @@ import {PolicyGatedERC20Upgradeable} from 'contracts/base/PolicyGatedERC20Upgrad
  */
 // No receive or payable function, and upgradeToAndCall rejects value: no ETH can enter (tests: *_Ether).
 // aderyn-ignore-next-line(contract-locks-ether)
-contract Gated4626Vault is ERC4626Upgradeable, PolicyGatedERC20Upgradeable, IGated4626Vault {
+contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
   /**
    * @notice Locks the implementation; only proxies can be initialized
    * @custom:oz-upgrades-unsafe-allow constructor
@@ -54,28 +52,6 @@ contract Gated4626Vault is ERC4626Upgradeable, PolicyGatedERC20Upgradeable, IGat
     __Pausable_init();
     __Multicall_init();
     __PolicyGatedERC20_init_unchained(_admin, _guardian, _registry, _hook, _initialRules);
-  }
-
-  /**
-   * @inheritdoc IPolicyGated
-   * @dev Always reverts: vault shares are minted only by deposits
-   */
-  function mint(
-    address,
-    uint256
-  ) external pure override {
-    revert Gated4626Vault_Unsupported();
-  }
-
-  /**
-   * @inheritdoc IPolicyGated
-   * @dev Always reverts: vault shares are burned only by redemptions
-   */
-  function burn(
-    address,
-    uint256
-  ) external pure override {
-    revert Gated4626Vault_Unsupported();
   }
 
   /// @inheritdoc ERC4626Upgradeable
@@ -153,6 +129,37 @@ contract Gated4626Vault is ERC4626Upgradeable, PolicyGatedERC20Upgradeable, IGat
     uint256 _value
   ) internal override(ERC20Upgradeable, PolicyGatedERC20Upgradeable) {
     super._update(_from, _to, _value);
+  }
+
+  /**
+   * @inheritdoc ERC4626Upgradeable
+   * @dev A payer other than the receiver must pass the token's policy (the receiver is judged by the mint). `maxDeposit`
+   *      names only the receiver, so it cannot say this
+   */
+  function _deposit(
+    address _caller,
+    address _receiver,
+    uint256 _assets,
+    uint256 _shares
+  ) internal override {
+    _requireThirdPartyEligible(_caller, _receiver);
+    super._deposit(_caller, _receiver, _assets, _shares);
+  }
+
+  /**
+   * @inheritdoc ERC4626Upgradeable
+   * @dev A receiver other than the owner must pass the token's policy. An owner paying itself is not judged here, so a
+   *      lapsed holder can still leave. `maxWithdraw` and `maxRedeem` name only the owner, so they cannot say this
+   */
+  function _withdraw(
+    address _caller,
+    address _receiver,
+    address _owner,
+    uint256 _assets,
+    uint256 _shares
+  ) internal override {
+    _requireThirdPartyEligible(_receiver, _owner);
+    super._withdraw(_caller, _receiver, _owner, _assets, _shares);
   }
 
   /**

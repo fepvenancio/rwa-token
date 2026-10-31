@@ -21,6 +21,7 @@ import {IERC7540Redeem} from 'interfaces/IERC7540Redeem.sol';
 import {IERC7575} from 'interfaces/IERC7575.sol';
 import {IERC7943Fungible} from 'interfaces/IERC7943Fungible.sol';
 import {IGated7540Vault} from 'interfaces/IGated7540Vault.sol';
+import {IGatedVaultBase} from 'interfaces/IGatedVaultBase.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
@@ -237,7 +238,7 @@ contract Gated7540VaultUnit_IssuerPrimitives is Gated7540VaultUnitTest {
     bytes32 _minterRole = _vault.MINTER_ROLE();
     vm.prank(_admin);
     _vault.grantRole(_minterRole, _alice);
-    vm.expectRevert(IGated7540Vault.Gated7540Vault_Unsupported.selector);
+    vm.expectRevert(IGatedVaultBase.GatedVault_Unsupported.selector);
     vm.prank(_alice);
     _vault.mint(_bob, 1);
   }
@@ -246,7 +247,7 @@ contract Gated7540VaultUnit_IssuerPrimitives is Gated7540VaultUnitTest {
     bytes32 _burnerRole = _vault.BURNER_ROLE();
     vm.prank(_admin);
     _vault.grantRole(_burnerRole, _alice);
-    vm.expectRevert(IGated7540Vault.Gated7540Vault_Unsupported.selector);
+    vm.expectRevert(IGatedVaultBase.GatedVault_Unsupported.selector);
     vm.prank(_alice);
     _vault.burn(_bob, 1);
   }
@@ -816,7 +817,7 @@ contract Gated7540VaultUnit_Escrow is Gated7540VaultUnitTest {
 
   function test_WhenTheAgentFreezesTheEscrow_ItReverts() external {
     _escrowTwo();
-    vm.expectRevert(IGated7540Vault.Gated7540Vault_Unsupported.selector);
+    vm.expectRevert(IGatedVaultBase.GatedVault_Unsupported.selector);
     vm.prank(_agent);
     _vault.setFrozenTokens(address(_vault), 30);
     assertEq(_vault.getFrozenTokens(address(_vault)), 0);

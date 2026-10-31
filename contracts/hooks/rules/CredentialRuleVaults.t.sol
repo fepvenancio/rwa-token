@@ -127,7 +127,6 @@ contract CredentialRuleVaults_7540 is CredentialVaultsTest {
     _credential(_alice, Quals.KYC | Quals.PROFESSIONAL, 30 days);
     _credential(_bob, Quals.KYC | Quals.PROFESSIONAL, 365 days);
     _credential(_carol, Quals.KYC, 365 days);
-    _credential(address(_vault), Quals.KYC | Quals.INFRA, 3650 days); // the escrow
     _fund(address(_vault), [_alice, _bob, _carol, _eve]);
   }
 
@@ -239,7 +238,7 @@ contract CredentialRuleVaults_7540 is CredentialVaultsTest {
   }
 
   function test_WhenThePolicyNeedsAProfessional_ARetailControllerCannotInvestAndTheEscrowStillWorks() external {
-    _rule.setPolicy(address(_vault), Quals.KYC, Quals.PROFESSIONAL | Quals.INFRA, 0, 1);
+    _rule.setPolicy(address(_vault), Quals.KYC, Quals.PROFESSIONAL, 0, 1);
 
     vm.expectRevert(
       abi.encodeWithSelector(
@@ -250,7 +249,7 @@ contract CredentialRuleVaults_7540 is CredentialVaultsTest {
     _vault.requestDeposit(10, _carol, _carol);
 
     _invest(_bob, 1000);
-    _redeemAll(_bob, 1000); // the escrow vault holds the shares in between, through INFRA
+    _redeemAll(_bob, 1000); // the escrow holds the shares in between, as the token's own address
     vm.prank(_bob);
     _vault.redeem(1000, _bob, _bob);
     assertEq(_vault.totalSupply(), 0);

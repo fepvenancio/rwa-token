@@ -552,6 +552,63 @@ contract CredentialRuleUnit_TokenCallsAreStatic is CredentialRuleUnitTest {
 
 /// @dev The account-level probes (`canSend` and `canReceive` on the token) must agree with `check`: a probe that rejects
 ///      an account means `check` rejects every movement of a kind the rule does not exempt on that side
+contract CredentialRuleUnit_TheTokensOwnAddress is CredentialRuleUnitTest {
+  function _standingOfTheToken(
+    uint8 _seed
+  ) internal {
+    _stand(_token, _statusOf(_seed));
+  }
+
+  function test_WhenTheAccountIsTheToken_ItMayReceiveWhateverItsStanding(
+    uint8 _statusSeed
+  ) external {
+    _standingOfTheToken(_statusSeed);
+    assertEq(_rule.checkReceive(_token, _token), Reasons.TRANSFER_OK);
+
+    IPolicyHook.TransferContext memory _c = _ctx(IPolicyHook.TransferKind.TRANSFER);
+    _c.to = _token;
+    _stand(_from, ICredentialRegistry.Status.ACTIVE);
+    assertEq(_rule.check(_c), Reasons.TRANSFER_OK);
+  }
+
+  function test_WhenTheAccountIsTheToken_ItMaySendWhateverItsStanding(
+    uint8 _statusSeed
+  ) external {
+    _standingOfTheToken(_statusSeed);
+    assertEq(_rule.checkSend(_token, _token), Reasons.TRANSFER_OK);
+
+    IPolicyHook.TransferContext memory _c = _ctx(IPolicyHook.TransferKind.BURN);
+    _c.from = _token;
+    _c.operator = _from; // not a burner: a settlement burn is the vault's own
+    assertEq(_rule.check(_c), Reasons.TRANSFER_OK);
+  }
+
+  function test_WhenTheTokenHasNoPolicy_ItsOwnAddressMayStillReceive() external {
+    address _unset = _mockContract('unset');
+    assertEq(_rule.checkReceive(_unset, _unset), Reasons.TRANSFER_OK);
+  }
+
+  function test_TheRegistryIsNotAskedAboutTheToken() external {
+    vm.expectCall(_registry, _call(_token), 0);
+    _rule.checkSend(_token, _token);
+    _rule.checkReceive(_token, _token);
+  }
+
+  function test_AnotherTokensAddressIsJudgedLikeAnyAccount() external {
+    address _other = _mockContract('other');
+    _stand(_other, ICredentialRegistry.Status.NONE);
+    assertEq(_rule.checkReceive(_token, _other), Reasons.RECEIVER_NOT_VERIFIED);
+    assertEq(_rule.checkSend(_token, _other), Reasons.SENDER_NOT_VERIFIED);
+  }
+
+  function test_TheTokenInAnotherTokensQuestionIsJudgedToo() external {
+    address _other = _mockContract('other');
+    _stand(_token, ICredentialRegistry.Status.BLOCKED);
+    assertEq(_rule.checkReceive(_other, _token), Reasons.RECEIVER_NOT_ELIGIBLE); // that token has no policy
+    assertEq(_rule.checkSend(_other, _token), Reasons.SENDER_NOT_VERIFIED);
+  }
+}
+
 contract CredentialRuleUnit_AccountProbes is CredentialRuleUnitTest {
   function test_WhenAskedWhetherAnAccountMaySend_ItAnswersFromItsStandingAndIgnoresTheToken(
     uint8 _statusSeed

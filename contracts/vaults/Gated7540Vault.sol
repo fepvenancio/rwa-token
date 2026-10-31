@@ -15,13 +15,11 @@ import {IERC7540Operator} from 'interfaces/IERC7540Operator.sol';
 import {IERC7540Redeem} from 'interfaces/IERC7540Redeem.sol';
 import {IERC7575} from 'interfaces/IERC7575.sol';
 import {IGated7540Vault} from 'interfaces/IGated7540Vault.sol';
-// Needed by the compiler to resolve `@inheritdoc IPolicyGated`; solhint does not see NatSpec usage.
-// solhint-disable-next-line no-unused-vars
-import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 import {ITemplated} from 'interfaces/ITemplated.sol';
 
 import {PolicyGatedERC20Upgradeable} from 'contracts/base/PolicyGatedERC20Upgradeable.sol';
+import {GatedVaultBase} from 'contracts/vaults/GatedVaultBase.sol';
 
 /**
  * @title Gated7540Vault
@@ -37,7 +35,7 @@ import {PolicyGatedERC20Upgradeable} from 'contracts/base/PolicyGatedERC20Upgrad
 // aderyn-ignore-next-line(contract-locks-ether)
 contract Gated7540Vault is
   ERC4626Upgradeable,
-  PolicyGatedERC20Upgradeable,
+  GatedVaultBase,
   IERC7540Operator,
   IERC7540Deposit,
   IERC7540Redeem,
@@ -154,6 +152,7 @@ contract Gated7540Vault is
     // No cancellation exists, so refuse assets from a controller that could not hold the shares.
     bytes32 _reason = _mintProbe(_controller);
     if (_reason != Reasons.TRANSFER_OK) revert Gated7540Vault_ControllerNotEligible(_reason);
+    _requireThirdPartyEligible(_owner, _controller);
 
     $.deposits[_controller].pendingAssets += _assets;
     emit DepositRequest(_controller, _owner, 0, _sender, _assets);
@@ -175,6 +174,8 @@ contract Gated7540Vault is
     Gated7540Storage storage $ = _getGated7540Storage();
     address _sender = _msgSender();
     if (_owner != _sender && !$.operators[_owner][_sender]) _spendAllowance(_owner, _sender, _shares);
+    // Otherwise a holder could name a lapsed address as controller, which, paying itself, would collect the cash.
+    _requireThirdPartyEligible(_controller, _owner);
 
     $.redeems[_controller].pendingShares += _shares;
     $.pendingRedeemShares += _shares;
@@ -262,10 +263,9 @@ contract Gated7540Vault is
     address _to
   ) external onlyRole(AGENT_ROLE) {
     if (_to == address(0)) revert Gated7540Vault_ZeroAddress();
-    // The recipient must pass the policy as the receiver of an enforcement move (identity), even for the asset leg,
-    // which is not hooked. A zero-amount FORCED probe: no pause, cap or frozen effect, only who may receive.
-    bytes32 _reason =
-      _check(_context(address(0), _to, 0, _msgSender(), IPolicyHook.TransferKind.FORCED, bytes32(0), 0), _policyHook());
+    // The recipient must pass the policy as the receiver of an enforcement move, even for the asset leg, which is not
+    // hooked.
+    bytes32 _reason = _enforcementProbe(_to);
     if (_reason != Reasons.TRANSFER_OK) revert Gated7540Vault_RecipientNotEligible(_reason);
 
     Gated7540Storage storage $ = _getGated7540Storage();
@@ -404,28 +404,6 @@ contract Gated7540Vault is
   }
 
   /**
-   * @inheritdoc IPolicyGated
-   * @dev Always reverts: shares are minted only by deposit claims
-   */
-  function mint(
-    address,
-    uint256
-  ) external pure override {
-    revert Gated7540Vault_Unsupported();
-  }
-
-  /**
-   * @inheritdoc IPolicyGated
-   * @dev Always reverts: shares are burned only by redemption fulfilments
-   */
-  function burn(
-    address,
-    uint256
-  ) external pure override {
-    revert Gated7540Vault_Unsupported();
-  }
-
-  /**
    * @inheritdoc PolicyGatedERC20Upgradeable
    * @dev Out of the vault's own address, only the shares above those booked to pending redemptions can be forced
    *      (`Gated7540Vault_ExceedsSurplus`): shares that reached the vault outside a request. A pending redemption
@@ -456,7 +434,7 @@ contract Gated7540Vault is
     address _account,
     uint256 _amount
   ) public override onlyRole(AGENT_ROLE) returns (bool _result) {
-    if (_account == address(this)) revert Gated7540Vault_Unsupported();
+    if (_account == address(this)) revert GatedVault_Unsupported();
     _result = super.setFrozenTokens(_account, _amount);
   }
 
@@ -493,6 +471,7 @@ contract Gated7540Vault is
   ) public override whenNotPaused returns (uint256 _assets) {
     _onlyControllerOrOperator(_controller);
     _requirePayoutEligible(_controller);
+    _requireThirdPartyEligible(_receiver, _controller);
     if (_shares == 0) revert Gated7540Vault_ZeroAmount();
     RedeemState storage _state = _getGated7540Storage().redeems[_controller];
     if (_shares > _state.claimableShares) revert Gated7540Vault_ExceedsClaimable(_shares, _state.claimableShares);
@@ -514,6 +493,7 @@ contract Gated7540Vault is
   ) public override whenNotPaused returns (uint256 _shares) {
     _onlyControllerOrOperator(_controller);
     _requirePayoutEligible(_controller);
+    _requireThirdPartyEligible(_receiver, _controller);
     if (_assets == 0) revert Gated7540Vault_ZeroAmount();
     RedeemState storage _state = _getGated7540Storage().redeems[_controller];
     if (_assets > _state.claimableAssets) revert Gated7540Vault_ExceedsClaimable(_assets, _state.claimableAssets);
