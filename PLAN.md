@@ -2763,7 +2763,7 @@ What this changes:
 - **One stack per issuer, many products (P1).** One set of timelocks, one guardian, one credential registry, one hook. A client is verified once and can hold every product, and blocking a sanctioned address applies everywhere, which is what an issuer wants. A fund's money stays apart in its own `Portfolio` (P12). Someone who wants one product alone deploys the core and one product, with the same code.
 - **Launching a product does not wait (P26).** It adds a proxy over attested code and touches nothing that exists, so `ProxyDeployer` stays with an operations multisig instead of moving to the timelock. A timelock delay still protects what can hurt existing holders: upgrades, the hook, rule lists, roles, adapters, raised caps and fee models.
 - **Caps and validators are the fund's mandate.** A fund client's manager can invest only where the issuer allowed, up to the limits it set. That is the oversight a depositary has to perform, enforced by the contract.
-- **Clients pay with our own cash token (P25).** A `GatedToken` limited to customers: take payment off-chain and mint, burn and pay out on the way back. It is the asset of every vault and the cash leg of `DvPExecutor`, so wires work with no fiat code in a vault. Vaults, portfolios and accounts hold the `INFRA` bit and clients the `CUSTOMER` bit. It must meet the rules that apply to holding client money.
+- **Clients pay with our own cash token (P25).** An `IntentToken` limited to customers, at its ledger's decimals: take payment off-chain and mint, burn and pay out on the way back. It is the asset of every vault and the cash leg of `DvPExecutor`, so wires work with no fiat code in a vault. Vaults, portfolios and accounts hold the `INFRA` bit and clients the `CUSTOMER` bit. It must meet the rules that apply to holding client money.
 - **Custody before on-chain yield.** The money sits with the issuer or its custodians, so `GuardedAccount` comes before `ERC4626Adapter`, and the 4626 comes last.
 - **Clients do not need wallets or gas (P24).** With one address per client in the issuer's custody, holder caps count clients rather than wallets, so entity ids can wait. The cost is concentration: a custody compromise is the worst case.
 - **Confidentiality decides the chain (P23).** On a public chain anyone can see each client's balances and movements. No contract fixes that. The code needs an EVM with Cancun: the base uses transient storage.
@@ -2860,7 +2860,8 @@ investor ⇄ Gated7540Vault ⇄ NavDesk ──────────▶ Portfo
 
 | Product | Legos | Profile |
 |---|---|---|
-| A cash token or a plain token | `GatedToken` | `token` |
+| A plain token | `GatedToken` | `token` |
+| A cash token | `IntentToken`, at its ledger's decimals | `token` |
 | A fund whose money sits with one custodian | `Gated7540Vault`, `NavDesk` (cash account is the custodian) | `vault7540` |
 | A fund with several custodians, a mandate and fees | + `Portfolio`, `GuardedAccount`, validators, `FeeModel` | `managed-fund` |
 | A gated vault, money stays in it | `Gated4626Vault` | `vault4626` |
@@ -2915,8 +2916,8 @@ Immutable, one per 7540 vault. It holds no money and has no role table: it asks 
 | Step | Function | Who | What it enforces |
 |---|---|---|---|
 | 1 | `closePeriod()` | Anyone, once `periodLength` has passed | Nobody chooses the cut-off |
-| 2 | `propose(reported, reportHash, asOf, moves)` | `REPORTER_ROLE` | One at a time. `asOf` is not before the cut-off and not in the future, so a price is always struck after requests close. `moves` equals the source's count, so money crossing between reported and on-chain after the valuation cannot count twice. The source's prices are fresh. `nav = reported + pricedValue() - fee`, and it must be above zero while shares exist. The NAV, the fee, the new high-water mark and `reportHash` are frozen |
-| 3 | `accept()` | `CHECKER_ROLE`, never the proposer | Two people on every price (P6) |
+| 2 | `propose(reported, reportHash, asOf, moves)` | `REPORTER_ROLE` | One at a time. `asOf` is not before the cut-off and not in the future, so a price is always struck after requests close. `moves` equals the source's count, so money crossing between reported and on-chain after the valuation cannot count twice. The source's prices are fresh. `nav = reported + pricedValue() - fee`, and it must be above zero while shares exist. The NAV, the fee, the new high-water mark, `reportHash`, the cash account and the fee recipient are frozen, because a timelock change can land inside the cooldown |
+| 3 | `accept(proposalHash)` | `CHECKER_ROLE`, never the proposer | Two people on every price (P6). The hash covers the period, the NAV, the fee, the mark, `reportHash`, the cash account and the fee recipient, so a replaced proposal cannot pick up an approval meant for another |
 | - | `cancel()` | `GUARDIAN_ROLE` or `CHECKER_ROLE` | Any time before execution |
 | 4 | `execute()` | Anyone, after the cooldown and acceptance | The report is not older than `maxReportAge`. Calls `settlePeriod` with the frozen numbers. Reverts if the cash account is short, so the desk raises cash before proposing |
 
@@ -3099,16 +3100,50 @@ P2 to P22 were answered by the owner on 2026-10-30, every row as recommended, wi
 | P21 | Should managed funds exclude on-chain yield by default? | Yes, through the `managed-fund` profile. Clients' holdings are not the issuer's exposure, but its own seed money and market-making are, and clients bring suitability and product-approval duties. `vault4626-invest` stays available as a separate product once risk has approved it. | Offer it from the start and classify case by case. |
 | P22 | Build `ExecutedOnlyRule`? | Yes, as an optional rule of about 30 lines. It ties every holder-to-holder movement to the issuer's message. | Leave plain transfers open and reconcile off-chain. |
 | P23 | Which chain? | **Unconfirmed.** A permissioned EVM with Cancun. It avoids publishing client balances and movements, and the issuer chooses the validators. It gives up public lending vaults and public stablecoins, which `managed-fund` leaves out anyway. | A public chain or L2. Reaches public liquidity, with client positions public unless a privacy layer is added, and validators outside the issuer's control. |
-| P24 | Who holds clients' keys? | **Unconfirmed.** Custody by the issuer by default, one address per client, in MPC or HSM. Clients need no wallet or gas. Institutions can bring their own wallet with a credential. A custody compromise is the worst case. | Clients hold their own keys. Less custody risk, but clients need wallets and gas, a lost key becomes a forced-transfer case, and the vaults need signed operator approvals. |
-| P25 | What do clients pay with? | **Unconfirmed.** Our own cash token, a `GatedToken` limited to customers. | An external stablecoin. Nothing to issue and none of the rules on holding client money, with another issuer's risk, and it needs a public chain or a bridge. |
+| P24 | Who holds clients' keys? | **Unconfirmed.** Custody by the issuer by default, one address per client, in MPC or HSM. Clients need no wallet or gas. Institutions can bring their own wallet with a credential. A custody compromise is the worst case. | Clients hold their own keys. Less custody risk, but clients need wallets and gas, a lost key becomes a forced-transfer case, and vault entry goes through signed entry. |
+| P25 | What do clients pay with? | **Unconfirmed.** Our own cash token, an `IntentToken` limited to customers, because a DvP cash leg must settle by signed intent. | An external stablecoin. Nothing to issue and none of the rules on holding client money, with another issuer's risk, and it needs a public chain or a bridge. |
 | P26 | How long is the timelock delay, and what waits for it? | **Decided by the owner, 2026-10-30: 24 hours,** replacing 7 days. Set at deployment, with a constant floor of 1 hour so that a compromised governance cannot take it to zero. The guardian has a day to cancel a bad change. A product launch does not wait at all. | 48 hours, for more cancel time. Or keep 7 days for upgrades only, which needs a second timelock. |
 | P27 | Does an investor with an open request count under a fund's investor cap? | **Decided by the owner, 2026-10-30: accept the first version as it is** (outside review, items 3.2 and 3.3). The agent rejects deposits near the cap, a monitor watches the count going over it, and recovery always works. No cheap contract fix exists: the 7540 has almost no room and settlement cannot loop over investors. Whether a redeeming investor still counts as a holder remains a question for counsel, and a different answer reopens this row. | Count an investor until the redemption settles, and reserve a slot at `requestDeposit`. The count is always exact, and it needs its own design in `Fund` and per-request bookkeeping in a vault with no room. |
+
+### Agreed order (owner, 2026-10-30)
+
+Set after three sessions assessed the stack and checked each other's findings. One PR each, tests first, stopping for review after each. Merging is the owner's.
+
+| # | What | Why here | Evidence |
+|---|---|---|---|
+| 1 | 3p, `Portfolio` and `ERC4626Adapter` (PR #11) | Built | Result above |
+| 2 | Remove `_KIND_SLOT`, `_REF_SLOT`, `_DEADLINE_SLOT` and `_consumePending`. `_moveAs` and `_mintAs` pass their arguments to one `_move` | Room for 3b before it is needed, and it removes the hidden channel between `_moveAs` and `_update` | On `8835283`: 7540 23,988 to 23,636 bytes. With a mocked hook, warm: plain transfer -216 gas, forced and executed -1,595 |
+| 3 | `canExecute(intent, sig, executor)`: check the role and the binding against the argument, and add a reason for a zero `to`. Reopens `ITransferIntent` | Pre-flight must not lie before more is built on it | Tests on `8835283`: true for a caller with no role while the call reverts; `WRONG_EXECUTOR` for a stranger on an intent the named executor could run; true for a zero `to` when the rules agree, while the call reverts |
+| 4 | `Portfolio.allocate(adapter, assets, minAdded)`: revert when a priced adapter's value grows by less | An allocator approves what it sends, and the target decides what comes back | `_added` can be 0 today and the call succeeds |
+| 5 | `IntentToken` takes its decimals, as `GatedToken` does | The cash token must be signable and at the ledger's precision, and neither template is both | `GatedToken` has no `executeTransfer`, so it cannot be a DvP cash leg; `IntentToken` is fixed at 18 |
+| 6 | 3a | The vault's credential stops mattering before 3b rewrites the escrow | Plan above |
+| 7 | 3b, with `Request` packed into two slots and safe casts, and `NavDesk.accept(proposalHash)` | The first time a vault sends money to a `Portfolio` | Plan above |
+| 8 | 3c, 3d, 3e. In 3e, skip `reported()` behind `ACCEPTS_REPORTED`, and measure it | `pricedValue()` becomes a hot path only there. A 4626's portfolio refuses reported adapters, so one immutable check replaces those calls | `pricedValue()` on `8835283`: 47,967 gas with 8 adapters, 19,217 with 3 |
+| 9 | Signed vault entry, as its own lego | An investor with its own wallet can enter with one signature, and a relayer pays the gas. No vault changes | Today `requestDeposit` needs the owner or an operator on-chain |
+| 10 | Step 4, then the HTML pages, then an external audit | Auditors need current pages, and writing them after step 4 writes them once | |
+
+**Row 2's tests come first, and they are new.** With the slots removed the whole suite passed unedited, but that proves little: no test covers a forced move to or from the zero address, and the token's guard is tested only from `transfer` (`IntentToken.t.sol:408`). So: both zero checks in `_moveAs` and the one in `_mintAs`, the guard from `forcedTransfer` and `executeTransfer`, and a mutant for each. `_move` is `internal virtual` and documented as the place a template extends, because `_update` no longer sees FORCED or EXECUTED moves. **Result (2026-10-31).** Built with those tests first. `npx hardhat test`: `1309 passing (1168 solidity, 141 nodejs)`, Slither 0, Aderyn 0, mutants 9 of 9.
+
+**Left out, with the reason.**
+
+- A static `TransferContext`: about 3,300 gas across five rules, but it gives up the append-only `extra` (rule 14), so every later field would change the interface and force new rules and a new hook.
+- Folding `wantsAfter()` into `beforeTransfer`: under 850 gas, and it departs from the draft ERC's call order.
+- A rule list stored as contract code: about 3,700 gas at four rules, but it adds `CREATE` and assembly to the hook.
+- A packed adapter slot in `Portfolio`: row 8 gets the saving on the hot path with one check.
+- Packing the transient slots: row 2 removes them.
+- An early FORCED exit in `CredentialRule`: a forced move must still judge its receiver.
+
+**Open for the owner.**
+
+- An enforcement burn as FORCED with `to == 0`. It removes three `hasRole` lookups in rules, and exempting from the pause only a FORCED move with a receiver keeps a pause stopping a stolen burner key. A burn from a frozen sender would then pass, which reverses an earlier decision, and its byte cost is not measured. Held.
+- A bitmap for nonces. It saves about 14,600 gas per nonce for a signer who picks them inside one word and costs about 300 for a random one. The bool map is the decision of 2026-10-16 (see the top of this file). Held.
+- A token argument on the draft ERC's `wantsAfterTransfer`. A question for that draft, not for this repo.
 
 ### Order of work after approval
 
 1. The owner approves the plan as a whole and answers P23 to P25. Step 1 does not depend on them: it builds the core, products and `GatedToken` on any EVM with Cancun.
 2. Step 1, then each row of step 3, then each row of step 4, each on its own short-lived branch from `main`: interface changes, tests with the red run shown, implementation, both runners, lint, fmt, the type check, Slither, Aderyn, `validate:upgrades`, `verify:reproducible`, the mutants.
-3. Docs in the same step: the brief, `README.md`, `SECURITY.md`, a contract page for each new lego, the affected topic pages, the pin in the footers, and a fresh claim check.
+3. Docs in the same step: the brief, `README.md` and `SECURITY.md`. The HTML pages wait for row 10 of the agreed order, while the repo is private and the site is offline: a page for each new lego, the affected topic pages, the pin in the footers, and a fresh claim check.
 4. Stop for review after each. Nothing is committed, pushed or merged without an instruction.
 
 ## Open questions for the owner

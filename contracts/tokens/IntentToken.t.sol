@@ -410,6 +410,39 @@ contract IntentTokenIntegration_Safety is IntentTokenIntegrationTest {
     _token.transfer(_bob, 1);
   }
 
+  /// @dev Announced moves take their own route to the guarded movement, so each is pinned on its own
+  function test_WhenARuleReentersDuringAForcedTransfer_ItReverts() external {
+    _installReentrantRule();
+    vm.expectRevert(ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector);
+    vm.prank(_agent);
+    _token.forcedTransfer(_alice, _bob, 1);
+  }
+
+  function test_WhenARuleReentersDuringAnExecutedIntent_ItReverts() external {
+    _installReentrantRule();
+    (ITransferIntent.TransferIntent memory _i, bytes memory _sig) = _signedIntent(_bob, 1, keccak256('guard'));
+    vm.expectRevert(ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector);
+    vm.prank(_executor);
+    _token.executeTransfer(_i, _sig);
+  }
+
+  function test_WhenARuleReentersDuringAMint_ItReverts() external {
+    _installReentrantRule();
+    vm.expectRevert(ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector);
+    vm.prank(_minter);
+    _token.mint(_bob, 1);
+  }
+
+  function _installReentrantRule() internal {
+    MockReentrantRule _reentrant = new MockReentrantRule();
+    vm.prank(_attester);
+    _registry.attest(address(_reentrant).codehash, IPolicyRegistry.AttestKind.RULE, 'ipfs://mock');
+    IComplianceRule[] memory _ruleSet = new IComplianceRule[](2);
+    _ruleSet[0] = _identityRule;
+    _ruleSet[1] = _reentrant;
+    _installRules(_ruleSet);
+  }
+
   function test_WhenAnImplementationIsRedeployed_ItNeedsItsOwnAttestation() external {
     // UUPSUpgradeable stores address(this) in an immutable, so every implementation deployment has its own codehash.
     IntentToken _next = new IntentToken();

@@ -1251,6 +1251,48 @@ contract PolicyGatedInvariantTest is PolicyGatedUnitTest {
   }
 }
 
+/// @dev An announced move skips nothing OpenZeppelin's `_transfer` and `_mint` check: no address may be zero. A forced move
+///      to the zero address would otherwise burn
+contract PolicyGatedUnit_AnnouncedMovesAndZeroAddresses is PolicyGatedUnitTest {
+  function test_WhenAForcedTransferHasNoReceiver_ItRevertsAndNothingMoves() external {
+    vm.expectRevert(abi.encodeWithSelector(IERC20Errors.ERC20InvalidReceiver.selector, address(0)));
+    vm.prank(_agent);
+    _token.forcedTransfer(_alice, address(0), 1);
+    assertEq(_token.totalSupply(), _INITIAL);
+    assertEq(_token.balanceOf(_alice), _INITIAL);
+  }
+
+  function test_WhenAForcedTransferHasNoSender_ItRevertsAndNothingMoves() external {
+    vm.expectRevert(abi.encodeWithSelector(IERC20Errors.ERC20InvalidSender.selector, address(0)));
+    vm.prank(_agent);
+    _token.forcedTransfer(address(0), _bob, 0);
+    assertEq(_token.totalSupply(), _INITIAL);
+  }
+
+  function test_WhenAForcedTransferHasNoSenderAndAnAmount_TheBalanceCheckRevertsFirst() external {
+    vm.expectRevert(abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, address(0), 0, 1));
+    vm.prank(_agent);
+    _token.forcedTransfer(address(0), _bob, 1);
+    assertEq(_token.balanceOf(_bob), 0);
+  }
+
+  function test_WhenAnAnnouncedMoveHasNoReceiver_ItReverts() external {
+    vm.expectRevert(abi.encodeWithSelector(IERC20Errors.ERC20InvalidReceiver.selector, address(0)));
+    _token.moveAs(_alice, address(0), 1, IPolicyHook.TransferKind.EXECUTED, bytes32(0), 0);
+  }
+
+  function test_WhenAnAnnouncedMoveHasNoSender_ItReverts() external {
+    vm.expectRevert(abi.encodeWithSelector(IERC20Errors.ERC20InvalidSender.selector, address(0)));
+    _token.moveAs(address(0), _bob, 1, IPolicyHook.TransferKind.EXECUTED, bytes32(0), 0);
+  }
+
+  function test_WhenAnAnnouncedMintHasNoReceiver_ItRevertsAndNothingIsMinted() external {
+    vm.expectRevert(abi.encodeWithSelector(IERC20Errors.ERC20InvalidReceiver.selector, address(0)));
+    _token.mintAs(address(0), 1, IPolicyHook.TransferKind.FORCED);
+    assertEq(_token.totalSupply(), _INITIAL);
+  }
+}
+
 /// @dev `_mintAs` announces the kind: FORCED with `from == address(0)` is an enforcement mint (brief §5)
 contract PolicyGatedUnit_MintAs is PolicyGatedUnitTest {
   function test_WhenMintingAsForced_TheHookSeesAForcedContextFromZero() external {

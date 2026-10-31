@@ -11,7 +11,6 @@ import {PausableUpgradeable} from '@openzeppelin/contracts-upgradeable/utils/Pau
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {IERC20Permit} from '@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol';
 import {ReentrancyGuardTransient} from '@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol';
-import {TransientSlot} from '@openzeppelin/contracts/utils/TransientSlot.sol';
 import {IERC165} from '@openzeppelin/contracts/utils/introspection/IERC165.sol';
 
 import {Reasons} from 'interfaces/Errors.sol';
@@ -28,7 +27,7 @@ import {ITemplated} from 'interfaces/ITemplated.sol';
  * @title PolicyGatedERC20Upgradeable
  * @notice Base for every gated template. Owns accounting, roles, the enforcement primitives (mint, burn, forced
  *         transfer, freeze, pause), the guardian and the hook pointer. Every policy decision is delegated to the hook
- *         through the single `_update` path; the base holds no business logic about who, where or when
+ *         through the single `_move` path; the base holds no business logic about who, where or when
  * @dev DEFAULT_ADMIN_ROLE is the timelock and administers every role. GUARDIAN_ROLE can only stop things: it pauses,
  *      and cannot unpause, change the hook, grant roles or upgrade
  */
@@ -42,8 +41,6 @@ abstract contract PolicyGatedERC20Upgradeable is
   IPolicyGated,
   ITemplated
 {
-  using TransientSlot for *;
-
   /**
    * @notice ERC-7201 namespaced storage of the base
    * @param registry The policy registry, fixed at initialization
@@ -75,13 +72,6 @@ abstract contract PolicyGatedERC20Upgradeable is
   /// @notice keccak256(abi.encode(uint256(keccak256('gated.storage.PolicyGatedERC20')) - 1)) & ~bytes32(uint256(0xff))
   bytes32 private constant _POLICY_GATED_STORAGE_LOCATION =
     0xe8c11567602593a5bc8df6eb5a119138618a3fad68d46d33c073939016673d00;
-
-  /// @notice Transient slot holding `uint8(kind) + 1` announced by `_moveAs`; 0 means "infer from addresses"
-  bytes32 private constant _KIND_SLOT = keccak256('gated.transient.kind');
-  /// @notice Transient slot holding the announced `ref`
-  bytes32 private constant _REF_SLOT = keccak256('gated.transient.ref');
-  /// @notice Transient slot holding the announced `deadline`
-  bytes32 private constant _DEADLINE_SLOT = keccak256('gated.transient.deadline');
 
   /// @notice The amount of the mint a template's `max*` and eligibility checks probe: above any minimum position up to
   ///         this value
@@ -192,7 +182,7 @@ abstract contract PolicyGatedERC20Upgradeable is
   ) public virtual onlyRole(AGENT_ROLE) returns (bool _result) {
     _releaseFrozen(_from, _amount);
     _moveAs(_from, _to, _amount, IPolicyHook.TransferKind.FORCED, bytes32(0), 0);
-    // Emitted after the hook's afterTransfer: re-entry is blocked by `_update`'s guard and the hook is attested.
+    // Emitted after the hook's afterTransfer: re-entry is blocked by `_move`'s guard and the hook is attested.
     // slither-disable-start reentrancy-events
     emit ForcedTransfer(_from, _to, _amount);
     emit ForcedTransferBy(_from, _to, _amount, _msgSender());
@@ -305,8 +295,7 @@ abstract contract PolicyGatedERC20Upgradeable is
   }
 
   /**
-   * @notice The single path every balance movement takes: mechanical checks and hook, balances, then `afterTransfer`
-   * @dev Guarded against reentrancy, so a hook or rule calling back into any transfer function reverts
+   * @notice The route OpenZeppelin's `_transfer`, `_mint` and `_burn` take into `_move`, with the kind the addresses imply
    * @param _from The sender, or address(0) on mint
    * @param _to The receiver, or address(0) on burn
    * @param _value The amount
@@ -315,8 +304,29 @@ abstract contract PolicyGatedERC20Upgradeable is
     address _from,
     address _to,
     uint256 _value
-  ) internal virtual override nonReentrant {
-    (IPolicyHook.TransferKind _kind, bytes32 _ref, uint256 _deadline) = _consumePending(_from, _to);
+  ) internal virtual override {
+    _move(_from, _to, _value, _inferKind(_from, _to), bytes32(0), 0);
+  }
+
+  /**
+   * @notice The single path every balance movement takes: mechanical checks and hook, balances, then `afterTransfer`
+   * @dev Guarded against reentrancy, so a hook or rule calling back into any transfer function reverts. A template that
+   *      must act on every movement extends this function: `_update` does not see FORCED or EXECUTED movements
+   * @param _from The sender, or address(0) on mint
+   * @param _to The receiver, or address(0) on burn
+   * @param _value The amount
+   * @param _kind The kind the hook sees
+   * @param _ref The reference of an executed intent, otherwise zero
+   * @param _deadline The deadline of an executed intent, otherwise zero
+   */
+  function _move(
+    address _from,
+    address _to,
+    uint256 _value,
+    IPolicyHook.TransferKind _kind,
+    bytes32 _ref,
+    uint256 _deadline
+  ) internal virtual nonReentrant {
     IPolicyHook.TransferContext memory _ctx = _context(_from, _to, _value, _msgSender(), _kind, _ref, _deadline);
 
     // Read once: the hook that approves the movement is the hook that sees `afterTransfer`.
@@ -343,7 +353,7 @@ abstract contract PolicyGatedERC20Upgradeable is
 
   /**
    * @notice Moves tokens announcing a kind that cannot be inferred from the addresses (FORCED, EXECUTED)
-   * @dev `_transfer` either reaches `_update`, which consumes and clears the slots, or reverts, which rolls them back
+   * @dev Keeps both zero-address checks of OpenZeppelin's `_transfer`, which it does not call: a move to zero would burn
    * @param _from The sender
    * @param _to The receiver
    * @param _amount The amount
@@ -359,17 +369,16 @@ abstract contract PolicyGatedERC20Upgradeable is
     bytes32 _ref,
     uint256 _deadline
   ) internal {
-    _KIND_SLOT.asUint256().tstore(uint256(_kind) + 1);
-    _REF_SLOT.asBytes32().tstore(_ref);
-    _DEADLINE_SLOT.asUint256().tstore(_deadline);
-    _transfer(_from, _to, _amount);
+    if (_from == address(0)) revert ERC20InvalidSender(address(0));
+    if (_to == address(0)) revert ERC20InvalidReceiver(address(0));
+    _move(_from, _to, _amount, _kind, _ref, _deadline);
   }
 
   /**
    * @notice Mints announcing a kind that cannot be inferred from the addresses: FORCED with `from == address(0)` is an
    *         enforcement mint (brief §5), exempt from pause and the holder cap but still identity-checked on `to`
-   * @dev Kept apart from `_moveAs`, which never sees `from == address(0)`. `_mint` either reaches `_update`, which
-   *      consumes and clears the slots, or reverts, which rolls them back
+   * @dev Kept apart from `_moveAs`, which never sees `from == address(0)`. Keeps the zero-address check of OpenZeppelin's
+   *      `_mint`, which it does not call
    * @param _to The receiver
    * @param _amount The amount
    * @param _kind The announced kind
@@ -379,10 +388,8 @@ abstract contract PolicyGatedERC20Upgradeable is
     uint256 _amount,
     IPolicyHook.TransferKind _kind
   ) internal {
-    _KIND_SLOT.asUint256().tstore(uint256(_kind) + 1);
-    _REF_SLOT.asBytes32().tstore(bytes32(0));
-    _DEADLINE_SLOT.asUint256().tstore(0);
-    _mint(_to, _amount);
+    if (_to == address(0)) revert ERC20InvalidReceiver(address(0));
+    _move(address(0), _to, _amount, _kind, bytes32(0), 0);
   }
 
   /**
@@ -617,28 +624,6 @@ abstract contract PolicyGatedERC20Upgradeable is
     address _oldHook = address($.hook);
     $.hook = IPolicyHook(_newHook);
     emit PolicyHookChanged(_oldHook, _newHook);
-  }
-
-  /**
-   * @notice Reads and clears the kind announced by `_moveAs`, or infers it
-   * @param _from The sender
-   * @param _to The receiver
-   * @return _kind The kind
-   * @return _ref The reference
-   * @return _deadline The deadline
-   */
-  function _consumePending(
-    address _from,
-    address _to
-  ) private returns (IPolicyHook.TransferKind _kind, bytes32 _ref, uint256 _deadline) {
-    uint256 _raw = _KIND_SLOT.asUint256().tload();
-    if (_raw == 0) return (_inferKind(_from, _to), bytes32(0), 0);
-    _kind = IPolicyHook.TransferKind(_raw - 1);
-    _ref = _REF_SLOT.asBytes32().tload();
-    _deadline = _DEADLINE_SLOT.asUint256().tload();
-    _KIND_SLOT.asUint256().tstore(0);
-    _REF_SLOT.asBytes32().tstore(bytes32(0));
-    _DEADLINE_SLOT.asUint256().tstore(0);
   }
 
   /**
