@@ -46,6 +46,7 @@ DvPExecutor (immutable)                          role-gated: settles a share tra
 | `contracts/mixins/`, `contracts/tokens/` | `IntentSettledUpgradeable`, `GatedToken`, `IntentToken` |
 | `contracts/hooks/` | `ComplianceHook`, `BaseRule`, `rules/` `CredentialRule`, `MinPositionRule`, `HolderRestrictionRule`, `SettlementWindowRule`, `FundHoldersRule` (in the recommended order) |
 | `contracts/fund/` | `Fund` |
+| `contracts/portfolio/` | `Portfolio`, `ERC4626Adapter`: where one vault's money may go. No vault plugs one in yet |
 | `contracts/intents/` | `IntentExecutor`, `DvPExecutor` |
 | `contracts/vaults/` | `Gated4626Vault`, `Gated7540Vault` |
 | `contracts/test/` | Test helpers and mocks, interface-freeze and contract-size guards, Halmos properties |
@@ -81,6 +82,7 @@ can change its own.
 | `ProxyDeployer` owner | operations account | none | place a new product, only over an attested implementation. It touches nothing that exists |
 | `Fund` owner | timelock | ≥ 24 hours | register a class, set the fund's rule and investor cap, exempt an account. Only the installed rule records which classes an account holds |
 | token `AGENT_ROLE` → rules | issuer | none | set or clear per-holder lockups, freeze or unfreeze a holder (`HolderRestrictionRule`) |
+| `ALLOCATOR_ROLE` (on a vault, asked by its `Portfolio`) | fund manager | none | send money to an installed adapter within caps, bring it back, choose the liquidity adapter |
 | `FULFILLER_ROLE` (7540 vault) | issuer | none | fulfil deposits/redemptions at off-chain NAV; reject pending requests |
 
 - **Attested code only.** Hooks, rules and implementations are installed only if their runtime codehash is attested.

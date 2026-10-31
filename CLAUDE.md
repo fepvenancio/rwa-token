@@ -20,13 +20,14 @@ Separate contracts, separate concerns:
 2. Policy hook — one `ComplianceHook` shared by every token of a deployment (one attested codehash), holding an ordered list of `IComplianceRule` for each token. A token installs its initial list when it is initialised; later changes to the list, and replacing the hook itself, go through the timelock.
 3. Mixins — `IntentSettled` (EIP-712 intents, nonces, `executeTransfer`). Opt-in per template.
 4. Executors — `IntentExecutor`: role-gated caller that validates and submits intents that state no consideration. Replaceable. `DvPExecutor`: role-gated, settles a share trade against cash atomically from two signed legs, the cash being a gated token or an ERC-3009 token. Replaceable. More than two legs later.
+5. Portfolio — where one vault's money may go: its idle money, adapters within caps, and nowhere else. One per vault, immutable and attested, with no role table: it asks the vault at call time. Built standing alone; no vault plugs one in yet.
 
 ## 2. Non-negotiable rules
 
 1. OpenZeppelin v5 (`@openzeppelin/contracts`, `@openzeppelin/contracts-upgradeable`) only. No Solady. No other libs without asking.
 2. No refactors outside the task you were given.
 3. Before any change touching more than one file, write or update `PLAN.md` and stop for review.
-4. `contracts/interfaces/*.sol` are frozen after Phase 1. Changing them requires an explicit instruction. (The owner reopened them on 2026-10-23 for the review items S0 to S4 and froze them again; `InterfaceFreeze.t.sol` pins every interface id and event topic.)
+4. `contracts/interfaces/*.sol` are frozen after Phase 1. Changing them requires an explicit instruction. (The owner reopened them on 2026-10-23 for the review items S0 to S4, and on 2026-10-30 for the portfolio lego and a renamed `Quals` bit, and froze them again; `InterfaceFreeze.t.sol` pins every interface id and event topic.)
 5. Every contract ships with a `.t.sol` next to it. Tests are written before implementation and the failing run is shown.
 6. Run `npx hardhat test` (both runners) before reporting any task as done. Paste the summary line.
 7. `transfer()` never returns `true` without moving balance. Rejections revert with a typed error. A policy rejection is `PolicyGated_TransferRejected(bytes32 reason)`; the token's own frozen-balance check (an amount within the balance but above the unfrozen balance) is the standard's `ERC7943InsufficientUnfrozenBalance(account, amount, unfrozen)`, and an amount above the balance is the base standard's `ERC20InsufficientBalance`. (Amended 2026-10-24.)
@@ -53,11 +54,12 @@ Separate contracts, separate concerns:
 
 ```
 contracts/
-  interfaces/   IPolicyGated.sol  IERC7943Fungible.sol  ITemplated.sol  IPolicyHook.sol  IComplianceHook.sol  IComplianceRule.sol  IPolicyRegistry.sol  ITransferIntent.sol  IIntentExecutor.sol  IIntentExecutorBatch.sol  IDvPExecutor.sol  IERC3009.sol  Errors.sol  (+ one per rule, the two vaults, IFund, IProxyDeployer, IGovernanceTimelock, IIdentityRegistry, ICredentialRegistry, ICredentialRule, Quals and the ERC-7540 and ERC-7575 interfaces)
+  interfaces/   IPolicyGated.sol  IERC7943Fungible.sol  ITemplated.sol  IPolicyHook.sol  IComplianceHook.sol  IComplianceRule.sol  IPolicyRegistry.sol  ITransferIntent.sol  IIntentExecutor.sol  IIntentExecutorBatch.sol  IDvPExecutor.sol  IERC3009.sol  Errors.sol  (+ one per rule, the two vaults, IFund, IPortfolio, IAdapter, IERC4626Adapter, IProxyDeployer, IGovernanceTimelock, IIdentityRegistry, ICredentialRegistry, ICredentialRule, Quals and the ERC-7540 and ERC-7575 interfaces)
   base/         PolicyGatedERC20Upgradeable.sol  PolicyGatedERC20Upgradeable.t.sol
   governance/   PolicyRegistry.sol  GovernanceTimelock.sol  (+ .t.sol)
   identity/     CredentialRegistry.sol  CredentialRegistry.t.sol
   deploy/       ProxyDeployer.sol  TokenProxy.sol  (+ .t.sol)
+  portfolio/    Portfolio.sol  ERC4626Adapter.sol  (+ .t.sol)
   mixins/       IntentSettledUpgradeable.sol  IntentSettledUpgradeable.t.sol
   tokens/       GatedToken.sol  IntentToken.sol  (+ .t.sol)
   vaults/       Gated4626Vault.sol  Gated7540Vault.sol  (+ .t.sol)
@@ -65,7 +67,7 @@ contracts/
   hooks/rules/  CredentialRule.sol  MinPositionRule.sol  HolderRestrictionRule.sol  SettlementWindowRule.sol  FundHoldersRule.sol  (+ .t.sol, RuleSetIntegration.t.sol)
   fund/         Fund.sol  Fund.t.sol
   intents/      IntentExecutor.sol  IntentExecutor.t.sol  DvPExecutor.sol  DvPExecutor.t.sol
-  test/         Helpers.sol  PolicyGatedHarness.sol  MockReentrantRule.sol  MockIdentityRegistry.sol  MockIdentityRule.sol  MockAsset.sol  MockERC3009Token.sol  MockReentrantCashToken.sol  MockReentrantGatedToken.sol  MockFakeSecurityToken.sol  MockStatefulToken.sol  MockStatefulFund.sol  MockERC1271Wallet.sol  InterfaceFreeze.t.sol  ContractSizes.t.sol  halmos/
+  test/         Helpers.sol  PolicyGatedHarness.sol  MockReentrantRule.sol  MockIdentityRegistry.sol  MockIdentityRule.sol  MockAsset.sol  MockERC3009Token.sol  MockReentrantCashToken.sol  MockReentrantGatedToken.sol  MockFakeSecurityToken.sol  MockAdapter.sol  MockPortfolioVault.sol  MockERC4626Target.sol  MockStatefulToken.sol  MockStatefulFund.sol  MockERC1271Wallet.sol  InterfaceFreeze.t.sol  ContractSizes.t.sol  halmos/
 test/nodejs/    *.test.ts   (viem + node:test: EIP-712 signing, settlement flows, vault flows)
 ignition/modules/  ignition/profiles.ts
 PLAN.md
@@ -127,11 +129,12 @@ The base also implements ERC-2612 `permit` (`ERC20PermitUpgradeable`); it shares
 
 **Recovery timelock** (owner decision M-1). A guardian that could cancel its own removal would not be stop-only, so a second `TimelockController` (same delay, governance multisig as proposer and executor, no cancellers, guardian holds nothing on it) holds `RECOVERY_ROLE`. On every token, vault and executor that role allows exactly `unpause()` and `revokeRole(GUARDIAN_ROLE, …)`; on the main timelock (`GovernanceTimelock`, an OZ subclass) exactly `revokeRole(CANCELLER_ROLE, …)`; on the credential registry exactly `clearGuardianBlock`, `reviveAttester` and `revokeRole(GUARDIAN_ROLE, …)`. (The registry has its own guardian, whose only powers are `blockSubject` and `killAttester`, with no delay, and the same recovery path undoes them.) It cannot grant roles, change hooks, upgrade, or propose on the main timelock. Governance keeps a path the guardian cannot block; the guardian can still stop everything else. A compromised governance multisig is out of scope for this control, by design. No expiring pause: it would turn a security control into a timer.
 
-**Policy registry** (one per deployment, `PolicyRegistry`). Immutable contract. Maps `codehash → attested kind` (`HOOK`, `RULE`, `IMPLEMENTATION`). `ATTESTER_ROLE` (security council multisig) attests after review and revokes; `DEFAULT_ADMIN_ROLE` (timelock) manages attesters. Checks are by `extcodehash` of the target, so targets must be plain contracts (rule 12). Enforced at:
+**Policy registry** (one per deployment, `PolicyRegistry`). Immutable contract. Maps `codehash → attested kind` (`HOOK`, `RULE`, `IMPLEMENTATION`, `PORTFOLIO`, `ADAPTER`). `ATTESTER_ROLE` (security council multisig) attests after review and revokes; `DEFAULT_ADMIN_ROLE` (timelock) manages attesters. Checks are by `extcodehash` of the target, so targets must be plain contracts (rule 12). Enforced at:
 
 * `setPolicyHook(newHook)` and the initialiser — `isAttested(newHook, HOOK)`, and `newHook.REGISTRY()` must be the token's own registry, because a shared hook vets rules against its own.
 * `ComplianceHook.setRules(token, rules)` (also how a token installs its initial rules) — `isAttested(rule, RULE)` for every rule.
 * `ProxyDeployer.deploy(symbol, implementation, …)` — `isAttested(implementation, IMPLEMENTATION)` before the proxy is created, and the new token's `registry()` must be the deployer's own. An operations account owns it, so a product launches without a timelock delay: it only adds a proxy over attested code and touches nothing that exists. The token cannot check its first implementation itself: its initialiser is the implementation's code.
+* `Portfolio.addAdapter(adapter)` — `isAttested(adapter, ADAPTER)`, and `Portfolio.migrateTo(successor)` — `isAttested(successor, PORTFOLIO)`, each in the registry its vault names.
 * `_authorizeUpgrade(newImpl)` — `isAttested(newImpl, IMPLEMENTATION)`, and `ITemplated(newImpl).templateId()` must equal the proxy's own, so a proxy cannot be moved onto another template.
 
 Attestation is checked at install time only. Revocation emits `AttestationRevoked(codehash)` and does not alter running tokens; governance removes the component, guardian can pause meanwhile. This avoids a revoke silently dropping a check or bricking transfers.
@@ -205,7 +208,7 @@ interface IIntentExecutor {
     function execute(address token, TransferIntent calldata intent, bytes calldata sig) external returns (bytes32);
 }
 
-enum AttestKind { NONE, HOOK, RULE, IMPLEMENTATION }
+enum AttestKind { NONE, HOOK, RULE, IMPLEMENTATION, PORTFOLIO, ADAPTER }
 
 interface IPolicyRegistry {
     event Attested(bytes32 indexed codehash, AttestKind kind, address indexed attester, string uri);

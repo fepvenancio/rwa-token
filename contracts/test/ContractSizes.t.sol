@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {Test} from 'forge-std/Test.sol';
 
 import {ICredentialRegistry} from 'interfaces/ICredentialRegistry.sol';
@@ -20,6 +21,10 @@ import {SettlementWindowRule} from 'contracts/hooks/rules/SettlementWindowRule.s
 import {CredentialRegistry} from 'contracts/identity/CredentialRegistry.sol';
 import {DvPExecutor} from 'contracts/intents/DvPExecutor.sol';
 import {IntentExecutor} from 'contracts/intents/IntentExecutor.sol';
+import {ERC4626Adapter} from 'contracts/portfolio/ERC4626Adapter.sol';
+import {Portfolio} from 'contracts/portfolio/Portfolio.sol';
+import {MockAsset} from 'contracts/test/MockAsset.sol';
+import {MockERC4626Target} from 'contracts/test/MockERC4626Target.sol';
 import {GatedToken} from 'contracts/tokens/GatedToken.sol';
 import {IntentToken} from 'contracts/tokens/IntentToken.sol';
 import {Gated4626Vault} from 'contracts/vaults/Gated4626Vault.sol';
@@ -57,6 +62,10 @@ contract ContractSizesTest is Test {
     Fund _fund = new Fund(address(this), IPolicyRegistry(_registry));
     _assertFits('Fund', address(_fund));
     _assertFits('FundHoldersRule', address(new FundHoldersRule(IFund(address(_fund)))));
+    MockAsset _asset = new MockAsset(6);
+    _assertFits('Portfolio', address(new Portfolio(address(this), IERC20(address(_asset)), true)));
+    MockERC4626Target _target = new MockERC4626Target(IERC20(address(_asset)));
+    _assertFits('ERC4626Adapter', address(new ERC4626Adapter(address(this), _target, bytes32(0))));
     _assertFits(
       'GovernanceTimelock',
       address(new GovernanceTimelock(1 days, new address[](0), new address[](0), address(this), address(this)))
