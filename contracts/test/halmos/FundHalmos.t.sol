@@ -45,6 +45,17 @@ contract FundHalmosClass {
   }
 }
 
+/// @notice A rule stub with the one thing `setRule` reads: the fund it names
+contract FundHalmosRule {
+  address public immutable FUND;
+
+  constructor(
+    address _fund
+  ) {
+    FUND = _fund;
+  }
+}
+
 /// @notice A hook stub whose rule list, for any token, is the installed rule
 contract FundHalmosHook {
   address public immutable RULE;
@@ -70,7 +81,7 @@ contract FundHalmosHook {
  */
 contract FundHalmos is Test {
   Fund internal _fund;
-  address internal _rule = address(0x70);
+  address internal _rule;
   address internal _classA;
   address internal _classB;
   address internal _accountA = address(0xA1);
@@ -78,6 +89,7 @@ contract FundHalmos is Test {
 
   function setUp() public {
     _fund = new Fund(address(this), IPolicyRegistry(address(new FundHalmosRegistry())));
+    _rule = address(new FundHalmosRule(address(_fund)));
     _fund.setRule(_rule);
     _fund.setHolderCap(10);
     _classA = address(new FundHalmosClass(address(new FundHalmosHook(_rule))));

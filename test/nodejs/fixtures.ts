@@ -212,7 +212,7 @@ async function stages(connection: NetworkConnection, profile: Profile) {
   const has = (key: string) => components[key] !== undefined;
 
   const timelock = await viem.getContractAt("GovernanceTimelock", components.timelock.address);
-  const recoveryTimelock = await viem.getContractAt("TimelockController", components.recoveryTimelock.address);
+  const recoveryTimelock = await viem.getContractAt("GovernanceTimelock", components.recoveryTimelock.address);
   const registry = await viem.getContractAt("PolicyRegistry", components.registry.address);
   const hook = await viem.getContractAt("ComplianceHook", components.hook.address);
   const proxyDeployer = await viem.getContractAt("ProxyDeployer", components.proxyDeployer.address);
@@ -521,6 +521,15 @@ export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
   assert.equal(await s.recoveryTimelock.read.hasRole([await s.recoveryTimelock.read.PROPOSER_ROLE(), governance]), true);
   assert.equal(await s.recoveryTimelock.read.hasRole([await s.recoveryTimelock.read.EXECUTOR_ROLE(), governance]), true);
   assert.ok((await s.recoveryTimelock.read.getMinDelay()) >= DAY, "recovery timelock delay below 24 hours");
+  // The same code as the main timelock, so its delay has the same floor; and no recovery power over itself.
+  assert.equal(
+    await s.publicClient.getCode({ address: recovery }),
+    await s.publicClient.getCode({ address: timelock }),
+    "the recovery timelock is not a GovernanceTimelock",
+  );
+  for (const account of [...known, recovery, timelock]) {
+    assert.equal(await s.recoveryTimelock.read.hasRole([ROLES.RECOVERY, account]), false, `${account} holds RECOVERY_ROLE on the recovery timelock`);
+  }
   // Each executor: the stack's operator submits through it and the guardian can pause it.
   for (const executor of executors) {
     assert.deepEqual(await heldBy(executor, s.wallets.operator.account.address), [ROLES.OPERATOR], `executor operator on ${executor.address}`);

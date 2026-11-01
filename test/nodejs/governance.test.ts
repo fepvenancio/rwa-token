@@ -279,6 +279,14 @@ describe("governance through the timelock", async function () {
     assert.equal(await s.token.read.paused(), false);
   });
 
+  it("the recovery timelock keeps the one-hour floor: governance cannot schedule its delay away", async function () {
+    const s = await networkHelpers.loadFixture(stack);
+    const op = await scheduleRecovery(s, [call(s.recoveryTimelock, "updateDelay", [3_599n])]);
+    await networkHelpers.time.increase(op.delay);
+    await viem.assertions.revertWithCustomError(op.execute(), s.recoveryTimelock, "GovernanceTimelock_DelayBelowFloor");
+    assert.equal(await s.recoveryTimelock.read.getMinDelay(), op.delay);
+  });
+
   it("M-1: one recovery batch strips the guardian everywhere, including its cancel right on the main timelock", async function () {
     const s = await networkHelpers.loadFixture(stack);
     const guardian = s.wallets.guardian.account;

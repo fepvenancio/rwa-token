@@ -10,10 +10,12 @@ import {Vm} from 'forge-std/Vm.sol';
 import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IFund} from 'interfaces/IFund.sol';
+import {IFundHoldersRule} from 'interfaces/IFundHoldersRule.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 
 import {Fund} from 'contracts/fund/Fund.sol';
+import {FundHoldersRule} from 'contracts/hooks/rules/FundHoldersRule.sol';
 import {Helpers} from 'contracts/test/Helpers.sol';
 
 contract FundUnitTest is Helpers {
@@ -27,10 +29,11 @@ contract FundUnitTest is Helpers {
 
   function setUp() public virtual {
     _registry = _mockContract('registry');
-    _attest(_rule, true);
     _fund = new Fund(_owner, IPolicyRegistry(_registry));
+    _attest(_rule, true);
   }
 
+  /// @dev A rule the fund accepts: attested (or not), and naming this fund
   function _attest(
     address _candidate,
     bool _attested
@@ -40,6 +43,14 @@ contract FundUnitTest is Helpers {
       abi.encodeCall(IPolicyRegistry.isAttested, (_candidate, IPolicyRegistry.AttestKind.RULE)),
       abi.encode(_attested)
     );
+    _namesFund(_candidate, address(_fund));
+  }
+
+  function _namesFund(
+    address _candidate,
+    address _named
+  ) internal {
+    vm.mockCall(_candidate, abi.encodeCall(IFundHoldersRule.FUND, ()), abi.encode(_named));
   }
 
   function _setRule() internal {
@@ -185,7 +196,33 @@ contract FundUnit_SetRule is FundUnitTest {
     _fund.setRule(_unattested);
   }
 
+  /// @dev Every FundHoldersRule shares one ruleId, so a hook would accept another fund's; only the fund can refuse it
+  function test_WhenTheRuleNamesAnotherFund_Reverts() external {
+    address _other = makeAddr('otherFund');
+    _namesFund(_rule, _other);
+    vm.expectRevert(abi.encodeWithSelector(IFund.Fund_RuleForAnotherFund.selector, _rule, _other));
+    vm.prank(_owner);
+    _fund.setRule(_rule);
+  }
+
+  function test_WhenARealRuleOfAnotherFundIsInstalled_Reverts() external {
+    Fund _other = new Fund(_owner, IPolicyRegistry(_registry));
+    FundHoldersRule _theirs = new FundHoldersRule(_other);
+    _attest(address(_theirs), true); // attested, as it would be: the same code as this fund's rule
+    _namesFund(address(_theirs), address(_other)); // undo the helper's mock: the real answer is the other fund
+    vm.expectRevert(abi.encodeWithSelector(IFund.Fund_RuleForAnotherFund.selector, address(_theirs), address(_other)));
+    vm.prank(_owner);
+    _fund.setRule(address(_theirs));
+
+    FundHoldersRule _ours = new FundHoldersRule(_fund);
+    _attest(address(_ours), true);
+    vm.prank(_owner);
+    _fund.setRule(address(_ours));
+    assertEq(_fund.rule(), address(_ours));
+  }
+
   function test_WhenTheRuleIsAttested_ItIsCheckedSetAndEmitted() external {
+    vm.expectCall(_rule, abi.encodeCall(IFundHoldersRule.FUND, ()), 1);
     vm.expectCall(_registry, abi.encodeCall(IPolicyRegistry.isAttested, (_rule, IPolicyRegistry.AttestKind.RULE)), 1);
     vm.expectEmit(true, true, false, false, address(_fund));
     emit IFund.RuleSet(address(0), _rule);

@@ -125,6 +125,14 @@ interface IFund {
   error Fund_NotAttested(address _rule);
 
   /**
+   * @notice Thrown when a rule reads and writes another fund: every `FundHoldersRule` shares one `ruleId`, so a hook
+   *         accepts any of them and only the fund can tell its own
+   * @param _rule The rule
+   * @param _fund The fund the rule names
+   */
+  error Fund_RuleForAnotherFund(address _rule, address _fund);
+
+  /**
    * @notice Thrown when a class number is outside 1 to `classCount()`
    * @param _index The number given
    */
@@ -147,7 +155,7 @@ interface IFund {
 
   /**
    * @notice Installs the rule that writes investor state
-   * @dev Only the owner. The rule must be attested as RULE in the registry
+   * @dev Only the owner. The rule must be attested as RULE in the registry and its `FUND()` must be this fund
    * @param _rule The rule
    */
   function setRule(

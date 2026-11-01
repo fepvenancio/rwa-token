@@ -46,7 +46,7 @@ In scope, all under `contracts/` (`.t.sol` files and `contracts/test/` are test 
 Also in scope: `ignition/modules/{Core,CoreHandover,Fund,Legos,Product,FundOpen,roles}.ts` and `ignition/profiles.ts`, which carry
 the deployment order, role grants, the hand-over to the timelock and each product's rule list.
 
-Out of scope: OpenZeppelin 5.6.1 (`@openzeppelin/contracts`, `-upgradeable`; `TimelockController` is used unmodified for the recovery timelock and as the base of `GovernanceTimelock`),
+Out of scope: OpenZeppelin 5.6.1 (`@openzeppelin/contracts`, `-upgradeable`; `TimelockController` is the base of `GovernanceTimelock`, which both timelocks are),
 the KYC attesters' off-chain verification, and test mocks.
 
 Build: solc 0.8.30, `evmVersion: cancun`, optimizer 200 runs, no metadata hash, the same in Hardhat and forge.

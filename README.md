@@ -69,10 +69,10 @@ Every contract except the abstract `BaseRule` has its `.t.sol` next to it. [`PLA
 The audit package (scope, suppressions, mutation results, findings an auditor should know first) is indexed in
 [`SECURITY.md`](SECURITY.md).
 
-The delays below are the timelocks' `minDelay`, 24 hours by default in `Core`. The main timelock refuses less than
-1 hour, at deployment and in `updateDelay` (`GovernanceTimelock_DelayBelowFloor`). The recovery timelock is
-OpenZeppelin's own: the post-deploy check asserts at least 24 hours on both, and an operation of the recovery timelock
-can change its own.
+The delays below are the timelocks' `minDelay`, 24 hours by default in `Core`. Both timelocks are `GovernanceTimelock`
+and refuse less than 1 hour, at deployment and in `updateDelay` (`GovernanceTimelock_DelayBelowFloor`); the recovery
+timelock is deployed with no recovery of its own. The post-deploy check asserts at least 24 hours on both and that the
+two run the same code.
 
 | Power | Holder | Delay | Can |
 |---|---|---|---|
@@ -156,7 +156,8 @@ defaults. Each module takes the addresses the earlier ones produced as parameter
 exact sequence on the local network, playing the council and the KYC attester, and ends with the post-deploy checks below.
 
 1. **`Core`** (deployer):
-   - the recovery timelock (plain OZ `TimelockController`, 24 hours, governance multisig as proposer and executor),
+   - the recovery timelock (`GovernanceTimelock` with no recovery of its own, 24 hours, governance multisig as proposer
+     and executor),
      then the main timelock (`GovernanceTimelock`: 24 hours, proposer **and** executor the governance multisig only;
      OpenZeppelin also makes every proposer a canceller, so governance can cancel there too, and `CoreHandover` adds the
      guardian; the recovery timelock may revoke `CANCELLER_ROLE` there). The deployer is the admin of both until `CoreHandover`;

@@ -10,6 +10,7 @@ import {SafeCast} from '@openzeppelin/contracts/utils/math/SafeCast.sol';
 import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IFund} from 'interfaces/IFund.sol';
+import {IFundHoldersRule} from 'interfaces/IFundHoldersRule.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 
@@ -115,6 +116,10 @@ contract Fund is Ownable, ERC165, IFund {
     // View interface: compiled to STATICCALL, so the registry cannot change state or re-enter before the write below.
     // aderyn-ignore-next-line(reentrancy-state-change)
     if (!REGISTRY.isAttested(_rule, IPolicyRegistry.AttestKind.RULE)) revert Fund_NotAttested(_rule);
+    // Every FundHoldersRule shares one ruleId and one attested codehash, so a hook accepts any of them: only the fund
+    // can tell that a rule counts into another fund's state.
+    address _named = address(IFundHoldersRule(_rule).FUND());
+    if (_named != address(this)) revert Fund_RuleForAnotherFund(_rule, _named);
     address _oldRule = _investors.rule;
     _investors.rule = _rule;
     emit RuleSet(_oldRule, _rule);
