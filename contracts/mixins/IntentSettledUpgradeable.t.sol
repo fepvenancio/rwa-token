@@ -262,7 +262,7 @@ contract IntentSettledUnit_ExecuteTransfer is IntentSettledUnitTest {
     assertTrue(_token.nonceUsed(_alice, _nonce));
   }
 
-  /// @dev The kind, ref and deadline live in transient storage for the whole transaction; they must be cleared after
+  /// @dev The kind, ref and deadline must not outlive their own movement within a transaction; they must be cleared after
   ///      each movement, or a later plain transfer in the same transaction would reach the hook as EXECUTED
   function test_WhenAPlainTransferFollowsAnExecutionInTheSameTransaction_ItIsAPlainTransfer() external {
     ITransferIntent.TransferIntent memory _i = _intent(10, keccak256('n'), block.timestamp + 1 days);

@@ -121,7 +121,7 @@ can change its own.
   hook cannot know; the post-deploy check asserts it is the zero address. Alert too when `holderCount()` is above
   `holderCap()`: a recovery from a 7540 vault can put it there, and the fulfiller should reject deposit requests near
   the cap (see [SECURITY.md](SECURITY.md)).
-- **Reentrancy.** `_update` is `nonReentrant` (transient storage), so no hook or rule can move balances during a
+- **Reentrancy.** `_move` is `nonReentrant` (transient storage), so no hook or rule can move balances during a
   movement; `check` is called as a view, and rules are attested.
 - **Reproducible builds.** solc 0.8.30, cancun, optimizer 200 runs, and no metadata hash, in both Hardhat and forge.
   Every codehash and CREATE2 address can be recomputed from the source at a tag; CI fails if two clean builds disagree.
