@@ -5,6 +5,7 @@ import {IAccessControl} from '@openzeppelin/contracts/access/IAccessControl.sol'
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 
 import {IERC4626} from '@openzeppelin/contracts/interfaces/IERC4626.sol';
+import {Math} from '@openzeppelin/contracts/utils/math/Math.sol';
 
 import {IFeeModel} from 'interfaces/IFeeModel.sol';
 import {IGated7540Vault} from 'interfaces/IGated7540Vault.sol';
@@ -45,6 +46,10 @@ contract NavDesk is INavDesk {
 
   /// @notice A price's scale: assets per this many share units
   uint256 private constant _PRICE_SCALE = 1e18;
+
+  /// @notice The mark at par, the lowest it can be, and where a period with no shares strikes: the vault deals 1e6 share
+  ///         units per unit of its asset. Getting back to par recovers principal, and is no gain
+  uint256 private constant _PAR_MARK = _PRICE_SCALE / 1e6;
 
   /// @inheritdoc INavDesk
   address public immutable VAULT;
@@ -144,7 +149,7 @@ contract NavDesk is INavDesk {
         // slither-disable-next-line incorrect-equality
         if (mark == 0) {
           // aderyn-ignore-next-line(reentrancy-state-change)
-          mark = IERC4626(VAULT).convertToAssets(_PRICE_SCALE);
+          mark = Math.max(IERC4626(VAULT).convertToAssets(_PRICE_SCALE), _PAR_MARK);
           markMovedAt = block.timestamp;
         }
         lastFeeAt = block.timestamp;
@@ -179,7 +184,9 @@ contract NavDesk is INavDesk {
     (_p.period, _supply) = _closedPeriod();
     uint256 _priced;
     (_p.cash, _priced) = _cashAndValue(_moves);
-    uint256 _gross = _reported + _priced;
+    // With no shares nothing is anyone's. A price struck on what is reported or left in the portfolio would be charged as
+    // a gain on the next investors' principal, and refusing would let a stranger's donation stop the period.
+    uint256 _gross = _supply == 0 ? 0 : _reported + _priced;
     _quote(_p, _gross, _supply);
     _p.nav = _gross - _p.fee;
     if (_p.nav == 0 && _supply != 0) revert NavDesk_ZeroNav();
@@ -378,8 +385,9 @@ contract NavDesk is INavDesk {
     uint256 _gross,
     uint256 _supply
   ) private view {
-    _p.mark = mark;
-    // With no shares both clocks restart, so the first investors do not pay for time before they arrived.
+    // With no shares the mark starts at the price they strike, and both clocks restart, so the first investors do not pay
+    // for time before they arrived.
+    _p.mark = _supply == 0 ? _PAR_MARK : mark;
     _p.markMovedAt = _supply == 0 ? block.timestamp : markMovedAt;
     address _feeModel = feeModel;
     if (_feeModel == address(0)) return;

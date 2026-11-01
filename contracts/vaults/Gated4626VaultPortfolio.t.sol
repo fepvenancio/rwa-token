@@ -819,11 +819,24 @@ contract Gated4626VaultPortfolio_Fees is Gated4626VaultPortfolioTest {
     assertApproxEqRel(_vault.mark(), 1e12, 0.0001e18);
   }
 
+  /// @dev Above par the mark starts at the price, so a gain made before the plug pays nothing
+  function test_AFirstPlugAboveParStartsTheMarkAtThePrice() external {
+    _asset.mint(address(_portfolio), _IN);
+    vm.warp(block.timestamp + _YEAR);
+    _charge();
+    assertGt(_vault.mark(), 1e12);
+    assertEq(_vault.mark(), _vault.convertToAssets(1e18));
+  }
+
   /// @dev Plugged during a read of nothing, a mark taken from `totalAssets()` would charge a performance fee on principal
   function test_AFirstPlugDuringAReadOfNothingStartsTheMarkAtTheLastPrice() external {
+    _asset.mint(address(_portfolio), _IN);
+    vm.warp(block.timestamp + _YEAR);
+    _vault.accrue();
     uint256 _price = _vault.convertToAssets(1e18);
-    _allocate(_IN);
-    _target.lose(_IN);
+    assertGt(_price, 1e12);
+    _allocate(_asset.balanceOf(address(_portfolio)));
+    _target.lose(_asset.balanceOf(address(_target)));
     assertEq(_vault.totalAssets(), 0);
     _charge();
     assertEq(_vault.mark(), _price);
@@ -901,6 +914,119 @@ contract Gated4626VaultPortfolio_Fees is Gated4626VaultPortfolioTest {
     _vault.accrue();
     // 30 days at the 10% limit passes 30 days of a 5% hurdle. A hurdle running for 395 days would not be passed.
     assertGt(_vault.feesOwed(), 0);
+  }
+
+  function _performanceOnly() internal {
+    FeeModel _onlyPerformance = new FeeModel(_recipient, 0, 2000, 0, false);
+    _registry.attest(address(_onlyPerformance).codehash, IPolicyRegistry.AttestKind.FEE_MODEL, '');
+    _vault.setFeeModel(address(_onlyPerformance));
+  }
+
+  /// @dev After a gain the last holder's redemption rounds down and leaves a unit counted, with no shares
+  function _lastHolderLeavesDust() internal {
+    _performanceOnly();
+    _asset.mint(address(_portfolio), 100e6);
+    vm.warp(block.timestamp + _YEAR);
+    _vault.accrue();
+    vm.prank(_alice);
+    _vault.redeem(_shares, _alice, _alice);
+    assertEq(_vault.totalSupply(), 0);
+    assertGt(_vault.lastCounted(), 0, 'the dust');
+    _vault.collectFees();
+  }
+
+  /// @dev Priced on that unit the next investor would buy at twice par and pay a performance fee on principal
+  function test_WhenTheLastHolderLeavesDustTheNextInvestorPaysNoFeeOnPrincipal() external {
+    _lastHolderLeavesDust();
+    uint256 _owed = _vault.feesOwed();
+    uint256 _bought = _deposit(_bob, _IN);
+    assertEq(_bought, _IN * 1e6, 'at par');
+    assertEq(_vault.mark(), 1e12);
+    vm.warp(block.timestamp + 1 days);
+    _vault.accrue();
+    assertEq(_vault.feesOwed(), _owed);
+    assertApproxEqAbs(_vault.convertToAssets(_bought), _IN, 2);
+  }
+
+  function test_WithNoSharesNothingCounts() external {
+    _lastHolderLeavesDust();
+    assertEq(_vault.totalAssets(), 0);
+    _vault.accrue();
+    assertEq(_vault.lastCounted(), 0);
+    assertEq(_vault.mark(), 1e12);
+  }
+
+  /// @dev Whatever is left, and however it got there, the next investor buys at par, and it counts for them under the limit
+  function testFuzz_WithNoSharesAnythingLeftStillStrikesAtPar(
+    uint256 _left
+  ) external {
+    _lastHolderLeavesDust();
+    _left = bound(_left, 0, 1e15);
+    _asset.mint(address(_portfolio), _left);
+    uint256 _bought = _deposit(_bob, _IN);
+    assertEq(_bought, _IN * 1e6);
+    assertEq(_vault.totalAssets(), _IN);
+    vm.warp(block.timestamp + _YEAR);
+    uint256 _net = _asset.balanceOf(address(_portfolio)) - _vault.feesOwed();
+    assertLe(_vault.totalAssets(), _net);
+    assertLe(_vault.totalAssets(), _IN + _IN * _RATE / 10_000);
+    assertGe(_vault.totalAssets(), _IN);
+  }
+
+  /// @dev Getting back to par is a recovery of principal, not a gain
+  function test_AFirstPlugBelowParStartsTheMarkAtPar() external {
+    _allocate(_IN);
+    _target.lose(_IN / 2);
+    _vault.accrue();
+    assertLt(_vault.convertToAssets(1e18), 1e12);
+    _performanceOnly();
+    assertEq(_vault.mark(), 1e12);
+    _asset.mint(address(_target), _IN / 2);
+    vm.warp(block.timestamp + 10 * _YEAR);
+    _vault.accrue();
+    assertEq(_vault.feesOwed(), 0);
+  }
+
+  /// @dev A dust share left after a loss: the next investor buys at about par, which a mark below par would charge
+  function testFuzz_DustSharesAfterALossDoNotChargeTheNextInvestorOnPrincipal(
+    uint256 _lost,
+    uint256 _sharesLeft
+  ) external {
+    _allocate(_IN);
+    _target.lose(bound(_lost, 1, _IN - 1));
+    _vault.accrue();
+    _performanceOnly();
+    vm.prank(_allocator);
+    _portfolio.setLiquidityAdapter(address(_adapter));
+    uint256 _out = _shares - bound(_sharesLeft, 1, 1e9);
+    uint256 _max = _vault.maxRedeem(_alice);
+    vm.prank(_alice);
+    _vault.redeem(_out < _max ? _out : _max, _alice, _alice);
+    _deposit(_bob, _IN);
+    vm.warp(block.timestamp + 1 days);
+    _vault.accrue();
+    assertLe(_vault.feesOwed(), _IN / 1e6);
+  }
+
+  /// @dev Shares left behind are not the empty case. A count before the entry lifts the mark above the price the next
+  ///      investor buys at, so that investor is not charged on principal either
+  function testFuzz_DustSharesDoNotChargeTheNextInvestorOnPrincipal(
+    uint256 _sharesLeft
+  ) external {
+    _performanceOnly();
+    _asset.mint(address(_portfolio), 100e6);
+    vm.warp(block.timestamp + _YEAR);
+    _vault.accrue();
+    _sharesLeft = bound(_sharesLeft, 1, 1e9);
+    vm.prank(_alice);
+    _vault.redeem(_shares - _sharesLeft, _alice, _alice);
+    assertEq(_vault.totalSupply(), _sharesLeft);
+    _vault.collectFees();
+    _deposit(_bob, _IN);
+    uint256 _owed = _vault.feesOwed();
+    vm.warp(block.timestamp + 1 days);
+    _vault.accrue();
+    assertLe(_vault.feesOwed() - _owed, _IN / 1e6);
   }
 
   /// @dev What is already owed is not value to count again

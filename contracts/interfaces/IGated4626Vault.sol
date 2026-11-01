@@ -28,7 +28,9 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
  *      price. Deposits and withdrawals move `last` by exactly their amount. While `priceFresh()` is false `totalAssets()` is
  *      the last counted value and deposits and withdrawals stop. While the value net of fees reads nothing, although
  *      holders have a value counted, `totalAssets()` reads zero, nothing is written down and deposits and withdrawals stop,
- *      so the value can come back under the limit. `maxWithdraw` and `maxRedeem` are limited by what the portfolio can raise
+ *      so the value can come back under the limit. With no shares nothing is anyone's: `totalAssets()` is zero, so the next
+ *      investor buys at par and the mark restarts there, and whatever is left counts for them under the limit.
+ *      `maxWithdraw` and `maxRedeem` are limited by what the portfolio can raise
  */
 interface IGated4626Vault {
   /*///////////////////////////////////////////////////////////////
@@ -149,7 +151,8 @@ interface IGated4626Vault {
   /**
    * @notice Plugs a fee model
    * @dev DEFAULT_ADMIN_ROLE. Needs a portfolio. The model must be attested as FEE_MODEL. Fees are charged only on gains that
-   *      have passed the rate limit. The first plug starts the mark at the current price, so principal is never charged
+   *      have passed the rate limit. The first plug starts the mark at the last counted price, or at par if that is lower, so
+   *      principal is never charged
    * @param _feeModel The fee model
    */
   function setFeeModel(

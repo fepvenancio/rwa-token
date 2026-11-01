@@ -67,6 +67,12 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
   /// @notice A price's scale: assets per this many share units
   uint256 private constant _PRICE_SCALE = 1e18;
 
+  /// @notice The virtual shares of the decimals offset: share units per unit of the asset at par
+  uint256 private constant _VIRTUAL_SHARES = 1e6;
+
+  /// @notice The mark at par, the lowest it can be: getting back to par recovers principal, and is no gain
+  uint256 private constant _PAR_MARK = _PRICE_SCALE / _VIRTUAL_SHARES;
+
   /// @notice keccak256(abi.encode(uint256(keccak256('gated.storage.Gated4626Vault')) - 1)) & ~bytes32(uint256(0xff))
   // Read in assembly by the ERC-7201 accessor (test: Gated4626VaultPortfolio_Storage).
   // aderyn-ignore-next-line(unused-state-variable)
@@ -179,7 +185,7 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
     if ($.feeModel == address(0)) {
       if ($.mark == 0) {
         // From what was counted, not from `totalAssets()`, which during a read of nothing would start the mark at nothing.
-        $.mark = Math.mulDiv(_PRICE_SCALE, $.last + 1, totalSupply() + 10 ** _decimalsOffset());
+        $.mark = Math.max(Math.mulDiv(_PRICE_SCALE, $.last + 1, totalSupply() + _VIRTUAL_SHARES), _PAR_MARK);
         $.markMovedAt = uint64(block.timestamp);
       }
       $.lastFeeAt = uint64(block.timestamp);
@@ -459,13 +465,13 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
     $.feesOwed += _fee;
     $.mark = _newMark;
     $.lastFeeAt = uint64(block.timestamp);
-    // With no shares the first investors do not pay for time before they arrived.
-    if (_markMoved || totalSupply() == 0) $.markMovedAt = uint64(block.timestamp);
+    if (_markMoved) $.markMovedAt = uint64(block.timestamp);
   }
 
   /**
    * @notice The value to count now, and the fee due on it
-   * @return _counted The value: the priced value net of fees owed, up to the rate limit; the last counted while no price
+   * @return _counted The value: the priced value net of fees owed, up to the rate limit; the last counted while no price;
+   *         zero with no shares
    * @return _fee The fee due now
    * @return _newMark The mark after that fee
    * @return _markMoved Whether the mark moved
@@ -476,6 +482,9 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
     _counted = $.last;
     _newMark = $.mark;
     if (!_portfolio.priceFresh()) return (_counted, 0, _newMark, false);
+    // With no shares nothing is anyone's. A price struck on what is left would be charged as a gain on the next investor's
+    // principal, so they buy at par, and the mark starts there. What is left counts for them under the limit.
+    if (totalSupply() == 0) return (0, 0, _PAR_MARK, true);
 
     uint256 _priced = _portfolio.pricedValue();
     uint256 _owed = $.feesOwed;

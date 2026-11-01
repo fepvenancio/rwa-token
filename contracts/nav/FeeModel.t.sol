@@ -187,6 +187,24 @@ contract FeeModel_Performance is FeeModelTest {
   }
 }
 
+contract FeeModel_RoundedCharges is FeeModelTest {
+  /// @dev A charge too small to pay leaves the price where it was. On a dust position the next investor buys near that
+  ///      price, and a mark left below it would be charged on their principal
+  function test_WhenTheChargeRoundsToNoFeeTheMarkIsThePrice() external {
+    (uint256 _fee, uint256 _newMark, bool _moved) = _model(0, 5000, 0, false).quote(5, 3e6, 1e12, 0, 0);
+    assertEq(_fee, 0);
+    assertEq(_newMark, uint256(5e18) / 3e6);
+    assertTrue(_moved);
+  }
+
+  function test_TheMarkIsThePriceAfterWhatIsActuallyCharged() external {
+    (uint256 _fee, uint256 _newMark, bool _moved) = _model(0, 5000, 0, false).quote(7, 3e6, 1e12, 0, 0);
+    assertEq(_fee, 1);
+    assertEq(_newMark, uint256(7e18) / 3e6 - uint256(1e18) / 3e6);
+    assertTrue(_moved);
+  }
+}
+
 contract FeeModel_Properties is FeeModelTest {
   function testFuzz_ItNeverRevertsAndAFeeNeverExceedsTheGross(
     uint256 _gross,

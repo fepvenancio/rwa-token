@@ -344,16 +344,16 @@ contract NavDesk_Propose is NavDeskTest {
       asOf: uint64(block.timestamp),
       acceptedAt: 0,
       proposer: _reporter,
-      nav: 500,
+      nav: 0, // no shares yet, so what is reported is nobody's, the mark starts at par and the clocks restart
       fee: 0,
-      mark: 0,
-      markMovedAt: block.timestamp, // no shares yet, so the clocks restart
+      mark: 1e12,
+      markMovedAt: block.timestamp,
       reportHash: _REPORT,
       cash: _custodian,
       feeRecipient: address(0)
     });
     vm.expectEmit(address(_desk));
-    emit INavDesk.ProposalMade(_desk.hashOf(_expected), 1, 500, 0, 500, 0, _REPORT, block.timestamp);
+    emit INavDesk.ProposalMade(_desk.hashOf(_expected), 1, 500, 0, 0, 0, _REPORT, block.timestamp);
     _propose(500);
     assertEq(_hash(), _desk.hashOf(_expected));
     assertEq(_desk.proposal().proposer, _reporter);
@@ -425,7 +425,8 @@ contract NavDesk_Accept is NavDeskTest {
     vm.prank(_checker);
     _desk.cancel();
 
-    _propose(999);
+    vm.prank(_reporter);
+    _desk.propose(999, keccak256('another NAV pack'), block.timestamp, 0);
     assertEq(_desk.proposal().acceptedAt, 0);
     vm.expectRevert(INavDesk.NavDesk_ProposalMismatch.selector);
     vm.prank(_checker);
@@ -520,7 +521,7 @@ contract NavDesk_Cancel is NavDeskTest {
     vm.prank(_checker);
     _desk.cancel();
     _propose(7);
-    assertEq(_desk.proposal().nav, 7);
+    assertEq(_desk.proposal().period, 1);
   }
 }
 
@@ -957,14 +958,37 @@ contract NavDesk_Fees is NavDeskTest {
     _desk.setFeeModel(address(_rogue));
   }
 
+  function _settleAt(
+    uint256 _reported
+  ) internal {
+    _close();
+    _propose(_reported);
+    _accept();
+    vm.warp(block.timestamp + _COOLDOWN);
+    _desk.execute();
+  }
+
   function test_TheFirstPlugStartsTheMarkAtTheCurrentPrice() external {
+    _settleAt(2000e6);
     vm.expectEmit(address(_desk));
     emit INavDesk.FeeModelSet(address(_model));
     _plug();
     assertEq(_desk.feeModel(), address(_model));
     assertEq(_desk.mark(), _vault.convertToAssets(1e18));
+    assertGt(_desk.mark(), 1e12);
     assertEq(_desk.lastFeeAt(), block.timestamp);
     assertEq(_desk.markMovedAt(), block.timestamp);
+  }
+
+  /// @dev Getting back to par is a recovery of principal, not a gain
+  function test_AFirstPlugBelowParStartsTheMarkAtPar() external {
+    _settleAt(500e6);
+    assertLt(_vault.convertToAssets(1e18), 1e12);
+    _plug();
+    assertEq(_desk.mark(), 1e12);
+    _close();
+    _propose(1000e6);
+    assertEq(_desk.proposal().mark, 1e12, 'no performance fee on the way back');
   }
 
   function test_ASwapKeepsTheMarkAndTheClocks() external {
@@ -1202,6 +1226,123 @@ contract NavDesk_Fees is NavDeskTest {
     assertEq(_next.mark(), _mark);
     assertEq(_next.markMovedAt(), _movedAt);
     assertEq(_next.lastFeeAt(), _at);
+  }
+}
+
+/// @notice With no shares nothing is anyone's: a period strikes at par, and the mark starts there
+contract NavDesk_NoShares is NavDeskTest {
+  uint256 internal constant _PAR_MARK = 1e12;
+  uint256 internal constant _IN = 1000e6;
+  address internal _recipient = makeAddr('recipient');
+
+  function setUp() public override {
+    super.setUp();
+    FeeModel _model = new FeeModel(_recipient, 0, 2000, 0, false);
+    _registry.attest(address(_model).codehash, IPolicyRegistry.AttestKind.FEE_MODEL, '');
+    _desk.setFeeModel(address(_model));
+  }
+
+  function _settle() internal {
+    _accept();
+    vm.warp(block.timestamp + _COOLDOWN);
+    _desk.execute();
+  }
+
+  function _claim(
+    address _who
+  ) internal returns (uint256 _shares) {
+    _shares = _vault.maxMint(_who);
+    vm.prank(_who);
+    _vault.mint(_shares, _who, _who);
+  }
+
+  function test_AValueReportedWithNoSharesStrikesAtPar() external {
+    _request(_alice, _IN);
+    _close();
+    _propose(1e6);
+    assertEq(_desk.proposal().nav, 0);
+    assertEq(_desk.proposal().mark, _PAR_MARK);
+    _settle();
+    assertEq(_claim(_alice), _IN * _PAR);
+    assertEq(_desk.mark(), _PAR_MARK);
+  }
+
+  /// @dev One unit reported would double the price against a mark at par, and charge 100 of an unchanged 1,000
+  function test_TheNextPeriodChargesNoFeeOnPrincipal() external {
+    _request(_alice, _IN);
+    _close();
+    _propose(1);
+    _settle();
+    _claim(_alice);
+    _close();
+    _propose(_IN);
+    assertEq(_desk.proposal().fee, 0);
+    assertEq(_desk.proposal().nav, _IN);
+  }
+
+  /// @dev Shares not claimed yet are shares: valuing them at nothing would hand their value to the next investors
+  function test_UnclaimedSharesStillHaveAValue() external {
+    _request(_alice, _IN);
+    _close();
+    _propose(0);
+    _settle();
+    assertEq(_vault.totalSupply(), 0);
+    _close();
+    _propose(_IN);
+    assertEq(_desk.proposal().nav, _IN);
+  }
+
+  /// @dev A stranger cannot move the first price, or stop it, with a unit sent to the portfolio
+  function test_ADonationToThePortfolioWithNoSharesStrikesAtPar() external {
+    Portfolio _portfolio = new Portfolio(address(_vault), IERC20(address(_asset)), true);
+    _registry.attest(address(_portfolio).codehash, IPolicyRegistry.AttestKind.PORTFOLIO, '');
+    _desk.setSettings(address(_portfolio), address(0), _LENGTH, _COOLDOWN, _MAX_AGE);
+    _request(_alice, _IN);
+    _asset.mint(address(_portfolio), 1);
+    _close();
+    _propose(0);
+    assertEq(_desk.proposal().nav, 0);
+    _settle();
+    assertEq(_claim(_alice), _IN * _PAR);
+    _close();
+    _propose(0);
+    assertEq(_desk.proposal().fee, 0, 'a gain of one unit rounds to no fee');
+    assertEq(_desk.proposal().nav, _IN + 1);
+  }
+
+  /// @dev Every holder gone, with the mark far above par and money left: the next investor still starts from par
+  function test_TheMarkRestartsAtParWhenEveryoneHasLeft() external {
+    _request(_alice, _IN);
+    _close();
+    _propose(0);
+    _settle();
+    uint256 _shares = _claim(_alice);
+
+    // The value doubles, a fee is charged and the mark moves.
+    _close();
+    _propose(2 * _IN);
+    _settle();
+    assertGt(_desk.mark(), _PAR_MARK);
+
+    vm.prank(_alice);
+    _vault.requestRedeem(_shares, _alice, _alice);
+    _close();
+    _propose(2 * _IN);
+    _settle();
+    assertEq(_vault.totalSupply(), 0);
+
+    _request(_bob, _IN);
+    _close();
+    _propose(5);
+    assertEq(_desk.proposal().nav, 0);
+    assertEq(_desk.proposal().fee, 0);
+    _settle();
+    assertEq(_claim(_bob), _IN * _PAR);
+    assertEq(_desk.mark(), _PAR_MARK);
+
+    _close();
+    _propose(_IN);
+    assertEq(_desk.proposal().fee, 0);
   }
 }
 

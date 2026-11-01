@@ -275,8 +275,9 @@ interface INavDesk {
 
   /**
    * @notice Proposes the price of the closed period: `nav = reported + pricedValue() - fee`, the fee being quoted now and
-   *         frozen with the rest. With no shares there is no fee, and both fee clocks restart when it executes, so the
-   *         first investors do not pay for time before they arrived
+   *         frozen with the rest. With no shares nothing is anyone's: `nav` is zero whatever is reported or sits in the
+   *         portfolio, so the period strikes at par, there is no fee, the mark restarts at par, and both fee clocks restart
+   *         when it executes, so the first investors pay neither on their principal nor for time before they arrived
    * @dev The vault's REPORTER_ROLE. One at a time
    * @param _reported One number covering everything not priced on-chain; the breakdown is in the NAV pack. It leaves out
    *        what the vault itself holds, which belongs to investors with open requests and claims
@@ -318,8 +319,8 @@ interface INavDesk {
 
   /**
    * @notice Plugs a fee model, or zero for none
-   * @dev The vault's DEFAULT_ADMIN_ROLE. A first plug starts the mark at the vault's current price, so principal is never
-   *      charged, and the fee clock at now. A proposal on the table keeps the fee it froze; one made with no model froze
+   * @dev The vault's DEFAULT_ADMIN_ROLE. A first plug starts the mark at the vault's current price, or at par if that is
+   *      lower, so principal is never charged, and the fee clock at now. A proposal on the table keeps the fee it froze; one made with no model froze
    *      none, and leaves what this plug set alone
    * @param _feeModel The fee model, attested as FEE_MODEL
    */

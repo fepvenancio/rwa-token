@@ -91,9 +91,11 @@ contract FeeModel is IFeeModel {
 
     uint256 _charged = _performance(_price, _mark, _hurdled);
     if (_charged == 0) return (_fee, _mark, false);
-    _fee += Math.mulDiv(_charged, _supply, _PRICE_SCALE);
-    // Never below the hurdle: what is charged never exceeds what is above it.
-    _newMark = _price - _charged;
+    uint256 _paid = Math.mulDiv(_charged, _supply, _PRICE_SCALE);
+    _fee += _paid;
+    // The price after what is actually paid, never below the hurdle: what is charged never exceeds what is above it. A
+    // charge that rounds down stays in the price, and a mark below that would be charged on the next investor's principal.
+    _newMark = _price - Math.mulDiv(_paid, _PRICE_SCALE, _supply);
     _markMoved = true;
   }
 
