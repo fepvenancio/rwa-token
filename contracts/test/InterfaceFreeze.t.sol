@@ -48,7 +48,8 @@ contract InterfaceFreezeTest is Test {
   function test_WhenThePortfolioLegoCompiles_ItsIdsTopicsAndKindsArePinned() external pure {
     assertEq(type(IAdapter).interfaceId, bytes4(0x4ffb2bfe), 'IAdapter');
     assertEq(type(IERC4626Adapter).interfaceId, bytes4(0x3398a02a), 'IERC4626Adapter');
-    assertEq(type(IPortfolio).interfaceId, bytes4(0x7d65c67c), 'IPortfolio');
+    // Re-pinned 2026-10-31 on owner instruction: `allocate` takes the least it may add.
+    assertEq(type(IPortfolio).interfaceId, bytes4(0x61d1b676), 'IPortfolio');
 
     assertEq(IPortfolio.AdapterAdded.selector, 0x9537fb53b49c6ea87760a6c4ea4ce6599f9e1785fcde3ff4f15211b1a4614681);
     assertEq(IPortfolio.AdapterRemoved.selector, 0xdf980d21d8c7bb34800e668dbe003299093bac8e693614151d3c57f73f98a93d);
@@ -87,7 +88,8 @@ contract InterfaceFreezeTest is Test {
     // Re-pinned 2026-10-23 on owner instruction (intent revision I-1): `TransferIntent` gained executor, validAfter,
     // considerationToken and considerationAmount, and `canExecute` takes the signature. Ids computed from the
     // signatures with `cast sig` (was 0x7a2b1b79, 0xd2319653 and 0x117727cb)
-    assertEq(type(ITransferIntent).interfaceId, bytes4(0x51128254), 'ITransferIntent');
+    // Re-pinned 2026-10-31 on owner instruction: `canExecute` takes the executor.
+    assertEq(type(ITransferIntent).interfaceId, bytes4(0xf81fba59), 'ITransferIntent');
     assertEq(type(IIntentExecutor).interfaceId, bytes4(0x4e8890b4), 'IIntentExecutor');
     // Added in Phase 3 (2026-10-16): executeBatch, pause, unpause
     assertEq(type(IIntentExecutorBatch).interfaceId, bytes4(0x58c0d550), 'IIntentExecutorBatch');
@@ -279,6 +281,8 @@ contract InterfaceFreezeTest is Test {
     // Appended in the credential layer (2026-10-23)
     assertEq(Reasons.CREDENTIAL_EXPIRED, keccak256('CREDENTIAL_EXPIRED'));
     assertEq(Reasons.RECEIVER_NOT_ELIGIBLE, keccak256('RECEIVER_NOT_ELIGIBLE'));
+    assertEq(Reasons.NOT_EXECUTOR, keccak256('NOT_EXECUTOR'));
+    assertEq(Reasons.ZERO_RECEIVER, keccak256('ZERO_RECEIVER'));
   }
 
   /// @dev The qualification bits are part of the frozen vocabulary: a record written under one meaning must never be read

@@ -344,6 +344,29 @@ describe("a token's decimals", async function () {
     assert.equal(await vault.read.decimals(), 8);
   });
 
+  it("a token that signs intents states its own too", async function () {
+    const signed: Profile = {
+      id: "signedCash",
+      products: [
+        {
+          key: "cash",
+          template: "IntentToken",
+          name: "Signed Cash",
+          symbol: "sUSD",
+          decimals: 6,
+          rules: ["credentialRule"],
+          policy: { requireAll: 0, requireAny: QUALS.CUSTOMER | QUALS.INFRA, forbidAny: 0, attesters: 1n },
+        },
+      ],
+    };
+    const s = await networkHelpers.loadFixture(async function signedDecimals() {
+      return deployProfile(connection, signed);
+    });
+    const cash = await viem.getContractAt("IntentToken", s.products.cash.address);
+    assert.equal(await cash.read.decimals(), 6);
+    assert.equal(await cash.read.templateId(), keccak256(toHex("IntentToken")));
+  });
+
   it("a plain token states its own or takes 18", async function () {
     const s = await networkHelpers.loadFixture(async function token() {
       return deployProfile(connection, PROFILES.token);

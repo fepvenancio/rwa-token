@@ -55,7 +55,7 @@ contract IntentSettledUnitTest is Helpers {
         new ERC1967Proxy(
           address(_impl),
           abi.encodeCall(
-            IntentToken.initialize, (_NAME, 'GNOTE', _admin, _guardian, _registry, _hook, new IComplianceRule[](0))
+            IntentToken.initialize, (_NAME, 'GNOTE', 18, _admin, _guardian, _registry, _hook, new IComplianceRule[](0))
           )
         )
       )
@@ -161,8 +161,7 @@ contract IntentSettledUnitTest is Helpers {
     ITransferIntent.TransferIntent memory _i,
     bytes memory _sig
   ) internal returns (bool _ok, bytes32 _reason) {
-    vm.prank(_caller);
-    (_ok, _reason) = _token.canExecute(_i, _sig);
+    (_ok, _reason) = _token.canExecute(_i, _sig, _caller);
   }
 
   function _rejected(
@@ -650,10 +649,78 @@ contract IntentSettledUnit_CancelIntent is IntentSettledUnitTest {
 }
 
 contract IntentSettledUnit_CanExecute is IntentSettledUnitTest {
+  function test_WhenTheNamedAccountHoldsNoRole_ItSaysSoAndTheCallAgrees() external {
+    ITransferIntent.TransferIntent memory _i = _intent(1, keccak256('n'), block.timestamp);
+    bytes memory _sig = _signed(_i);
+    (bool _ok, bytes32 _reason) = _token.canExecute(_i, _sig, _stranger);
+    assertFalse(_ok);
+    assertEq(_reason, Reasons.NOT_EXECUTOR);
+    vm.expectRevert(
+      abi.encodeWithSelector(
+        IAccessControl.AccessControlUnauthorizedAccount.selector, _stranger, _token.EXECUTOR_ROLE()
+      )
+    );
+    _executeAs(_stranger, _i, _sig);
+  }
+
+  function test_TheRoleIsCheckedBeforeEverythingElseAsInTheCall() external {
+    ITransferIntent.TransferIntent memory _i = _intent(1, keccak256('n'), block.timestamp);
+    bytes memory _sig = _signed(_i);
+    vm.warp(block.timestamp + 1);
+    (, bytes32 _reason) = _token.canExecute(_i, _sig, _stranger);
+    assertEq(_reason, Reasons.NOT_EXECUTOR);
+    (, _reason) = _token.canExecute(_i, _sig, _executor);
+    assertEq(_reason, Reasons.INTENT_EXPIRED);
+  }
+
+  function test_TheAnswerDoesNotDependOnWhoAsks(
+    address _asker
+  ) external {
+    ITransferIntent.TransferIntent memory _i = _intent(1, keccak256('n'), block.timestamp);
+    _i.executor = _executor;
+    bytes memory _sig = _signed(_i);
+    vm.prank(_asker);
+    (bool _ok, bytes32 _reason) = _token.canExecute(_i, _sig, _executor);
+    assertTrue(_ok);
+    assertEq(_reason, Reasons.TRANSFER_OK);
+    vm.prank(_asker);
+    (_ok, _reason) = _token.canExecute(_i, _sig, _otherExecutor);
+    assertFalse(_ok);
+    assertEq(_reason, Reasons.WRONG_EXECUTOR);
+  }
+
+  function test_TheRulesSeeTheNamedAccountAsTheOperator() external {
+    ITransferIntent.TransferIntent memory _i = _intent(1, keccak256('n'), block.timestamp);
+    bytes memory _sig = _signed(_i);
+    IPolicyHook.TransferContext memory _ctx = IPolicyHook.TransferContext({
+      token: address(_token),
+      from: _alice,
+      to: _bob,
+      id: 0,
+      amount: 1,
+      operator: _executor,
+      kind: IPolicyHook.TransferKind.EXECUTED,
+      extra: abi.encode(_token.balanceOf(_alice), _token.balanceOf(_bob), _i.ref, _i.deadline)
+    });
+    vm.expectCall(_hook, abi.encodeCall(IPolicyHook.beforeTransfer, (_ctx)));
+    vm.prank(_stranger);
+    _token.canExecute(_i, _sig, _executor);
+  }
+
+  function test_WhenTheIntentPaysZero_BothRejectItWithTheSameReason() external {
+    ITransferIntent.TransferIntent memory _i = _intent(1, keccak256('n'), block.timestamp);
+    _i.to = address(0);
+    bytes memory _sig = _signed(_i);
+    (bool _ok, bytes32 _reason) = _token.canExecute(_i, _sig, _executor);
+    assertFalse(_ok);
+    assertEq(_reason, Reasons.ZERO_RECEIVER);
+    vm.expectRevert(_rejected(Reasons.ZERO_RECEIVER));
+    _execute(_i, _sig);
+  }
+
   function test_WhenExecutable_ItReturnsOk() external {
     ITransferIntent.TransferIntent memory _i = _intent(1, keccak256('n'), block.timestamp);
-    vm.prank(_executor);
-    (bool _ok, bytes32 _reason) = _token.canExecute(_i, _signed(_i));
+    (bool _ok, bytes32 _reason) = _token.canExecute(_i, _signed(_i), _executor);
     assertTrue(_ok);
     assertEq(_reason, Reasons.TRANSFER_OK);
   }
@@ -662,7 +729,7 @@ contract IntentSettledUnit_CanExecute is IntentSettledUnitTest {
     ITransferIntent.TransferIntent memory _i = _intent(1, keccak256('n'), block.timestamp);
     bytes memory _sig = _signed(_i);
     vm.warp(block.timestamp + 1);
-    (bool _ok, bytes32 _reason) = _token.canExecute(_i, _sig);
+    (bool _ok, bytes32 _reason) = _token.canExecute(_i, _sig, _executor);
     assertFalse(_ok);
     assertEq(_reason, Reasons.INTENT_EXPIRED);
   }
@@ -672,7 +739,7 @@ contract IntentSettledUnit_CanExecute is IntentSettledUnitTest {
     bytes memory _sig = _signed(_i);
     vm.prank(_alice);
     _token.cancelIntent(keccak256('n'));
-    (bool _ok, bytes32 _reason) = _token.canExecute(_i, _sig);
+    (bool _ok, bytes32 _reason) = _token.canExecute(_i, _sig, _executor);
     assertFalse(_ok);
     assertEq(_reason, Reasons.NONCE_USED);
   }
@@ -684,7 +751,7 @@ contract IntentSettledUnit_CanExecute is IntentSettledUnitTest {
     _hookDecides(_reason);
     ITransferIntent.TransferIntent memory _i = _intent(1, keccak256('n'), block.timestamp);
     bytes memory _sig = _signed(_i);
-    (bool _ok, bytes32 _preflight) = _token.canExecute(_i, _sig);
+    (bool _ok, bytes32 _preflight) = _token.canExecute(_i, _sig, _executor);
     assertFalse(_ok);
     assertEq(_preflight, _reason);
     vm.expectRevert(_rejected(_reason));

@@ -160,7 +160,8 @@ contract Portfolio is ReentrancyGuardTransient, IPortfolio {
   /// @inheritdoc IPortfolio
   function allocate(
     address _adapter,
-    uint256 _assets
+    uint256 _assets,
+    uint256 _minAdded
   ) external {
     if (!_hasRole(ALLOCATOR_ROLE)) revert Portfolio_Unauthorized(msg.sender);
     _requireInstalled(_adapter);
@@ -168,7 +169,7 @@ contract Portfolio is ReentrancyGuardTransient, IPortfolio {
     // slither-disable-next-line incorrect-equality
     if (_assets == 0) revert Portfolio_ZeroAmount();
     // Read before the guard: a vault's total can ask this portfolio, which gives no price in the middle of a move.
-    _allocate(_adapter, _assets, IERC4626(VAULT).totalAssets());
+    _allocate(_adapter, _assets, _minAdded, IERC4626(VAULT).totalAssets());
   }
 
   /// @inheritdoc IPortfolio
@@ -270,6 +271,7 @@ contract Portfolio is ReentrancyGuardTransient, IPortfolio {
   function _allocate(
     address _adapter,
     uint256 _assets,
+    uint256 _minAdded,
     uint256 _totalAssets
   ) private nonReentrant {
     IAdapter _plug = IAdapter(_adapter);
@@ -287,6 +289,7 @@ contract Portfolio is ReentrancyGuardTransient, IPortfolio {
       uint256 _after = _plug.value();
       _added = _after > _before ? _after - _before : 0;
     }
+    if (_added < _minAdded) revert Portfolio_ShortAllocation(_adapter, _minAdded, _added);
     ++moves;
     _addAllocation(_adapter, _added, _totalAssets);
     emit Allocated(_adapter, _assets, _added);

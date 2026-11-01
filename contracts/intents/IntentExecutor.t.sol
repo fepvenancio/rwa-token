@@ -377,8 +377,7 @@ contract IntentExecutorIntegration_Execute is IntentExecutorIntegrationTest {
   function test_WhenAnOperatorSubmits_TheIntentSettlesWithTheExecutorAsSettler() external {
     (ITransferIntent.TransferIntent memory _i, bytes memory _sig) = _signedIntent(_bob, 50 ether, keccak256('n'));
 
-    vm.prank(address(_intentExecutor));
-    (bool _ok,) = _token.canExecute(_i, _sig);
+    (bool _ok,) = _token.canExecute(_i, _sig, address(_intentExecutor));
     assertTrue(_ok);
 
     vm.expectEmit(address(_token));

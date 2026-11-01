@@ -415,23 +415,25 @@ contract DvPExecutorUnit_PreflightGated is DvPExecutorUnitTest {
   ) internal {
     vm.mockCall(
       _cash,
-      abi.encodeCall(ITransferIntent.canExecute, (_cashIntent(), _SIG_C)),
+      abi.encodeCall(ITransferIntent.canExecute, (_cashIntent(), _SIG_C, address(_dvp))),
       abi.encode(_cashReason == Reasons.TRANSFER_OK, _cashReason)
     );
     vm.mockCall(
       _security,
-      abi.encodeCall(ITransferIntent.canExecute, (_securitiesIntent(), _SIG_S)),
+      abi.encodeCall(ITransferIntent.canExecute, (_securitiesIntent(), _SIG_S, address(_dvp))),
       abi.encode(_securitiesReason == Reasons.TRANSFER_OK, _securitiesReason)
     );
   }
 
   function test_WhenEverythingPasses_ItReturnsOkAndAsksBothTokensFromTheExecutor() external {
     _mockAndExpect(
-      _cash, abi.encodeCall(ITransferIntent.canExecute, (_cashIntent(), _SIG_C)), abi.encode(true, Reasons.TRANSFER_OK)
+      _cash,
+      abi.encodeCall(ITransferIntent.canExecute, (_cashIntent(), _SIG_C, address(_dvp))),
+      abi.encode(true, Reasons.TRANSFER_OK)
     );
     _mockAndExpect(
       _security,
-      abi.encodeCall(ITransferIntent.canExecute, (_securitiesIntent(), _SIG_S)),
+      abi.encodeCall(ITransferIntent.canExecute, (_securitiesIntent(), _SIG_S, address(_dvp))),
       abi.encode(true, Reasons.TRANSFER_OK)
     );
     (bool _ok, bytes32 _reason) = _canGated();
@@ -492,7 +494,7 @@ contract DvPExecutorUnit_Preflight3009 is DvPExecutorUnitTest {
   ) internal {
     vm.mockCall(
       _security,
-      abi.encodeCall(ITransferIntent.canExecute, (_securitiesIntent(), _SIG_S)),
+      abi.encodeCall(ITransferIntent.canExecute, (_securitiesIntent(), _SIG_S, address(_dvp))),
       abi.encode(_reason == Reasons.TRANSFER_OK, _reason)
     );
   }
@@ -702,7 +704,7 @@ contract DvPExecutorIntegrationTest is RuleSetIntegrationTest {
         address(_cashImpl),
         abi.encodeCall(
           IntentToken.initialize,
-          ('Gated USD', 'GUSD', _admin, _guardian, address(_registry), address(_hook), _cashRules)
+          ('Gated USD', 'GUSD', 18, _admin, _guardian, address(_registry), address(_hook), _cashRules)
         ),
         address(_hook),
         _cashRules
@@ -1047,11 +1049,11 @@ contract DvPExecutorIntegration_Gated is DvPExecutorIntegrationTest {
     vm.prank(_admin);
     _token.revokeRole(_role, address(_dvp));
 
-    // Pre-flight does not check the executor's role on the tokens: the tokens' own `canExecute` does not either.
+    // The token's pre-flight asks about this executor, so it says no before the trade fails.
     (bool _ok, bytes32 _reason) =
       _dvp.canExecuteDvPGated(address(_token), address(_cashToken), _t.s, _t.sSig, _t.c, _t.cSig);
-    assertTrue(_ok);
-    assertEq(_reason, Reasons.TRANSFER_OK);
+    assertFalse(_ok);
+    assertEq(_reason, Reasons.NOT_EXECUTOR);
 
     vm.expectRevert(
       abi.encodeWithSelector(
@@ -1411,7 +1413,7 @@ contract DvPExecutorFundIntegrationTest is FundIntegrationTest {
         _cashImpl,
         abi.encodeCall(
           IntentToken.initialize,
-          ('Gated USD', 'GUSD', address(this), _guardian, address(_registry), address(_hook), _list)
+          ('Gated USD', 'GUSD', 18, address(this), _guardian, address(_registry), address(_hook), _list)
         ),
         address(_hook),
         _list
@@ -1492,7 +1494,7 @@ contract DvPExecutorFundIntegration_TwoClasses is DvPExecutorFundIntegrationTest
         _impl,
         abi.encodeCall(
           IntentToken.initialize,
-          ('Class Two', 'gCLS2', address(this), _guardian, address(_registry), address(_hook), _list)
+          ('Class Two', 'gCLS2', 18, address(this), _guardian, address(_registry), address(_hook), _list)
         ),
         address(_hook),
         _list

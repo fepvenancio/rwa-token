@@ -91,7 +91,7 @@ contract PortfolioUnitTest is Helpers {
     uint256 _assets
   ) internal {
     vm.prank(_allocator);
-    _portfolio.allocate(address(_adapter), _assets);
+    _portfolio.allocate(address(_adapter), _assets, 0);
   }
 }
 
@@ -202,7 +202,7 @@ contract PortfolioUnit_Gates is PortfolioUnitTest {
     address[3] memory _callers = [_admin, _guardian, _stranger];
     for (uint256 _i; _i < 3; ++_i) {
       _expectUnauthorized(_callers[_i]);
-      _portfolio.allocate(address(_priced), 1);
+      _portfolio.allocate(address(_priced), 1, 0);
     }
   }
 
@@ -241,7 +241,7 @@ contract PortfolioUnit_Gates is PortfolioUnitTest {
   function test_ARevokedRoleStopsWorkingAtOnce() external {
     _vault.setRole(_ALLOCATOR_ROLE, _allocator, false);
     _expectUnauthorized(_allocator);
-    _portfolio.allocate(address(_priced), 1);
+    _portfolio.allocate(address(_priced), 1, 0);
 
     _vault.setRole(_GUARDIAN_ROLE, _guardian, false);
     _expectUnauthorized(_guardian);
@@ -257,7 +257,7 @@ contract PortfolioUnit_Gates is PortfolioUnitTest {
   function test_ANewlyGrantedRoleWorksAtOnce() external {
     _vault.setRole(_ALLOCATOR_ROLE, _stranger, true);
     vm.prank(_stranger);
-    _portfolio.allocate(address(_priced), 1);
+    _portfolio.allocate(address(_priced), 1, 0);
     assertEq(_portfolio.allocationOf(address(_priced)), 1);
   }
 }
@@ -587,7 +587,7 @@ contract PortfolioUnit_Allocate is PortfolioUnitTest {
   function test_WhenTheAdapterIsNotInstalled_ItReverts() external {
     vm.expectRevert(abi.encodeWithSelector(IPortfolio.Portfolio_UnknownAdapter.selector, address(1)));
     vm.prank(_allocator);
-    _portfolio.allocate(address(1), 1);
+    _portfolio.allocate(address(1), 1, 0);
   }
 
   function test_WhenTheAmountIsZero_ItReverts() external {
@@ -604,12 +604,71 @@ contract PortfolioUnit_Allocate is PortfolioUnitTest {
     vm.prank(_admin);
     _portfolio.setCaps(_PRICED_ID, _cap, _NO_RELATIVE_LIMIT);
     vm.prank(_allocator);
-    try _portfolio.allocate(address(_priced), _assets) {
+    try _portfolio.allocate(address(_priced), _assets, 0) {
       assertLe(_assets, _cap);
     } catch {
       assertGt(_assets, _cap);
     }
     assertLe(_portfolio.riskOf(_PRICED_ID).allocation, _cap);
+  }
+}
+
+contract PortfolioUnit_AllocateMinimum is PortfolioUnitTest {
+  function _allocateAtLeast(
+    MockAdapter _adapter,
+    uint256 _assets,
+    uint256 _minAdded
+  ) internal {
+    vm.prank(_allocator);
+    _portfolio.allocate(address(_adapter), _assets, _minAdded);
+  }
+
+  function test_WhenAPricedAdapterGrowsByLess_ItRevertsAndNothingMoves() external {
+    _priced.setFee(1e6);
+    vm.expectRevert(abi.encodeWithSelector(IPortfolio.Portfolio_ShortAllocation.selector, _priced, 100e6, 99e6));
+    _allocateAtLeast(_priced, 100e6, 100e6);
+    assertEq(_asset.balanceOf(address(_portfolio)), _IDLE);
+    assertEq(_asset.balanceOf(address(_priced)), 0);
+    assertEq(_portfolio.allocationOf(address(_priced)), 0);
+    assertEq(_portfolio.moves(), 0);
+  }
+
+  function test_WhenAPricedAdapterGrowsByExactlyTheMinimum_ItPasses() external {
+    _priced.setFee(1e6);
+    _allocateAtLeast(_priced, 100e6, 99e6);
+    assertEq(_portfolio.allocationOf(address(_priced)), 99e6);
+  }
+
+  function test_WhenAPricedAdapterKeepsEverything_AnyMinimumAboveZeroStopsIt() external {
+    _priced.setFee(100e6);
+    vm.expectRevert(abi.encodeWithSelector(IPortfolio.Portfolio_ShortAllocation.selector, _priced, 1, 0));
+    _allocateAtLeast(_priced, 100e6, 1);
+  }
+
+  function test_ForAReportedAdapter_TheMinimumIsJudgedAgainstWhatWasSent() external {
+    vm.expectRevert(abi.encodeWithSelector(IPortfolio.Portfolio_ShortAllocation.selector, _reported, 100e6 + 1, 100e6));
+    _allocateAtLeast(_reported, 100e6, 100e6 + 1);
+    _allocateAtLeast(_reported, 100e6, 100e6);
+    assertEq(_portfolio.allocationOf(address(_reported)), 100e6);
+  }
+
+  function testFuzz_ItPassesExactlyWhenTheValueGrowsEnough(
+    uint256 _assets,
+    uint256 _fee,
+    uint256 _minAdded
+  ) external {
+    _assets = bound(_assets, 1, _IDLE);
+    _fee = bound(_fee, 0, _assets);
+    _minAdded = bound(_minAdded, 0, _assets);
+    _priced.setFee(_fee);
+    vm.prank(_allocator);
+    try _portfolio.allocate(address(_priced), _assets, _minAdded) {
+      assertGe(_assets - _fee, _minAdded);
+      assertEq(_portfolio.allocationOf(address(_priced)), _assets - _fee);
+    } catch {
+      assertLt(_assets - _fee, _minAdded);
+      assertEq(_portfolio.allocationOf(address(_priced)), 0);
+    }
   }
 }
 
@@ -1143,7 +1202,7 @@ contract PortfolioIntegrationTest is Helpers {
     uint256 _assets
   ) internal {
     vm.prank(_allocator);
-    _portfolio.allocate(address(_adapter), _assets);
+    _portfolio.allocate(address(_adapter), _assets, 0);
   }
 
   function test_TheMoneyGoesInGrowsAndComesBack() external {

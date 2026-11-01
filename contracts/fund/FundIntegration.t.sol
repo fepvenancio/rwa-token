@@ -115,7 +115,7 @@ contract FundIntegrationTest is Test {
         _impl,
         abi.encodeCall(
           IntentToken.initialize,
-          ('Class Token', 'gINT', address(this), _guardian, address(_registry), address(_hook), _rules(_fundRule))
+          ('Class Token', 'gINT', 18, address(this), _guardian, address(_registry), address(_hook), _rules(_fundRule))
         ),
         address(_hook),
         _rules(_fundRule)
@@ -457,7 +457,7 @@ contract FundIntegration_Registration is FundIntegrationTest {
         _impl,
         abi.encodeCall(
           IntentToken.initialize,
-          ('Other', 'gOTH', address(this), _guardian, address(_registry), address(_hook), _rules(_fundRule))
+          ('Other', 'gOTH', 18, address(this), _guardian, address(_registry), address(_hook), _rules(_fundRule))
         ),
         address(_hook),
         _rules(_fundRule)

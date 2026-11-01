@@ -28,7 +28,7 @@ describe("intents: EIP-712 signing and executor settlement", async function () {
     const offChain = hashTypedData({ domain, types: INTENT_TYPES, primaryType: "TransferIntent", message: intent });
     assert.equal(await s.token.read.intentHash([intent]), offChain);
     assert.ok(await verifyTypedData({ address: alice.account.address, domain, types: INTENT_TYPES, primaryType: "TransferIntent", message: intent, signature: sig }));
-    assert.deepEqual(await s.token.read.canExecute([intent, sig], { account: s.executor.address }), [true, REASONS.TRANSFER_OK]);
+    assert.deepEqual(await s.token.read.canExecute([intent, sig, s.executor.address]), [true, REASONS.TRANSFER_OK]);
 
     await viem.assertions.emitWithArgs(execute(s, intent, sig), s.token, "IntentExecuted", [
       offChain,
@@ -55,7 +55,7 @@ describe("intents: EIP-712 signing and executor settlement", async function () {
   it("a signature over another chain's domain reverts BAD_SIGNATURE, and canExecute says so first", async function () {
     const s = await networkHelpers.loadFixture(funded);
     const { intent, sig, domain } = await signIntent(s, s.holders.alice, { to: s.holders.bob.account.address, amount: 1n }, { chainId: 1n });
-    assert.deepEqual(await s.token.read.canExecute([intent, sig], { account: s.executor.address }), [false, REASONS.BAD_SIGNATURE]);
+    assert.deepEqual(await s.token.read.canExecute([intent, sig, s.executor.address]), [false, REASONS.BAD_SIGNATURE]);
     const onChainDomain = { ...domain, chainId: await s.publicClient.getChainId() };
     assert.equal(
       await verifyTypedData({ address: s.holders.alice.account.address, domain: onChainDomain, types: INTENT_TYPES, primaryType: "TransferIntent", message: intent, signature: sig }),
@@ -78,7 +78,7 @@ describe("intents: EIP-712 signing and executor settlement", async function () {
     const offChain = hashTypedData({ domain, types: INTENT_TYPES, primaryType: "TransferIntent", message: intent });
     assert.equal(await s.token.read.intentHash([intent]), offChain, "the wallet and the chain hash all ten fields alike");
     // The token's pre-flight knows nothing of the intent executor's own refusal, which comes first.
-    assert.deepEqual(await s.token.read.canExecute([intent, sig], { account: s.executor.address }), [true, REASONS.TRANSFER_OK]);
+    assert.deepEqual(await s.token.read.canExecute([intent, sig, s.executor.address]), [true, REASONS.TRANSFER_OK]);
 
     const refused = await revertOf(execute(s, intent, sig), s.executor.abi as Abi);
     assert.deepEqual(refused, { errorName: "IntentExecutor_ConsiderationNotSupported", args: [0n] });
@@ -91,7 +91,7 @@ describe("intents: EIP-712 signing and executor settlement", async function () {
     const { alice, bob } = s.holders;
     const { intent, sig, domain } = await signIntent(s, alice, { to: bob.account.address, amount: 5n, executor: s.executor.address });
     const offChain = hashTypedData({ domain, types: INTENT_TYPES, primaryType: "TransferIntent", message: intent });
-    assert.deepEqual(await s.token.read.canExecute([intent, sig], { account: s.executor.address }), [true, REASONS.TRANSFER_OK]);
+    assert.deepEqual(await s.token.read.canExecute([intent, sig, s.executor.address]), [true, REASONS.TRANSFER_OK]);
 
     await viem.assertions.emitWithArgs(execute(s, intent, sig), s.token, "IntentExecuted", [
       offChain,
@@ -121,15 +121,15 @@ describe("intents: EIP-712 signing and executor settlement", async function () {
     assert.equal(await s.token.read.nonceUsed([alice.account.address, plain.intent.nonce]), false);
   });
 
-  it("an intent that names another executor is refused by the real executor, and pre-flight says so from each address", async function () {
+  it("an intent that names another executor is refused by the real executor, and pre-flight answers for each account", async function () {
     const s = await networkHelpers.loadFixture(funded);
     const { alice, bob, carol } = s.holders;
     const named = carol.account.address; // an account other than the executor contract
     const { intent, sig } = await signIntent(s, alice, { to: bob.account.address, amount: 5n, executor: named });
 
-    assert.deepEqual(await s.token.read.canExecute([intent, sig], { account: s.executor.address }), [false, REASONS.WRONG_EXECUTOR]);
-    // Pre-flight does not check the role, only the binding: from the named address the intent is executable.
-    assert.deepEqual(await s.token.read.canExecute([intent, sig], { account: named }), [true, REASONS.TRANSFER_OK]);
+    assert.deepEqual(await s.token.read.canExecute([intent, sig, s.executor.address]), [false, REASONS.WRONG_EXECUTOR]);
+    // The named account holds no role here, so the call from it would revert too.
+    assert.deepEqual(await s.token.read.canExecute([intent, sig, named]), [false, REASONS.NOT_EXECUTOR]);
     await viem.assertions.revertWithCustomErrorWithArgs(execute(s, intent, sig), s.token, "PolicyGated_TransferRejected", [REASONS.WRONG_EXECUTOR]);
     assert.equal(await s.token.read.nonceUsed([alice.account.address, intent.nonce]), false);
     assert.equal(await s.token.read.balanceOf([bob.account.address]), 0n);
@@ -145,7 +145,7 @@ describe("intents: EIP-712 signing and executor settlement", async function () {
       considerationAmount: 500n,
     });
 
-    assert.deepEqual(await s.token.read.canExecute([intent, sig], { account: s.executor.address }), [false, REASONS.CONSIDERATION_NEEDS_EXECUTOR]);
+    assert.deepEqual(await s.token.read.canExecute([intent, sig, s.executor.address]), [false, REASONS.CONSIDERATION_NEEDS_EXECUTOR]);
     const refused = await revertOf(execute(s, intent, sig), s.executor.abi as Abi);
     assert.deepEqual(refused, { errorName: "IntentExecutor_ConsiderationNotSupported", args: [0n] });
     assert.equal(await s.token.read.balanceOf([bob.account.address]), 0n);
@@ -156,7 +156,7 @@ describe("intents: EIP-712 signing and executor settlement", async function () {
     const { alice, bob } = s.holders;
     const first = await signIntent(s, alice, { to: bob.account.address, amount: 1n });
     await execute(s, first.intent, first.sig);
-    assert.deepEqual(await s.token.read.canExecute([first.intent, first.sig]), [false, REASONS.NONCE_USED]);
+    assert.deepEqual(await s.token.read.canExecute([first.intent, first.sig, s.executor.address]), [false, REASONS.NONCE_USED]);
     await viem.assertions.revertWithCustomErrorWithArgs(execute(s, first.intent, first.sig), s.token, "PolicyGated_TransferRejected", [REASONS.NONCE_USED]);
 
     const cancelled = await signIntent(s, alice, { to: bob.account.address, amount: 1n });
@@ -166,7 +166,7 @@ describe("intents: EIP-712 signing and executor settlement", async function () {
       "IntentCancelled",
       [alice.account.address, cancelled.intent.nonce],
     );
-    assert.deepEqual(await s.token.read.canExecute([cancelled.intent, cancelled.sig]), [false, REASONS.NONCE_USED]);
+    assert.deepEqual(await s.token.read.canExecute([cancelled.intent, cancelled.sig, s.executor.address]), [false, REASONS.NONCE_USED]);
     await viem.assertions.revertWithCustomErrorWithArgs(execute(s, cancelled.intent, cancelled.sig), s.token, "PolicyGated_TransferRejected", [REASONS.NONCE_USED]);
   });
 

@@ -97,7 +97,7 @@ contract IntentTokenIntegrationTest is Test {
           address(_impl),
           abi.encodeCall(
             IntentToken.initialize,
-            ('Gated Note', 'GNOTE', _admin, _guardian, address(_registry), address(_hook), _initialRules)
+            ('Gated Note', 'GNOTE', 6, _admin, _guardian, address(_registry), address(_hook), _initialRules)
           ),
           address(_hook),
           _initialRules
@@ -211,6 +211,48 @@ contract IntentTokenIntegration_Deployment is IntentTokenIntegrationTest {
     vm.prank(_admin);
     _token.setPolicyHook(address(_twin));
     assertEq(_token.policyHook(), address(_twin));
+  }
+}
+
+contract IntentTokenIntegration_Decimals is IntentTokenIntegrationTest {
+  function test_ItHasTheDecimalsItWasGiven() external view {
+    assertEq(_token.decimals(), 6);
+  }
+
+  function testFuzz_ItReportsTheDecimalsItWasGiven(
+    uint8 _decimals
+  ) external {
+    IComplianceRule[] memory _rules = _hook.rules(address(_token));
+    ProxyDeployer _otherDeployer = new ProxyDeployer(address(this), _registry);
+    IntentToken _other = IntentToken(
+      _otherDeployer.deploy(
+        'OTHER',
+        address(_impl),
+        abi.encodeCall(
+          IntentToken.initialize,
+          ('Other', 'OTHER', _decimals, _admin, _guardian, address(_registry), address(_hook), _rules)
+        ),
+        address(_hook),
+        _rules
+      )
+    );
+    assertEq(_other.decimals(), _decimals);
+  }
+
+  function test_TheErc7201LocationHoldsTheDecimals() external view {
+    bytes32 _location =
+      keccak256(abi.encode(uint256(keccak256('gated.storage.IntentToken')) - 1)) & ~bytes32(uint256(0xff));
+    assertEq(_location, 0x403ba412e6fa3831ce946cdd170c250cfb7cdf1cb5d1422d2bd90099bcd06700);
+    assertEq(uint256(vm.load(address(_token), _location)), 6);
+  }
+
+  function test_AnUpgradeKeepsTheDecimals() external {
+    IntentToken _next = new IntentToken();
+    vm.prank(_attester);
+    _registry.attest(address(_next).codehash, IPolicyRegistry.AttestKind.IMPLEMENTATION, 'ipfs://next');
+    vm.prank(_admin);
+    _token.upgradeToAndCall(address(_next), '');
+    assertEq(_token.decimals(), 6);
   }
 }
 
@@ -337,8 +379,7 @@ contract IntentTokenIntegration_Enforcement is IntentTokenIntegrationTest {
 contract IntentTokenIntegration_Intents is IntentTokenIntegrationTest {
   function test_WhenTheReceiverIsVerified_TheIntentSettles() external {
     (ITransferIntent.TransferIntent memory _i, bytes memory _sig) = _signedIntent(_bob, 50 ether, keccak256('n1'));
-    vm.prank(_executor);
-    (bool _ok,) = _token.canExecute(_i, _sig);
+    (bool _ok,) = _token.canExecute(_i, _sig, _executor);
     assertTrue(_ok);
     vm.prank(_executor);
     _token.executeTransfer(_i, _sig);
@@ -347,7 +388,7 @@ contract IntentTokenIntegration_Intents is IntentTokenIntegrationTest {
 
   function test_WhenTheReceiverIsUnverified_TheIntentFailsAndPreflightAgrees() external {
     (ITransferIntent.TransferIntent memory _i, bytes memory _sig) = _signedIntent(_eve, 1, keccak256('n2'));
-    (bool _ok, bytes32 _reason) = _token.canExecute(_i, _sig);
+    (bool _ok, bytes32 _reason) = _token.canExecute(_i, _sig, _executor);
     assertFalse(_ok);
     assertEq(_reason, Reasons.RECEIVER_NOT_VERIFIED);
     vm.expectRevert(_rejected(Reasons.RECEIVER_NOT_VERIFIED));
@@ -361,8 +402,7 @@ contract IntentTokenIntegration_Intents is IntentTokenIntegrationTest {
     (uint8 _v, bytes32 _r, bytes32 _s) = vm.sign(_evePk, _token.intentHash(_i));
     bytes memory _badSig = abi.encodePacked(_r, _s, _v);
 
-    vm.prank(_executor);
-    (bool _ok, bytes32 _reason) = _token.canExecute(_i, _badSig);
+    (bool _ok, bytes32 _reason) = _token.canExecute(_i, _badSig, _executor);
     assertFalse(_ok);
     assertEq(_reason, Reasons.BAD_SIGNATURE);
     vm.expectRevert(_rejected(Reasons.BAD_SIGNATURE));
@@ -374,7 +414,7 @@ contract IntentTokenIntegration_Intents is IntentTokenIntegrationTest {
     vm.prank(_agent);
     _token.setFrozenTokens(_alice, 1000 ether);
     (ITransferIntent.TransferIntent memory _i, bytes memory _sig) = _signedIntent(_bob, 1, keccak256('n3'));
-    (bool _ok, bytes32 _reason) = _token.canExecute(_i, _sig);
+    (bool _ok, bytes32 _reason) = _token.canExecute(_i, _sig, _executor);
     assertFalse(_ok);
     assertEq(_reason, Reasons.INSUFFICIENT_UNFROZEN);
   }
@@ -383,8 +423,7 @@ contract IntentTokenIntegration_Intents is IntentTokenIntegrationTest {
   ///      while `canExecute`, which carries a reason, still says the intent cannot run
   function test_WhenTheAmountExceedsTheBalance_TheIntentRevertsWithTheBaseErrorAndPreflightAgrees() external {
     (ITransferIntent.TransferIntent memory _i, bytes memory _sig) = _signedIntent(_bob, 1001 ether, keccak256('n6'));
-    vm.prank(_executor);
-    (bool _ok, bytes32 _reason) = _token.canExecute(_i, _sig);
+    (bool _ok, bytes32 _reason) = _token.canExecute(_i, _sig, _executor);
     assertFalse(_ok);
     assertEq(_reason, Reasons.INSUFFICIENT_UNFROZEN);
     vm.expectRevert(
@@ -468,7 +507,7 @@ contract IntentTokenIntegration_Safety is IntentTokenIntegrationTest {
     vm.prank(_admin);
     _token.upgradeToAndCall(_vaultImpl, '');
     assertEq(_token.balanceOf(_alice), 1000 ether);
-    assertEq(_token.decimals(), 18);
+    assertEq(_token.decimals(), 6);
   }
 
   function test_WhenUpgradedToAnAsyncVaultImplementationThatIsAttested_ItIsRefused() external {

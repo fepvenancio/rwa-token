@@ -95,19 +95,21 @@ interface ITransferIntent {
   ) external returns (bytes32 _intentHash);
 
   /**
-   * @notice Pre-flight for `executeTransfer`
+   * @notice Pre-flight for `executeTransfer`, as it would run from `_executor`, whoever asks
    * @dev Runs the same checks in the same order as `executeTransfer`, minus the write: the deadline, the nonce, the
-   *      consideration, the executor, the window, the signature, then the mechanical and hook checks. The caller is the
-   *      operator in the context and the account compared with `executor`, so an intent that names an executor passes
-   *      only from that address
+   *      consideration, the executor, the window, the receiver, the signature, then the mechanical and hook checks, after
+   *      a role check on `_executor`, which `executeTransfer` makes first
    * @param _intent The intent
    * @param _sig The signer's signature over `intentHash(_intent)`
+   * @param _executor The account that would call `executeTransfer`: it must hold EXECUTOR_ROLE, and it is the operator the
+   *        rules see and the account compared with the intent's `executor`
    * @return _ok True if the intent would execute
    * @return _reason The reason code; `Reasons.TRANSFER_OK` when `_ok`
    */
   function canExecute(
     TransferIntent calldata _intent,
-    bytes calldata _sig
+    bytes calldata _sig,
+    address _executor
   ) external view returns (bool _ok, bytes32 _reason);
 
   /**

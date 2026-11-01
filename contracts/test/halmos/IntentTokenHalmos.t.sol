@@ -78,6 +78,7 @@ contract IntentTokenHalmos is Test {
             (
               'Gated',
               'GTD',
+              18,
               _admin,
               _admin,
               _registry,

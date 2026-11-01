@@ -70,6 +70,8 @@ const REASON_NAMES = [
   "RECEIVER_FROZEN",
   "CREDENTIAL_EXPIRED",
   "RECEIVER_NOT_ELIGIBLE",
+  "NOT_EXECUTOR",
+  "ZERO_RECEIVER",
 ] as const;
 
 /** `Errors.sol` reason codes, keyed by name; `reasonName` maps a code back for readable assertions. */
@@ -749,7 +751,7 @@ export async function deployGatedCashToken(connection: NetworkConnection, s: Sta
   const data = encodeFunctionData({
     abi: implementation.abi,
     functionName: "initialize",
-    args: ["Gated USD", symbol, deployer, s.wallets.guardian.account.address, s.registry.address, s.hook.address, rules],
+    args: ["Gated USD", symbol, 18, deployer, s.wallets.guardian.account.address, s.registry.address, s.hook.address, rules],
   });
   await proxyDeployer.write.deploy([symbol, implementation.address, data, s.hook.address, rules]);
   const token = await viem.getContractAt("IntentToken", predicted);

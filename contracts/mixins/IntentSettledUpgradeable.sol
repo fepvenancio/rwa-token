@@ -46,7 +46,7 @@ abstract contract IntentSettledUpgradeable is PolicyGatedERC20Upgradeable, ITran
     TransferIntent calldata _intent,
     bytes calldata _sig
   ) external onlyRole(EXECUTOR_ROLE) returns (bytes32 _intentHash) {
-    bytes32 _reason = _intentPreflight(_intent);
+    bytes32 _reason = _intentPreflight(_intent, _msgSender());
     if (_reason != Reasons.TRANSFER_OK) revert PolicyGated_TransferRejected(_reason);
 
     _intentHash = intentHash(_intent);
@@ -75,9 +75,10 @@ abstract contract IntentSettledUpgradeable is PolicyGatedERC20Upgradeable, ITran
   /// @inheritdoc ITransferIntent
   function canExecute(
     TransferIntent calldata _intent,
-    bytes calldata _sig
+    bytes calldata _sig,
+    address _executor
   ) external view returns (bool _ok, bytes32 _reason) {
-    _reason = _intentPreflight(_intent);
+    _reason = hasRole(EXECUTOR_ROLE, _executor) ? _intentPreflight(_intent, _executor) : Reasons.NOT_EXECUTOR;
     if (
       _reason == Reasons.TRANSFER_OK && !SignatureChecker.isValidSignatureNow(_intent.from, intentHash(_intent), _sig)
     ) {
@@ -89,7 +90,7 @@ abstract contract IntentSettledUpgradeable is PolicyGatedERC20Upgradeable, ITran
           _intent.from,
           _intent.to,
           _intent.amount,
-          _msgSender(),
+          _executor,
           IPolicyHook.TransferKind.EXECUTED,
           _intent.ref,
           _intent.deadline
@@ -131,12 +132,15 @@ abstract contract IntentSettledUpgradeable is PolicyGatedERC20Upgradeable, ITran
 
   /**
    * @notice Checks that do not depend on the signature, in this order: the deadline (inclusive), the nonce, that a
-   *         stated consideration has an executor, that the caller is the named executor, and `validAfter` (inclusive)
+   *         stated consideration has an executor, that `_executor` is the named executor, `validAfter` (inclusive), and
+   *         that the intent pays someone
    * @param _intent The intent
+   * @param _executor The account calling `executeTransfer`, or the one `canExecute` asks about
    * @return _reason The reason code
    */
   function _intentPreflight(
-    TransferIntent calldata _intent
+    TransferIntent calldata _intent,
+    address _executor
   ) private view returns (bytes32 _reason) {
     if (block.timestamp > _intent.deadline) return Reasons.INTENT_EXPIRED;
     if (_getIntentSettledStorage().nonces[_intent.from][_intent.nonce]) return Reasons.NONCE_USED;
@@ -144,10 +148,11 @@ abstract contract IntentSettledUpgradeable is PolicyGatedERC20Upgradeable, ITran
       if (_intent.considerationToken != address(0) || _intent.considerationAmount != 0) {
         return Reasons.CONSIDERATION_NEEDS_EXECUTOR;
       }
-    } else if (_intent.executor != _msgSender()) {
+    } else if (_intent.executor != _executor) {
       return Reasons.WRONG_EXECUTOR;
     }
     if (block.timestamp < _intent.validAfter) return Reasons.INTENT_NOT_YET_VALID;
+    if (_intent.to == address(0)) return Reasons.ZERO_RECEIVER;
     _reason = Reasons.TRANSFER_OK;
   }
 
