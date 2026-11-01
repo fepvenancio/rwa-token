@@ -294,7 +294,7 @@ Further limits recorded during review:
 
 ## 4. Static-analysis suppressions
 
-Slither 0.11.5 runs as a CI gate with 0 findings. Project-wide exclusions (`slither.config.json`):
+Slither 0.11.5 runs as a CI gate with 0 findings, on the contracts that ship: `npm run slither` leaves tests and mocks out of the build. Project-wide exclusions (`slither.config.json`):
 
 | Detector | Reason |
 |---|---|
@@ -465,7 +465,7 @@ npm run lint:sol
 ```
 
 ```bash
-slither .
+npm run slither
 ```
 
 ```bash

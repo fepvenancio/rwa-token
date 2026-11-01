@@ -3185,6 +3185,16 @@ Halmos: `PortfolioHalmos` proves an allocation never passes a cap, and the three
 3. Docs in the same step: the brief, `README.md` and `SECURITY.md`. The HTML pages wait for row 10 of the agreed order, while the repo is private and the site is offline: a page for each new lego, the affected topic pages, the pin in the footers, and a fresh claim check.
 4. Stop for review after each. Nothing is committed, pushed or merged without an instruction.
 
+## CI time: Slither on the contracts that ship (2026-11-01)
+
+A CI run took about 70 minutes, and `slither .` was 55 of them. It compiled and analysed every test contract, and `slither.config.json` then dropped every finding in them. The owner asked whether parallel jobs would help. They would not: this is one single-threaded process, and each extra job bills its own setup.
+
+- `npm run slither` builds without the `.t.sol` files and `contracts/test/`, then runs Slither on that build. Measured here on the same code: 727 s and 5.1 GB before, 10.5 s and 0.6 GB after, 514 contracts down to 144.
+- It loses nothing on shipped code. With all 59 suppressions removed from the shipped contracts, both runs report the same 56 findings, across 14 detectors and 22 files, and both exit non-zero. All 76 shipped files are in the narrower build, and no test or mock is.
+- The swap step is gone, because it existed for Slither's memory.
+- `concurrency` cancels a PR's run when a newer push replaces it. Runs on `main` finish.
+- Not done: splitting the tests and the reproducibility check into more jobs. It would take about 18 minutes to about 12, for about 6 more billed minutes a run.
+
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: P23 to P25 in that section, the issuer's country, counsel's view on P27, and approval of the plan as a whole.
 2. Credential layer: none left. On 2026-10-30 the owner confirmed decisions 11, 12, 13, 15, 16 and 17 as built (17 at the measured +8,179 gas on a transfer). Decision 14 is moot, since `IdentityRule` was removed in the cleanup. Decisions 8 and 9 are recorded in the credential section's table.
