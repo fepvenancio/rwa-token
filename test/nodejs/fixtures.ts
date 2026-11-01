@@ -763,6 +763,15 @@ export async function deployGatedCashToken(connection: NetworkConnection, s: Sta
   return token;
 }
 
+// ---- Credentials -------------------------------------------------------------------------------------------------------
+
+type Who = Address | { account: { address: Address } };
+const addressOf = (who: Who) => (typeof who === "string" ? who : who.account.address);
+
+/**
+ * The demo KYC attester vouches for `who`: a credential from now, valid for `validFor` seconds (far past any test by
+ * default) with `quals`. Writes over an earlier credential of the same attester.
+ */
 // ---- Dealing ----
 
 /** Shares per asset unit at par: the shares of a 7540 have 6 more decimals than its asset. */
@@ -807,14 +816,5 @@ export async function verify(s: Pick<ProfileStack, "publicClient" | "credentials
 
 /** The KYC attester blocks `who`: it can no longer send or receive. (The old "de-verified".) */
 export async function deverify(s: Pick<ProfileStack, "credentials" | "wallets">, who: Who) {
-// ---- Credentials -------------------------------------------------------------------------------------------------------
-
-type Who = Address | { account: { address: Address } };
-const addressOf = (who: Who) => (typeof who === "string" ? who : who.account.address);
-
-/**
- * The demo KYC attester vouches for `who`: a credential from now, valid for `validFor` seconds (far past any test by
- * default) with `quals`. Writes over an earlier credential of the same attester.
- */
   await s.credentials!.write.setStatus([addressOf(who), STATUS.BLOCKED], { account: s.wallets.kyc.account });
 }
