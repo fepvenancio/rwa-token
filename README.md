@@ -305,7 +305,7 @@ npm run fmt:check     # forge fmt (Wonderland profile in foundry.toml)
 ```
 
 ```bash
-slither .             # static-analysis gate; accepted findings in slither.config.json and inline
+npm run slither       # static-analysis gate on the contracts that ship; accepted findings in slither.config.json and inline
 ```
 
 ```bash

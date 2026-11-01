@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+# A newer push replaces a PR's run, so only the latest is paid for. head_ref is empty on main, where every run finishes.
+concurrency:
+  group: ${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -54,9 +59,9 @@ jobs:
           python-version: 3.12.15
       - run: pip install --require-hashes -r ci/requirements.txt
       - run: npm run fmt:check
-      # Private-repo runners have less memory, and the full build under Slither was shut down twice without this.
-      - run: sudo fallocate -l 8G /ci.swap && sudo chmod 600 /ci.swap && sudo mkswap /ci.swap && sudo swapon /ci.swap
-      - run: slither .
+      # The contracts that ship. Test contracts were nearly all of Slither's time and memory, and slither.config.json
+      # drops findings in them anyway.
+      - run: npm run slither
       # Second static analyser (Cyfrin Aderyn): fails on any finding not excluded in aderyn.toml or suppressed inline
       # with a reason. The binary is the sha256-pinned release asset from tools.lock.
       - run: scripts/fetch-tool.sh aderyn
