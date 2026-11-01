@@ -572,12 +572,12 @@ contract Gated4626VaultPortfolio_Counting is Gated4626VaultPortfolioTest {
     assertGt(_vault.maxDeposit(_bob), 0);
   }
 
-  /// @dev A value below what was counted, and not nothing, counts at once as it always has
+  /// @dev A value below what was counted, and not nothing, counts at once. Up to half of it leaves deposits open
   function test_ALowReadIsStillALoss() external {
     _allocate(_IN);
-    _target.lose(_IN - 1e6);
+    _target.lose(_IN * 4 / 10);
     _vault.accrue();
-    assertApproxEqAbs(_vault.lastCounted(), 1e6, 2);
+    assertApproxEqAbs(_vault.lastCounted(), _IN * 6 / 10, 2);
     assertGt(_vault.maxDeposit(_bob), 0);
   }
 
@@ -768,6 +768,165 @@ contract Gated4626VaultPortfolio_WriteOff is Gated4626VaultPortfolioTest {
   }
 
   function test_AReplacementKeepsTheExitOnlyState() external {
+    Portfolio _next = _newPortfolio();
+    _portfolio.migrateTo(address(_next));
+    _vault.setPortfolio(address(_next), _RATE);
+    assertFalse(_next.writtenOff());
+    assertTrue(_vault.exitOnly());
+    assertEq(_vault.maxDeposit(_bob), 0);
+  }
+}
+
+/// @notice Someone depositing at the price after a large fall would take part of any recovery from the holders who bore it
+contract Gated4626VaultPortfolio_LargeFall is Gated4626VaultPortfolioTest {
+  uint256 internal _shares;
+
+  function setUp() public override {
+    super.setUp();
+    _plug();
+    _install();
+    _shares = _deposit(_alice, _IN);
+  }
+
+  function _depositReverts() internal {
+    vm.expectRevert(abi.encodeWithSelector(ERC4626Upgradeable.ERC4626ExceededMaxDeposit.selector, _bob, 1, 0));
+    vm.prank(_bob);
+    _vault.deposit(1, _bob);
+  }
+
+  function test_AFallOfMoreThanHalfClosesDepositsForGood() external {
+    _allocate(_IN);
+    _target.lose(_IN * 6 / 10);
+    _vault.accrue();
+    assertTrue(_vault.exitOnly());
+    assertEq(_vault.maxDeposit(_bob), 0);
+    assertEq(_vault.maxMint(_bob), 0);
+    _depositReverts();
+
+    // The money comes back, and deposits stay closed.
+    _asset.mint(address(_target), _IN * 6 / 10);
+    vm.warp(block.timestamp + 100 * _YEAR);
+    _vault.accrue();
+    assertApproxEqAbs(_vault.totalAssets(), _IN, 2);
+    assertTrue(_vault.exitOnly());
+    assertEq(_vault.maxDeposit(_bob), 0);
+  }
+
+  /// @dev Half is not more than half, and one unit more is
+  function test_AFallOfExactlyHalfLeavesDepositsOpen() external {
+    _allocate(_IN / 2);
+    _target.lose(_asset.balanceOf(address(_target)));
+    assertEq(_portfolio.pricedValue(), _IN / 2);
+    _vault.accrue();
+    assertFalse(_vault.exitOnly());
+    assertGt(_vault.maxDeposit(_bob), 0);
+  }
+
+  function test_AFallOfOneUnitMoreThanHalfClosesDeposits() external {
+    _allocate(_IN / 2 + 1);
+    _target.lose(_asset.balanceOf(address(_target)));
+    assertEq(_portfolio.pricedValue(), _IN / 2 - 1);
+    _vault.accrue();
+    assertTrue(_vault.exitOnly());
+  }
+
+  /// @dev In a read of nothing a stranger's unit reopened deposits at a price of about nothing, ahead of any recovery
+  function test_AStrangersUnitDuringAReadOfNothingOpensNothing() external {
+    _allocate(_IN);
+    _target.lose(_IN);
+    _asset.mint(address(_portfolio), 1);
+    assertEq(_vault.maxDeposit(_bob), 0, 'before it is counted');
+    vm.prank(_stranger);
+    _vault.accrue();
+    assertEq(_vault.lastCounted(), 1);
+    assertTrue(_vault.exitOnly());
+    assertEq(_vault.maxDeposit(_bob), 0);
+    assertEq(_vault.maxMint(_bob), 0);
+    _depositReverts();
+  }
+
+  /// @dev The views say so before a count, and a deposit's revert writes nothing, so a glitch nobody counts closes nothing
+  function test_AFallNobodyCountedClosesNothing() external {
+    _allocate(_IN);
+    _target.lose(_IN * 6 / 10);
+    assertTrue(_vault.exitOnly());
+    assertEq(_vault.maxDeposit(_bob), 0);
+    assertEq(_vault.maxMint(_bob), 0);
+    _depositReverts();
+    assertEq(_vault.lastCounted(), _IN);
+
+    _asset.mint(address(_target), _IN * 6 / 10);
+    assertFalse(_vault.exitOnly());
+    assertGt(_vault.maxDeposit(_bob), 0);
+  }
+
+  /// @dev A holder can still leave at the price the fall left, and that count is what closes deposits
+  function test_AHolderLeavingAfterAFallCountsItAndPaysThatPrice() external {
+    _allocate(_IN);
+    vm.prank(_allocator);
+    _portfolio.setLiquidityAdapter(address(_adapter));
+    _target.lose(_IN * 6 / 10);
+    uint256 _max = _vault.maxRedeem(_alice);
+    vm.prank(_alice);
+    uint256 _paid = _vault.redeem(_max, _alice, _alice);
+    assertApproxEqAbs(_paid, _IN * 4 / 10, 2);
+    assertTrue(_vault.exitOnly());
+  }
+
+  /// @dev Money leaving moves the count by exactly what left, so no exit reads as a fall
+  function test_AHolderLeavingIsNotAFall() external {
+    vm.prank(_alice);
+    _vault.withdraw(_IN * 9 / 10, _alice, _alice);
+    _vault.accrue();
+    assertFalse(_vault.exitOnly());
+    assertGt(_vault.maxDeposit(_bob), 0);
+  }
+
+  /// @dev With no shares nothing counts, and that is no fall either
+  function test_TheLastHolderLeavingIsNotAFall() external {
+    _asset.mint(address(_portfolio), 100e6);
+    vm.warp(block.timestamp + _YEAR);
+    _vault.accrue();
+    vm.prank(_alice);
+    _vault.redeem(_shares, _alice, _alice);
+    assertGt(_vault.lastCounted(), 0, 'the dust');
+    assertFalse(_vault.exitOnly());
+    _vault.accrue();
+    assertFalse(_vault.exitOnly());
+    assertGt(_deposit(_bob, _IN), 0);
+  }
+
+  /// @dev A write-off closes deposits whatever its size
+  function test_AWriteOffOfLessThanHalfStillClosesDeposits() external {
+    _allocate(_IN / 10);
+    _target.setBroken(true);
+    _portfolio.writeOffAdapter(address(_adapter));
+    assertEq(_portfolio.pricedValue(), _IN - _IN / 10);
+    assertTrue(_vault.exitOnly());
+    assertEq(_vault.maxDeposit(_bob), 0);
+  }
+
+  /// @dev The limit is on one count: two smaller falls do not add up
+  function test_TwoSmallerFallsLeaveDepositsOpen() external {
+    _allocate(_IN);
+    _target.lose(_IN * 4 / 10);
+    _vault.accrue();
+    _target.lose(_IN * 3 / 10);
+    _vault.accrue();
+    assertApproxEqAbs(_vault.lastCounted(), _IN * 3 / 10, 2);
+    assertFalse(_vault.exitOnly());
+    assertGt(_vault.maxDeposit(_bob), 0);
+  }
+
+  function test_AReplacementKeepsItClosed() external {
+    _allocate(_IN);
+    _target.lose(_IN * 6 / 10);
+    _vault.accrue();
+    uint256 _back = _adapter.liquid();
+    vm.prank(_allocator);
+    _portfolio.deallocate(address(_adapter), _back);
+    _target.lose(_asset.balanceOf(address(_target)));
+    _portfolio.removeAdapter(address(_adapter));
     Portfolio _next = _newPortfolio();
     _portfolio.migrateTo(address(_next));
     _vault.setPortfolio(address(_next), _RATE);
@@ -987,13 +1146,14 @@ contract Gated4626VaultPortfolio_Fees is Gated4626VaultPortfolioTest {
     assertEq(_vault.feesOwed(), 0);
   }
 
-  /// @dev A dust share left after a loss: the next investor buys at about par, which a mark below par would charge
+  /// @dev A dust share left after a loss, of up to half as more closes deposits: the next investor buys at about par,
+  ///      which a mark below par would charge
   function testFuzz_DustSharesAfterALossDoNotChargeTheNextInvestorOnPrincipal(
     uint256 _lost,
     uint256 _sharesLeft
   ) external {
     _allocate(_IN);
-    _target.lose(bound(_lost, 1, _IN - 1));
+    _target.lose(bound(_lost, 1, _IN / 2 - 2));
     _vault.accrue();
     _performanceOnly();
     vm.prank(_allocator);
@@ -1102,7 +1262,8 @@ contract Gated4626VaultPortfolio_Fees is Gated4626VaultPortfolioTest {
     assertEq(_vault.maxDeposit(_bob), 0);
     _asset.mint(address(_portfolio), 1);
     assertEq(_vault.totalAssets(), 1);
-    assertGt(_vault.maxDeposit(_bob), 0);
+    assertEq(_vault.maxDeposit(_bob), 0, 'one unit above the fees is a fall of more than half');
+    assertGt(_vault.maxRedeem(_alice), 0);
   }
 
   function test_FeesAreNotPaidWhilePaused() external {

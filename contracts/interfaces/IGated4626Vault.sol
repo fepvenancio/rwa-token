@@ -28,7 +28,8 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
  *      price. Deposits and withdrawals move `last` by exactly their amount. While `priceFresh()` is false `totalAssets()` is
  *      the last counted value and deposits and withdrawals stop. While the value net of fees reads nothing, although
  *      holders have a value counted, `totalAssets()` reads zero, nothing is written down and deposits and withdrawals stop,
- *      so the value can come back under the limit. With no shares nothing is anyone's: `totalAssets()` is zero, so the next
+ *      so the value can come back under the limit. A count that finds the value fallen by more than half closes deposits for
+ *      good, as a write-off does. With no shares nothing is anyone's: `totalAssets()` is zero, so the next
  *      investor buys at par and the mark restarts there, and whatever is left counts for them under the limit.
  *      `maxWithdraw` and `maxRedeem` are limited by what the portfolio can raise
  */
@@ -221,8 +222,11 @@ interface IGated4626Vault {
   function mark() external view returns (uint256 _mark);
 
   /**
-   * @notice Whether deposits are closed for good, because a portfolio wrote off an adapter. Someone depositing at the
-   *         written-down price would otherwise take part of any recovery from the holders who bore the loss
+   * @notice Whether deposits are closed for good, because a portfolio wrote off an adapter or a count found the value fallen
+   *         by more than half. Someone depositing at the written-down price would otherwise take part of any recovery from
+   *         the holders who bore the loss
+   * @dev It reads true as soon as a count would find such a fall, and is for good once one has. A fall nobody counts, and
+   *      that goes away, closes nothing. Several smaller falls do not add up
    * @return _exitOnly True when they are
    */
   function exitOnly() external view returns (bool _exitOnly);

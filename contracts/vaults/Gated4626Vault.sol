@@ -35,7 +35,7 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
    * @notice ERC-7201 namespaced storage of the vault. All of it is unused while no portfolio is plugged
    * @param portfolio The portfolio; zero while the vault keeps its own money
    * @param lastAt When `last` was counted
-   * @param exitOnly Whether an earlier portfolio wrote off an adapter
+   * @param exitOnly Whether an earlier portfolio wrote off an adapter, or a count found the value fallen by more than half
    * @param feeModel The fee model, or zero for none
    * @param markMovedAt When the mark last moved
    * @param lastFeeAt When a fee was last charged
@@ -458,6 +458,7 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
     Gated4626Storage storage $ = _getGated4626Storage();
     if ($.portfolio == address(0) || _dealingStopped()) return;
     (uint256 _counted, uint256 _fee, uint256 _newMark, bool _markMoved) = _counting();
+    if (_fellTooFar(_counted)) $.exitOnly = true;
     $.last = _counted - _fee;
     $.lastAt = uint64(block.timestamp);
     emit Accrued(_counted, _fee);
@@ -512,13 +513,30 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
   }
 
   /**
-   * @notice Whether a portfolio, this one or an earlier one, wrote off an adapter
-   * @return _closed True when one did
+   * @notice Whether deposits are closed: a portfolio, this one or an earlier one, wrote off an adapter, or a count found the
+   *         value fallen by more than half, or one now would
+   * @return _closed True when they are
    */
   function _closedForGood() private view returns (bool _closed) {
     Gated4626Storage storage $ = _getGated4626Storage();
     address _portfolio = $.portfolio;
-    _closed = $.exitOnly || (_portfolio != address(0) && IPortfolio(_portfolio).writtenOff());
+    if ($.exitOnly) return true;
+    if (_portfolio == address(0)) return false;
+    if (IPortfolio(_portfolio).writtenOff()) return true;
+    (uint256 _counted,,,) = _counting();
+    _closed = _fellTooFar(_counted);
+  }
+
+  /**
+   * @notice Whether a value counted now is less than half of the last, with holders who bore it. Someone depositing at that
+   *         price would take part of any recovery from them, as after a write-off
+   * @param _counted The value counted now
+   * @return _fell True when it is
+   */
+  function _fellTooFar(
+    uint256 _counted
+  ) private view returns (bool _fell) {
+    _fell = _counted * 2 < _getGated4626Storage().last && totalSupply() != 0;
   }
 
   /**
