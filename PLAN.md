@@ -3001,6 +3001,17 @@ With none plugged it behaves exactly as today. `setPortfolio` (timelock) checks 
 - `maxWithdraw` and `maxRedeem` are limited by `liquidAssets()`, so `redeem(maxRedeem(o))` still succeeds.
 - With a `FeeModel` plugged, each accrual quotes it on the counted value, so fees are charged only on gains that have passed the rate limit, and adds to `feesOwed`; `collectFees()` pays the recipient from idle money.
 
+**Result (2026-11-01), row 8.** `GuardedAccount`, `ERC20CallValidator` and `ERC4626CallValidator` (3c), `FeeModel` on `NavDesk` (3d), and the 4626 with a `Portfolio` (3e). `AttestKind` gains `VALIDATOR` and `FEE_MODEL`. Sizes: `Gated4626Vault` 23,282, `NavDesk` 9,624, `GuardedAccount` 4,189, `FeeModel` 1,380. Skipping `reported()` behind `ACCEPTS_REPORTED` takes `pricedValue()` from 19,860 to 14,292 gas with 8 mock adapters. What the build settled:
+
+- `totalAssets` includes the fee due now, and every deposit and withdrawal counts first, so a price quoted by a preview is the price paid. `accrue()` is public and emits `Accrued`.
+- `maxRedeem` compares in assets before converting: converting the liquid assets to shares rounds down, and left dust stuck in a position that was wholly liquid. A test found that.
+- A proposal freezes the mark's clock too (`markMovedAt`), and the hash covers it. `lastFeeAt` moves to the proposal's time at execution, so the gap between proposing and executing is charged next time.
+- A first plug of a fee model starts the mark at `convertToAssets(1e18)`, the current price, rather than the opening price the plan named. On a fund that already has gains the opening price would charge those gains, and on a new fund the two are the same.
+- A model replaced with fees owed pays them to the new recipient, so the batch that swaps it collects first. That is recorded in `SECURITY.md`.
+- `GuardedAccount.setPermission` refuses its own portfolio, vault and self, and `allocate` is a no-op for the portfolio to call: the money waits there until the allocator sends it on.
+
+Tests first: 51 failing against stubs. Mutants: 106 in the first run, with 8 alive. Two showed code that did nothing, a `Math.max` in `FeeModel` and a length check in `ERC4626CallValidator`, and both are gone. Five were missing tests, which now exist: the management and performance fees added together, the 4626's mark, its clock restarting with no shares, fees owed not counted again, and the rate limit's clock running through an outage. One is equivalent: at exactly the hurdle `<` and `<=` both charge nothing. Rerun on the changed lines: 8 of 8.
+
 #### Attestation and deployment
 
 `AttestKind` gains `PORTFOLIO` and `ADAPTER` (built), then `VALIDATOR` and `FEE_MODEL` with their legos, each appended so existing values keep their numbers (P2). `setPortfolio`, `addAdapter`, `setPermission` and `setFeeModel` enforce them. `SETTLER_ROLE` is a plain role grant, since checking it in the vault would spend its margin, so the hand-over check pins the holder and `NavDesk.isWired()` shows it to monitors.

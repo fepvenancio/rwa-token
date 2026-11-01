@@ -5,12 +5,16 @@ import {ERC20Upgradeable} from '@openzeppelin/contracts-upgradeable/token/ERC20/
 import {ERC4626Upgradeable} from '@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol';
 import {IERC4626} from '@openzeppelin/contracts/interfaces/IERC4626.sol';
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
+import {SafeERC20} from '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
 import {Math} from '@openzeppelin/contracts/utils/math/Math.sol';
 
 import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+import {IFeeModel} from 'interfaces/IFeeModel.sol';
 import {IGated4626Vault} from 'interfaces/IGated4626Vault.sol';
+import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
+import {IPortfolio} from 'interfaces/IPortfolio.sol';
 import {ITemplated} from 'interfaces/ITemplated.sol';
 
 import {PolicyGatedERC20Upgradeable} from 'contracts/base/PolicyGatedERC20Upgradeable.sol';
@@ -25,6 +29,47 @@ import {GatedVaultBase} from 'contracts/vaults/GatedVaultBase.sol';
 // No receive or payable function, and upgradeToAndCall rejects value: no ETH can enter (tests: *_Ether).
 // aderyn-ignore-next-line(contract-locks-ether)
 contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
+  using SafeERC20 for IERC20;
+
+  /**
+   * @notice ERC-7201 namespaced storage of the vault. All of it is unused while no portfolio is plugged
+   * @param portfolio The portfolio; zero while the vault keeps its own money
+   * @param lastAt When `last` was counted
+   * @param exitOnly Whether an earlier portfolio wrote off an adapter
+   * @param feeModel The fee model, or zero for none
+   * @param markMovedAt When the mark last moved
+   * @param lastFeeAt When a fee was last charged
+   * @param last The value last counted
+   * @param maxRateBps The most the counted value may rise in a year
+   * @param feesOwed Fees charged and not yet paid
+   * @param mark The high-water mark
+   * @custom:storage-location erc7201:gated.storage.Gated4626Vault
+   */
+  struct Gated4626Storage {
+    address portfolio;
+    uint64 lastAt;
+    bool exitOnly;
+    address feeModel;
+    uint64 markMovedAt;
+    uint64 lastFeeAt;
+    uint256 last;
+    uint256 maxRateBps;
+    uint256 feesOwed;
+    uint256 mark;
+  }
+
+  /// @notice A year's worth of the rate's denominator: basis points per year, in seconds
+  uint256 private constant _RATE_DENOMINATOR = 1e4 * 365 days;
+
+  /// @notice A price's scale: assets per this many share units
+  uint256 private constant _PRICE_SCALE = 1e18;
+
+  /// @notice keccak256(abi.encode(uint256(keccak256('gated.storage.Gated4626Vault')) - 1)) & ~bytes32(uint256(0xff))
+  // Read in assembly by the ERC-7201 accessor (test: Gated4626VaultPortfolio_Storage).
+  // aderyn-ignore-next-line(unused-state-variable)
+  bytes32 private constant _GATED_4626_STORAGE_LOCATION =
+    0xf7c5c9bdda2a603a74c9f186cabeac6180f7b0be68bbe7656cfbf1baf4988200;
+
   /**
    * @notice Locks the implementation; only proxies can be initialized
    * @custom:oz-upgrades-unsafe-allow constructor
@@ -54,6 +99,203 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
     __PolicyGatedERC20_init_unchained(_admin, _guardian, _registry, _hook, _initialRules);
   }
 
+  /// @inheritdoc IGated4626Vault
+  function setPortfolio(
+    address _portfolio,
+    uint256 _maxRateBps
+  ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    if (_maxRateBps == 0) revert Gated4626Vault_ZeroRate();
+    // View interfaces, compiled to STATICCALL: nothing re-enters before the writes below.
+    // aderyn-ignore-next-line(reentrancy-state-change)
+    if (!IPolicyRegistry(this.registry()).isAttested(_portfolio, IPolicyRegistry.AttestKind.PORTFOLIO)) {
+      revert Gated4626Vault_NotAttested(_portfolio);
+    }
+    IPortfolio _next = IPortfolio(_portfolio);
+    // aderyn-ignore-next-line(reentrancy-state-change)
+    if (_next.VAULT() != address(this) || _next.ACCEPTS_REPORTED()) revert Gated4626Vault_PortfolioRefused(_portfolio);
+
+    Gated4626Storage storage $ = _getGated4626Storage();
+    address _old = $.portfolio;
+    if (_old != address(0)) {
+      // View interfaces, compiled to STATICCALL, and the portfolio is attested: nothing re-enters before these writes.
+      // aderyn-ignore-next-line(reentrancy-state-change)
+      if (IPortfolio(_old).pricedValue() != 0) revert Gated4626Vault_PortfolioNotEmpty();
+      // aderyn-ignore-next-line(reentrancy-state-change)
+      if (IPortfolio(_old).writtenOff()) $.exitOnly = true;
+    }
+    // aderyn-ignore-next-line(reentrancy-state-change)
+    IERC20 _asset = IERC20(asset());
+    // aderyn-ignore-next-line(reentrancy-state-change)
+    uint256 _held = _asset.balanceOf(address(this));
+    $.portfolio = _portfolio;
+    $.maxRateBps = _maxRateBps;
+    $.last += _held;
+    $.lastAt = uint64(block.timestamp);
+    emit PortfolioSet(_portfolio);
+    emit MaxRateSet(_maxRateBps);
+    if (_held != 0) _asset.safeTransfer(_portfolio, _held);
+  }
+
+  /// @inheritdoc IGated4626Vault
+  function setMaxRate(
+    uint256 _maxRateBps
+  ) external {
+    Gated4626Storage storage $ = _getGated4626Storage();
+    if (!hasRole(DEFAULT_ADMIN_ROLE, _msgSender())) {
+      if (!hasRole(GUARDIAN_ROLE, _msgSender()) || _maxRateBps > $.maxRateBps) {
+        revert Gated4626Vault_Unauthorized(_msgSender());
+      }
+    }
+    // The old rate decides what has counted so far.
+    _accrue();
+    $.maxRateBps = _maxRateBps;
+    emit MaxRateSet(_maxRateBps);
+  }
+
+  /// @inheritdoc IGated4626Vault
+  function setFeeModel(
+    address _feeModel
+  ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    Gated4626Storage storage $ = _getGated4626Storage();
+    if ($.portfolio == address(0)) revert Gated4626Vault_NoPortfolio();
+    // A view interface, compiled to STATICCALL: nothing re-enters before the writes below.
+    // aderyn-ignore-next-line(reentrancy-state-change)
+    if (!IPolicyRegistry(this.registry()).isAttested(_feeModel, IPolicyRegistry.AttestKind.FEE_MODEL)) {
+      revert Gated4626Vault_NotAttested(_feeModel);
+    }
+    _accrue();
+    if ($.feeModel == address(0)) {
+      if ($.mark == 0) {
+        $.mark = _convertToAssets(_PRICE_SCALE, Math.Rounding.Floor);
+        $.markMovedAt = uint64(block.timestamp);
+      }
+      $.lastFeeAt = uint64(block.timestamp);
+    }
+    $.feeModel = _feeModel;
+    emit FeeModelSet(_feeModel);
+  }
+
+  /// @inheritdoc IGated4626Vault
+  function accrue() external {
+    if (_getGated4626Storage().portfolio == address(0)) revert Gated4626Vault_NoPortfolio();
+    _accrue();
+  }
+
+  /// @inheritdoc IGated4626Vault
+  function collectFees() external {
+    Gated4626Storage storage $ = _getGated4626Storage();
+    address _feeModel = $.feeModel;
+    if (_feeModel == address(0)) revert Gated4626Vault_NoFeeModel();
+    _accrue();
+    address _portfolio = $.portfolio;
+    IERC20 _asset = IERC20(asset());
+    // View interfaces, compiled to STATICCALL: nothing re-enters before the write below.
+    // aderyn-ignore-next-line(reentrancy-state-change)
+    uint256 _assets = Math.min($.feesOwed, _asset.balanceOf(_portfolio));
+    // aderyn-ignore-next-line(reentrancy-state-change)
+    address _recipient = IFeeModel(_feeModel).RECIPIENT();
+    $.feesOwed -= _assets;
+    emit FeesCollected(_recipient, _assets);
+    // The portfolio gave this vault an allowance at construction; the recipient is the one the attested model names.
+    // slither-disable-next-line arbitrary-send-erc20
+    _asset.safeTransferFrom(_portfolio, _recipient, _assets); // aderyn-ignore(arbitrary-transfer-from)
+  }
+
+  /// @inheritdoc IGated4626Vault
+  function portfolio() external view returns (address _portfolio) {
+    _portfolio = _getGated4626Storage().portfolio;
+  }
+
+  /// @inheritdoc IGated4626Vault
+  function feeModel() external view returns (address _feeModel) {
+    _feeModel = _getGated4626Storage().feeModel;
+  }
+
+  /// @inheritdoc IGated4626Vault
+  function maxRate() external view returns (uint256 _maxRateBps) {
+    _maxRateBps = _getGated4626Storage().maxRateBps;
+  }
+
+  /// @inheritdoc IGated4626Vault
+  function lastCounted() external view returns (uint256 _last) {
+    _last = _getGated4626Storage().last;
+  }
+
+  /// @inheritdoc IGated4626Vault
+  function feesOwed() external view returns (uint256 _assets) {
+    _assets = _getGated4626Storage().feesOwed;
+  }
+
+  /// @inheritdoc IGated4626Vault
+  function mark() external view returns (uint256 _mark) {
+    _mark = _getGated4626Storage().mark;
+  }
+
+  /// @inheritdoc IGated4626Vault
+  function exitOnly() external view returns (bool _exitOnly) {
+    _exitOnly = _closedForGood();
+  }
+
+  /**
+   * @inheritdoc ERC4626Upgradeable
+   * @dev Counts the value first, so a price quoted from it is the price paid
+   */
+  function deposit(
+    uint256 _assets,
+    address _receiver
+  ) public override(ERC4626Upgradeable) returns (uint256 _shares) {
+    _accrue();
+    _shares = super.deposit(_assets, _receiver);
+  }
+
+  /**
+   * @inheritdoc ERC4626Upgradeable
+   * @dev Counts the value first, so a price quoted from it is the price paid
+   */
+  function mint(
+    uint256 _shares,
+    address _receiver
+  ) public override(ERC4626Upgradeable) returns (uint256 _assets) {
+    _accrue();
+    _assets = super.mint(_shares, _receiver);
+  }
+
+  /**
+   * @inheritdoc ERC4626Upgradeable
+   * @dev Counts the value first, so a price quoted from it is the price paid
+   */
+  function withdraw(
+    uint256 _assets,
+    address _receiver,
+    address _owner
+  ) public override(ERC4626Upgradeable) returns (uint256 _shares) {
+    _accrue();
+    _shares = super.withdraw(_assets, _receiver, _owner);
+  }
+
+  /**
+   * @inheritdoc ERC4626Upgradeable
+   * @dev Counts the value first, so a price quoted from it is the price paid
+   */
+  function redeem(
+    uint256 _shares,
+    address _receiver,
+    address _owner
+  ) public override(ERC4626Upgradeable) returns (uint256 _assets) {
+    _accrue();
+    _assets = super.redeem(_shares, _receiver, _owner);
+  }
+
+  /**
+   * @inheritdoc ERC4626Upgradeable
+   * @dev With a portfolio, the counted value net of any fee due now; it never reverts on a loss below the fees owed
+   */
+  function totalAssets() public view override returns (uint256 _total) {
+    if (_getGated4626Storage().portfolio == address(0)) return super.totalAssets();
+    (uint256 _counted, uint256 _fee,,) = _counting();
+    _total = _counted - _fee;
+  }
+
   /// @inheritdoc ERC4626Upgradeable
   function decimals() public view override(ERC20Upgradeable, ERC4626Upgradeable) returns (uint8 _decimals) {
     _decimals = super.decimals();
@@ -67,7 +309,7 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
   function maxDeposit(
     address _receiver
   ) public view override returns (uint256 _maxAssets) {
-    if (_mintProbe(_receiver) != Reasons.TRANSFER_OK) return 0;
+    if (_mintProbe(_receiver) != Reasons.TRANSFER_OK || _dealingStopped() || _closedForGood()) return 0;
     _maxAssets = super.maxDeposit(_receiver);
   }
 
@@ -78,21 +320,30 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
   function maxMint(
     address _receiver
   ) public view override returns (uint256 _maxShares) {
-    if (_mintProbe(_receiver) != Reasons.TRANSFER_OK) return 0;
+    if (_mintProbe(_receiver) != Reasons.TRANSFER_OK || _dealingStopped() || _closedForGood()) return 0;
     _maxShares = super.maxMint(_receiver);
   }
 
   /**
    * @inheritdoc ERC4626Upgradeable
-   * @dev The unfrozen balance; 0 when paused or when the policy would reject a burn from `_owner` (identity, freeze,
-   *      lockup). The probe burns nothing: one share would leave a remainder, which a minimum position rejects, and
-   *      hide a holder who can redeem everything. The size of a real redemption is judged when it burns
+   * @dev The unfrozen balance, up to what the portfolio can raise; 0 when paused, when a price cannot be read, or when the
+   *      policy would reject a burn from `_owner` (identity, freeze, lockup). The probe burns nothing: one share would leave a
+   *      remainder, which a minimum position rejects, and hide a holder who can redeem everything. The size of a real
+   *      redemption is judged when it burns
    */
   function maxRedeem(
     address _owner
   ) public view override returns (uint256 _maxShares) {
-    if (_canTransfer(_owner, address(0), 0) != Reasons.TRANSFER_OK) return 0;
+    if (_canTransfer(_owner, address(0), 0) != Reasons.TRANSFER_OK || _dealingStopped()) return 0;
     _maxShares = _unfrozenBalance(_owner);
+    address _portfolio = _getGated4626Storage().portfolio;
+    if (_portfolio != address(0)) {
+      uint256 _liquid = IPortfolio(_portfolio).liquidAssets();
+      // Rounding the liquid assets down to shares would strand dust from a position that is wholly liquid.
+      if (_convertToAssets(_maxShares, Math.Rounding.Floor) > _liquid) {
+        _maxShares = _convertToShares(_liquid, Math.Rounding.Floor);
+      }
+    }
   }
 
   /**
@@ -143,7 +394,11 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
     uint256 _shares
   ) internal override {
     _requireThirdPartyEligible(_caller, _receiver);
+    Gated4626Storage storage $ = _getGated4626Storage();
+    address _portfolio = $.portfolio;
+    if (_portfolio != address(0)) $.last += _assets;
     super._deposit(_caller, _receiver, _assets, _shares);
+    if (_portfolio != address(0)) IERC20(asset()).safeTransfer(_portfolio, _assets);
   }
 
   /**
@@ -159,6 +414,15 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
     uint256 _shares
   ) internal override {
     _requireThirdPartyEligible(_receiver, _owner);
+    Gated4626Storage storage $ = _getGated4626Storage();
+    address _portfolio = $.portfolio;
+    if (_portfolio != address(0)) {
+      $.last -= _assets;
+      IPortfolio(_portfolio).raise(_assets);
+      // The portfolio gave this vault an allowance at construction, for this.
+      // slither-disable-next-line arbitrary-send-erc20
+      IERC20(asset()).safeTransferFrom(_portfolio, address(this), _assets); // aderyn-ignore(arbitrary-transfer-from)
+    }
     super._withdraw(_caller, _receiver, _owner, _assets, _shares);
   }
 
@@ -168,5 +432,77 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
    */
   function _decimalsOffset() internal pure override returns (uint8 _offset) {
     _offset = 6;
+  }
+
+  /// @notice Brings the counted value up to date and charges any fee; does nothing with no portfolio or no price
+  function _accrue() private {
+    Gated4626Storage storage $ = _getGated4626Storage();
+    address _portfolio = $.portfolio;
+    if (_portfolio == address(0) || !IPortfolio(_portfolio).priceFresh()) return;
+    (uint256 _counted, uint256 _fee, uint256 _newMark, bool _markMoved) = _counting();
+    $.last = _counted - _fee;
+    $.lastAt = uint64(block.timestamp);
+    emit Accrued(_counted, _fee);
+    if ($.feeModel == address(0)) return;
+    $.feesOwed += _fee;
+    $.mark = _newMark;
+    $.lastFeeAt = uint64(block.timestamp);
+    // With no shares the first investors do not pay for time before they arrived.
+    if (_markMoved || totalSupply() == 0) $.markMovedAt = uint64(block.timestamp);
+  }
+
+  /**
+   * @notice The value to count now, and the fee due on it
+   * @return _counted The value: the priced value net of fees owed, up to the rate limit; the last counted while no price
+   * @return _fee The fee due now
+   * @return _newMark The mark after that fee
+   * @return _markMoved Whether the mark moved
+   */
+  function _counting() private view returns (uint256 _counted, uint256 _fee, uint256 _newMark, bool _markMoved) {
+    Gated4626Storage storage $ = _getGated4626Storage();
+    IPortfolio _portfolio = IPortfolio($.portfolio);
+    _counted = $.last;
+    _newMark = $.mark;
+    if (!_portfolio.priceFresh()) return (_counted, 0, _newMark, false);
+
+    uint256 _priced = _portfolio.pricedValue();
+    uint256 _owed = $.feesOwed;
+    uint256 _net = _priced > _owed ? _priced - _owed : 0;
+    uint256 _limit = _counted + Math.mulDiv(_counted, $.maxRateBps * (block.timestamp - $.lastAt), _RATE_DENOMINATOR);
+    _counted = Math.min(_net, _limit);
+    address _feeModel = $.feeModel;
+    if (_feeModel != address(0)) {
+      (_fee, _newMark, _markMoved) = IFeeModel(_feeModel)
+        .quote(_counted, totalSupply(), _newMark, block.timestamp - $.markMovedAt, block.timestamp - $.lastFeeAt);
+    }
+  }
+
+  /**
+   * @notice Whether a price cannot be read, which stops deposits and withdrawals
+   * @return _stopped True when one cannot
+   */
+  function _dealingStopped() private view returns (bool _stopped) {
+    address _portfolio = _getGated4626Storage().portfolio;
+    _stopped = _portfolio != address(0) && !IPortfolio(_portfolio).priceFresh();
+  }
+
+  /**
+   * @notice Whether a portfolio, this one or an earlier one, wrote off an adapter
+   * @return _closed True when one did
+   */
+  function _closedForGood() private view returns (bool _closed) {
+    Gated4626Storage storage $ = _getGated4626Storage();
+    address _portfolio = $.portfolio;
+    _closed = $.exitOnly || (_portfolio != address(0) && IPortfolio(_portfolio).writtenOff());
+  }
+
+  /**
+   * @notice The ERC-7201 storage of the vault
+   * @return $ The storage pointer
+   */
+  function _getGated4626Storage() private pure returns (Gated4626Storage storage $) {
+    assembly ('memory-safe') {
+      $.slot := _GATED_4626_STORAGE_LOCATION
+    }
   }
 }

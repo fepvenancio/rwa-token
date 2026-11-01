@@ -4,6 +4,9 @@ pragma solidity ^0.8.28;
 import {IAccessControl} from '@openzeppelin/contracts/access/IAccessControl.sol';
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 
+import {IERC4626} from '@openzeppelin/contracts/interfaces/IERC4626.sol';
+
+import {IFeeModel} from 'interfaces/IFeeModel.sol';
 import {IGated7540Vault} from 'interfaces/IGated7540Vault.sol';
 import {INavDesk} from 'interfaces/INavDesk.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
@@ -40,6 +43,9 @@ contract NavDesk is INavDesk {
   /// @notice The vault's admin role
   bytes32 private constant _DEFAULT_ADMIN_ROLE = 0x00;
 
+  /// @notice A price's scale: assets per this many share units
+  uint256 private constant _PRICE_SCALE = 1e18;
+
   /// @inheritdoc INavDesk
   address public immutable VAULT;
 
@@ -60,6 +66,18 @@ contract NavDesk is INavDesk {
 
   /// @inheritdoc INavDesk
   uint256 public lastCutoff;
+
+  /// @inheritdoc INavDesk
+  address public feeModel;
+
+  /// @inheritdoc INavDesk
+  uint256 public mark;
+
+  /// @inheritdoc INavDesk
+  uint256 public markMovedAt;
+
+  /// @inheritdoc INavDesk
+  uint256 public lastFeeAt;
 
   /// @notice Whether `adopt` has run
   bool internal _adopted;
@@ -108,6 +126,30 @@ contract NavDesk is INavDesk {
   }
 
   /// @inheritdoc INavDesk
+  function setFeeModel(
+    address _feeModel
+  ) external {
+    _onlyRole(_DEFAULT_ADMIN_ROLE);
+    if (_feeModel != address(0)) {
+      IPolicyRegistry _registry = IPolicyRegistry(IPolicyGated(VAULT).registry());
+      if (!_registry.isAttested(_feeModel, IPolicyRegistry.AttestKind.FEE_MODEL)) {
+        revert NavDesk_FeeModelRefused(_feeModel);
+      }
+      if (feeModel == address(0)) {
+        // Zero means no mark yet, not a balance.
+        // slither-disable-next-line incorrect-equality
+        if (mark == 0) {
+          mark = IERC4626(VAULT).convertToAssets(_PRICE_SCALE);
+          markMovedAt = block.timestamp;
+        }
+        lastFeeAt = block.timestamp;
+      }
+    }
+    feeModel = _feeModel;
+    emit FeeModelSet(_feeModel);
+  }
+
+  /// @inheritdoc INavDesk
   function closePeriod() external {
     if (block.timestamp < lastCutoff + periodLength) revert NavDesk_PeriodNotOver();
     lastCutoff = block.timestamp;
@@ -124,27 +166,24 @@ contract NavDesk is INavDesk {
   ) external {
     _onlyRole(REPORTER_ROLE);
     if (_proposal.period != 0) revert NavDesk_ProposalPending();
-    (uint64 _period, uint256 _supply) = _closedPeriod();
     if (_asOf < lastCutoff || _asOf > block.timestamp) revert NavDesk_ReportOutOfWindow();
-    (address _cash, uint256 _priced) = _cashAndValue(_moves);
-    uint256 _nav = _reported + _priced;
-    if (_nav == 0 && _supply != 0) revert NavDesk_ZeroNav();
-
-    Proposal memory _p = Proposal({
-      period: _period,
-      proposedAt: uint64(block.timestamp),
-      asOf: uint64(_asOf),
-      acceptedAt: 0,
-      proposer: msg.sender,
-      nav: _nav,
-      fee: 0,
-      mark: 0,
-      reportHash: _reportHash,
-      cash: _cash,
-      feeRecipient: address(0)
-    });
+    // Filled in below, a field at a time.
+    // slither-disable-next-line uninitialized-local
+    Proposal memory _p;
+    uint256 _supply;
+    (_p.period, _supply) = _closedPeriod();
+    uint256 _priced;
+    (_p.cash, _priced) = _cashAndValue(_moves);
+    uint256 _gross = _reported + _priced;
+    _quote(_p, _gross, _supply);
+    _p.nav = _gross - _p.fee;
+    if (_p.nav == 0 && _supply != 0) revert NavDesk_ZeroNav();
+    _p.proposedAt = uint64(block.timestamp);
+    _p.asOf = uint64(_asOf);
+    _p.proposer = msg.sender;
+    _p.reportHash = _reportHash;
     _proposal = _p;
-    emit ProposalMade(hashOf(_p), _period, _reported, _priced, _nav, 0, _reportHash, _asOf);
+    emit ProposalMade(hashOf(_p), _p.period, _reported, _priced, _p.nav, _p.fee, _reportHash, _asOf);
   }
 
   /// @inheritdoc INavDesk
@@ -182,6 +221,9 @@ contract NavDesk is INavDesk {
     if (block.timestamp > _p.asOf + maxReportAge) revert NavDesk_StaleReport();
     bytes32 _hash = hashOf(_p);
     delete _proposal;
+    mark = _p.mark;
+    markMovedAt = _p.markMovedAt;
+    lastFeeAt = _p.proposedAt;
     emit ProposalExecuted(_hash, _p.period);
     IGated7540Vault(VAULT).settlePeriod(_p.nav, _p.fee, _p.cash, _p.feeRecipient);
   }
@@ -218,6 +260,9 @@ contract NavDesk is INavDesk {
     if (_adopted || _old.VAULT() != VAULT || _old.proposal().period != 0) revert NavDesk_CannotAdopt();
     _adopted = true;
     lastCutoff = _old.lastCutoff();
+    mark = _old.mark();
+    markMovedAt = _old.markMovedAt();
+    lastFeeAt = _old.lastFeeAt();
     emit DeskAdopted(_oldDesk);
   }
 
@@ -235,7 +280,9 @@ contract NavDesk is INavDesk {
   function hashOf(
     Proposal memory _p
   ) public pure returns (bytes32 _hash) {
-    _hash = keccak256(abi.encode(_p.period, _p.nav, _p.fee, _p.mark, _p.reportHash, _p.cash, _p.feeRecipient));
+    _hash = keccak256(
+      abi.encode(_p.period, _p.nav, _p.fee, _p.mark, _p.markMovedAt, _p.reportHash, _p.cash, _p.feeRecipient)
+    );
   }
 
   /**
@@ -297,6 +344,29 @@ contract NavDesk is INavDesk {
       if (!IPortfolio(_portfolio).priceFresh()) revert NavDesk_PriceNotFresh();
       _priced = IPortfolio(_portfolio).pricedValue();
     }
+  }
+
+  /**
+   * @notice Fills in the fee, the mark and its clock
+   * @param _p The proposal being drawn up
+   * @param _gross The gross value
+   * @param _supply All shares
+   */
+  function _quote(
+    Proposal memory _p,
+    uint256 _gross,
+    uint256 _supply
+  ) private view {
+    _p.mark = mark;
+    // With no shares both clocks restart, so the first investors do not pay for time before they arrived.
+    _p.markMovedAt = _supply == 0 ? block.timestamp : markMovedAt;
+    address _feeModel = feeModel;
+    if (_feeModel == address(0)) return;
+    bool _moved;
+    (_p.fee, _p.mark, _moved) =
+      IFeeModel(_feeModel).quote(_gross, _supply, _p.mark, block.timestamp - markMovedAt, block.timestamp - lastFeeAt);
+    if (_moved) _p.markMovedAt = block.timestamp;
+    _p.feeRecipient = IFeeModel(_feeModel).RECIPIENT();
   }
 
   /// @notice Reverts unless the caller is the agent, nothing is on the table and the period has been closed long enough
