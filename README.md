@@ -92,7 +92,7 @@ two run the same code.
 | `ProxyDeployer` owner | operations account | none | place a new product, only over an attested implementation. It touches nothing that exists |
 | `Fund` owner | timelock | ≥ 24 hours | register a class, set the fund's rule and investor cap, exempt an account. Only the installed rule records which classes an account holds |
 | token `AGENT_ROLE` → rules | issuer | none | set or clear per-holder lockups, freeze or unfreeze a holder (`HolderRestrictionRule`) |
-| `ALLOCATOR_ROLE` (on a vault, asked by its `Portfolio` and `GuardedAccount`s) | fund manager | none | send money to an installed adapter within caps, bring it back, choose the liquidity adapter |
+| `ALLOCATOR_ROLE` (on a vault, asked by its `Portfolio` and `GuardedAccount`s) | fund manager | none | send money to an installed adapter within caps (not while the vault is paused), bring it back, choose the liquidity adapter |
 | `SETTLER_ROLE` (7540 vault) | a `NavDesk` | none | close and settle periods; take a request back once its period has closed |
 | `REPORTER_ROLE`, `CHECKER_ROLE` (on a vault, asked by its `NavDesk`) | fund administration; risk or the depositary | none | propose a price; accept or cancel one. Never the same account |
 | `DISTRIBUTION_MAKER_ROLE`, `CHECKER_ROLE` (on a token, asked by its `Distributor`) | corporate actions; a second function | none | propose a distribution; approve one and pull its funding. Never the same account |
@@ -129,6 +129,7 @@ two run the same code.
 - **Pause.** A guardian pause blocks every balance movement except FORCED ones (`forcedTransfer`, and the 7540 vault's `recoverRedeemRequest` and `recoverClaimable`), so the issuer's mint and burn too. Enforcement
   during a pause is `forcedTransfer` to a quarantine account, and the burn waits for the unpause. This differs from the
   ERC-3643 reference token, whose agents can mint, burn and force while paused (see [Deployment and governance](docs/deployment.html)).
+  A vault's pause also stops `Portfolio.allocate` and `GuardedAccount.execute`, and `deallocate` still brings money back.
 - **Fund monitor.** `Fund.firstBrokenClass()` names the first class whose hook no longer lists the fund's rule, which the
   hook cannot know; the post-deploy check asserts it is the zero address. Alert too when `holderCount()` is above
   `holderCap()`: a recovery from a 7540 vault can put it there, and the agent should reject deposit requests near

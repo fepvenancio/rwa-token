@@ -13,9 +13,6 @@ interface IGovernanceTimelock {
                             ERRORS
   //////////////////////////////////////////////////////////////*/
 
-  /// @notice Thrown when the recovery timelock address is zero
-  error GovernanceTimelock_ZeroAddress();
-
   /**
    * @notice Thrown when the delay, at deployment or in `updateDelay`, is below one hour
    * @param _delay The delay asked for

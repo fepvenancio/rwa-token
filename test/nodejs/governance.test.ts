@@ -287,6 +287,21 @@ describe("governance through the timelock", async function () {
     assert.equal(await s.recoveryTimelock.read.getMinDelay(), op.delay);
   });
 
+  it("a recovery timelock that runs other code fails the post-deploy check", async function () {
+    const s = await networkHelpers.loadFixture(stack);
+    const plain = await viem.deployContract("TimelockController", [3_600n, [], [], s.wallets.governance.account.address]);
+    await assert.rejects(assertHandedOver({ ...s, recoveryTimelock: plain as never }), /is not a GovernanceTimelock/);
+  });
+
+  it("anyone holding RECOVERY_ROLE on the recovery timelock fails the post-deploy check", async function () {
+    const s = await networkHelpers.loadFixture(stack);
+    const operator = s.wallets.operator.account.address;
+    const op = await scheduleRecovery(s, [call(s.recoveryTimelock, "grantRole", [ROLES.RECOVERY, operator])]);
+    await networkHelpers.time.increase(op.delay);
+    await op.execute();
+    await assert.rejects(assertHandedOver(s), /holds RECOVERY_ROLE on the recovery timelock/);
+  });
+
   it("M-1: one recovery batch strips the guardian everywhere, including its cancel right on the main timelock", async function () {
     const s = await networkHelpers.loadFixture(stack);
     const guardian = s.wallets.guardian.account;

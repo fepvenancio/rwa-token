@@ -465,6 +465,13 @@ export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
   const operations = s.wallets.operations.account.address;
   const guardian = s.wallets.guardian.account.address;
   const timelock = s.timelock.address;
+  // The same code as the main timelock, so its delay has the same floor. First, because the role reads below would only
+  // revert on another contract.
+  assert.equal(
+    await s.publicClient.getCode({ address: s.recoveryTimelock.address }),
+    await s.publicClient.getCode({ address: timelock }),
+    "the recovery timelock is not a GovernanceTimelock",
+  );
   const known = Object.values(s.wallets).map((w) => w.account.address);
   const tokens = s.deployed.map(({ contract }) => contract);
   const executors = [s.executor, s.dvpExecutor].filter((c) => c !== undefined);
@@ -521,12 +528,7 @@ export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
   assert.equal(await s.recoveryTimelock.read.hasRole([await s.recoveryTimelock.read.PROPOSER_ROLE(), governance]), true);
   assert.equal(await s.recoveryTimelock.read.hasRole([await s.recoveryTimelock.read.EXECUTOR_ROLE(), governance]), true);
   assert.ok((await s.recoveryTimelock.read.getMinDelay()) >= DAY, "recovery timelock delay below 24 hours");
-  // The same code as the main timelock, so its delay has the same floor; and no recovery power over itself.
-  assert.equal(
-    await s.publicClient.getCode({ address: recovery }),
-    await s.publicClient.getCode({ address: timelock }),
-    "the recovery timelock is not a GovernanceTimelock",
-  );
+  // No recovery power over itself.
   for (const account of [...known, recovery, timelock]) {
     assert.equal(await s.recoveryTimelock.read.hasRole([ROLES.RECOVERY, account]), false, `${account} holds RECOVERY_ROLE on the recovery timelock`);
   }

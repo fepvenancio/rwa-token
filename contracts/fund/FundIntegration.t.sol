@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {Test} from 'forge-std/Test.sol';
+import {Vm} from 'forge-std/Vm.sol';
 
 import {Reasons} from 'interfaces/Errors.sol';
 
@@ -417,6 +418,27 @@ contract FundIntegration_Cap is FundIntegrationTest {
     assertEq(_fund.holderCount(), 2);
     assertEq(_fund.heldClasses(_alice), 0);
     assertEq(_fund.heldClasses(_dave), 1);
+  }
+
+  function test_WhenTheSenderLeavesTheFundAtAFullCap_NoEventShowsTheCountAboveTheCap() external {
+    _mintToken(_alice, 10 ether);
+    _deposit4626(_bob, 5e6);
+    uint256 _cap = _fund.holderCap();
+    assertEq(_fund.holderCount(), _cap);
+
+    vm.recordLogs();
+    vm.prank(_alice);
+    _token.transfer(_dave, 10 ether);
+
+    Vm.Log[] memory _logs = vm.getRecordedLogs();
+    uint256 _counts;
+    for (uint256 _i; _i < _logs.length; ++_i) {
+      if (_logs[_i].topics[0] != IFund.HolderCountUpdated.selector) continue;
+      assertLe(abi.decode(_logs[_i].data, (uint256)), _cap);
+      ++_counts;
+    }
+    assertEq(_counts, 2);
+    assertEq(_fund.holderCount(), _cap);
   }
 
   function test_WhenTheSenderKeepsAnotherClass_ThatSameMoveIsRejectedWithParity() external {

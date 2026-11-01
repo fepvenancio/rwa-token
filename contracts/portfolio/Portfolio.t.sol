@@ -673,6 +673,48 @@ contract PortfolioUnit_AllocateMinimum is PortfolioUnitTest {
   }
 }
 
+contract PortfolioUnit_WhileThePauseHolds is PortfolioUnitTest {
+  function setUp() public override {
+    super.setUp();
+    _allocate(_priced, 100e6);
+    _vault.setPaused(true);
+  }
+
+  function test_AnAllocationRevertsAndNothingMoves() external {
+    vm.expectRevert(IPortfolio.Portfolio_VaultPaused.selector);
+    vm.prank(_allocator);
+    _portfolio.allocate(address(_priced), 1e6, 0);
+    assertEq(_portfolio.allocationOf(address(_priced)), 100e6);
+    assertEq(_asset.balanceOf(address(_portfolio)), _IDLE - 100e6);
+  }
+
+  function test_AStrangerStillGetsTheRoleError() external {
+    vm.expectRevert(abi.encodeWithSelector(IPortfolio.Portfolio_Unauthorized.selector, _stranger));
+    vm.prank(_stranger);
+    _portfolio.allocate(address(_priced), 1e6, 0);
+  }
+
+  function test_TheGuardianAndTheAllocatorStillBringMoneyBack() external {
+    vm.prank(_guardian);
+    _portfolio.deallocate(address(_priced), 40e6);
+    vm.prank(_allocator);
+    _portfolio.deallocate(address(_priced), 60e6);
+    assertEq(_asset.balanceOf(address(_portfolio)), _IDLE);
+  }
+
+  function test_TheGuardianStillLowersACap() external {
+    vm.prank(_guardian);
+    _portfolio.setCaps(_PRICED_ID, 0, 0);
+    assertEq(_portfolio.riskOf(_PRICED_ID).absoluteCap, 0);
+  }
+
+  function test_WhenThePauseIsLifted_AnAllocationGoesThrough() external {
+    _vault.setPaused(false);
+    _allocate(_priced, 1e6);
+    assertEq(_portfolio.allocationOf(address(_priced)), 101e6);
+  }
+}
+
 contract PortfolioUnit_Deallocate is PortfolioUnitTest {
   function setUp() public override {
     super.setUp();
@@ -1267,6 +1309,20 @@ contract PortfolioIntegrationTest is Helpers {
   ) internal {
     vm.prank(_allocator);
     _portfolio.allocate(address(_adapter), _assets, 0);
+  }
+
+  function test_WhenTheGuardianPausesTheVault_TheAllocatorSendsNothingAndTheGuardianPullsBack() external {
+    _allocate(100e6);
+    vm.prank(_guardian);
+    _vault.pause();
+
+    vm.expectRevert(IPortfolio.Portfolio_VaultPaused.selector);
+    vm.prank(_allocator);
+    _portfolio.allocate(address(_adapter), 1e6, 0);
+
+    vm.prank(_guardian);
+    _portfolio.deallocate(address(_adapter), 100e6);
+    assertEq(_asset.balanceOf(address(_portfolio)), _IDLE);
   }
 
   function test_TheMoneyGoesInGrowsAndComesBack() external {

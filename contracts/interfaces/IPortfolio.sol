@@ -217,6 +217,9 @@ interface IPortfolio {
   /// @notice Thrown when `raise` needs an adapter and none is set
   error Portfolio_NoLiquidityAdapter();
 
+  /// @notice Thrown when an allocation is asked for while the vault is paused
+  error Portfolio_VaultPaused();
+
   /*///////////////////////////////////////////////////////////////
                             LOGIC
   //////////////////////////////////////////////////////////////*/
@@ -269,7 +272,8 @@ interface IPortfolio {
 
   /**
    * @notice Sends idle money to an installed adapter, within the caps of every risk it names
-   * @dev The vault's ALLOCATOR_ROLE. Caps are checked here only, so an exit can leave a risk above its relative cap
+   * @dev The vault's ALLOCATOR_ROLE, and not while the vault is paused: a pause stops money going out, and `deallocate`
+   *      still brings it back. Caps are checked here only, so an exit can leave a risk above its relative cap
    * @param _adapter The adapter
    * @param _assets The assets to send
    * @param _minAdded The least the allocation may grow by: the change in value for a priced adapter, the assets sent
