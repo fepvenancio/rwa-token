@@ -62,9 +62,13 @@ contract GuardedAccount is IGuardedAccount {
     if (_portfolio == address(0)) revert GuardedAccount_ZeroAddress();
     if (_riskId == bytes32(0)) revert GuardedAccount_NoRiskId();
     IPortfolio _plug = IPortfolio(_portfolio);
+    // Immutables read from view interfaces, at construction: nothing can re-enter.
+    // aderyn-ignore-next-line(reentrancy-state-change)
     if (!_plug.ACCEPTS_REPORTED()) revert GuardedAccount_ReportedNotAccepted();
     PORTFOLIO = _portfolio;
+    // aderyn-ignore-next-line(reentrancy-state-change)
     VAULT = _plug.VAULT();
+    // aderyn-ignore-next-line(reentrancy-state-change)
     _ASSET = _plug.ASSET();
     RISK_ID = _riskId;
     SHARED_RISK_ID = _sharedRiskId;
@@ -106,6 +110,7 @@ contract GuardedAccount is IGuardedAccount {
     // View interfaces, compiled to STATICCALL: nothing re-enters before the write below.
     // aderyn-ignore-next-line(reentrancy-state-change)
     IPolicyRegistry _registry = IPolicyRegistry(IPolicyGated(VAULT).registry());
+    // aderyn-ignore-next-line(reentrancy-state-change)
     if (!_registry.isAttested(_validator, IPolicyRegistry.AttestKind.VALIDATOR)) {
       revert GuardedAccount_NotAttested(_validator);
     }
