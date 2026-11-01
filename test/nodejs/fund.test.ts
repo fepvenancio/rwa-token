@@ -19,7 +19,7 @@ import {
 } from "viem";
 
 import { RULE_ORDER } from "../../ignition/modules/roles.js";
-import { deployStack, FUND_HOLDER_CAP, QUALS, REASONS, revertOf, signIntent, type Stack } from "./fixtures.js";
+import { deployStack, FUND_HOLDER_CAP, PAR, QUALS, REASONS, revertOf, settlePeriod, signIntent, type Stack } from "./fixtures.js";
 
 const ATTEST = { HOOK: 1, RULE: 2 } as const;
 const usd = (amount: string) => parseUnits(amount, 6);
@@ -35,7 +35,7 @@ describe("fund: investors counted across classes", async function () {
   /** The stack with asset balances and approvals, so the vault flows run. */
   async function funded() {
     const s = await deployStack(connection);
-    for (const w of [s.holders.alice, s.holders.bob, s.holders.carol, s.holders.dave, s.wallets.fulfiller]) {
+    for (const w of [s.holders.alice, s.holders.bob, s.holders.carol, s.holders.dave]) {
       await s.asset.write.mint([w.account.address, usd("1000000")]);
       for (const v of [s.vault4626.address, s.vault7540.address]) {
         await s.asset.write.approve([v, maxUint256], { account: w.account });
@@ -51,12 +51,12 @@ describe("fund: investors counted across classes", async function () {
   const deposit4626 = (s: Stack, who: Holder, assets = usd("100")) =>
     s.vault4626.write.deposit([assets, who.account.address], { account: who.account });
 
-  /** Request, fulfil at par, claim: the holder ends up with `assets` shares of the 7540 class. */
+  /** Request, settle at par, claim: the holder ends up with `assets * PAR` shares of the 7540 class. */
   async function invest7540(s: Stack, who: Holder, assets = usd("100")) {
     const a = who.account.address;
     await s.vault7540.write.requestDeposit([assets, a, a], { account: who.account });
-    await s.vault7540.write.fulfillDeposit([a, assets, assets], { account: s.wallets.fulfiller.account });
-    await s.vault7540.write.mint([assets, a, a], { account: who.account });
+    await settlePeriod(s, s.vault7540);
+    await s.vault7540.write.mint([assets * PAR, a, a], { account: who.account });
   }
 
   let saltCounter = 0;
@@ -121,7 +121,7 @@ describe("fund: investors counted across classes", async function () {
     assert.deepEqual(tokens.map(getAddress), [s.token.address, s.vault4626.address, s.vault7540.address].map(getAddress));
     assert.equal(balances[0], 10n ** 18n);
     assert.equal(balances[1], await s.vault4626.read.balanceOf([a]));
-    assert.equal(balances[2], usd("100"));
+    assert.equal(balances[2], usd("100") * PAR);
 
     await mintToken(s, bob);
     assert.equal(await s.fund.read.holderCount(), 2n);

@@ -40,8 +40,8 @@ abstract contract GatedVaultBaseTest is Test {
 
   address internal _guardian = makeAddr('guardian');
   address internal _agent = makeAddr('agent');
-  address internal _fulfiller = makeAddr('fulfiller');
-  address internal _custody = makeAddr('custody');
+  address internal _settler = makeAddr('settler');
+  address internal _cash = makeAddr('cash');
   address internal _alice = makeAddr('alice'); // valid for 30 days
   address internal _bob = makeAddr('bob'); // a credentialed third party
   address internal _eve = makeAddr('eve'); // never credentialed
@@ -78,7 +78,7 @@ abstract contract GatedVaultBaseTest is Test {
   function _fund(
     address _vault
   ) internal {
-    address[5] memory _accounts = [_alice, _bob, _eve, _lapsing, _fulfiller];
+    address[5] memory _accounts = [_alice, _bob, _eve, _lapsing, _cash];
     for (uint256 _i; _i < 5; ++_i) {
       _asset.mint(_accounts[_i], 1e12);
       vm.prank(_accounts[_i]);
@@ -240,6 +240,9 @@ contract GatedVaultBase_4626 is GatedVaultBaseTest {
 }
 
 contract GatedVaultBase_7540 is GatedVaultBaseTest {
+  uint256 internal constant _PAR = 1e6;
+  uint256 internal constant _SHARES = _AMOUNT * _PAR;
+
   Gated7540Vault internal _vault;
 
   function setUp() public {
@@ -260,8 +263,7 @@ contract GatedVaultBase_7540 is GatedVaultBaseTest {
             _guardian,
             address(_policyRegistry),
             address(_hook),
-            _rules,
-            _custody
+            _rules
           )
         ),
         address(_hook),
@@ -270,10 +272,20 @@ contract GatedVaultBase_7540 is GatedVaultBaseTest {
     );
     _rule.setPolicy(address(_vault), Quals.KYC, 0, 0, 1);
     _vault.grantRole(_vault.AGENT_ROLE(), _agent);
-    _vault.grantRole(_vault.FULFILLER_ROLE(), _fulfiller);
+    _vault.grantRole(_vault.SETTLER_ROLE(), _settler);
     _fund(address(_vault));
     _invest(_alice);
     _invest(_lapsing);
+  }
+
+  /// @dev Closes the open period and settles it at par: one asset unit buys `_PAR` shares
+  function _settle() internal {
+    (,, uint256 _unclaimed) = _vault.dealingState();
+    uint256 _nav = (_vault.totalSupply() + _unclaimed) / _PAR;
+    vm.startPrank(_settler);
+    _vault.closePeriod();
+    _vault.settlePeriod(_nav, 0, _cash, address(0));
+    vm.stopPrank();
   }
 
   function _invest(
@@ -281,19 +293,17 @@ contract GatedVaultBase_7540 is GatedVaultBaseTest {
   ) internal {
     vm.prank(_who);
     _vault.requestDeposit(_AMOUNT, _who, _who);
-    vm.prank(_fulfiller);
-    _vault.fulfillDeposit(_who, _AMOUNT, _AMOUNT);
+    _settle();
     vm.prank(_who);
-    _vault.mint(_AMOUNT, _who, _who);
+    _vault.mint(_SHARES, _who, _who);
   }
 
   function _settledRedemption(
     address _who
   ) internal {
     vm.prank(_who);
-    _vault.requestRedeem(_AMOUNT, _who, _who);
-    vm.prank(_fulfiller);
-    _vault.fulfillRedeem(_who, _AMOUNT, _AMOUNT);
+    _vault.requestRedeem(_SHARES, _who, _who);
+    _settle();
   }
 
   function test_AControllerPayingForItselfIsNotAskedAboutAgain() external {
@@ -327,7 +337,7 @@ contract GatedVaultBase_7540 is GatedVaultBaseTest {
     _settledRedemption(_alice);
     vm.expectRevert(_notEligible(_eve, Reasons.RECEIVER_NOT_VERIFIED));
     vm.prank(_alice);
-    _vault.redeem(_AMOUNT, _eve, _alice);
+    _vault.redeem(_SHARES, _eve, _alice);
     vm.expectRevert(_notEligible(_eve, Reasons.RECEIVER_NOT_VERIFIED));
     vm.prank(_alice);
     _vault.withdraw(_AMOUNT, _eve, _alice);
@@ -337,7 +347,7 @@ contract GatedVaultBase_7540 is GatedVaultBaseTest {
     _settledRedemption(_alice);
     uint256 _before = _asset.balanceOf(_bob);
     vm.prank(_alice);
-    _vault.redeem(_AMOUNT, _bob, _alice);
+    _vault.redeem(_SHARES, _bob, _alice);
     assertEq(_asset.balanceOf(_bob), _before + _AMOUNT);
   }
 
@@ -355,11 +365,11 @@ contract GatedVaultBase_7540 is GatedVaultBaseTest {
     vm.warp(_NOW + 2 days);
     vm.expectRevert(_notEligible(_eve, Reasons.RECEIVER_NOT_VERIFIED));
     vm.prank(_lapsing);
-    _vault.redeem(_AMOUNT, _eve, _lapsing);
+    _vault.redeem(_SHARES, _eve, _lapsing);
 
     uint256 _before = _asset.balanceOf(_lapsing);
     vm.prank(_lapsing);
-    _vault.redeem(_AMOUNT, _lapsing, _lapsing);
+    _vault.redeem(_SHARES, _lapsing, _lapsing);
     assertEq(_asset.balanceOf(_lapsing), _before + _AMOUNT);
   }
 
@@ -367,26 +377,26 @@ contract GatedVaultBase_7540 is GatedVaultBaseTest {
     vm.warp(_NOW + 2 days);
     vm.expectRevert(_notEligible(_lapsing, Reasons.CREDENTIAL_EXPIRED));
     vm.prank(_alice);
-    _vault.requestRedeem(_AMOUNT, _lapsing, _alice);
+    _vault.requestRedeem(_SHARES, _lapsing, _alice);
   }
 
   function test_WhenAHolderNamesAnUncredentialedController_TheRequestIsRefused() external {
     vm.expectRevert(_notEligible(_eve, Reasons.RECEIVER_NOT_VERIFIED));
     vm.prank(_alice);
-    _vault.requestRedeem(_AMOUNT, _eve, _alice);
+    _vault.requestRedeem(_SHARES, _eve, _alice);
   }
 
   function test_WhenAHolderNamesACredentialedController_TheRequestIsTheControllers() external {
     vm.prank(_alice);
-    _vault.requestRedeem(_AMOUNT, _bob, _alice);
-    assertEq(_vault.pendingRedeemRequest(0, _bob), _AMOUNT);
+    _vault.requestRedeem(_SHARES, _bob, _alice);
+    assertEq(_vault.pendingRedeemRequest(0, _bob), _SHARES);
   }
 
   function test_WhenAHolderHasLapsed_ItCanStillNameItselfAsController() external {
     vm.warp(_NOW + 2 days);
     vm.prank(_lapsing);
-    _vault.requestRedeem(_AMOUNT, _lapsing, _lapsing);
-    assertEq(_vault.pendingRedeemRequest(0, _lapsing), _AMOUNT);
+    _vault.requestRedeem(_SHARES, _lapsing, _lapsing);
+    assertEq(_vault.pendingRedeemRequest(0, _lapsing), _SHARES);
   }
 
   function test_TheVaultNeedsNoCredentialToHoldItsEscrow() external view {
@@ -403,7 +413,7 @@ contract GatedVaultBase_7540 is GatedVaultBaseTest {
     _creds.blockSubject(address(_vault));
     _settledRedemption(_alice);
     vm.prank(_alice);
-    _vault.redeem(_AMOUNT, _alice, _alice);
+    _vault.redeem(_SHARES, _alice, _alice);
     assertEq(_vault.balanceOf(address(_vault)), 0);
   }
 
@@ -411,10 +421,10 @@ contract GatedVaultBase_7540 is GatedVaultBaseTest {
     _credential(address(_vault), 1 days);
     vm.warp(_NOW + 2 days);
     vm.prank(_alice);
-    _vault.requestRedeem(_AMOUNT, _alice, _alice);
-    vm.prank(_fulfiller);
+    _vault.requestRedeem(_SHARES, _alice, _alice);
+    vm.prank(_agent);
     _vault.rejectRedeemRequest(_alice);
-    assertEq(_vault.balanceOf(_alice), _AMOUNT);
+    assertEq(_vault.balanceOf(_alice), _SHARES);
   }
 
   function test_WhenTheVaultItselfIsFrozen_TheEscrowStops() external {
@@ -422,16 +432,16 @@ contract GatedVaultBase_7540 is GatedVaultBaseTest {
     _restrictions.setFrozen(address(_vault), address(_vault), true);
     vm.expectRevert();
     vm.prank(_alice);
-    _vault.requestRedeem(_AMOUNT, _alice, _alice);
+    _vault.requestRedeem(_SHARES, _alice, _alice);
   }
 
   function test_WhenSharesReachTheVaultByMistake_TheAgentForcesThemBack() external {
     vm.prank(_alice);
-    _vault.transfer(address(_vault), _AMOUNT);
-    assertEq(_vault.balanceOf(address(_vault)), _AMOUNT);
+    _vault.transfer(address(_vault), _SHARES);
+    assertEq(_vault.balanceOf(address(_vault)), _SHARES);
     vm.prank(_agent);
-    _vault.forcedTransfer(address(_vault), _alice, _AMOUNT);
-    assertEq(_vault.balanceOf(_alice), _AMOUNT);
+    _vault.forcedTransfer(address(_vault), _alice, _SHARES);
+    assertEq(_vault.balanceOf(_alice), _SHARES);
   }
 
   function test_IssuerMintAndBurnAreNotSupported() external {
@@ -443,19 +453,19 @@ contract GatedVaultBase_7540 is GatedVaultBaseTest {
 }
 
 contract GatedVaultBase_GatedAsset is GatedVaultBaseTest {
-  GatedToken internal _cash;
+  GatedToken internal _gatedCash;
   Gated7540Vault internal _vault;
 
   function setUp() public {
     _deployBase();
-    GatedToken _cashImpl = new GatedToken();
+    GatedToken _gatedCashImpl = new GatedToken();
     Gated7540Vault _impl = new Gated7540Vault();
-    _policyRegistry.attest(address(_cashImpl).codehash, IPolicyRegistry.AttestKind.IMPLEMENTATION, '');
+    _policyRegistry.attest(address(_gatedCashImpl).codehash, IPolicyRegistry.AttestKind.IMPLEMENTATION, '');
     _policyRegistry.attest(address(_impl).codehash, IPolicyRegistry.AttestKind.IMPLEMENTATION, '');
-    _cash = GatedToken(
+    _gatedCash = GatedToken(
       _deployer.deploy(
         'gUSD',
-        address(_cashImpl),
+        address(_gatedCashImpl),
         abi.encodeCall(
           GatedToken.initialize,
           ('Gated USD', 'gUSD', 6, address(this), _guardian, address(_policyRegistry), address(_hook), _rules)
@@ -464,8 +474,8 @@ contract GatedVaultBase_GatedAsset is GatedVaultBaseTest {
         _rules
       )
     );
-    _rule.setPolicy(address(_cash), Quals.KYC, 0, 0, 1);
-    _cash.grantRole(_cash.MINTER_ROLE(), address(this));
+    _rule.setPolicy(address(_gatedCash), Quals.KYC, 0, 0, 1);
+    _gatedCash.grantRole(_gatedCash.MINTER_ROLE(), address(this));
     _vault = Gated7540Vault(
       _deployer.deploy(
         'gASYNC',
@@ -473,15 +483,14 @@ contract GatedVaultBase_GatedAsset is GatedVaultBaseTest {
         abi.encodeCall(
           Gated7540Vault.initialize,
           (
-            IERC20(address(_cash)),
+            IERC20(address(_gatedCash)),
             'Gated Async Fund',
             'gASYNC',
             address(this),
             _guardian,
             address(_policyRegistry),
             address(_hook),
-            _rules,
-            _custody
+            _rules
           )
         ),
         address(_hook),
@@ -489,9 +498,9 @@ contract GatedVaultBase_GatedAsset is GatedVaultBaseTest {
       )
     );
     _rule.setPolicy(address(_vault), Quals.KYC, 0, 0, 1);
-    _cash.mint(_alice, _AMOUNT);
+    _gatedCash.mint(_alice, _AMOUNT);
     vm.prank(_alice);
-    _cash.approve(address(_vault), _AMOUNT);
+    _gatedCash.approve(address(_vault), _AMOUNT);
   }
 
   function test_WhenTheAssetIsGated_TheVaultIsAnOrdinaryHolderOfItAndNeedsACredential() external {
@@ -502,6 +511,6 @@ contract GatedVaultBase_GatedAsset is GatedVaultBaseTest {
     _credential(address(_vault), 365 days);
     vm.prank(_alice);
     _vault.requestDeposit(_AMOUNT, _alice, _alice);
-    assertEq(_cash.balanceOf(address(_vault)), _AMOUNT);
+    assertEq(_gatedCash.balanceOf(address(_vault)), _AMOUNT);
   }
 }

@@ -34,8 +34,8 @@ abstract contract CredentialVaultsTest is Test {
   ProxyDeployer internal _deployer;
   address internal _guardian = makeAddr('guardian');
   address internal _agent = makeAddr('agent');
-  address internal _fulfiller = makeAddr('fulfiller');
-  address internal _custody = makeAddr('custody');
+  address internal _settler = makeAddr('settler');
+  address internal _cash = makeAddr('cash');
   address internal _alice = makeAddr('alice'); // credential valid for 30 days
   address internal _bob = makeAddr('bob');
   address internal _carol = makeAddr('carol'); // no professional qualification
@@ -76,8 +76,8 @@ abstract contract CredentialVaultsTest is Test {
       vm.prank(_accounts[_i]);
       _asset.approve(_vault, type(uint256).max);
     }
-    _asset.mint(_fulfiller, 1e12);
-    vm.prank(_fulfiller);
+    _asset.mint(_cash, 1e12);
+    vm.prank(_cash);
     _asset.approve(_vault, type(uint256).max);
   }
 
@@ -111,8 +111,7 @@ contract CredentialRuleVaults_7540 is CredentialVaultsTest {
               _guardian,
               address(_policyRegistry),
               address(_h),
-              _rules,
-              _custody
+              _rules
             )
           ),
           address(_h),
@@ -120,7 +119,7 @@ contract CredentialRuleVaults_7540 is CredentialVaultsTest {
         )
       )
     );
-    _vault.grantRole(_vault.FULFILLER_ROLE(), _fulfiller);
+    _vault.grantRole(_vault.SETTLER_ROLE(), _settler);
     _vault.grantRole(_vault.AGENT_ROLE(), _agent);
     _rule.setPolicy(address(_vault), Quals.KYC, 0, 0, 1);
 
@@ -130,16 +129,28 @@ contract CredentialRuleVaults_7540 is CredentialVaultsTest {
     _fund(address(_vault), [_alice, _bob, _carol, _eve]);
   }
 
+  uint256 internal constant _PAR = 1e6;
+
+  /// @dev Closes the open period and settles it at par
+  function _settle() internal {
+    (,, uint256 _unclaimed) = _vault.dealingState();
+    uint256 _nav = (_vault.totalSupply() + _unclaimed) / _PAR;
+    vm.startPrank(_settler);
+    _vault.closePeriod();
+    _vault.settlePeriod(_nav, 0, _cash, address(0));
+    vm.stopPrank();
+  }
+
+  /// @dev Leaves `_account` with `_amount * _PAR` shares
   function _invest(
     address _account,
     uint256 _amount
   ) internal {
     vm.prank(_account);
     _vault.requestDeposit(_amount, _account, _account);
-    vm.prank(_fulfiller);
-    _vault.fulfillDeposit(_account, _amount, _amount);
+    _settle();
     vm.prank(_account);
-    _vault.mint(_amount, _account, _account);
+    _vault.mint(_amount * _PAR, _account, _account);
   }
 
   function _redeemAll(
@@ -147,9 +158,8 @@ contract CredentialRuleVaults_7540 is CredentialVaultsTest {
     uint256 _amount
   ) internal {
     vm.prank(_account);
-    _vault.requestRedeem(_amount, _account, _account);
-    vm.prank(_fulfiller);
-    _vault.fulfillRedeem(_account, _amount, _amount + 100);
+    _vault.requestRedeem(_amount * _PAR, _account, _account);
+    _settle();
   }
 
   function test_WhenTheControllerHasLapsed_ItCanStillClaimItsRedemptionPayout() external {
@@ -157,15 +167,15 @@ contract CredentialRuleVaults_7540 is CredentialVaultsTest {
     _redeemAll(_alice, 1000);
     vm.warp(_NOW + 31 days);
     vm.prank(_alice);
-    _vault.redeem(1000, _alice, _alice);
-    assertEq(_asset.balanceOf(_alice), 1e12 - 1000 + 1100);
+    _vault.redeem(1000 * _PAR, _alice, _alice);
+    assertEq(_asset.balanceOf(_alice), 1e12);
   }
 
   function test_WhenTheControllerHasLapsed_ItCanRequestARedemptionButNotADeposit() external {
     _invest(_alice, 1000);
     vm.warp(_NOW + 31 days);
     vm.prank(_alice);
-    _vault.requestRedeem(400, _alice, _alice); // the exit path stays open
+    _vault.requestRedeem(400 * _PAR, _alice, _alice); // the exit path stays open
 
     vm.expectRevert(
       abi.encodeWithSelector(IGated7540Vault.Gated7540Vault_ControllerNotEligible.selector, Reasons.CREDENTIAL_EXPIRED)
@@ -174,11 +184,10 @@ contract CredentialRuleVaults_7540 is CredentialVaultsTest {
     _vault.requestDeposit(10, _alice, _alice);
   }
 
-  function test_WhenAFulfilledDepositIsClaimedAfterTheLapse_ItIsRefusedAndTheAgentRecoversIt() external {
+  function test_WhenASettledDepositIsClaimedAfterTheLapse_ItIsRefusedAndTheAgentRecoversIt() external {
     vm.prank(_alice);
     _vault.requestDeposit(1000, _alice, _alice);
-    vm.prank(_fulfiller);
-    _vault.fulfillDeposit(_alice, 1000, 1000);
+    _settle();
     vm.warp(_NOW + 31 days);
 
     vm.expectRevert(
@@ -189,22 +198,22 @@ contract CredentialRuleVaults_7540 is CredentialVaultsTest {
 
     vm.prank(_agent);
     _vault.recoverClaimable(_alice, _bob); // an enforcement mint to an eligible account
-    assertEq(_vault.balanceOf(_bob), 1000);
+    assertEq(_vault.balanceOf(_bob), 1000 * _PAR);
   }
 
   function test_WhenTheControllerHasLapsed_RejectingItsRedemptionRevertsAndTheAgentRecoversIt() external {
     _invest(_alice, 1000);
     vm.prank(_alice);
-    _vault.requestRedeem(1000, _alice, _alice);
+    _vault.requestRedeem(1000 * _PAR, _alice, _alice);
     vm.warp(_NOW + 31 days);
 
     vm.expectRevert(_rejected(Reasons.CREDENTIAL_EXPIRED));
-    vm.prank(_fulfiller);
+    vm.prank(_agent);
     _vault.rejectRedeemRequest(_alice);
 
     vm.prank(_agent);
     _vault.recoverRedeemRequest(_alice, _bob);
-    assertEq(_vault.balanceOf(_bob), 1000);
+    assertEq(_vault.balanceOf(_bob), 1000 * _PAR);
   }
 
   function test_WhenTheRecoveryAccountIsNotEligible_RecoveringClaimableAssetsIsRefused() external {
@@ -221,7 +230,7 @@ contract CredentialRuleVaults_7540 is CredentialVaultsTest {
 
     vm.prank(_agent);
     _vault.recoverClaimable(_alice, _bob);
-    assertEq(_asset.balanceOf(_bob), 1e12 + 1100);
+    assertEq(_asset.balanceOf(_bob), 1e12 + 1000);
   }
 
   function test_WhenTheGuardianBlocksTheController_ItCannotCollectItsPayout() external {
@@ -234,7 +243,7 @@ contract CredentialRuleVaults_7540 is CredentialVaultsTest {
       abi.encodeWithSelector(IGated7540Vault.Gated7540Vault_ControllerNotEligible.selector, Reasons.SENDER_NOT_VERIFIED)
     );
     vm.prank(_alice);
-    _vault.redeem(1000, _alice, _alice);
+    _vault.redeem(1000 * _PAR, _alice, _alice);
   }
 
   function test_WhenThePolicyNeedsAProfessional_ARetailControllerCannotInvestAndTheEscrowStillWorks() external {
@@ -251,7 +260,7 @@ contract CredentialRuleVaults_7540 is CredentialVaultsTest {
     _invest(_bob, 1000);
     _redeemAll(_bob, 1000); // the escrow holds the shares in between, as the token's own address
     vm.prank(_bob);
-    _vault.redeem(1000, _bob, _bob);
+    _vault.redeem(1000 * _PAR, _bob, _bob);
     assertEq(_vault.totalSupply(), 0);
   }
 }

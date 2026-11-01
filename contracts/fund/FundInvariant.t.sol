@@ -22,7 +22,8 @@ contract FundHandler is Test {
   address internal _minter;
   address internal _burner;
   address internal _agent;
-  address internal _fulfiller;
+  address internal _settler;
+  address internal _cash;
   address[4] internal _actors;
 
   /// @notice Actions that went through
@@ -36,15 +37,15 @@ contract FundHandler is Test {
     Gated4626Vault _classVault4626,
     Gated7540Vault _classVault7540,
     address[4] memory _holders,
-    address[5] memory _roleHolders
+    address[6] memory _roleHolders
   ) {
     _fund = _fundContract;
     _token = _classToken;
     _vault4626 = _classVault4626;
     _vault7540 = _classVault7540;
     _actors = _holders;
-    (_owner, _minter, _burner, _agent, _fulfiller) =
-    (_roleHolders[0], _roleHolders[1], _roleHolders[2], _roleHolders[3], _roleHolders[4]);
+    (_owner, _minter, _burner, _agent, _settler, _cash) =
+    (_roleHolders[0], _roleHolders[1], _roleHolders[2], _roleHolders[3], _roleHolders[4], _roleHolders[5]);
   }
 
   function actors() external view returns (address[4] memory _all) {
@@ -166,10 +167,10 @@ contract FundHandler is Test {
     address _account = _actor(_who);
     vm.prank(_account);
     try _vault7540.requestDeposit(_assets, _account, _account) {
-      vm.prank(_fulfiller);
-      _vault7540.fulfillDeposit(_account, _assets, _assets);
+      _settle7540();
+      uint256 _shares = _vault7540.maxMint(_account);
       vm.prank(_account);
-      try _vault7540.mint(_assets, _account, _account) {
+      try _vault7540.mint(_shares, _account, _account) {
         ++executed;
       } catch {
         ++rejected;
@@ -193,18 +194,25 @@ contract FundHandler is Test {
     }
   }
 
-  function fulfillRedeem7540(
+  function settleRedeem7540(
     uint256 _who
   ) external {
-    address _account = _actor(_who);
-    uint256 _pending = _vault7540.pendingRedeemRequest(0, _account);
-    if (_pending == 0) return;
-    vm.prank(_fulfiller);
-    try _vault7540.fulfillRedeem(_account, _pending, _pending) {
+    if (_vault7540.pendingRedeemRequest(0, _actor(_who)) == 0) return;
+    _settle7540();
+  }
+
+  /// @dev Closes the open period if it can and settles at par, counting a refusal
+  function _settle7540() private {
+    (uint64 _open, uint64 _settled, uint256 _unclaimed) = _vault7540.dealingState();
+    uint256 _nav = (_vault7540.totalSupply() + _unclaimed) / 1e6;
+    vm.startPrank(_settler);
+    if (_open == _settled + 1) _vault7540.closePeriod();
+    try _vault7540.settlePeriod(_nav, 0, _cash, address(0)) {
       ++executed;
     } catch {
       ++rejected;
     }
+    vm.stopPrank();
   }
 
   function rejectRedeem7540(
@@ -212,7 +220,7 @@ contract FundHandler is Test {
   ) external {
     address _account = _actor(_who);
     if (_vault7540.pendingRedeemRequest(0, _account) == 0) return;
-    vm.prank(_fulfiller);
+    vm.prank(_agent);
     try _vault7540.rejectRedeemRequest(_account) {
       ++executed;
     } catch {
@@ -278,7 +286,7 @@ contract FundInvariantTest is FundIntegrationTest {
       _vault4626,
       _vault7540,
       [_alice, _bob, _carol, _dave],
-      [address(this), _minter, _burner, _agent, _fulfiller]
+      [address(this), _minter, _burner, _agent, _settler, _cash]
     );
     targetContract(address(_handler));
   }
@@ -310,8 +318,8 @@ contract FundInvariantTest is FundIntegrationTest {
     assertEq(_fund.heldClasses(address(_token)), 0);
     assertEq(_fund.heldClasses(address(_vault4626)), 0);
     assertEq(_fund.heldClasses(address(_vault7540)), 0);
-    assertEq(_fund.heldClasses(_fulfiller), 0);
-    assertEq(_fund.heldClasses(_custody), 0);
+    assertEq(_fund.heldClasses(_settler), 0);
+    assertEq(_fund.heldClasses(_cash), 0);
   }
 
   /// @dev Non-vacuity: every run must execute actions and must run into a rejection, or the cap was never exercised

@@ -21,6 +21,7 @@ import {SettlementWindowRule} from 'contracts/hooks/rules/SettlementWindowRule.s
 import {CredentialRegistry} from 'contracts/identity/CredentialRegistry.sol';
 import {DvPExecutor} from 'contracts/intents/DvPExecutor.sol';
 import {IntentExecutor} from 'contracts/intents/IntentExecutor.sol';
+import {NavDesk} from 'contracts/nav/NavDesk.sol';
 import {ERC4626Adapter} from 'contracts/portfolio/ERC4626Adapter.sol';
 import {Portfolio} from 'contracts/portfolio/Portfolio.sol';
 import {MockAsset} from 'contracts/test/MockAsset.sol';
@@ -64,6 +65,7 @@ contract ContractSizesTest is Test {
     _assertFits('FundHoldersRule', address(new FundHoldersRule(IFund(address(_fund)))));
     MockAsset _asset = new MockAsset(6);
     _assertFits('Portfolio', address(new Portfolio(address(this), IERC20(address(_asset)), true)));
+    _assertFits('NavDesk', address(new NavDesk(address(this), address(this), 1 days, 1 hours, 1 days)));
     MockERC4626Target _target = new MockERC4626Target(IERC20(address(_asset)));
     _assertFits('ERC4626Adapter', address(new ERC4626Adapter(address(this), _target, bytes32(0))));
     _assertFits(
