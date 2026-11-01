@@ -8,7 +8,7 @@ import { fundOpenModule } from "../../ignition/modules/FundOpen.js";
 import { productModule } from "../../ignition/modules/Product.js";
 import { QUALS } from "../../ignition/modules/roles.js";
 import { PROFILES, type Product, type Profile } from "../../ignition/profiles.js";
-import { assertHandedOver, deployProduct, deployProfile, deployStack, deverify, REASONS, verify } from "./fixtures.js";
+import { assertHandedOver, deployProduct, deployProfile, deployStack, deverify, REASONS, verify, PAR, settlePeriod } from "./fixtures.js";
 
 const PLAIN = ["credentialRule", "holderRestrictionRule"] as const;
 const CORE = ["credentialRegistry", "credentialRule", "holderRestrictionRule", "hook", "proxyDeployer", "recoveryTimelock", "registry", "timelock"];
@@ -73,9 +73,9 @@ describe("one product alone: the core and that product, and nothing else", async
     await s.asset.write.mint([a, usd(100n)]);
     await s.asset.write.approve([vault.address, maxUint256], { account: alice.account });
     await vault.write.requestDeposit([usd(100n), a, a], { account: alice.account });
-    await vault.write.fulfillDeposit([a, usd(100n), usd(100n)], { account: s.wallets.fulfiller.account });
-    await vault.write.mint([usd(100n), a, a], { account: alice.account });
-    assert.equal(await vault.read.balanceOf([a]), usd(100n));
+    await settlePeriod(s, vault);
+    await vault.write.mint([usd(100n) * PAR, a, a], { account: alice.account });
+    assert.equal(await vault.read.balanceOf([a]), usd(100n) * PAR);
   });
 });
 

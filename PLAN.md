@@ -2927,6 +2927,16 @@ Immutable, one per 7540 vault. It holds no money and has no role table: it asks 
 
 Replacing a `NavDesk`: with no proposal pending, one timelock batch swaps `SETTLER_ROLE` and calls the successor's one-shot `adopt(oldDesk)`, which reads the high-water mark, the fee clocks and the last cut-off live at that moment, so nothing is charged twice however long the timelock took.
 
+**Result (2026-11-01), row 7.** `Gated7540Vault` deals in periods, with no `fulfill*`, `custody` or `FULFILLER_ROLE`, and `NavDesk` is built standing beside it. The 7540 no longer inherits OpenZeppelin's 4626 (P13), so the 8 "unreachable code" warnings are gone. It measures 24,320 bytes: a first build came to 24,701, and writing a `Request` through one helper rather than at five places saved 343; removing the full-claim branch, which a mutant showed changes nothing because `mulDiv(x, y, x)` is exact, saved 38. What the build settled:
+
+- `Request` and `Book` are per side, `mapping(bool => ...)`, so one set of helpers serves deposits and redemptions. A `Request` is two slots, as agreed, with `toUint128` at the request and at the settlement, so a period whose claims could not be booked refuses at settlement, not at one investor's claim.
+- A rejected request leaves its period's book, in either state of the period, so a refund out of a closed period is not priced.
+- In a test with a 1-unit first investor and a $1,000 donation before a victim's $1,000 period, the victim gains and the attacker loses a third of the donation (the 2026-10-30 script's setup gave a half). The bound that matters is pinned: the victim keeps at least 99.98%.
+- The fee is passed through and paid, and `NavDesk` passes zero until `FeeModel` arrives in row 8.
+- From a parallel review: `maxReportAge` below `cooldown` would make every report stale before it could execute, so it is refused (`NavDesk_ReportAgeBelowCooldown`), and the NatSpec now says `nav` leaves out what the vault holds. No module deploys a `NavDesk` yet; `Product.ts` grants `SETTLER_ROLE` to a parameter until row 10.
+
+Tests first: 134 failing against stubs in the vault's `closePeriod` and the desk's `propose`, then 2 for the age check. The test file's non-vacuity check now asks for each family of actions, because a rare action misses the odd run out of 256 by chance, and the handler takes requests back less often so that more of them live to settle.
+
 #### `Portfolio`: where the money may go
 
 Immutable, one per vault. Holds idle money. It asks the vault for roles live. Immutable: `VAULT`, `ASSET`, `ACCEPTS_REPORTED` (false for a 4626 vault, which refuses a portfolio that says otherwise). It gives its vault an allowance at construction.

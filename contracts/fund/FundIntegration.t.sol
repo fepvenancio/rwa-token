@@ -37,6 +37,7 @@ contract FundIntegrationTest is Test {
   uint256 internal constant _CLASS_TOKEN = 1;
   uint256 internal constant _CLASS_4626 = 2;
   uint256 internal constant _CLASS_7540 = 3;
+  uint256 internal constant _PAR = 1e6;
 
   PolicyRegistry internal _registry;
   MockIdentityRegistry internal _identity;
@@ -56,8 +57,8 @@ contract FundIntegrationTest is Test {
   address internal _minter = makeAddr('minter');
   address internal _burner = makeAddr('burner');
   address internal _agent = makeAddr('agent');
-  address internal _fulfiller = makeAddr('fulfiller');
-  address internal _custody = makeAddr('custody');
+  address internal _settler = makeAddr('settler');
+  address internal _cash = makeAddr('cash');
   address internal _treasury = makeAddr('treasury');
   address internal _alice = makeAddr('alice');
   address internal _bob = makeAddr('bob');
@@ -166,8 +167,7 @@ contract FundIntegrationTest is Test {
             _guardian,
             address(_registry),
             address(_hook),
-            _rules(_fundRule),
-            _custody
+            _rules(_fundRule)
           )
         ),
         address(_hook),
@@ -186,14 +186,14 @@ contract FundIntegrationTest is Test {
     _token.grantRole(_token.AGENT_ROLE(), _agent);
     _vault4626.grantRole(_vault4626.AGENT_ROLE(), _agent);
     _vault7540.grantRole(_vault7540.AGENT_ROLE(), _agent);
-    _vault7540.grantRole(_vault7540.FULFILLER_ROLE(), _fulfiller);
+    _vault7540.grantRole(_vault7540.SETTLER_ROLE(), _settler);
 
     // The 7540 escrow is a verified account.
     _identity.set(address(_vault7540), true);
 
-    address[6] memory _accounts = [_alice, _bob, _carol, _dave, _treasury, _fulfiller];
+    address[6] memory _accounts = [_alice, _bob, _carol, _dave, _treasury, _cash];
     for (uint256 _i; _i < _accounts.length; ++_i) {
-      if (_accounts[_i] != _fulfiller) _identity.set(_accounts[_i], true);
+      if (_accounts[_i] != _cash) _identity.set(_accounts[_i], true);
       _asset.mint(_accounts[_i], 1e12);
       vm.startPrank(_accounts[_i]);
       _asset.approve(address(_vault4626), type(uint256).max);
@@ -220,16 +220,26 @@ contract FundIntegrationTest is Test {
     _vault4626.deposit(_assets, _account);
   }
 
+  /// @dev Closes the open period and settles it at par: one asset unit buys `_PAR` shares
+  function _settle7540() internal {
+    (,, uint256 _unclaimed) = _vault7540.dealingState();
+    uint256 _nav = (_vault7540.totalSupply() + _unclaimed) / _PAR;
+    vm.startPrank(_settler);
+    _vault7540.closePeriod();
+    _vault7540.settlePeriod(_nav, 0, _cash, address(0));
+    vm.stopPrank();
+  }
+
+  /// @dev Leaves `_account` with `_assets * _PAR` shares of the class
   function _invest7540(
     address _account,
     uint256 _assets
   ) internal {
     vm.prank(_account);
     _vault7540.requestDeposit(_assets, _account, _account);
-    vm.prank(_fulfiller);
-    _vault7540.fulfillDeposit(_account, _assets, _assets);
+    _settle7540();
     vm.prank(_account);
-    _vault7540.mint(_assets, _account, _account);
+    _vault7540.mint(_assets * _PAR, _account, _account);
   }
 
   function _requestRedeem7540(
@@ -278,7 +288,7 @@ contract FundIntegration_Counting is FundIntegrationTest {
     assertEq(_tokens[2], address(_vault7540));
     assertEq(_balances[0], 10 ether);
     assertEq(_balances[1], _vault4626.balanceOf(_alice));
-    assertEq(_balances[2], 7e6);
+    assertEq(_balances[2], 7e6 * _PAR);
 
     _mintToken(_bob, 1 ether);
     assertEq(_fund.holderCount(), 2);
@@ -300,7 +310,7 @@ contract FundIntegration_Counting is FundIntegrationTest {
     assertEq(_fund.holderCount(), 1);
     assertEq(_fund.heldClasses(_alice), 4);
 
-    _requestRedeem7540(_alice, 7e6);
+    _requestRedeem7540(_alice, 7e6 * _PAR);
     assertEq(_fund.holderCount(), 0);
     assertEq(_fund.heldClasses(_alice), 0);
   }
@@ -515,21 +525,20 @@ contract FundIntegration_VaultEscrow is FundIntegrationTest {
     _invest7540(_alice, 7e6);
     assertEq(_fund.holderCount(), 1);
 
-    _requestRedeem7540(_alice, 7e6);
+    _requestRedeem7540(_alice, 7e6 * _PAR);
     assertEq(_fund.holderCount(), 0);
     assertEq(_fund.heldClasses(_alice), 0);
     assertEq(_fund.heldClasses(address(_vault7540)), 0);
   }
 
-  function test_WhenARedemptionIsFulfilled_TheBurnFromTheEscrowChangesNothing() external {
+  function test_WhenARedemptionIsSettled_TheBurnFromTheEscrowChangesNothing() external {
     _invest7540(_alice, 7e6);
-    _requestRedeem7540(_alice, 7e6);
-    vm.prank(_fulfiller);
-    _vault7540.fulfillRedeem(_alice, 7e6, 7e6);
+    _requestRedeem7540(_alice, 7e6 * _PAR);
+    _settle7540();
     assertEq(_fund.holderCount(), 0);
 
     vm.prank(_alice);
-    _vault7540.redeem(7e6, _alice, _alice);
+    _vault7540.redeem(7e6 * _PAR, _alice, _alice);
     assertEq(_fund.holderCount(), 0);
   }
 
@@ -541,14 +550,14 @@ contract FundIntegration_VaultEscrow is FundIntegrationTest {
     _mintToken(_bob, 1 ether);
     assertEq(_fund.holderCount(), 2);
 
-    _requestRedeem7540(_alice, 7e6);
+    _requestRedeem7540(_alice, 7e6 * _PAR);
     assertEq(_fund.holderCount(), 1);
     _mintToken(_carol, 1 ether);
     assertEq(_fund.holderCount(), 2);
 
     // The return is a plain transfer, so alice is a new investor at a full cap and the reject reverts.
     vm.expectRevert(_rejected(Reasons.MAX_HOLDERS));
-    vm.prank(_fulfiller);
+    vm.prank(_agent);
     _vault7540.rejectRedeemRequest(_alice);
 
     // The agent recovers the escrow with an enforcement move: exempt from the cap, still counted.
@@ -560,10 +569,10 @@ contract FundIntegration_VaultEscrow is FundIntegrationTest {
 
   function test_WhenARejectedRedemptionReturnsSharesWithRoomInTheFund_TheInvestorRejoins() external {
     _invest7540(_alice, 7e6);
-    _requestRedeem7540(_alice, 7e6);
+    _requestRedeem7540(_alice, 7e6 * _PAR);
     assertEq(_fund.holderCount(), 0);
 
-    vm.prank(_fulfiller);
+    vm.prank(_agent);
     _vault7540.rejectRedeemRequest(_alice);
     assertEq(_fund.holderCount(), 1);
     assertEq(_fund.heldClasses(_alice), 4);
@@ -579,11 +588,10 @@ contract FundIntegration_Claimable is FundIntegrationTest {
   function test_WhenAnotherClassFillsTheFundBeforeAClaim_TheClaimIsBlockedAndRecoverClaimableDeliversCounted()
     external
   {
-    // alice's deposit is fulfilled while the fund has room, and she has not claimed yet.
+    // alice's deposit settles while the fund has room, and she has not claimed yet.
     vm.prank(_alice);
     _vault7540.requestDeposit(7e6, _alice, _alice);
-    vm.prank(_fulfiller);
-    _vault7540.fulfillDeposit(_alice, 7e6, 7e6);
+    _settle7540();
     assertEq(_fund.holderCount(), 0);
 
     // Two other investors fill the fund through the other two classes.
@@ -596,13 +604,13 @@ contract FundIntegration_Claimable is FundIntegrationTest {
       abi.encodeWithSelector(IGated7540Vault.Gated7540Vault_ControllerNotEligible.selector, Reasons.MAX_HOLDERS)
     );
     vm.prank(_alice);
-    _vault7540.mint(7e6, _alice, _alice);
+    _vault7540.mint(7e6 * _PAR, _alice, _alice);
     assertEq(_vault7540.claimableDepositRequest(0, _alice), 7e6);
 
     // The agent delivers them as an enforcement mint: exempt from the cap and still counted.
     vm.prank(_agent);
     _vault7540.recoverClaimable(_alice, _alice);
-    assertEq(_vault7540.balanceOf(_alice), 7e6);
+    assertEq(_vault7540.balanceOf(_alice), 7e6 * _PAR);
     assertEq(_fund.holderCount(), 3);
     assertEq(_fund.heldClasses(_alice), 4);
     assertEq(_vault7540.claimableDepositRequest(0, _alice), 0);

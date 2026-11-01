@@ -12,6 +12,7 @@ import {
   keccak256,
   toHex,
   type Abi,
+  type Account,
   type Address,
   type Hex,
   zeroAddress,
@@ -170,7 +171,7 @@ async function stages(connection: NetworkConnection, profile: Profile) {
     burner,
     agent,
     operator,
-    fulfiller,
+    settler,
     custody,
     recovery,
     alice,
@@ -234,18 +235,17 @@ async function stages(connection: NetworkConnection, profile: Profile) {
     governance: address(governance),
     operations: address(operations),
     asset: asset.address,
-    custody: address(custody),
     minter: address(minter),
     burner: address(burner),
     agent: address(agent),
     operator: address(operator),
-    fulfiller: address(fulfiller),
+    settler: address(settler),
     windowOpen: WINDOW_OPEN,
     windowClose: WINDOW_CLOSE,
     windowDays: rules.windowRule === undefined ? 0 : await rules.windowRule.read.MON_TO_FRI(),
   };
 
-  const wallets = { deployer, governance, attester, guardian, minter, burner, agent, operator, fulfiller, custody, recovery, kyc, operations };
+  const wallets = { deployer, governance, attester, guardian, minter, burner, agent, operator, settler, custody, recovery, kyc, operations };
 
   /** A fund as the stack knows it: its contract, its rule, its intended cap and the classes it opened with. */
   type FundStack = {
@@ -772,6 +772,41 @@ const addressOf = (who: Who) => (typeof who === "string" ? who : who.account.add
  * The demo KYC attester vouches for `who`: a credential from now, valid for `validFor` seconds (far past any test by
  * default) with `quals`. Writes over an earlier credential of the same attester.
  */
+// ---- Dealing ----
+
+/** Shares per asset unit at par: the shares of a 7540 have 6 more decimals than its asset. */
+export const PAR = 1_000_000n;
+
+type DealingVault = {
+  address: Address;
+  read: { dealingState: () => Promise<readonly [bigint, bigint, bigint]>; totalSupply: () => Promise<bigint> };
+  write: {
+    closePeriod: (options: { account: Account }) => Promise<Hex>;
+    settlePeriod: (args: readonly [bigint, bigint, Address, Address], options: { account: Account }) => Promise<Hex>;
+  };
+};
+type DealingStack = {
+  wallets: { settler: { account: Account }; custody: { account: Account } };
+  asset: {
+    write: {
+      mint: (args: readonly [Address, bigint]) => Promise<Hex>;
+      approve: (args: readonly [Address, bigint], options: { account: Account }) => Promise<Hex>;
+    };
+  };
+};
+
+/** Closes the vault's open period and settles it at `nav`, or at par, with the custody wallet as a funded cash account. */
+export async function settlePeriod(s: DealingStack, vault: DealingVault, nav?: bigint) {
+  const custody = s.wallets.custody.account;
+  await s.asset.write.mint([custody.address, 10n ** 30n]);
+  await s.asset.write.approve([vault.address, 2n ** 256n - 1n], { account: custody });
+  const [, , unclaimed] = await vault.read.dealingState();
+  const value = nav ?? ((await vault.read.totalSupply()) + unclaimed) / PAR;
+  const settler = s.wallets.settler.account;
+  await vault.write.closePeriod({ account: settler });
+  await vault.write.settlePeriod([value, 0n, custody.address, zeroAddress], { account: settler });
+}
+
 export async function verify(s: Pick<ProfileStack, "publicClient" | "credentials" | "wallets">, who: Who, opts: { quals?: number; validFor?: bigint } = {}) {
   const now = (await s.publicClient.getBlock()).timestamp;
   await s.credentials!.write.set([addressOf(who), now + (opts.validFor ?? DEMO_VALIDITY), opts.quals ?? QUALS.KYC, COUNTRY], {

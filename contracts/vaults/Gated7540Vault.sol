@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import {ERC20Upgradeable} from '@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol';
-import {ERC4626Upgradeable} from '@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol';
+import {IERC4626} from '@openzeppelin/contracts/interfaces/IERC4626.sol';
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
+import {IERC20Metadata} from '@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol';
 import {SafeERC20} from '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
 import {Math} from '@openzeppelin/contracts/utils/math/Math.sol';
+import {SafeCast} from '@openzeppelin/contracts/utils/math/SafeCast.sol';
+
+import {ERC20Upgradeable} from '@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol';
 
 import {Reasons} from 'interfaces/Errors.sol';
 
@@ -23,72 +26,107 @@ import {GatedVaultBase} from 'contracts/vaults/GatedVaultBase.sol';
 
 /**
  * @title Gated7540Vault
- * @notice ERC-7540 asynchronous vault whose shares are a policy-gated token, as specified in `IGated7540Vault`
- * @dev Deployed behind a UUPS proxy. Share decimals equal the asset's (no offset: prices are set explicitly by the
- *      fulfiller, so there is no on-chain exchange rate to inflate)
+ * @notice ERC-7540 asynchronous vault whose shares are a policy-gated token, dealt in periods, as specified in
+ *         `IGated7540Vault`
+ * @dev Deployed behind a UUPS proxy. It does not inherit OpenZeppelin's ERC-4626: it would have to override almost all of
+ *      it and claim to be a synchronous vault while its previews revert (owner decision P13)
  */
-// IERC7575 re-declares every ERC-4626 function already inherited via OZ IERC4626; inheriting both would need dual
-// override specifiers on each. Conformance is pinned by the 0x2f0a18c5 ERC-165 test and full function coverage.
+// IERC7575 re-declares every ERC-4626 function; inheriting both would need dual override specifiers on each. Conformance
+// is pinned by the 0x2f0a18c5 ERC-165 test and full function coverage.
 // No receive or payable function, and upgradeToAndCall rejects value: no ETH can enter (tests: *_Ether).
 // Slither missing-inheritance spans the whole contract, so its suppression block closes after the last line.
 // slither-disable-start missing-inheritance
 // aderyn-ignore-next-line(contract-locks-ether)
 contract Gated7540Vault is
-  ERC4626Upgradeable,
   GatedVaultBase,
+  IERC4626,
   IERC7540Operator,
   IERC7540Deposit,
   IERC7540Redeem,
   IGated7540Vault
 {
   using SafeERC20 for IERC20;
+  using SafeCast for uint256;
 
   /**
-   * @notice A controller's deposit request
-   * @param pendingAssets Requested, not yet fulfilled
-   * @param claimableAssets Fulfilled assets not yet claimed
-   * @param claimableShares Shares those assets buy, not yet minted
+   * @notice One controller's request on one side: assets to shares on a deposit, shares to assets on a redemption
+   * @param period The period holding `pending`; 0 with nothing pending
+   * @param pending Requested, not yet settled
+   * @param paid Settled and not yet claimed: what the controller gave
+   * @param owed What that buys, not yet claimed
    */
-  struct DepositState {
-    uint256 pendingAssets;
-    uint256 claimableAssets;
-    uint256 claimableShares;
+  struct Request {
+    uint64 period;
+    uint128 pending;
+    uint128 paid;
+    uint128 owed;
   }
 
   /**
-   * @notice A controller's redemption request
-   * @param pendingShares Escrowed in the vault, not yet fulfilled
-   * @param claimableShares Fulfilled (burned) shares not yet claimed
-   * @param claimableAssets Assets those shares pay, held for the claim
+   * @notice One side of one period
+   * @param paid What its requests gave, net of rejects
+   * @param owed What that bought, at settlement
    */
-  struct RedeemState {
-    uint256 pendingShares;
-    uint256 claimableShares;
-    uint256 claimableAssets;
+  struct Book {
+    uint128 paid;
+    uint128 owed;
+  }
+
+  /**
+   * @notice What one settlement struck
+   * @param deposits The assets of the period's deposit requests
+   * @param redemptions The shares of its redemption requests
+   * @param supply All shares at the period's value
+   * @param shares The shares its deposits bought
+   * @param assets The assets its redemptions pay
+   */
+  struct Settlement {
+    uint256 deposits;
+    uint256 redemptions;
+    uint256 supply;
+    uint256 shares;
+    uint256 assets;
   }
 
   /**
    * @notice ERC-7201 namespaced storage of the vault
-   * @param custody Receives fulfilled deposit assets
-   * @param lastPrice Assets per `10**decimals()` shares at the last fulfilment
-   * @param deposits Deposit requests per controller
-   * @param redeems Redemption requests per controller
-   * @param operators Operator approvals per controller
+   * @param asset The underlying asset
+   * @param decimals The share decimals: the asset's plus 6
+   * @param openPeriod The period requests join; the first is 1
+   * @param settledPeriod The last settled period
+   * @param lastNav The value the last settlement dealt at, behind `convertTo*` and `totalAssets`
+   * @param lastSupply All shares at that value
+   * @param unclaimedShares Shares bought in settled periods and not yet minted
+   * @param pendingDeposits Assets held for unsettled deposit requests
+   * @param claimableCash Assets held for settled redemptions
    * @param pendingRedeemShares The shares booked to pending redemptions, every controller together: the part of the
    *        vault's own balance that a forced transfer may not take
+   * @param requests Each controller's request on each side (true is the deposit side)
+   * @param books Each period's totals on each side
+   * @param operators Operator approvals per controller
    * @custom:storage-location erc7201:gated.storage.Gated7540Vault
    */
   struct Gated7540Storage {
-    address custody;
-    uint256 lastPrice;
-    mapping(address _controller => DepositState _state) deposits;
-    mapping(address _controller => RedeemState _state) redeems;
-    mapping(address _controller => mapping(address _operator => bool _approved)) operators;
+    IERC20 asset;
+    uint8 decimals;
+    uint64 openPeriod;
+    uint64 settledPeriod;
+    uint128 lastNav;
+    uint128 lastSupply;
+    uint256 unclaimedShares;
+    uint256 pendingDeposits;
+    uint256 claimableCash;
     uint256 pendingRedeemShares;
+    mapping(address _controller => mapping(bool _isDeposit => Request _request)) requests;
+    mapping(uint256 _period => mapping(bool _isDeposit => Book _book)) books;
+    mapping(address _controller => mapping(address _operator => bool _approved)) operators;
   }
 
   /// @inheritdoc IGated7540Vault
-  bytes32 public constant FULFILLER_ROLE = keccak256('FULFILLER_ROLE');
+  bytes32 public constant SETTLER_ROLE = keccak256('SETTLER_ROLE');
+
+  /// @notice The virtual shares of the price, and the digits added to the asset's decimals to keep them honest
+  uint256 private constant _VIRTUAL_SHARES = 1e6;
 
   /// @notice keccak256(abi.encode(uint256(keccak256('gated.storage.Gated7540Vault')) - 1)) & ~bytes32(uint256(0xff))
   // Read in assembly by the ERC-7201 accessor (test: Gated7540VaultUnit_Storage).
@@ -113,29 +151,17 @@ contract Gated7540Vault is
     address _guardian,
     address _registry,
     address _hook,
-    IComplianceRule[] memory _initialRules,
-    address _custody
+    IComplianceRule[] memory _initialRules
   ) external initializer {
-    if (_custody == address(0)) revert Gated7540Vault_ZeroAddress();
-    // Parent initializers in linearized order (OZ upgrades-core): the base's composite init is expanded around ERC4626.
-    __ERC20_init(_name, _symbol);
-    __ERC4626_init(_asset);
-    __ERC20Permit_init(_name);
-    __AccessControl_init();
-    __Pausable_init();
-    __Multicall_init();
-    __PolicyGatedERC20_init_unchained(_admin, _guardian, _registry, _hook, _initialRules);
-    // The call above installs the rules on the hook, which the registry attested and which cannot re-enter
-    // `initialize` (the `initializer` modifier) or use a role: only the admin and the guardian hold one yet. What
-    // follows is the vault's own initial state, which the hook never reads.
-    // slither-disable-start reentrancy-benign,reentrancy-events
+    if (address(_asset) == address(0)) revert Gated7540Vault_ZeroAddress();
     Gated7540Storage storage $ = _getGated7540Storage();
-    $.custody = _custody;
-    // 10 ** decimals() is one whole share; decimals() is read at runtime, so there is no literal to hoist.
-    // aderyn-ignore-next-line(literal-instead-of-constant)
-    $.lastPrice = 10 ** decimals();
-    emit CustodyChanged(address(0), _custody);
-    // slither-disable-end reentrancy-benign,reentrancy-events
+    $.asset = _asset;
+    // 6 is the digits of `_VIRTUAL_SHARES`. A view interface: compiled to STATICCALL, so the asset cannot change state or
+    // re-enter before the write below.
+    // aderyn-ignore-next-line(reentrancy-state-change)
+    $.decimals = IERC20Metadata(address(_asset)).decimals() + 6;
+    $.openPeriod = 1;
+    __PolicyGatedERC20_init(_name, _symbol, _admin, _guardian, _registry, _hook, _initialRules);
   }
 
   /// @inheritdoc IERC7540Deposit
@@ -154,12 +180,13 @@ contract Gated7540Vault is
     if (_reason != Reasons.TRANSFER_OK) revert Gated7540Vault_ControllerNotEligible(_reason);
     _requireThirdPartyEligible(_owner, _controller);
 
-    $.deposits[_controller].pendingAssets += _assets;
+    _join(_controller, _assets, true);
+    $.pendingDeposits += _assets;
     emit DepositRequest(_controller, _owner, 0, _sender, _assets);
     // `_owner` is authorised above: the caller itself, or an operator the owner approved (ERC-7540 operators are trusted).
     // Aderyn's form of the Slither finding below; same guard, same tests.
     // slither-disable-next-line arbitrary-send-erc20
-    IERC20(asset()).safeTransferFrom(_owner, address(this), _assets); // aderyn-ignore(arbitrary-transfer-from)
+    $.asset.safeTransferFrom(_owner, address(this), _assets); // aderyn-ignore(arbitrary-transfer-from)
     _requestId = 0;
   }
 
@@ -177,7 +204,7 @@ contract Gated7540Vault is
     // Otherwise a holder could name a lapsed address as controller, which, paying itself, would collect the cash.
     _requireThirdPartyEligible(_controller, _owner);
 
-    $.redeems[_controller].pendingShares += _shares;
+    _join(_controller, _shares, false);
     $.pendingRedeemShares += _shares;
     emit RedeemRequest(_controller, _owner, 0, _sender, _shares);
     // Escrow as a TRANSFER through the hook: lockup, frozen, identity and pause all apply.
@@ -186,74 +213,51 @@ contract Gated7540Vault is
   }
 
   /// @inheritdoc IGated7540Vault
-  function fulfillDeposit(
-    address _controller,
-    uint256 _assets,
-    uint256 _shares
-  ) external onlyRole(FULFILLER_ROLE) {
-    if (_assets == 0 || _shares == 0) revert Gated7540Vault_ZeroAmount();
+  function closePeriod() external onlyRole(SETTLER_ROLE) {
     Gated7540Storage storage $ = _getGated7540Storage();
-    DepositState storage _state = $.deposits[_controller];
-    if (_state.pendingAssets == 0) revert Gated7540Vault_NothingPending();
-    if (_assets > _state.pendingAssets) revert Gated7540Vault_ExceedsPending(_assets, _state.pendingAssets);
-
-    _state.pendingAssets -= _assets;
-    _state.claimableAssets += _assets;
-    _state.claimableShares += _shares;
-    uint256 _price = _recordPrice(_assets, _shares);
-    emit Fulfilled(_controller, true, _price, _assets, _shares, _msgSender());
-    IERC20(asset()).safeTransfer($.custody, _assets);
+    uint64 _open = $.openPeriod;
+    uint64 _next = $.settledPeriod + 1;
+    if (_open != _next) revert Gated7540Vault_PeriodUnsettled(_next);
+    $.openPeriod = _open + 1;
+    emit PeriodClosed(_open);
   }
 
   /// @inheritdoc IGated7540Vault
-  function fulfillRedeem(
-    address _controller,
-    uint256 _shares,
-    uint256 _assets
-  ) external onlyRole(FULFILLER_ROLE) {
-    if (_assets == 0 || _shares == 0) revert Gated7540Vault_ZeroAmount();
-    Gated7540Storage storage $ = _getGated7540Storage();
-    RedeemState storage _state = $.redeems[_controller];
-    if (_state.pendingShares == 0) revert Gated7540Vault_NothingPending();
-    if (_shares > _state.pendingShares) revert Gated7540Vault_ExceedsPending(_shares, _state.pendingShares);
-
-    _state.pendingShares -= _shares;
-    $.pendingRedeemShares -= _shares;
-    _state.claimableShares += _shares;
-    _state.claimableAssets += _assets;
-    uint256 _price = _recordPrice(_assets, _shares);
-    emit Fulfilled(_controller, false, _price, _assets, _shares, _msgSender());
-    // BURN the escrow through the hook, then pull the assets that pay for it.
-    _burn(address(this), _shares);
-    IERC20(asset()).safeTransferFrom(_msgSender(), address(this), _assets);
+  function settlePeriod(
+    uint256 _nav,
+    uint256 _fee,
+    address _cash,
+    address _feeRecipient
+  ) external onlyRole(SETTLER_ROLE) whenNotPaused {
+    Settlement memory _s = _strike(_nav, _fee);
+    if (_s.redemptions != 0) _burn(address(this), _s.redemptions);
+    // The book was written before the burn, `_net` writes no state, and what Slither reads as a write here is the storage
+    // pointer.
+    // slither-disable-next-line reentrancy-no-eth
+    _net(_s.deposits, _s.assets, _fee, _cash, _feeRecipient);
   }
 
   /// @inheritdoc IGated7540Vault
   function rejectDepositRequest(
     address _controller
-  ) external onlyRole(FULFILLER_ROLE) {
-    DepositState storage _state = _getGated7540Storage().deposits[_controller];
-    uint256 _assets = _state.pendingAssets;
-    if (_assets == 0) revert Gated7540Vault_NothingPending();
-    _state.pendingAssets = 0;
+  ) external {
+    uint256 _assets = _takePending(_controller, true);
+    Gated7540Storage storage $ = _getGated7540Storage();
+    $.pendingDeposits -= _assets;
     emit DepositRequestRejected(_controller, _assets);
-    IERC20(asset()).safeTransfer(_controller, _assets);
+    $.asset.safeTransfer(_controller, _assets);
   }
 
   /// @inheritdoc IGated7540Vault
   function rejectRedeemRequest(
     address _controller
-  ) external onlyRole(FULFILLER_ROLE) {
-    Gated7540Storage storage $ = _getGated7540Storage();
-    RedeemState storage _state = $.redeems[_controller];
-    uint256 _shares = _state.pendingShares;
-    if (_shares == 0) revert Gated7540Vault_NothingPending();
-    _state.pendingShares = 0;
-    $.pendingRedeemShares -= _shares;
+  ) external {
+    uint256 _shares = _takePending(_controller, false);
+    _getGated7540Storage().pendingRedeemShares -= _shares;
     emit RedeemRequestRejected(_controller, _shares);
     // A plain TRANSFER back to the controller: cap, pause, lockup and freeze all
     // apply, so a holder cannot route shares past the cap by naming a new controller. If the transfer is blocked,
-    // this reverts and the agent's recoverRedeemRequest (FORCED, to a verified account) is the enforcement path.
+    // this reverts and recoverRedeemRequest (FORCED, to a verified account) is the enforcement path.
     _transfer(address(this), _controller, _shares);
   }
 
@@ -269,51 +273,37 @@ contract Gated7540Vault is
     if (_reason != Reasons.TRANSFER_OK) revert Gated7540Vault_RecipientNotEligible(_reason);
 
     Gated7540Storage storage $ = _getGated7540Storage();
-    RedeemState storage _redeem = $.redeems[_controller];
-    DepositState storage _deposit = $.deposits[_controller];
-    uint256 _assets = _redeem.claimableAssets;
-    uint256 _shares = _deposit.claimableShares;
-    if (_assets == 0 && _shares == 0 && _redeem.claimableShares == 0 && _deposit.claimableAssets == 0) {
+    Request memory _deposit = _request(_controller, true);
+    Request memory _redeem = _request(_controller, false);
+    uint256 _shares = _deposit.owed;
+    uint256 _assets = _redeem.owed;
+    if (_shares == 0 && _assets == 0 && _deposit.paid == 0 && _redeem.paid == 0) {
       revert Gated7540Vault_NothingClaimable();
     }
-    // Clear every claimable figure: the redemption's share units were burned at fulfilment, and the deposit's assets
-    // already went to custody at fulfilment, so only `_assets` (held here) and `_shares` (not yet minted) remain.
-    _redeem.claimableAssets = 0;
-    _redeem.claimableShares = 0;
-    _deposit.claimableAssets = 0;
-    _deposit.claimableShares = 0;
+    // Clear every claimable figure: a redemption's shares were burned at settlement, and a deposit's assets already
+    // went to the cash account then, so only `_assets` (held here) and `_shares` (not yet minted) remain.
+    _deposit.paid = _deposit.owed = _redeem.paid = _redeem.owed = 0;
+    _store(_controller, true, _deposit);
+    _store(_controller, false, _redeem);
+    // The mint raises `totalSupply()`, so these shares would otherwise count twice in the next price.
+    $.unclaimedShares -= _shares;
+    $.claimableCash -= _assets;
     emit ClaimableRecovered(_controller, _to, _assets, _shares, _msgSender());
-    if (_shares > 0) _mintAs(_to, _shares, IPolicyHook.TransferKind.FORCED);
-    if (_assets > 0) IERC20(asset()).safeTransfer(_to, _assets);
+    if (_shares != 0) _mintAs(_to, _shares, IPolicyHook.TransferKind.FORCED);
+    if (_assets != 0) $.asset.safeTransfer(_to, _assets);
   }
 
   /// @inheritdoc IGated7540Vault
   function recoverRedeemRequest(
     address _controller,
     address _to
-  ) external onlyRole(AGENT_ROLE) {
+  ) external {
     if (_to == address(0)) revert Gated7540Vault_ZeroAddress();
-    Gated7540Storage storage $ = _getGated7540Storage();
-    RedeemState storage _state = $.redeems[_controller];
-    uint256 _shares = _state.pendingShares;
-    if (_shares == 0) revert Gated7540Vault_NothingPending();
-    _state.pendingShares = 0;
-    $.pendingRedeemShares -= _shares;
+    uint256 _shares = _takePending(_controller, false);
+    _getGated7540Storage().pendingRedeemShares -= _shares;
     emit RedeemRequestRecovered(_controller, _to, _shares, _msgSender());
-    // Internal FORCED move: an enforcement action; identity still applies to the recovery account. Releases any frozen
-    // escrow it takes first, as forcedTransfer does.
-    _releaseFrozen(address(this), _shares);
+    // Internal FORCED move: an enforcement action; identity still applies to the recovery account.
     _moveAs(address(this), _to, _shares, IPolicyHook.TransferKind.FORCED, bytes32(0), 0);
-  }
-
-  /// @inheritdoc IGated7540Vault
-  function setCustody(
-    address _newCustody
-  ) external onlyRole(DEFAULT_ADMIN_ROLE) {
-    if (_newCustody == address(0)) revert Gated7540Vault_ZeroAddress();
-    Gated7540Storage storage $ = _getGated7540Storage();
-    emit CustodyChanged($.custody, _newCustody);
-    $.custody = _newCustody;
   }
 
   /// @inheritdoc IERC7540Operator
@@ -333,7 +323,7 @@ contract Gated7540Vault is
     address _receiver,
     address _controller
   ) external returns (uint256 _shares) {
-    _shares = _claimDeposit(_assets, _receiver, _controller);
+    (, _shares) = _claimShares(_assets, _receiver, _controller, true);
   }
 
   /// @inheritdoc IERC7540Deposit
@@ -342,7 +332,52 @@ contract Gated7540Vault is
     address _receiver,
     address _controller
   ) external returns (uint256 _assets) {
-    _assets = _claimMint(_shares, _receiver, _controller);
+    (_assets,) = _claimShares(_shares, _receiver, _controller, false);
+  }
+
+  /// @inheritdoc IERC4626
+  function deposit(
+    uint256 _assets,
+    address _receiver
+  ) external returns (uint256 _shares) {
+    (, _shares) = _claimShares(_assets, _receiver, _msgSender(), true);
+  }
+
+  /// @inheritdoc IERC4626
+  function mint(
+    uint256 _shares,
+    address _receiver
+  ) external returns (uint256 _assets) {
+    (_assets,) = _claimShares(_shares, _receiver, _msgSender(), false);
+  }
+
+  /**
+   * @inheritdoc IERC4626
+   * @dev Claims settled redemption assets; the third argument is the controller (ERC-7540)
+   */
+  function redeem(
+    uint256 _shares,
+    address _receiver,
+    address _controller
+  ) external returns (uint256 _assets) {
+    (, _assets) = _claimCash(_shares, _receiver, _controller, true);
+  }
+
+  /**
+   * @inheritdoc IERC4626
+   * @dev Claims settled redemption assets; the third argument is the controller (ERC-7540)
+   */
+  function withdraw(
+    uint256 _assets,
+    address _receiver,
+    address _controller
+  ) external returns (uint256 _shares) {
+    (_shares,) = _claimCash(_assets, _receiver, _controller, false);
+  }
+
+  /// @inheritdoc IERC4626
+  function asset() external view returns (address _assetTokenAddress) {
+    _assetTokenAddress = address(_getGated7540Storage().asset);
   }
 
   /// @inheritdoc IERC7540Deposit
@@ -350,7 +385,7 @@ contract Gated7540Vault is
     uint256,
     address _controller
   ) external view returns (uint256 _claimableAssets) {
-    _claimableAssets = _getGated7540Storage().deposits[_controller].claimableAssets;
+    _claimableAssets = _request(_controller, true).paid;
   }
 
   /// @inheritdoc IERC7540Redeem
@@ -358,12 +393,13 @@ contract Gated7540Vault is
     uint256,
     address _controller
   ) external view returns (uint256 _claimableShares) {
-    _claimableShares = _getGated7540Storage().redeems[_controller].claimableShares;
+    _claimableShares = _request(_controller, false).paid;
   }
 
   /// @inheritdoc IGated7540Vault
-  function custody() external view returns (address _custody) {
-    _custody = _getGated7540Storage().custody;
+  function dealingState() external view returns (uint64 _open, uint64 _settled, uint256 _unclaimedShares) {
+    Gated7540Storage storage $ = _getGated7540Storage();
+    (_open, _settled, _unclaimedShares) = ($.openPeriod, $.settledPeriod, $.unclaimedShares);
   }
 
   /// @inheritdoc IERC7540Operator
@@ -374,17 +410,12 @@ contract Gated7540Vault is
     _status = _getGated7540Storage().operators[_controller][_operator];
   }
 
-  /// @inheritdoc IGated7540Vault
-  function lastPrice() external view returns (uint256 _price) {
-    _price = _getGated7540Storage().lastPrice;
-  }
-
   /// @inheritdoc IERC7540Deposit
   function pendingDepositRequest(
     uint256,
     address _controller
   ) external view returns (uint256 _pendingAssets) {
-    _pendingAssets = _getGated7540Storage().deposits[_controller].pendingAssets;
+    _pendingAssets = _request(_controller, true).pending;
   }
 
   /// @inheritdoc IERC7540Redeem
@@ -392,7 +423,7 @@ contract Gated7540Vault is
     uint256,
     address _controller
   ) external view returns (uint256 _pendingShares) {
-    _pendingShares = _getGated7540Storage().redeems[_controller].pendingShares;
+    _pendingShares = _request(_controller, false).pending;
   }
 
   /**
@@ -404,10 +435,113 @@ contract Gated7540Vault is
   }
 
   /**
+   * @inheritdoc IERC4626
+   * @dev At the last settlement's value, indicative only
+   */
+  function convertToShares(
+    uint256 _assets
+  ) external view returns (uint256 _shares) {
+    Gated7540Storage storage $ = _getGated7540Storage();
+    _shares = Math.mulDiv(_assets, uint256($.lastSupply) + _VIRTUAL_SHARES, uint256($.lastNav) + 1);
+  }
+
+  /**
+   * @inheritdoc IERC4626
+   * @dev The controller's claimable deposit assets; 0 when paused or when the controller could not receive shares
+   */
+  function maxDeposit(
+    address _controller
+  ) external view returns (uint256 _maxAssets) {
+    if (_mintProbe(_controller) != Reasons.TRANSFER_OK) return 0;
+    _maxAssets = _request(_controller, true).paid;
+  }
+
+  /**
+   * @inheritdoc IERC4626
+   * @dev The controller's claimable deposit shares; 0 when paused or when the controller could not receive shares
+   */
+  function maxMint(
+    address _controller
+  ) external view returns (uint256 _maxShares) {
+    if (_mintProbe(_controller) != Reasons.TRANSFER_OK) return 0;
+    _maxShares = _request(_controller, true).owed;
+  }
+
+  /**
+   * @inheritdoc IERC4626
+   * @dev The controller's claimable redemption shares; 0 when paused
+   */
+  function maxRedeem(
+    address _controller
+  ) external view returns (uint256 _maxShares) {
+    if (_payoutReason(_controller) != Reasons.TRANSFER_OK) return 0;
+    _maxShares = _request(_controller, false).paid;
+  }
+
+  /**
+   * @inheritdoc IERC4626
+   * @dev The controller's claimable redemption assets; 0 when paused
+   */
+  function maxWithdraw(
+    address _controller
+  ) external view returns (uint256 _maxAssets) {
+    if (_payoutReason(_controller) != Reasons.TRANSFER_OK) return 0;
+    _maxAssets = _request(_controller, false).owed;
+  }
+
+  /**
+   * @inheritdoc IERC4626
+   * @dev Indicative only: all shares, unclaimed included, at the last settlement's value
+   */
+  function totalAssets() external view returns (uint256 _totalManagedAssets) {
+    _totalManagedAssets = convertToAssets(totalSupply() + _getGated7540Storage().unclaimedShares);
+  }
+
+  /**
+   * @inheritdoc IERC4626
+   * @dev Always reverts, as ERC-7540 requires for asynchronous flows
+   */
+  function previewDeposit(
+    uint256
+  ) external pure returns (uint256) {
+    revert Gated7540Vault_AsyncOnly();
+  }
+
+  /**
+   * @inheritdoc IERC4626
+   * @dev Always reverts, as ERC-7540 requires for asynchronous flows
+   */
+  function previewMint(
+    uint256
+  ) external pure returns (uint256) {
+    revert Gated7540Vault_AsyncOnly();
+  }
+
+  /**
+   * @inheritdoc IERC4626
+   * @dev Always reverts, as ERC-7540 requires for asynchronous flows
+   */
+  function previewRedeem(
+    uint256
+  ) external pure returns (uint256) {
+    revert Gated7540Vault_AsyncOnly();
+  }
+
+  /**
+   * @inheritdoc IERC4626
+   * @dev Always reverts, as ERC-7540 requires for asynchronous flows
+   */
+  function previewWithdraw(
+    uint256
+  ) external pure returns (uint256) {
+    revert Gated7540Vault_AsyncOnly();
+  }
+
+  /**
    * @inheritdoc PolicyGatedERC20Upgradeable
    * @dev Out of the vault's own address, only the shares above those booked to pending redemptions can be forced
    *      (`Gated7540Vault_ExceedsSurplus`): shares that reached the vault outside a request. A pending redemption
-   *      leaves the escrow only through fulfilment, reject or `recoverRedeemRequest`, per controller. The role is
+   *      leaves the escrow only through settlement, reject or `recoverRedeemRequest`, per controller. The role is
    *      checked first, so a caller without AGENT_ROLE gets the access error whatever it asks
    */
   function forcedTransfer(
@@ -427,8 +561,7 @@ contract Gated7540Vault is
   /**
    * @inheritdoc PolicyGatedERC20Upgradeable
    * @dev Reverts for the vault's own address: the escrow is shared by every controller, so a frozen amount there
-   *      could not name whose redemption it holds. One controller's redemption is held by not fulfilling it, or moved
-   *      with `recoverRedeemRequest`
+   *      could not name whose redemption it holds. One controller's redemption is held by rejecting or recovering it
    */
   function setFrozenTokens(
     address _account,
@@ -439,119 +572,22 @@ contract Gated7540Vault is
   }
 
   /**
-   * @inheritdoc ERC4626Upgradeable
-   * @dev Claims a fulfilled deposit with the caller as controller
+   * @inheritdoc IERC4626
+   * @dev At the last settlement's value, indicative only
    */
-  function deposit(
-    uint256 _assets,
-    address _receiver
-  ) public override returns (uint256 _shares) {
-    _shares = _claimDeposit(_assets, _receiver, _msgSender());
+  function convertToAssets(
+    uint256 _shares
+  ) public view returns (uint256 _assets) {
+    Gated7540Storage storage $ = _getGated7540Storage();
+    _assets = Math.mulDiv(_shares, uint256($.lastNav) + 1, uint256($.lastSupply) + _VIRTUAL_SHARES);
   }
 
   /**
-   * @inheritdoc ERC4626Upgradeable
-   * @dev Claims a fulfilled deposit with the caller as controller
+   * @notice The share decimals
+   * @return _decimals The asset's plus 6
    */
-  function mint(
-    uint256 _shares,
-    address _receiver
-  ) public override returns (uint256 _assets) {
-    _assets = _claimMint(_shares, _receiver, _msgSender());
-  }
-
-  /**
-   * @inheritdoc ERC4626Upgradeable
-   * @dev Claims fulfilled redemption assets; the third argument is the controller (ERC-7540)
-   */
-  function redeem(
-    uint256 _shares,
-    address _receiver,
-    address _controller
-  ) public override whenNotPaused returns (uint256 _assets) {
-    _onlyControllerOrOperator(_controller);
-    _requirePayoutEligible(_controller);
-    _requireThirdPartyEligible(_receiver, _controller);
-    if (_shares == 0) revert Gated7540Vault_ZeroAmount();
-    RedeemState storage _state = _getGated7540Storage().redeems[_controller];
-    if (_shares > _state.claimableShares) revert Gated7540Vault_ExceedsClaimable(_shares, _state.claimableShares);
-    _assets = _shares == _state.claimableShares
-      ? _state.claimableAssets
-      : Math.mulDiv(_shares, _state.claimableAssets, _state.claimableShares, Math.Rounding.Floor);
-    if (_assets == 0) revert Gated7540Vault_ZeroAmount();
-    _payRedemption(_state, _receiver, _controller, _assets, _shares);
-  }
-
-  /**
-   * @inheritdoc ERC4626Upgradeable
-   * @dev Claims fulfilled redemption assets; the third argument is the controller (ERC-7540)
-   */
-  function withdraw(
-    uint256 _assets,
-    address _receiver,
-    address _controller
-  ) public override whenNotPaused returns (uint256 _shares) {
-    _onlyControllerOrOperator(_controller);
-    _requirePayoutEligible(_controller);
-    _requireThirdPartyEligible(_receiver, _controller);
-    if (_assets == 0) revert Gated7540Vault_ZeroAmount();
-    RedeemState storage _state = _getGated7540Storage().redeems[_controller];
-    if (_assets > _state.claimableAssets) revert Gated7540Vault_ExceedsClaimable(_assets, _state.claimableAssets);
-    // Shares deducted round up, so a partial claim never takes fewer than its pro-rata share. That can use the shares
-    // up before the assets; the remaining assets then pay out against zero shares, and they are owed either way.
-    _shares = _assets == _state.claimableAssets
-      ? _state.claimableShares
-      : Math.mulDiv(_assets, _state.claimableShares, _state.claimableAssets, Math.Rounding.Ceil);
-    _payRedemption(_state, _receiver, _controller, _assets, _shares);
-  }
-
-  /// @inheritdoc ERC4626Upgradeable
-  function decimals() public view override(ERC20Upgradeable, ERC4626Upgradeable) returns (uint8 _decimals) {
-    _decimals = super.decimals();
-  }
-
-  /**
-   * @inheritdoc ERC4626Upgradeable
-   * @dev The controller's claimable deposit assets; 0 when paused or when the controller could not receive shares
-   */
-  function maxDeposit(
-    address _controller
-  ) public view override returns (uint256 _maxAssets) {
-    if (_mintProbe(_controller) != Reasons.TRANSFER_OK) return 0;
-    _maxAssets = _getGated7540Storage().deposits[_controller].claimableAssets;
-  }
-
-  /**
-   * @inheritdoc ERC4626Upgradeable
-   * @dev The controller's claimable deposit shares; 0 when paused or when the controller could not receive shares
-   */
-  function maxMint(
-    address _controller
-  ) public view override returns (uint256 _maxShares) {
-    if (_mintProbe(_controller) != Reasons.TRANSFER_OK) return 0;
-    _maxShares = _getGated7540Storage().deposits[_controller].claimableShares;
-  }
-
-  /**
-   * @inheritdoc ERC4626Upgradeable
-   * @dev The controller's claimable redemption shares; 0 when paused
-   */
-  function maxRedeem(
-    address _controller
-  ) public view override returns (uint256 _maxShares) {
-    if (_payoutReason(_controller) != Reasons.TRANSFER_OK) return 0;
-    _maxShares = _getGated7540Storage().redeems[_controller].claimableShares;
-  }
-
-  /**
-   * @inheritdoc ERC4626Upgradeable
-   * @dev The controller's claimable redemption assets; 0 when paused
-   */
-  function maxWithdraw(
-    address _controller
-  ) public view override returns (uint256 _maxAssets) {
-    if (_payoutReason(_controller) != Reasons.TRANSFER_OK) return 0;
-    _maxAssets = _getGated7540Storage().redeems[_controller].claimableAssets;
+  function decimals() public view override(ERC20Upgradeable, IERC20Metadata) returns (uint8 _decimals) {
+    _decimals = _getGated7540Storage().decimals;
   }
 
   /// @inheritdoc PolicyGatedERC20Upgradeable
@@ -563,239 +599,245 @@ contract Gated7540Vault is
       || super.supportsInterface(_interfaceId);
   }
 
-  /**
-   * @inheritdoc ERC4626Upgradeable
-   * @dev Indicative only: derived from the last fulfilment price, not from assets held (they sit in custody)
-   */
-  function totalAssets() public view override returns (uint256 _totalManagedAssets) {
-    _totalManagedAssets = _convertToAssets(totalSupply(), Math.Rounding.Floor);
-  }
-
-  /**
-   * @inheritdoc ERC4626Upgradeable
-   * @dev Always reverts, as ERC-7540 requires for asynchronous flows
-   */
-  function previewDeposit(
-    uint256
-  ) public pure override returns (uint256) {
-    revert Gated7540Vault_AsyncOnly();
-  }
-
-  /**
-   * @inheritdoc ERC4626Upgradeable
-   * @dev Always reverts, as ERC-7540 requires for asynchronous flows
-   */
-  function previewMint(
-    uint256
-  ) public pure override returns (uint256) {
-    revert Gated7540Vault_AsyncOnly();
-  }
-
-  /**
-   * @inheritdoc ERC4626Upgradeable
-   * @dev Always reverts, as ERC-7540 requires for asynchronous flows
-   */
-  function previewRedeem(
-    uint256
-  ) public pure override returns (uint256) {
-    revert Gated7540Vault_AsyncOnly();
-  }
-
-  /**
-   * @inheritdoc ERC4626Upgradeable
-   * @dev Always reverts, as ERC-7540 requires for asynchronous flows
-   */
-  function previewWithdraw(
-    uint256
-  ) public pure override returns (uint256) {
-    revert Gated7540Vault_AsyncOnly();
-  }
-
   /// @inheritdoc ITemplated
   function templateId() public pure override returns (bytes32 _id) {
     _id = keccak256('Gated7540Vault');
   }
 
   /**
-   * @notice Claims fulfilled deposit assets for shares; Floor on the shares, exact on a full claim
-   * @param _assets The claimable assets to consume
-   * @param _receiver The receiver of the shares
-   * @param _controller The controller of the request
-   * @return _shares The shares minted
+   * @notice Adds to a controller's request in the open period, rolling a settled one into its claimable amounts first
+   * @param _controller The controller
+   * @param _amount What it gives
+   * @param _isDeposit True on the deposit side
    */
-  function _claimDeposit(
+  function _join(
+    address _controller,
+    uint256 _amount,
+    bool _isDeposit
+  ) private {
+    Gated7540Storage storage $ = _getGated7540Storage();
+    Request memory _r = _request(_controller, _isDeposit);
+    uint64 _open = $.openPeriod;
+    if (_r.period != 0 && _r.period != _open) revert Gated7540Vault_EarlierRequestUnsettled(_r.period);
+    uint128 _added = _amount.toUint128();
+    _r.period = _open;
+    _r.pending += _added;
+    _store(_controller, _isDeposit, _r);
+    $.books[_open][_isDeposit].paid += _added;
+  }
+
+  /**
+   * @notice Strikes the closed period's price and books it
+   * @param _nav The net asset value the period deals at
+   * @param _fee The fee, for the event
+   * @return _s What was struck
+   */
+  function _strike(
+    uint256 _nav,
+    uint256 _fee
+  ) private returns (Settlement memory _s) {
+    Gated7540Storage storage $ = _getGated7540Storage();
+    uint64 _period = $.settledPeriod + 1;
+    if (_period == $.openPeriod) revert Gated7540Vault_NoClosedPeriod();
+
+    // A mapping's key, which Slither reads as a misused constant.
+    // slither-disable-start boolean-cst
+    _s.deposits = $.books[_period][true].paid;
+    _s.redemptions = $.books[_period][false].paid;
+    _s.supply = totalSupply() + $.unclaimedShares;
+    _s.shares = Math.mulDiv(_s.deposits, _s.supply + _VIRTUAL_SHARES, _nav + 1);
+    _s.assets = Math.mulDiv(_s.redemptions, _nav + 1, _s.supply + _VIRTUAL_SHARES);
+
+    // The casts refuse a period whose claims could not be booked later, so no controller's claim can ever overflow alone.
+    $.books[_period][true].owed = _s.shares.toUint128();
+    $.books[_period][false].owed = _s.assets.toUint128();
+    // slither-disable-end boolean-cst
+    $.settledPeriod = _period;
+    $.lastNav = _nav.toUint128();
+    $.lastSupply = _s.supply.toUint128();
+    $.unclaimedShares += _s.shares;
+    $.pendingDeposits -= _s.deposits;
+    $.pendingRedeemShares -= _s.redemptions;
+    $.claimableCash += _s.assets;
+    emit PeriodSettled(_period, _nav, _s.supply, _s.deposits, _s.shares, _s.redemptions, _s.assets, _fee);
+  }
+
+  /**
+   * @notice Moves only the difference between deposits and what must be paid, pays the fee, and audits the balance
+   * @param _deposits The assets of the period's deposit requests
+   * @param _assets The assets its redemptions pay
+   * @param _fee The fee
+   * @param _cash The account that receives net inflow and funds net outflow
+   * @param _feeRecipient The account that receives the fee
+   */
+  function _net(
+    uint256 _deposits,
     uint256 _assets,
-    address _receiver,
-    address _controller
-  ) internal returns (uint256 _shares) {
-    _onlyControllerOrOperator(_controller);
-    _requireDepositClaimEligible(_controller);
-    if (_assets == 0) revert Gated7540Vault_ZeroAmount();
-    DepositState storage _state = _getGated7540Storage().deposits[_controller];
-    if (_assets > _state.claimableAssets) revert Gated7540Vault_ExceedsClaimable(_assets, _state.claimableAssets);
-    _shares = _assets == _state.claimableAssets
-      ? _state.claimableShares
-      : Math.mulDiv(_assets, _state.claimableShares, _state.claimableAssets, Math.Rounding.Floor);
-    if (_shares == 0) revert Gated7540Vault_ZeroAmount();
-    _mintClaim(_state, _receiver, _controller, _assets, _shares);
+    uint256 _fee,
+    address _cash,
+    address _feeRecipient
+  ) private {
+    Gated7540Storage storage $ = _getGated7540Storage();
+    IERC20 _token = $.asset;
+    uint256 _out = _assets + _fee;
+    if (_deposits > _out) {
+      _token.safeTransfer(_cash, _deposits - _out);
+    } else if (_out > _deposits) {
+      // The settler names the account, and only one that approved the vault can be pulled from.
+      // slither-disable-next-line arbitrary-send-erc20
+      _token.safeTransferFrom(_cash, address(this), _out - _deposits); // aderyn-ignore(arbitrary-transfer-from)
+    }
+    if (_fee != 0) _token.safeTransfer(_feeRecipient, _fee);
+
+    uint256 _owed = $.pendingDeposits + $.claimableCash;
+    uint256 _held = _token.balanceOf(address(this));
+    if (_held < _owed) revert Gated7540Vault_BalanceAudit(_held, _owed);
   }
 
   /**
-   * @notice Claims fulfilled deposit shares; Ceil on the assets consumed, exact on a full claim
-   * @param _shares The claimable shares to mint
-   * @param _receiver The receiver of the shares
-   * @param _controller The controller of the request
-   * @return _assets The claimable assets consumed
+   * @notice Takes a controller's whole pending request off its period. The agent may while the period is open, and only
+   *         the settler once it has closed, so a request cannot leave a period that is being priced
+   * @param _controller The controller
+   * @param _isDeposit True on the deposit side
+   * @return _pending What was pending
    */
-  function _claimMint(
-    uint256 _shares,
-    address _receiver,
-    address _controller
-  ) internal returns (uint256 _assets) {
-    _onlyControllerOrOperator(_controller);
-    _requireDepositClaimEligible(_controller);
-    if (_shares == 0) revert Gated7540Vault_ZeroAmount();
-    DepositState storage _state = _getGated7540Storage().deposits[_controller];
-    if (_shares > _state.claimableShares) revert Gated7540Vault_ExceedsClaimable(_shares, _state.claimableShares);
-    // Assets consumed round up, so a partial claim never takes fewer than its pro-rata share. That can use the assets
-    // up before the shares; the remaining shares are then minted against zero assets, and they are owed either way.
-    _assets = _shares == _state.claimableShares
-      ? _state.claimableAssets
-      : Math.mulDiv(_shares, _state.claimableAssets, _state.claimableShares, Math.Rounding.Ceil);
-    _mintClaim(_state, _receiver, _controller, _assets, _shares);
+  function _takePending(
+    address _controller,
+    bool _isDeposit
+  ) private returns (uint256 _pending) {
+    Gated7540Storage storage $ = _getGated7540Storage();
+    Request memory _r = _request(_controller, _isDeposit);
+    _pending = _r.pending;
+    if (_pending == 0) revert Gated7540Vault_NothingPending();
+    _checkRole(_r.period == $.openPeriod ? AGENT_ROLE : SETTLER_ROLE);
+    $.books[_r.period][_isDeposit].paid -= _r.pending;
+    _r.pending = 0;
+    _r.period = 0;
+    _store(_controller, _isDeposit, _r);
   }
 
   /**
-   * @notice Routes every share movement through the policy hook
-   * @param _from The sender, or address(0) on a claim mint
-   * @param _to The receiver, or address(0) on a fulfilment burn
-   * @param _value The share amount
+   * @notice Takes part of a controller's claimable amounts. Given what was paid, the other side rounds down; given what
+   *         is owed, the paid side rounds up; a full claim clears exactly, because the rounding has nothing to round
+   * @param _controller The controller
+   * @param _amount The amount claimed
+   * @param _isDeposit True on the deposit side
+   * @param _givenPaid True when `_amount` is of what was paid
+   * @return _paid What the claim consumed of what was paid
+   * @return _owed What it delivers
    */
-  function _update(
-    address _from,
-    address _to,
-    uint256 _value
-  ) internal override(ERC20Upgradeable, PolicyGatedERC20Upgradeable) {
-    super._update(_from, _to, _value);
+  function _claim(
+    address _controller,
+    uint256 _amount,
+    bool _isDeposit,
+    bool _givenPaid
+  ) private returns (uint256 _paid, uint256 _owed) {
+    if (_amount == 0) revert Gated7540Vault_ZeroAmount();
+    Request memory _r = _request(_controller, _isDeposit);
+    uint256 _claimable = _givenPaid ? _r.paid : _r.owed;
+    if (_amount > _claimable) revert Gated7540Vault_ExceedsClaimable(_amount, _claimable);
+    if (_givenPaid) {
+      (_paid, _owed) = (_amount, Math.mulDiv(_amount, _r.owed, _r.paid));
+    } else {
+      (_paid, _owed) = (Math.mulDiv(_amount, _r.paid, _r.owed, Math.Rounding.Ceil), _amount);
+    }
+    if (_givenPaid && _owed == 0) revert Gated7540Vault_ZeroAmount();
+    // Neither exceeds what the request holds, each being a share of it at most, so both fit.
+    // aderyn-ignore-next-line(unsafe-casting)
+    _r.paid -= uint128(_paid);
+    // aderyn-ignore-next-line(unsafe-casting)
+    _r.owed -= uint128(_owed);
+    _store(_controller, _isDeposit, _r);
   }
 
   /**
-   * @notice Shares for assets at the last fulfilment price
-   * @param _assets The assets
-   * @param _rounding The rounding
-   * @return _shares The shares
+   * @notice Writes a controller's request
+   * @param _controller The controller
+   * @param _isDeposit True on the deposit side
+   * @param _r The request
    */
-  function _convertToShares(
-    uint256 _assets,
-    Math.Rounding _rounding
-  ) internal view override returns (uint256 _shares) {
-    // 10 ** decimals() is one whole share, read at runtime.
-    // aderyn-ignore-next-line(literal-instead-of-constant)
-    _shares = Math.mulDiv(_assets, 10 ** decimals(), _getGated7540Storage().lastPrice, _rounding);
+  function _store(
+    address _controller,
+    bool _isDeposit,
+    Request memory _r
+  ) private {
+    _getGated7540Storage().requests[_controller][_isDeposit] = _r;
   }
 
   /**
-   * @notice Assets for shares at the last fulfilment price
-   * @param _shares The shares
-   * @param _rounding The rounding
-   * @return _assets The assets
-   */
-  function _convertToAssets(
-    uint256 _shares,
-    Math.Rounding _rounding
-  ) internal view override returns (uint256 _assets) {
-    // 10 ** decimals() is one whole share, read at runtime.
-    // aderyn-ignore-next-line(literal-instead-of-constant)
-    _assets = Math.mulDiv(_shares, _getGated7540Storage().lastPrice, 10 ** decimals(), _rounding);
-  }
-
-  /**
-   * @notice Books and mints a deposit claim (MINT through the hook)
-   * @param _state The controller's deposit state
+   * @notice Claims settled deposit shares (MINT through the hook)
+   * @param _amount The amount claimed
    * @param _receiver The receiver of the shares
    * @param _controller The controller
-   * @param _assets The claimable assets consumed
-   * @param _shares The shares minted
+   * @param _givenAssets True when `_amount` is in assets
+   * @return _assets The claimable assets consumed
+   * @return _shares The shares minted
    */
-  function _mintClaim(
-    DepositState storage _state,
+  function _claimShares(
+    uint256 _amount,
     address _receiver,
     address _controller,
-    uint256 _assets,
-    uint256 _shares
-  ) private {
-    _state.claimableAssets -= _assets;
-    _state.claimableShares -= _shares;
+    bool _givenAssets
+  ) private returns (uint256 _assets, uint256 _shares) {
+    _onlyControllerOrOperator(_controller);
+    bytes32 _reason = _mintProbe(_controller);
+    if (_reason != Reasons.TRANSFER_OK) revert Gated7540Vault_ControllerNotEligible(_reason);
+    (_assets, _shares) = _claim(_controller, _amount, true, _givenAssets);
+    _getGated7540Storage().unclaimedShares -= _shares;
     emit Deposit(_controller, _receiver, _assets, _shares);
     _mint(_receiver, _shares);
   }
 
   /**
-   * @notice Books and pays a redemption claim
-   * @param _state The controller's redemption state
+   * @notice Claims settled redemption cash
+   * @param _amount The amount claimed
    * @param _receiver The receiver of the assets
    * @param _controller The controller
-   * @param _assets The assets paid
-   * @param _shares The claimable shares consumed
+   * @param _givenShares True when `_amount` is in shares
+   * @return _shares The claimable shares consumed
+   * @return _assets The assets paid
    */
-  function _payRedemption(
-    RedeemState storage _state,
+  function _claimCash(
+    uint256 _amount,
     address _receiver,
     address _controller,
-    uint256 _assets,
-    uint256 _shares
-  ) private {
-    _state.claimableShares -= _shares;
-    _state.claimableAssets -= _assets;
-    emit Withdraw(_msgSender(), _receiver, _controller, _assets, _shares);
-    IERC20(asset()).safeTransfer(_receiver, _assets);
-  }
-
-  /**
-   * @notice Records a fulfilment price
-   * @param _assets The fulfilled assets
-   * @param _shares The fulfilled shares
-   * @return _price Assets per `10**decimals()` shares, rounded down
-   */
-  function _recordPrice(
-    uint256 _assets,
-    uint256 _shares
-  ) private returns (uint256 _price) {
-    // 10 ** decimals() is one whole share, read at runtime.
-    // aderyn-ignore-next-line(literal-instead-of-constant)
-    _price = Math.mulDiv(_assets, 10 ** decimals(), _shares);
-    // A price below one unit per whole share floors to 0; store the smallest unit instead, so the indicative
-    // convertTo* (which divide by lastPrice) never revert. Claims use the exact claimable ratio, not this price.
-    if (_price == 0) _price = 1;
-    _getGated7540Storage().lastPrice = _price;
-  }
-
-  /**
-   * @notice Reverts unless the controller could still receive shares: the same probe as `maxDeposit`
-   * @param _controller The controller claiming a fulfilled deposit
-   */
-  function _requireDepositClaimEligible(
-    address _controller
-  ) private view {
-    bytes32 _reason = _mintProbe(_controller);
-    if (_reason != Reasons.TRANSFER_OK) revert Gated7540Vault_ControllerNotEligible(_reason);
-  }
-
-  /**
-   * @notice Reverts unless the controller may still collect a redemption payout (see `_payoutReason`)
-   * @param _controller The controller collecting a fulfilled redemption
-   */
-  function _requirePayoutEligible(
-    address _controller
-  ) private view {
+    bool _givenShares
+  ) private whenNotPaused returns (uint256 _shares, uint256 _assets) {
+    _onlyControllerOrOperator(_controller);
     bytes32 _reason = _payoutReason(_controller);
     if (_reason != Reasons.TRANSFER_OK) revert Gated7540Vault_ControllerNotEligible(_reason);
+    _requireThirdPartyEligible(_receiver, _controller);
+    (_shares, _assets) = _claim(_controller, _amount, false, _givenShares);
+    Gated7540Storage storage $ = _getGated7540Storage();
+    $.claimableCash -= _assets;
+    emit Withdraw(_msgSender(), _receiver, _controller, _assets, _shares);
+    $.asset.safeTransfer(_receiver, _assets);
+  }
+
+  /**
+   * @notice A controller's request with any settled part rolled into its claimable amounts
+   * @param _controller The controller
+   * @param _isDeposit True on the deposit side
+   * @return _r The request
+   */
+  function _request(
+    address _controller,
+    bool _isDeposit
+  ) private view returns (Request memory _r) {
+    Gated7540Storage storage $ = _getGated7540Storage();
+    _r = $.requests[_controller][_isDeposit];
+    if (_r.period == 0 || _r.period > $.settledPeriod) return _r;
+    Book memory _book = $.books[_r.period][_isDeposit];
+    _r.paid += _r.pending;
+    _r.owed += Math.mulDiv(_r.pending, _book.owed, _book.paid).toUint128();
+    _r.pending = 0;
+    _r.period = 0;
   }
 
   /**
    * @notice The policy verdict on a controller collecting a redemption payout: a zero-amount burn by the controller.
    *         Checks who the controller is (identity, lockup, pause) without the frozen-balance check, since its shares
-   *         were escrowed and burned at fulfilment and it typically holds none
+   *         were escrowed and burned at settlement and it typically holds none
    * @param _controller The controller
    * @return _reason TRANSFER_OK or the policy's reason code
    */

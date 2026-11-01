@@ -10,7 +10,7 @@ export const ROLES = {
   PROPOSER: keccak256(toHex("PROPOSER_ROLE")),
   UPGRADER: keccak256(toHex("UPGRADER_ROLE")),
   EXECUTOR: keccak256(toHex("EXECUTOR_ROLE")),
-  FULFILLER: keccak256(toHex("FULFILLER_ROLE")),
+  SETTLER: keccak256(toHex("SETTLER_ROLE")),
   OPERATOR: keccak256(toHex("OPERATOR_ROLE")),
   CANCELLER: keccak256(toHex("CANCELLER_ROLE")),
   RECOVERY: keccak256(toHex("RECOVERY_ROLE")),

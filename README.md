@@ -21,7 +21,7 @@ PolicyGatedERC20Upgradeable        base: accounting, roles, enforcement, guardia
         │
 GatedToken                                the base and nothing else
 IntentToken (+ IntentSettledUpgradeable)  holder-signed EIP-712 TransferIntent, settled by EXECUTOR_ROLE
-Gated4626Vault (ERC-4626, gated max*, decimals offset 6), Gated7540Vault (ERC-7540 async, escrow, fulfiller)
+Gated4626Vault (ERC-4626, gated max*, decimals offset 6), Gated7540Vault (ERC-7540 async, dealt in periods, escrow, settled by a NavDesk)
 
 ComplianceHook (one per deployment, immutable) ──► per token, an ordered list of ≤16 attested IComplianceRule (first
                                                  rejection wins); a token installs its own list when it is initialised
@@ -83,7 +83,8 @@ can change its own.
 | `Fund` owner | timelock | ≥ 24 hours | register a class, set the fund's rule and investor cap, exempt an account. Only the installed rule records which classes an account holds |
 | token `AGENT_ROLE` → rules | issuer | none | set or clear per-holder lockups, freeze or unfreeze a holder (`HolderRestrictionRule`) |
 | `ALLOCATOR_ROLE` (on a vault, asked by its `Portfolio`) | fund manager | none | send money to an installed adapter within caps, bring it back, choose the liquidity adapter |
-| `FULFILLER_ROLE` (7540 vault) | issuer | none | fulfil deposits/redemptions at off-chain NAV; reject pending requests |
+| `SETTLER_ROLE` (7540 vault) | a `NavDesk` | none | close and settle periods; take a request back once its period has closed |
+| `REPORTER_ROLE`, `CHECKER_ROLE` (on a vault, asked by its `NavDesk`) | fund administration; risk or the depositary | none | propose a price; accept or cancel one. Never the same account |
 
 - **Attested code only.** Hooks, rules and implementations are installed only if their runtime codehash is attested.
   Attestation is checked at install time; revoking it later does not silently change a live token.
@@ -119,7 +120,7 @@ can change its own.
   ERC-3643 reference token, whose agents can mint, burn and force while paused (see [Deployment and governance](docs/deployment.html)).
 - **Fund monitor.** `Fund.firstBrokenClass()` names the first class whose hook no longer lists the fund's rule, which the
   hook cannot know; the post-deploy check asserts it is the zero address. Alert too when `holderCount()` is above
-  `holderCap()`: a recovery from a 7540 vault can put it there, and the fulfiller should reject deposit requests near
+  `holderCap()`: a recovery from a 7540 vault can put it there, and the agent should reject deposit requests near
   the cap (see [SECURITY.md](SECURITY.md)).
 - **Reentrancy.** `_move` is `nonReentrant` (transient storage), so no hook or rule can move balances during a
   movement; `check` is called as a view, and rules are attested.
@@ -210,8 +211,8 @@ exact sequence on the local network, playing the council and the KYC attester, a
      fund's rule as the parameter `fundHoldersRule`, but never touches the fund, so a launch cannot fail on one. Nothing is set
      for the escrow: the 7540 vault is the token itself, which neither the fund rule nor the minimum counts;
    - grant roles: AGENT to the issuer's account, **UPGRADER to the timelock only**, RECOVERY to the recovery timelock; MINTER and
-     BURNER on a `GatedToken` or `IntentToken`; EXECUTOR on an `IntentToken` to the executors the product names; FULFILLER on a
-     7540 vault to the issuer;
+     BURNER on a `GatedToken` or `IntentToken`; EXECUTOR on an `IntentToken` to the executors the product names; SETTLER on a
+     7540 vault to its `NavDesk`, and REPORTER and CHECKER to two different accounts;
    - hand over: DEFAULT_ADMIN_ROLE to the timelock, and the operations account renounces it.
 6. **`FundOpen`** (the operations account), once per fund, after its first classes are placed (parameters `fundContract`,
    `fundHoldersRule`, `holderCap`, `timelock` and a `class_<key>` for each class): install the rule, set the cap, register the

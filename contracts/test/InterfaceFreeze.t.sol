@@ -28,6 +28,7 @@ import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IIntentExecutor} from 'interfaces/IIntentExecutor.sol';
 import {IIntentExecutorBatch} from 'interfaces/IIntentExecutorBatch.sol';
 import {IMinPositionRule} from 'interfaces/IMinPositionRule.sol';
+import {INavDesk} from 'interfaces/INavDesk.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
@@ -109,7 +110,9 @@ contract InterfaceFreezeTest is Test {
     // Re-pinned 2026-10-17 on owner instruction: recoverRedeemRequest added (was 0x34aae296)
     // Re-pinned in v0.2.0 (2026-10-17): recoverClaimable added, the one post-freeze change (owner decision M-3)
     // Re-pinned in S1 of the review items (2026-10-24): `initialize` takes the token's initial rules (was 0x75f5b0db)
-    assertEq(type(IGated7540Vault).interfaceId, bytes4(0x8f0b8793), 'IGated7540Vault');
+    // Re-pinned 2026-10-31 on owner instruction: dealing periods replace per-investor fulfilment.
+    assertEq(type(IGated7540Vault).interfaceId, bytes4(0xc6a5eee9), 'IGated7540Vault');
+    assertEq(type(INavDesk).interfaceId, bytes4(0x2d3ee46c), 'INavDesk');
     assertEq(type(IIdentityRegistry).interfaceId, bytes4(0xb9209e33), 'IIdentityRegistry');
     // Added in Phase 7 (2026-10-17), after ProxyDeployer moved to OZ Ownable
     // Re-pinned in S1 of the review items (2026-10-24): `deploy` takes and checks the expected rules (was 0x886d8cd8)
@@ -167,20 +170,26 @@ contract InterfaceFreezeTest is Test {
       ISettlementWindowRule.WindowSet.selector, 0xcfbaf2575cd70ccd40d11716312d33d4c45312c933586af58b3ccc959f81b96c
     );
     // Added in Phase 5b (2026-10-17)
+    assertEq(IGated7540Vault.PeriodClosed.selector, 0x5263beccfd97c2947207bf7254d7c0c216431d4b9cea8c9b3371e8187020851b);
+    assertEq(IGated7540Vault.PeriodSettled.selector, 0x59d402dbba7176d35eb7a36b22a3d102e56f927fa636f911d542ce9ddff6677f);
+    assertEq(INavDesk.CutOff.selector, 0x3059172a9b0c574ae2c014e7ae803574138d1151319008a9d8712f37a87c375b);
+    assertEq(INavDesk.DeskAdopted.selector, 0xa66dee6ab9d4713c6eda1dfbdfcaa28b4ca7a43d637d84a3310c088708ea6cbb);
+    assertEq(INavDesk.ProposalAccepted.selector, 0x6931ab328a92d5384b647f50bea59bf9c0154a2c39315df2738ad91bb3c9d769);
+    assertEq(INavDesk.ProposalCancelled.selector, 0x56a54393c88fb71d37dc109609d88e0b586637deb2452aef5f41d3eb32adedfc);
+    assertEq(INavDesk.ProposalExecuted.selector, 0x120985525cfb78f6c03f96986f9687f49caf81e29350d21fa052e8c0df211ebb);
+    assertEq(INavDesk.ProposalMade.selector, 0xca6ea76bb021cdd518593898b1fcb99c059112c7796b27a1fa5b42edcd08500f);
+    assertEq(INavDesk.RequestReleased.selector, 0x8200f2685c547311254dcb33469a4d5f90fe2a82745d94f07b09838b8e1cb112);
+    assertEq(INavDesk.SettingsChanged.selector, 0x036001a16a233eae5020698275f1719506f862029418b8c2e7e8fd0c9fdee5e7);
     assertEq(
       IGated7540Vault.RedeemRequestRecovered.selector,
       0x274953cbe95d9877cd89aea6e3ca427fdd6170aeaa554aaea9ceceb36733cfd5
     );
-    assertEq(IGated7540Vault.Fulfilled.selector, 0xaf0e36efc5836309f8f21b646c6bfec100f3cd067e3a9e9c232c2bcb3d7045ce);
     assertEq(
       IGated7540Vault.DepositRequestRejected.selector,
       0x62349aea2c873bb117c163dc27359603fe48b3c8e94fbb2acf192e0e6a300f38
     );
     assertEq(
       IGated7540Vault.RedeemRequestRejected.selector, 0x5e8a98909a36717c694a64574320783e7d08b72c502bc66cf1bb82c69b6614b8
-    );
-    assertEq(
-      IGated7540Vault.CustodyChanged.selector, 0x76513a9766f12c52160aee58e04a50558448bf8d8cc1d1b2c60bcab3740c54bf
     );
     assertEq(
       IERC7540Deposit.DepositRequest.selector, 0xbb58420bb8ce44e11b84e214cc0de10ce5e7c24d0355b2815c3d758b514cae72

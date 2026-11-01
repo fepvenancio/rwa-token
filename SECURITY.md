@@ -150,7 +150,7 @@ Further limits recorded during review:
   unburned in the escrow, and `requestDeposit` reserves no place. So when the fund fills up meanwhile, a reject that returns
   the shares, or a deposit claim, is refused with `MAX_HOLDERS`. The agent's recovery always works, and delivering to an
   account that holds nothing puts the count above the cap, where it stays until investors leave. The mitigation is
-  operational: the fulfiller rejects deposit requests near the cap, and a monitor alerts when `Fund.holderCount()` is
+  operational: the agent rejects deposit requests near the cap, and a monitor alerts when `Fund.holderCount()` is
   above `Fund.holderCap()`. Whether a redeeming investor still counts as a holder is for counsel. Pinned by
   `FundIntegration.t.sol::test_WhenARejectedRedemptionReturnsSharesToAnInvestorWhoWasReplaced_TheFundCapAppliesAndRecoveryIsCounted`
   and `Gated7540Vault.t.sol::test_WhenACapFilledAfterFulfilment_TheAgentDeliversTheStrandedShares`.
@@ -214,13 +214,13 @@ Further limits recorded during review:
   redeems less, or the agent lowers the frozen amount first. Pinned by `test_WhenAFrozenRemainderBelowTheMinimumWouldStay_RedeemingAllOfMaxRedeemReverts`.
 - **A below-minimum 7540 claim reverts.** A request cannot know how many shares it will buy, so a fresh controller is not
   refused for size. If the shares claimed, added to what the receiver already holds, come to less than the minimum, the claim reverts with `BELOW_MIN_POSITION` and
-  the claimable stays until the agent's `recoverClaimable` (an enforcement mint, exempt) delivers it, or the fulfiller
-  rejects the request before fulfilling.
+  the claimable stays until the agent's `recoverClaimable` (an enforcement mint, exempt) delivers it, or the agent
+  rejects the request while its period is open.
 - **The 7540 escrow is pooled, and enforcement on it is per controller.** Pending redemptions are booked per
   controller, but their shares sit in one balance at the vault's own address. `forcedTransfer` out of that address may
   take only the shares above the booked total (`Gated7540Vault_ExceedsSurplus`): shares that reached the vault outside
   a request. `setFrozenTokens` on it reverts (`GatedVault_Unsupported`), since a frozen amount there could not name
-  a controller. One controller's redemption is held by not fulfilling it, or moved with `recoverRedeemRequest`. Tooling
+  a controller. One controller's redemption is rejected, or moved with `recoverRedeemRequest`. Tooling
   that calls `setFrozenTokens` on the vault's address, or forces booked shares out of it, sees a revert. Pinned by
   `Gated7540VaultUnit_Escrow`.
 - **The timelocks wait 24 hours by default, and the main one has a floor of 1 hour.** `GovernanceTimelock` refuses less
@@ -235,10 +235,25 @@ Further limits recorded during review:
   check runs on each real product. Recovery from a stolen key is a new `ProxyDeployer`, which changes where later tokens land.
 - **Revoking an attestation does not affect live tokens.** Attestation is checked at install and upgrade time only.
   The guardian pauses while the timelock removes the component.
-- **`totalAssets` of the 7540 vault is indicative** (the last fulfilment price); `preview*` revert, as ERC-7540
-  requires.
-- **solc prints 8 "unreachable code" warnings inside OZ's `ERC4626Upgradeable`.** The code after the 7540 vault's
-  always-reverting `preview*` overrides is unreachable.
+- **`totalAssets` of the 7540 vault is indicative** (all shares at the last settlement's value); `preview*` revert, as
+  ERC-7540 requires.
+- **Who holds `SETTLER_ROLE` sets the price.** The vault takes whatever `settlePeriod` is given, and the holder can name any
+  cash account that approved the vault. So the role belongs to a `NavDesk`, where two people approve every price and a
+  cooldown gives the guardian time to cancel. The timelock can grant it to anyone: that is delayed and visible, not
+  prevented. The vault does not check the holder, because that would spend its size margin, so `NavDesk.isWired()` shows
+  it to monitors and the hand-over check pins it.
+- **A price is a claim.** `reportHash` proves which report was used, not that the money exists. A maker and a checker who
+  collude can approve a wrong price, and whoever dealt in between keeps the difference when it is corrected. The cooldown,
+  the guardian's cancel and the published hash make that harder and traceable.
+- **A stuck period is a dealing suspension.** A loss, an outage, a pause or short cash can all stop settlement, and then new
+  requests wait in the next period. After `maxReportAge` with nothing on the table, the agent can send requests in the
+  closed period back through `NavDesk.refundRequest` and `recoverRequest`, one controller at a time. Beyond that a total
+  loss is a wind-down, which the contracts do not recover from.
+- **Rounding each claim leaves dust.** Each claim on a period's shares rounds down, so at most one share unit per investor per
+  period stays in `unclaimedShares`, for good: 3.65m units for 1,000 investors dealing daily for 10 years, under a billionth
+  of a basis point of 100m shares at 12 decimals. A controller whose whole request rounds to nothing keeps a claimable
+  amount that buys nothing; `recoverClaimable` clears it.
+
 - **What a `Portfolio` trusts.** It sends money only to adapters attested as `ADAPTER` for this portfolio and this asset,
   and each risk's caps bound how much. An adapter's codehash covers its target's address and not the target's behaviour,
   so a bad target can lose what was allocated to it. The council reads the target before attesting, and that review is the
@@ -280,7 +295,9 @@ Inline suppressions (each carries its reason on the line above, in the source):
 | `CredentialRule` `_sendReason`, `_receiveReason` | `unused-return` | Only the standing is read for a sender, and the standing, the bits and the attester for a receiver; the country is stored for later rules and no policy reads it |
 | `Fund` `positionsOf` | `uninitialized-local` | The class count and the entries written start at zero by design |
 | `HolderRestrictionRule` `setLockup` | `uninitialized-local` | The stored unlock time starts at zero, the value of a cleared lockup |
-| `Gated7540Vault` `initialize` | `reentrancy-benign`, `reentrancy-events` | The initialiser installs the token's rules on the shared hook, then writes the vault's own state (custody, last price). The hook is attested, cannot re-enter `initialize`, and never reads that state; only the admin and the guardian hold a role yet |
+| `Gated7540Vault` `settlePeriod` | `reentrancy-no-eth`, `boolean-cst`, `arbitrary-send-erc20` | The book is written before the burn and `_net` writes no state: what Slither reads as a write is the storage pointer. A boolean mapping key is not a misused constant. The settler names the cash account, and only one that approved the vault can be pulled from; the role belongs to a `NavDesk`, and `SETTLER_ROLE` is timelock-granted |
+| `NavDesk` | `incorrect-equality`, `unused-return` | Zero means nothing on the table or nothing accepted, not a balance. The unclaimed shares say nothing about whether a period is stuck |
+| `Gated7540Vault` `initialize` | `reentrancy-benign`, `reentrancy-events` | The initialiser installs the token's rules on the shared hook, after writing the vault's own state (the asset, the decimals, the first period). The hook is attested, cannot re-enter `initialize`, and never reads that state; only the admin and the guardian hold a role yet |
 | `SettlementWindowRule` | `weak-prng` | Calendar arithmetic on the timestamp, not randomness |
 | `ComplianceHook` `_setRules` | `uninitialized-local` | The after-mask starts at zero by design |
 | `Portfolio` `_allocate`, `_deallocate` | `reentrancy-benign`, `reentrancy-events`, `reentrancy-balance` | The guard is held, the adapter is attested, and what the move changed can only be measured after the call: the balance read before it is the point of the comparison. A reentrant target is refused (`test_AReentrantTargetCannotAllocateAgainMidCall`) |
@@ -316,6 +333,9 @@ Inline acknowledgements (reason on the line above each `aderyn-ignore`):
 | `arbitrary-transfer-from` (high) | `Gated7540Vault.requestDeposit` | Same as Slither's `arbitrary-send-erc20` (§4 above) | Fuzzed victim-owner test; removing the guard fails 2 tests |
 | `abi-encode-packed-hash-collision` (high) | `ProxyDeployer._initCodeHash` | False positive: only the second operand varies; the first is fixed creation code | Fuzzed `predict` formula test; off-chain CREATE2 test |
 | `storage-array-memory-edit` (high) | `SettlementWindowRule.check`, `isOpen` | False positive: a read-only copy of a storage struct into memory | Window tests |
+| `reentrancy-state-change` | `Gated7540Vault.initialize` (the asset's `decimals()`), `NavDesk.adopt` (the old desk's views) | View interfaces, compiled to STATICCALL | |
+| `unsafe-casting` | `Gated7540Vault._claim` | Neither part exceeds what the request holds, each being a share of it at most | `testFuzz_TheSumOfClaimsNeverExceedsTheBookAndFallsShortByAtMostOneUnitEach` |
+| `state-no-address-check` | `NavDesk._setSettings` | Zero is a choice for both: no portfolio, or a portfolio to be plugged | `test_WithNoCashAccount_ItReverts` |
 | `unused-state-variable` | `GatedToken` and `Gated7540Vault` ERC-7201 locations | False positive: read in assembly | `GatedTokenIntegrationTest::test_TheErc7201LocationHoldsTheDecimals` and `Gated7540VaultUnit_Storage`: the formula equals the constant and the slot holds the decimals, or custody and `lastPrice` |
 | `unchecked-return` | `EnumerableSet.remove` in `Portfolio`; `deposit` and `withdraw` in `ERC4626Adapter`; `_grantRole` in constructors and initialisers (`CredentialRegistry` included), and `_revokeRole` in the `revokeRole` overrides of the base, `GovernanceTimelock`, both executors and `CredentialRegistry` (it returns false only if the role was not held, and either way the account ends up without it); `Address.functionCall` in `ProxyDeployer`; `_executeLeg` in `DvPExecutor` | `_grantRole` returns false only if the role is already held; `initialize` returns nothing; the cash leg's digest is not needed and the securities leg's digest was read before the call | Role, deploy and DvP tests |
 | `costly-loop`, `require-revert-in-loop` | `ComplianceHook._setRules`, `IntentExecutor.executeBatch`, `Portfolio._addAllocation`, `_subtractAllocation` | By design: at most 16 rules, and invalid rules must fail closed; batches are atomic; an adapter names only a few risks, and a move past any cap fails whole | Hook, batch and portfolio tests |
@@ -355,10 +375,9 @@ Each row is a bug deliberately planted, the tests that caught it, then the file 
 | Ignition `Activate` | UPGRADER to an ops account; deployer keeps timelock admin; deployer keeps `ProxyDeployer` ownership | 54 / 54 / 55 failing |
 | upgrades-core | upgrade-unsafe state initialiser | `validate` FAILED |
 | Aderyn gate | one inline suppression removed | `npm run aderyn` fails (1 high) |
-| 7540 invariant handler | an action silently turned into a no-op | `afterInvariant` fails (every action must execute in every run) |
-| `Gated7540Vault` access | controller/operator check removed from `redeem`, `withdraw`, `_claimMint`, `_claimDeposit`; `FULFILLER_ROLE` removed from `fulfillRedeem`, `rejectRedeemRequest`, `fulfillDeposit`, `rejectDepositRequest`; `whenNotPaused` removed from `withdraw` | 1 to 2 tests each (`Gated7540VaultUnit_ClaimAccess` and others). Before the 2026-10-17 review, 6 of these 9 survived |
+| 7540 invariant handler | every action of a family silently turned into a no-op | `afterInvariant` fails (each family must execute in every run) |
+| `Gated7540Vault` access | controller/operator check removed from `redeem`, `withdraw`, `_claimMint`, `_claimDeposit`; the settler's and the agent's roles removed from settlement and rejects; `whenNotPaused` removed from `withdraw` | 1 to 2 tests each (`Gated7540VaultUnit_ClaimAccess` and others). Before the 2026-10-17 review, 6 of these 9 survived |
 | `Gated7540Vault.requestDeposit` | eligibility checked on the owner instead of the controller | `test_WhenAVerifiedOwnerRequestsForAnUnverifiedController_ItIsRefused`, the only test where owner differs from controller |
-| `Gated7540Vault` price (L-3) | the minimum price of 1 removed | 3 tests (`Gated7540VaultUnit_ZeroPrice` and the fulfilment fuzz) |
 | `Gated7540Vault` claims (M-3) | deposit-claim, mint-claim, redeem or withdraw eligibility check removed; `maxRedeem` back to pause-only; `recoverClaimable` without the recipient check; enforcement mint downgraded to a plain MINT; payout probe with amount 1 | 1 to 11 tests each (`Gated7540VaultIntegration_Claimable`). The amount-1 probe breaks 11, since it would block payouts to controllers holding no shares |
 | `Gated7540Vault` reject (M-2) | rejected shares returned as FORCED | tests including the steering attack at a full cap and the paused reject |
 | Recovery timelock (M-1) | base or executor `revokeRole` lets RECOVERY_ROLE revoke any role, or not the guardian; recovery cannot `unpause`; `GovernanceTimelock` lets it revoke any role, or not CANCELLER. On `DvPExecutor` (2026-10-23): the same three, and `pause` open to anyone | 1 to 2 tests each (`PolicyGatedUnit_Recovery`, `IntentExecutorUnit_Recovery`, `DvPExecutorUnit_Roles`, `GovernanceTimelockUnitTest`) |
@@ -376,6 +395,8 @@ Each row is a bug deliberately planted, the tests that caught it, then the file 
 | `CredentialRule` (2026-10-25) | the enforcement-burn exemption widened to any burn or any kind, dropped, or looked up for every sender; a blocked, unknown or lapsed sender judged wrongly; zero amounts skipped; `FORCED` or `MINT` checking the sender; `BURN` checking the receiver; an unset policy admitting; the lapsed reason removed; an exit-only receiver admitted; the attester bitmap or its shift, `requireAll`, `requireAny` or `forbidAny` dropped or weakened; `setPolicy` unauthenticated, dropping a field or keyed by the sender; the receiver or the sender read from the wrong side; `checkSend` or `checkReceive` always accepting, ignoring the token's policy or reading the wrong side | 28 of 28. 2 by exactly one test |
 | Ignition credential wiring (2026-10-25) | no policy set on the tokens; a policy that asks for no bits, or trusts no attester 0; the registry not handed to the timelock; no `RECOVERY_ROLE` on the registry; the credential rule last in the order; an attester allowed to assert nothing | 7 of 7, by `credentials.test.ts` and `deployment.test.ts` (1 to 15 failing) |
 | `Gated7540Vault` escrow, `GovernanceTimelock` floor (2026-10-27) | the surplus check removed, or ignoring the booked total, or at `>=`; the booked total not raised by `requestRedeem`, or not lowered by `fulfillRedeem`, the reject or the recovery; a freeze on the vault's address allowed; the timelock floor removed from the constructor or from `updateDelay`, or at `<=`; the floor checked before OpenZeppelin's caller check; the vault's escrow check run before the role check | 13 of 13, by `Gated7540VaultUnit_Escrow` and `GovernanceTimelockUnitTest`. The `<=` floor first survived, and `test_WhenGovernanceSetsTheDelayToExactlySevenDays_ItApplies` was added; the role order was found by the docs check and fixed with `test_WhenACallerWithoutTheAgentRoleNamesTheEscrow_TheRoleCheckAnswers` |
+| `Gated7540Vault` dealing periods (2026-11-01) | no virtual shares or asset in the price, unclaimed shares left out of the supply; a second close, settling an open period or while paused; the balance audit gone or off by one either way; net inflow or outflow not moved, the fee unpaid or left out of the net, the escrow not burned; no wait for an earlier request; the book not raised or not lowered; each reject and recovery role; a claim or a recovery leaving `unclaimedShares` or the cash owed unchanged; each rounding direction; a request rolling before it settles; each booked total not lowered; the decimals and the first period | 38 of 39 caught. The survivor was the full-claim branch, which changes nothing because `mulDiv(x, y, x)` is exact, so the branch was removed |
+| `NavDesk` (2026-11-01) | each role, each time boundary at both sides, the table and stuck checks, each setting's bound and attestation, `adopt`'s checks, what the hash covers, the portfolio left out of the value, a stale price, the move count | 49 of 49 caught, 3 of them added with the review's age check and the cut-off event |
 
 ## 6. Toolchain supply chain
 

@@ -36,12 +36,9 @@ export function productModule(product: Product) {
 
     const base = [product.name, product.symbol, operations, guardian, registry, hook, ruleList];
     const initArgs =
-      product.template === "Gated4626Vault"
+      product.template === "Gated4626Vault" || product.template === "Gated7540Vault"
         ? [p("asset"), ...base]
-        : product.template === "Gated7540Vault"
-          ? // The 7540 initialiser takes the custody after the rules.
-            [p("asset"), ...base, p("custody")]
-          : product.template === "GatedToken" || product.template === "IntentToken"
+        : product.template === "GatedToken" || product.template === "IntentToken"
             ? // Both token templates take their decimals after the symbol.
               [product.name, product.symbol, product.decimals ?? 18, ...base.slice(2)]
             : base;
@@ -90,7 +87,7 @@ export function productModule(product: Product) {
     if (product.template === "GatedToken" || product.template === "IntentToken") {
       granted.push(grant("minter", ROLES.MINTER, p("minter")), grant("burner", ROLES.BURNER, p("burner")));
     }
-    if (product.template === "Gated7540Vault") granted.push(grant("fulfiller", ROLES.FULFILLER, p("fulfiller")));
+    if (product.template === "Gated7540Vault") granted.push(grant("settler", ROLES.SETTLER, p("settler")));
     if (product.executors?.includes("intent")) granted.push(grant("executor", ROLES.EXECUTOR, p("executor")));
     if (product.executors?.includes("dvp")) granted.push(grant("dvp_executor", ROLES.EXECUTOR, p("dvpExecutor")));
 
