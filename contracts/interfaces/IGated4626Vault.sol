@@ -18,16 +18,11 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
  *      redemption that would leave dust reverts when it executes. A rule that bounded the size of a position (a supply
  *      cap, a maximum balance) would refuse the mint probe and zero `maxDeposit` and `maxMint`.
  *      `maxWithdraw` is `convertToAssets(maxRedeem, Floor)`. `preview*` stay pure conversions. Share
- *      supply moves only through deposits and redemptions: the issuer `mint` / `burn` primitives revert
+ *      supply moves only through deposits and redemptions: the issuer `mint` / `burn` primitives revert. A payer other
+ *      than the receiver, and a receiver of redemption cash other than the owner, must pass the token's policy
+ *      (`IGatedVaultBase`); the `max*` views name one account and cannot say so
  */
 interface IGated4626Vault {
-  /*///////////////////////////////////////////////////////////////
-                            ERRORS
-  //////////////////////////////////////////////////////////////*/
-
-  /// @notice Thrown by the issuer `mint` / `burn` primitives, which vault shares do not support
-  error Gated4626Vault_Unsupported();
-
   /*///////////////////////////////////////////////////////////////
                             LOGIC
   //////////////////////////////////////////////////////////////*/

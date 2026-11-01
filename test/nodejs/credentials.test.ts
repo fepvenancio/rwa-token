@@ -87,7 +87,8 @@ describe("credentials: the registry and the rule through the real deployment", a
 
     const alice = s.holders.alice.account.address;
     assert.deepEqual(await credentials.read.profileOf([alice]), [STATUS.ACTIVE, QUALS.KYC, COUNTRY, 0]);
-    assert.deepEqual(await credentials.read.profileOf([s.vault7540.address]), [STATUS.ACTIVE, QUALS.KYC | QUALS.INFRA, COUNTRY, 0]);
+    // The escrow is the token's own address, so the vault needs no credential for its own shares.
+    assert.deepEqual(await credentials.read.profileOf([s.vault7540.address]), [STATUS.NONE, 0, 0, 0]);
     assert.equal(await credentials.read.isVerified([alice]), true);
     assert.equal(await s.rules.credentialRule.read.ruleId(), keccak256(toHex("CredentialRule.v1")));
   });

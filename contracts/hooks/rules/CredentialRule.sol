@@ -84,10 +84,10 @@ contract CredentialRule is BaseRule, ICredentialRule {
 
   /// @inheritdoc IComplianceRule
   function checkSend(
-    address,
+    address _token,
     address _account
   ) external view override(BaseRule, IComplianceRule) returns (bytes32 _reason) {
-    _reason = _sendReason(_account);
+    _reason = _sendReason(_token, _account);
   }
 
   /// @inheritdoc ICredentialRule
@@ -118,7 +118,7 @@ contract CredentialRule is BaseRule, ICredentialRule {
   function _checkSender(
     IPolicyHook.TransferContext calldata _ctx
   ) internal view returns (bytes32 _reason) {
-    _reason = _sendReason(_ctx.from);
+    _reason = _sendReason(_ctx.token, _ctx.from);
     if (_reason == Reasons.TRANSFER_OK) return _reason;
     // View interface: compiled to STATICCALL, so the token cannot change any state (test: *_TokenCallsAreStatic).
     // aderyn-ignore-next-line(reentrancy-state-change)
@@ -129,12 +129,16 @@ contract CredentialRule is BaseRule, ICredentialRule {
 
   /**
    * @notice Whether an account may send at all: `ACTIVE`, `EXIT_ONLY` or `LAPSED`. `NONE` and `BLOCKED` may not
+   * @param _token The token
    * @param _account The prospective sender
    * @return _reason `TRANSFER_OK` or `SENDER_NOT_VERIFIED`
    */
   function _sendReason(
+    address _token,
     address _account
   ) internal view returns (bytes32 _reason) {
+    // The token's own address holds a 7540's escrow. A credential there could lapse and stop every redemption.
+    if (_account == _token) return Reasons.TRANSFER_OK;
     // Only the standing decides here; the bits, country and attester matter for a receiver.
     // slither-disable-next-line unused-return
     (ICredentialRegistry.Status _status,,,) = REGISTRY.profileOf(_account);
@@ -154,6 +158,8 @@ contract CredentialRule is BaseRule, ICredentialRule {
     address _token,
     address _account
   ) internal view returns (bytes32 _reason) {
+    // See `_sendReason`.
+    if (_account == _token) return Reasons.TRANSFER_OK;
     Policy memory _policy = _policies[_token];
     if (_policy.attesters == 0) return Reasons.RECEIVER_NOT_ELIGIBLE;
 

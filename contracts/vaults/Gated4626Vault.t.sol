@@ -15,6 +15,7 @@ import {Reasons} from 'interfaces/Errors.sol';
 import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IGated4626Vault} from 'interfaces/IGated4626Vault.sol';
+import {IGatedVaultBase} from 'interfaces/IGatedVaultBase.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
@@ -158,7 +159,7 @@ contract Gated4626VaultUnit_IssuerPrimitives is Gated4626VaultUnitTest {
     bytes32 _minterRole = _vault.MINTER_ROLE();
     vm.prank(_admin);
     _vault.grantRole(_minterRole, _alice);
-    vm.expectRevert(IGated4626Vault.Gated4626Vault_Unsupported.selector);
+    vm.expectRevert(IGatedVaultBase.GatedVault_Unsupported.selector);
     vm.prank(_alice);
     _vault.mint(_bob, 1);
   }
@@ -168,7 +169,7 @@ contract Gated4626VaultUnit_IssuerPrimitives is Gated4626VaultUnitTest {
     bytes32 _burnerRole = _vault.BURNER_ROLE();
     vm.prank(_admin);
     _vault.grantRole(_burnerRole, _bob);
-    vm.expectRevert(IGated4626Vault.Gated4626Vault_Unsupported.selector);
+    vm.expectRevert(IGatedVaultBase.GatedVault_Unsupported.selector);
     vm.prank(_bob);
     _vault.burn(_alice, 1);
   }

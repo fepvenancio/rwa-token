@@ -221,9 +221,10 @@ exact sequence on the local network, playing the council and the KYC attester, a
    Any later class or rule change goes through governance (schedule, wait out the delay, execute), because either can
    change the room existing investors have under the cap. A later class launches through `Product` like any other, handed
    to the timelock and inert until `registerClass` runs.
-7. **KYC attester:** credential a 7540 vault, which escrows pending redemptions, and then every holder
-   (`CredentialRegistry.set`, or a signed credential that anyone submits). A vault whose asset is a gated token needs a
-   credential that token's policy accepts.
+7. **KYC attester:** credential every holder (`CredentialRegistry.set`, or a signed credential that anyone submits). A
+   vault needs no credential for its own shares, because `CredentialRule` does not judge a token's own address, but a
+   vault whose asset is a gated token needs a credential that token's policy accepts. So does a custodian depositing for
+   clients, and anyone paid a client's redemption cash.
 8. **Post-deploy checks** (the fixture's `assertHandedOver`):
    - the deployer and the operations account hold no role on either timelock, the policy registry, the credential registry, the products or the executors;
    - the timelock holds DEFAULT_ADMIN_ROLE everywhere and is the only UPGRADER;

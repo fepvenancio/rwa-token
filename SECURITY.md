@@ -139,8 +139,7 @@ Further limits recorded during review:
   `BELOW_MIN_POSITION`; the holder exits the current balance (`maxRedeem`). It is off by default (a
   minimum of 0), and a product sets none unless `Product` is given one. Where none is set, the mitigation is
   operational: the agent cleans up dust (forced transfer or burn) and monitoring watches slot usage. FORCED and an enforcement
-  burn are exempt, so an agent can still leave a remainder. Requiring a credentialed caller on vault mints was rejected
-  because it would break custodians depositing for clients.
+  burn are exempt, so an agent can still leave a remainder.
 - **The fund's investor cap is a ratchet** (review L-4). A new investor passes when `count < cap`, or when
   `count == cap` and the move empties the sender's only class (net zero). So above a lowered cap no new investor is
   admitted, net-zero moves included, until the count comes back down. Existing investors can still move among
@@ -171,6 +170,18 @@ Further limits recorded during review:
   minimum position up to `type(uint128).max` as a block.
   A rule that bounded the size of a position (a supply cap, a maximum balance) would refuse the mint probe and zero
   `maxDeposit` and `maxMint`; none of the shipped rules does.
+- **Money does not reach or leave a vault through someone the policy refuses** (`GatedVaultBase`). A payer other than the
+  receiver or controller, a receiver of redemption cash other than the owner or controller, and on the 7540 a controller
+  other than the shares' owner must pass the zero-amount enforcement probe (`GatedVault_ThirdPartyNotEligible`). So a
+  custodian depositing for clients needs a credential. A holder paying itself is not judged, so a lapsed holder can
+  leave, and a holder cannot name a lapsed address as controller to get round that. The `max*` views name one account,
+  so they do not say any of this. The probe is judged when the money moves: nothing checks a payer's source of funds
+  beyond its credential.
+- **A token's own address is not judged by `CredentialRule`,** on either side. A 7540's escrow is that address, and a
+  credential there could lapse or be blocked and stop every redemption. Stopping a vault stays with `pause()` and
+  `HolderRestrictionRule`, and a freeze on the vault's own address stops its escrow. A vault whose asset is gated is an
+  ordinary holder of that asset and needs a credential there. The cost: a holder can send a token to the token's own
+  address by mistake, and the agent recovers it with `forcedTransfer`.
 - **Credentials: the attester decides who may hold, and a lapse stops only receiving.** `CredentialRegistry` records what an
   attester says and verifies no KYC. A compromised attester key can credential any address for every token whose policy
   trusts that attester, with any bit the attester may assert. The limits are the attester's allowed bits, the token's
@@ -208,7 +219,7 @@ Further limits recorded during review:
 - **The 7540 escrow is pooled, and enforcement on it is per controller.** Pending redemptions are booked per
   controller, but their shares sit in one balance at the vault's own address. `forcedTransfer` out of that address may
   take only the shares above the booked total (`Gated7540Vault_ExceedsSurplus`): shares that reached the vault outside
-  a request. `setFrozenTokens` on it reverts (`Gated7540Vault_Unsupported`), since a frozen amount there could not name
+  a request. `setFrozenTokens` on it reverts (`GatedVault_Unsupported`), since a frozen amount there could not name
   a controller. One controller's redemption is held by not fulfilling it, or moved with `recoverRedeemRequest`. Tooling
   that calls `setFrozenTokens` on the vault's address, or forces booked shares out of it, sees a revert. Pinned by
   `Gated7540VaultUnit_Escrow`.

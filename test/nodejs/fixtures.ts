@@ -311,8 +311,9 @@ async function stages(connection: NetworkConnection, profile: Profile) {
         defaultSender: address(operations),
       });
       const contract = await attach(product.template, token.address);
-      // A 7540 vault escrows pending redemptions, so the KYC attester credentials it.
-      if (product.template === "Gated7540Vault" && credentials !== undefined) {
+      // A 7540 vault is an ordinary holder of a gated asset while it holds pending deposits, so that asset's attester
+      // credentials it. Its own shares need no credential: `CredentialRule` does not judge a token's own address.
+      if (product.template === "Gated7540Vault" && product.assetProduct !== undefined && credentials !== undefined) {
         const validUntil = (await publicClient.getBlock()).timestamp + DEMO_VALIDITY;
         await credentials.write.set([contract.address, validUntil, QUALS.KYC | QUALS.INFRA, COUNTRY], { account: kyc.account });
       }
