@@ -320,7 +320,7 @@ interface INavDesk {
   /**
    * @notice Plugs a fee model, or zero for none
    * @dev The vault's DEFAULT_ADMIN_ROLE. A first plug starts the mark at the vault's current price, or at par if that is
-   *      lower, so principal is never charged, and the fee clock at now. A proposal on the table keeps the fee it froze; one made with no model froze
+   *      lower, so a gain made before it is not charged, and the fee clock at now. A proposal on the table keeps the fee it froze; one made with no model froze
    *      none, and leaves what this plug set alone
    * @param _feeModel The fee model, attested as FEE_MODEL
    */

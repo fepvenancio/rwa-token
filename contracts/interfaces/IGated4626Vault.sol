@@ -152,7 +152,7 @@ interface IGated4626Vault {
    * @notice Plugs a fee model
    * @dev DEFAULT_ADMIN_ROLE. Needs a portfolio. The model must be attested as FEE_MODEL. Fees are charged only on gains that
    *      have passed the rate limit. The first plug starts the mark at the last counted price, or at par if that is lower, so
-   *      principal is never charged
+   *      a gain made before it is not charged
    * @param _feeModel The fee model
    */
   function setFeeModel(
