@@ -59,6 +59,8 @@ export function coreModule(profile: Profile) {
     if (rules.has("minPositionRule")) used.minPositionRule = m.contract("MinPositionRule");
     if (rules.has("holderRestrictionRule")) used.holderRestrictionRule = m.contract("HolderRestrictionRule");
     if (rules.has("windowRule")) used.windowRule = m.contract("SettlementWindowRule");
+    if (rules.has("supplyCapRule")) used.supplyCapRule = m.contract("SupplyCapRule");
+    if (rules.has("executedOnlyRule")) used.executedOnlyRule = m.contract("ExecutedOnlyRule");
     for (const template of templates) used[IMPLEMENTATION_KEY[template]] = m.contract(template);
     if (executors.has("intent")) used.executor = m.contract("IntentExecutor", [deployer, guardian]);
     if (executors.has("dvp")) used.dvpExecutor = m.contract("DvPExecutor", [deployer, guardian]);

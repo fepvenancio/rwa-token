@@ -22,6 +22,10 @@ const compiler = {
 
 export default defineConfig({
   plugins: [hardhatToolboxViemPlugin, hardhatKeystore],
+  networks: {
+    // The deployment tests give each function its own key, and there are more of them than the default twenty.
+    default: { type: "edr-simulated", accounts: { count: 24 } },
+  },
   solidity: {
     // Hardhat emits artifacts only for project sources; Ignition deploys OZ's own timelock by name.
     npmFilesToBuild: ["@openzeppelin/contracts/governance/TimelockController.sol"],

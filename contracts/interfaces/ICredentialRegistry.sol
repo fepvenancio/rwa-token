@@ -3,8 +3,8 @@ pragma solidity ^0.8.28;
 
 /**
  * @title ICredentialRegistry
- * @notice One record per address: who vouched for it (an attester), what it is (qualification bits and a country),
- *         until when, and its standing. Attesters write records directly, or sign an EIP-712 credential off chain that
+ * @notice One record per address: who vouched for it (an attester), what it is (qualification bits), until when, and
+ *         its standing. Attesters write records directly, or sign an EIP-712 credential off chain that
  *         anyone may submit. The registry stores flags only: no names, no evidence, no hashes of personal data
  * @dev The effective status is resolved at read time (`profileOf`), so a rule never does time or trust arithmetic.
  *      A lapsed credential and a killed attester both leave the holder able to exit. An explicit block does not.
@@ -41,7 +41,6 @@ interface ICredentialRegistry {
    * @param validUntil Unix seconds. Non-zero and in the future when written as `ACTIVE`; the record reads `LAPSED` after it
    * @param status The stored status. Never `LAPSED`
    * @param quals The qualification bits (see `Quals`)
-   * @param country ISO 3166-1 numeric country code; 0 when unknown
    * @param attester The id of the attester that wrote the record
    * @param issuedAt When the attester issued the record. Only ever rises for one address
    * @param guardianBlock Set by the guardian. Cleared only by `clearGuardianBlock`
@@ -50,7 +49,6 @@ interface ICredentialRegistry {
     uint64 validUntil;
     Status status;
     uint32 quals;
-    uint16 country;
     uint8 attester;
     uint64 issuedAt;
     bool guardianBlock;
@@ -73,7 +71,6 @@ interface ICredentialRegistry {
    * @param subject The address the credential is about
    * @param validUntil Unix seconds; must be in the future when submitted
    * @param quals The qualification bits
-   * @param country ISO 3166-1 numeric country code
    * @param issuedAt When the attester issued it; strictly above the stored value and not in the future
    * @param attester The id of the signing attester
    */
@@ -81,7 +78,6 @@ interface ICredentialRegistry {
     address subject;
     uint64 validUntil;
     uint32 quals;
-    uint16 country;
     uint64 issuedAt;
     uint8 attester;
   }
@@ -96,16 +92,10 @@ interface ICredentialRegistry {
    * @param _attester The attester id
    * @param _validUntil Unix seconds
    * @param _quals The qualification bits
-   * @param _country The country code
    * @param _issuedAt When the record was issued
    */
   event CredentialSet(
-    address indexed _subject,
-    uint8 indexed _attester,
-    uint64 _validUntil,
-    uint32 _quals,
-    uint16 _country,
-    uint64 _issuedAt
+    address indexed _subject, uint8 indexed _attester, uint64 _validUntil, uint32 _quals, uint64 _issuedAt
   );
 
   /**
@@ -333,13 +323,11 @@ interface ICredentialRegistry {
    * @param _subject The address
    * @param _validUntil Unix seconds
    * @param _quals The qualification bits
-   * @param _country The country code
    */
   function set(
     address _subject,
     uint64 _validUntil,
-    uint32 _quals,
-    uint16 _country
+    uint32 _quals
   ) external;
 
   /**
@@ -419,12 +407,11 @@ interface ICredentialRegistry {
    * @param _subject The address
    * @return _status The effective status
    * @return _quals The qualification bits as stored
-   * @return _country The country code as stored
    * @return _attester The attester id that wrote the record
    */
   function profileOf(
     address _subject
-  ) external view returns (Status _status, uint32 _quals, uint16 _country, uint8 _attester);
+  ) external view returns (Status _status, uint32 _quals, uint8 _attester);
 
   /**
    * @notice The stored record of an address, unresolved

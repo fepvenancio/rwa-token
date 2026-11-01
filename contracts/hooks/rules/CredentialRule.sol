@@ -139,9 +139,9 @@ contract CredentialRule is BaseRule, ICredentialRule {
   ) internal view returns (bytes32 _reason) {
     // The token's own address holds a 7540's escrow. A credential there could lapse and stop every redemption.
     if (_account == _token) return Reasons.TRANSFER_OK;
-    // Only the standing decides here; the bits, country and attester matter for a receiver.
+    // Only the standing decides here; the bits and attester matter for a receiver.
     // slither-disable-next-line unused-return
-    (ICredentialRegistry.Status _status,,,) = REGISTRY.profileOf(_account);
+    (ICredentialRegistry.Status _status,,) = REGISTRY.profileOf(_account);
     _reason = _status != ICredentialRegistry.Status.NONE && _status != ICredentialRegistry.Status.BLOCKED
       ? Reasons.TRANSFER_OK
       : Reasons.SENDER_NOT_VERIFIED;
@@ -163,9 +163,7 @@ contract CredentialRule is BaseRule, ICredentialRule {
     Policy memory _policy = _policies[_token];
     if (_policy.attesters == 0) return Reasons.RECEIVER_NOT_ELIGIBLE;
 
-    // The country is stored for later rules; no policy reads it yet.
-    // slither-disable-next-line unused-return
-    (ICredentialRegistry.Status _status, uint32 _quals,, uint8 _attester) = REGISTRY.profileOf(_account);
+    (ICredentialRegistry.Status _status, uint32 _quals, uint8 _attester) = REGISTRY.profileOf(_account);
     if (_status == ICredentialRegistry.Status.LAPSED) return Reasons.CREDENTIAL_EXPIRED;
     if (_status != ICredentialRegistry.Status.ACTIVE) return Reasons.RECEIVER_NOT_VERIFIED;
 

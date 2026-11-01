@@ -31,6 +31,12 @@ const ATTESTED = {
   Gated7540Vault: "vaults",
   Portfolio: "portfolio",
   ERC4626Adapter: "portfolio",
+  GuardedAccount: "portfolio",
+  ERC20CallValidator: "portfolio",
+  ERC4626CallValidator: "portfolio",
+  FeeModel: "nav",
+  SupplyCapRule: "hooks/rules",
+  ExecutedOnlyRule: "hooks/rules",
 } as const;
 const DEPLOYED = {
   PolicyRegistry: "governance",
@@ -38,6 +44,9 @@ const DEPLOYED = {
   GovernanceTimelock: "governance",
   IntentExecutor: "intents",
   DvPExecutor: "intents",
+  SignedEntry: "intents",
+  NavDesk: "nav",
+  Distributor: "distribution",
   ProxyDeployer: "deploy",
   Fund: "fund",
   TokenProxy: "deploy",

@@ -11,6 +11,7 @@ import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {ICredentialRegistry} from 'interfaces/ICredentialRegistry.sol';
 import {ICredentialRule} from 'interfaces/ICredentialRule.sol';
+import {IDistributor} from 'interfaces/IDistributor.sol';
 import {IDvPExecutor} from 'interfaces/IDvPExecutor.sol';
 import {IERC20CallValidator} from 'interfaces/IERC20CallValidator.sol';
 import {IERC3009} from 'interfaces/IERC3009.sol';
@@ -40,6 +41,7 @@ import {IPortfolio} from 'interfaces/IPortfolio.sol';
 import {IProxyDeployer} from 'interfaces/IProxyDeployer.sol';
 import {ISettlementWindowRule} from 'interfaces/ISettlementWindowRule.sol';
 import {ISignedEntry} from 'interfaces/ISignedEntry.sol';
+import {ISupplyCapRule} from 'interfaces/ISupplyCapRule.sol';
 import {ITemplated} from 'interfaces/ITemplated.sol';
 import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
 import {Quals} from 'interfaces/Quals.sol';
@@ -122,6 +124,8 @@ contract InterfaceFreezeTest is Test {
     assertEq(type(IGated7540Vault).interfaceId, bytes4(0xc6a5eee9), 'IGated7540Vault');
     assertEq(type(INavDesk).interfaceId, bytes4(0x6d2f4b62), 'INavDesk');
     assertEq(type(ISignedEntry).interfaceId, bytes4(0x05cc4f78), 'ISignedEntry');
+    assertEq(type(ISupplyCapRule).interfaceId, bytes4(0x52c89ff1), 'ISupplyCapRule');
+    assertEq(type(IDistributor).interfaceId, bytes4(0xd75218de), 'IDistributor');
     assertEq(type(IGuardedAccount).interfaceId, bytes4(0x30444861), 'IGuardedAccount');
     assertEq(type(ICallValidator).interfaceId, bytes4(0x9e8d53da), 'ICallValidator');
     assertEq(type(IERC20CallValidator).interfaceId, bytes4(0x4095b410), 'IERC20CallValidator');
@@ -150,7 +154,8 @@ contract InterfaceFreezeTest is Test {
     assertEq(type(IMinPositionRule).interfaceId, bytes4(0x44ac9195), 'IMinPositionRule');
     // Added in the credential layer (C-1, 2026-10-23), ids computed from the signatures with `cast sig`. The enum
     // `Status` is `uint8` in a signature and `Credential` a tuple
-    assertEq(type(ICredentialRegistry).interfaceId, bytes4(0x4573f2ef), 'ICredentialRegistry');
+    // Re-pinned 2026-11-01 on owner instruction: a record no longer holds a country (was 0x4573f2ef).
+    assertEq(type(ICredentialRegistry).interfaceId, bytes4(0xd224eb70), 'ICredentialRegistry');
     assertEq(type(ICredentialRule).interfaceId, bytes4(0x35778007), 'ICredentialRule');
   }
 
@@ -191,6 +196,19 @@ contract InterfaceFreezeTest is Test {
     assertEq(IGated4626Vault.FeesCollected.selector, 0x9dc46f23cfb5ddcad0ae7ea2be38d47fec07bb9382ec7e564efc69e036dd66ce);
     assertEq(IGated4626Vault.MaxRateSet.selector, 0x08ee7b4c9309523d0db8e9554983c42a2b594b0a05a721d6237edb07bec7dab3);
     assertEq(IGated4626Vault.PortfolioSet.selector, 0x0d5636196773d6bc83dfcd7e1aadeb530723d82fce181c4a3680a0bcfe0b2f0f);
+    assertEq(ISupplyCapRule.SupplyCapSet.selector, 0xf8ee54017f503850b1efbe5e44529540dc62ae2a9b329417770fb104e87dacaa);
+    assertEq(
+      IDistributor.DistributionApproved.selector, 0x0ddd602aa86fb0c636893a72925c2bab77936b913012a959b14d8ab202d6e3c5
+    );
+    assertEq(
+      IDistributor.DistributionClaimed.selector, 0x64bdb55782b54d32d4886f2dc4f69cf7344fd99862caaa6703164c8fc13f2ea8
+    );
+    assertEq(
+      IDistributor.DistributionProposed.selector, 0xdecb52003d63f8fec877496be8045b66e1945cc76a8fb743c948fe181ead3feb
+    );
+    assertEq(
+      IDistributor.DistributionSwept.selector, 0x394babdfc435cd4ce1602316d1be5142c7f0880c34f5808b80c46111206c7106
+    );
     assertEq(ISignedEntry.EntryCancelled.selector, 0x112e0bf83077a00b180a2c526e1e40fd2b7ce442cc2bfb9c6d3510870ddf0e96);
     assertEq(ISignedEntry.EntryExecuted.selector, 0xb98db96ae7f09fd2003f14676b3a4f20fb1592e2f5adb29d28d14c116a594be0);
     assertEq(IGuardedAccount.CallMade.selector, 0xf7069cb373783a30940dc185ef11ac49cdc063baa4035fbd6c914a9ab6975350);
@@ -259,7 +277,7 @@ contract InterfaceFreezeTest is Test {
     );
     // Added in the credential layer (C-1, 2026-10-23), topics computed with `cast keccak`
     assertEq(
-      ICredentialRegistry.CredentialSet.selector, 0xd789f338d152d3d12ec115f96ae3af3aba999e7e254fb41a4b3f62f0dd903412
+      ICredentialRegistry.CredentialSet.selector, 0x62696bfef46e93b00f133a80152dadf9f45c617aa5b847061be528b3e677b32a
     );
     assertEq(ICredentialRegistry.StatusSet.selector, 0xe07c9ed653206f6d019e37fbf43c2610409800ac75a0178854d7a6ec8974a61b);
     assertEq(
@@ -318,10 +336,12 @@ contract InterfaceFreezeTest is Test {
     assertEq(Reasons.RECEIVER_NOT_ELIGIBLE, keccak256('RECEIVER_NOT_ELIGIBLE'));
     assertEq(Reasons.NOT_EXECUTOR, keccak256('NOT_EXECUTOR'));
     assertEq(Reasons.ZERO_RECEIVER, keccak256('ZERO_RECEIVER'));
+    assertEq(Reasons.ABOVE_SUPPLY_CAP, keccak256('ABOVE_SUPPLY_CAP'));
+    assertEq(Reasons.TRANSFER_NOT_EXECUTED, keccak256('TRANSFER_NOT_EXECUTED'));
   }
 
   /// @dev The qualification bits are part of the frozen vocabulary: a record written under one meaning must never be read
-  ///      under another. Bits 8 to 15 are reserved and 16 to 31 belong to a deployment
+  ///      under another. Bits 10 to 15 are reserved and 16 to 31 belong to a deployment
   function test_WhenQualsCompile_TheirBitsArePinned() external pure {
     assertEq(Quals.KYC, uint32(1));
     assertEq(Quals.PROFESSIONAL, uint32(2));
@@ -331,5 +351,7 @@ contract InterfaceFreezeTest is Test {
     assertEq(Quals.LICENSED, uint32(32));
     assertEq(Quals.CUSTOMER, uint32(64));
     assertEq(Quals.INFRA, uint32(128));
+    assertEq(Quals.US_PERSON, uint32(256));
+    assertEq(Quals.EEA, uint32(512));
   }
 }

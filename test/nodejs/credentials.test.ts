@@ -17,9 +17,9 @@ import {
 } from "viem";
 
 import { ROLES } from "../../ignition/modules/roles.js";
-import { COUNTRY, DEMO_VALIDITY, deployStack, QUALS, REASONS, revertOf, STATUS, verify, type Stack } from "./fixtures.js";
+import { DEMO_VALIDITY, deployStack, QUALS, REASONS, revertOf, STATUS, verify, type Stack } from "./fixtures.js";
 
-const ICREDENTIAL_REGISTRY_ID = "0x4573f2ef";
+const ICREDENTIAL_REGISTRY_ID = "0xd224eb70";
 const IIDENTITY_REGISTRY_ID = "0xb9209e33";
 
 /** The EIP-712 type the attester signs: `ICredentialRegistry.Credential`. */
@@ -28,7 +28,6 @@ const CREDENTIAL_TYPES = {
     { name: "subject", type: "address" },
     { name: "validUntil", type: "uint64" },
     { name: "quals", type: "uint32" },
-    { name: "country", type: "uint16" },
     { name: "issuedAt", type: "uint64" },
     { name: "attester", type: "uint8" },
   ],
@@ -86,9 +85,9 @@ describe("credentials: the registry and the rule through the real deployment", a
     assert.equal(attester.allowedQuals, 255, "the demo provider may assert the eight named bits");
 
     const alice = s.holders.alice.account.address;
-    assert.deepEqual(await credentials.read.profileOf([alice]), [STATUS.ACTIVE, QUALS.KYC, COUNTRY, 0]);
+    assert.deepEqual(await credentials.read.profileOf([alice]), [STATUS.ACTIVE, QUALS.KYC, 0]);
     // The escrow is the token's own address, so the vault needs no credential for its own shares.
-    assert.deepEqual(await credentials.read.profileOf([s.vault7540.address]), [STATUS.NONE, 0, 0, 0]);
+    assert.deepEqual(await credentials.read.profileOf([s.vault7540.address]), [STATUS.NONE, 0, 0]);
     assert.equal(await credentials.read.isVerified([alice]), true);
     assert.equal(await s.rules.credentialRule.read.ruleId(), keccak256(toHex("CredentialRule.v1")));
   });
@@ -113,7 +112,7 @@ describe("credentials: the registry and the rule through the real deployment", a
     const eve = s.holders.eve.account.address;
     const stranger = s.holders.bob.account;
     const now = (await s.publicClient.getBlock()).timestamp;
-    const credential = { subject: eve, validUntil: now + DEMO_VALIDITY, quals: QUALS.KYC, country: COUNTRY, issuedAt: now, attester: 0 };
+    const credential = { subject: eve, validUntil: now + DEMO_VALIDITY, quals: QUALS.KYC, issuedAt: now, attester: 0 };
     const [, name, version, chainId, verifyingContract] = await s.credentials.read.eip712Domain();
     const domain = { name, version, chainId, verifyingContract };
     const message = { ...credential };
@@ -129,7 +128,7 @@ describe("credentials: the registry and the rule through the real deployment", a
     const sig = await sign(s.wallets.kyc);
     await s.credentials.write.register([credential, sig], { account: stranger });
     assert.equal(await s.token.read.canReceive([eve]), true);
-    assert.deepEqual(await s.credentials.read.profileOf([eve]), [STATUS.ACTIVE, QUALS.KYC, COUNTRY, 0]);
+    assert.deepEqual(await s.credentials.read.profileOf([eve]), [STATUS.ACTIVE, QUALS.KYC, 0]);
 
     const replay = await revertOf(s.credentials.simulate.register([credential, sig], { account: stranger.address }), s.credentials.abi);
     assert.equal(replay?.errorName, "CredentialRegistry_StaleCredential");
@@ -193,7 +192,7 @@ describe("credentials: the registry and the rule through the real deployment", a
     assert.equal(await s.token.read.canSend([alice]), true);
     assert.equal(await s.token.read.canReceive([alice]), false);
     const writes = await revertOf(
-      s.credentials.simulate.set([s.holders.eve.account.address, 1n << 40n, QUALS.KYC, COUNTRY], { account: s.wallets.kyc.account.address }),
+      s.credentials.simulate.set([s.holders.eve.account.address, 1n << 40n, QUALS.KYC], { account: s.wallets.kyc.account.address }),
       s.credentials.abi,
     );
     assert.deepEqual(writes, { errorName: "CredentialRegistry_AttesterKilled", args: [0] });
@@ -240,7 +239,6 @@ describe("credentials: the registry and the rule through the real deployment", a
     assert.equal(getAddress(last.args._subject!), getAddress(eve));
     assert.equal(last.args._attester, 0);
     assert.equal(last.args._quals, QUALS.KYC | QUALS.CUSTOMER);
-    assert.equal(last.args._country, COUNTRY);
 
     await s.credentials.write.blockSubject([eve], { account: s.wallets.guardian.account });
     const blocked = await s.publicClient.getContractEvents({ address: s.credentials.address, abi: s.credentials.abi, eventName: "SubjectBlocked", fromBlock: 0n });

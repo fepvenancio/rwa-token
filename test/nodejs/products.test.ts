@@ -7,8 +7,8 @@ import { encodeFunctionData, getAddress, isAddressEqual, keccak256, maxUint256, 
 import { fundOpenModule } from "../../ignition/modules/FundOpen.js";
 import { productModule } from "../../ignition/modules/Product.js";
 import { QUALS } from "../../ignition/modules/roles.js";
-import { PROFILES, type Product, type Profile } from "../../ignition/profiles.js";
-import { assertHandedOver, deployProduct, deployProfile, deployStack, deverify, PAR, REASONS, RECEIVE_AUTHORIZATION_TYPES, settlePeriod, verify } from "./fixtures.js";
+import { DEMO_SIGNERS, PROFILES, type Product, type Profile } from "../../ignition/profiles.js";
+import { assertHandedOver, deployProduct, deployProfile, deployStack, deverify, PAR, REASONS, RECEIVE_AUTHORIZATION_TYPES, settlePeriod, settleThroughDesk, verify } from "./fixtures.js";
 
 const PLAIN = ["credentialRule", "holderRestrictionRule"] as const;
 const CORE = ["credentialRegistry", "credentialRule", "holderRestrictionRule", "hook", "proxyDeployer", "recoveryTimelock", "registry", "timelock"];
@@ -73,7 +73,7 @@ describe("one product alone: the core and that product, and nothing else", async
     await s.asset.write.mint([a, usd(100n)]);
     await s.asset.write.approve([vault.address, maxUint256], { account: alice.account });
     await vault.write.requestDeposit([usd(100n), a, a], { account: alice.account });
-    await settlePeriod(s, vault);
+    await settleThroughDesk(connection, s, "asyncFund", 0n);
     await vault.write.mint([usd(100n) * PAR, a, a], { account: alice.account });
     assert.equal(await vault.read.balanceOf([a]), usd(100n) * PAR);
   });
@@ -155,6 +155,7 @@ describe("a vault whose asset is a gated cash token", async function () {
 
   const cashAndFund: Profile = {
     id: "cashAndFund",
+    singleSigners: DEMO_SIGNERS,
     products: [
       {
         key: "cash",
@@ -218,6 +219,7 @@ describe("each fund is its own lego", async function () {
 
   const twoFunds: Profile = {
     id: "twoFunds",
+    singleSigners: DEMO_SIGNERS,
     products: [
       { key: "usdShare", template: "GatedToken", name: "USD Fund", symbol: "USDF", rules: FUND_RULES, fund: "usd" },
       { key: "eurShare", template: "GatedToken", name: "EUR Fund", symbol: "EURF", rules: FUND_RULES, fund: "eur" },
@@ -389,6 +391,7 @@ describe("a token's decimals", async function () {
 
   const twoDecimals: Profile = {
     id: "twoDecimals",
+    singleSigners: DEMO_SIGNERS,
     products: [
       {
         key: "cash",
@@ -416,6 +419,7 @@ describe("a token's decimals", async function () {
   it("a token that signs intents states its own too", async function () {
     const signed: Profile = {
       id: "signedCash",
+      singleSigners: DEMO_SIGNERS,
       products: [
         {
           key: "cash",

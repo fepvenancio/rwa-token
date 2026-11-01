@@ -1,7 +1,12 @@
 import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
 
-import { activeProduct, assertUsable, DEFAULT_POLICY, type Product } from "../profiles.js";
+import { toFunctionSelector, zeroAddress } from "viem";
+
+import { activeProduct, assertUsable, type Caps, DEFAULT_POLICY, type Product } from "../profiles.js";
 import { ROLES } from "./roles.js";
+
+/** The one function a custodian's `GuardedAccount` may call on the asset. */
+const TRANSFER = toFunctionSelector("transfer(address,uint256)");
 
 /**
  * Once per product, run by the operations account, which owns `ProxyDeployer` and needs no timelock: a launch only adds a
@@ -10,14 +15,16 @@ import { ROLES } from "./roles.js";
  * `ProxyDeployer` reverts unless the hook ends up holding exactly the listed rules for the new token, so every later step
  * runs only for a token that came up as intended. Then:
  *
- * 1. Configure while the operations account is the token's admin: its credential policy, settlement window and minimum
- *    position, each if the product lists that rule. A product never touches a fund, so its launch cannot fail on one: a
- *    class is inert, with every movement refused, until `FundOpen` or a timelock operation registers it.
+ * 1. Configure while the operations account is the token's admin: its credential policy, settlement window, minimum
+ *    position and supply cap, each if the product lists that rule, and the legos `Legos` deployed and the council attested:
+ *    the portfolio's adapters, caps and permissions, and the desk or the vault's plugs. A product never touches a fund, so
+ *    its launch cannot fail on one: a class is inert, with every movement refused, until `FundOpen` or a timelock operation
+ *    registers it.
  * 2. Grant the token's roles, after the configuration; UPGRADER_ROLE goes to the timelock only.
  * 3. Hand over: DEFAULT_ADMIN_ROLE to the timelock, and the operations account renounces.
  *
- * Outside this module: the KYC attester must credential a 7540 vault (it escrows pending redemptions) and every holder,
- * and a vault whose asset is gated needs a credential that token's policy accepts.
+ * Outside this module: the KYC attester must credential every holder, and a vault whose asset is gated needs a credential
+ * that token's policy accepts.
  */
 export function productModule(product: Product) {
   assertUsable(product);
@@ -64,6 +71,10 @@ export function productModule(product: Product) {
         m.call(minPositionRule, "setMinPosition", [token, m.getParameter<bigint>("minPosition", 0n)], { after: [deployed] }),
       );
     }
+    if (product.rules.includes("supplyCapRule")) {
+      const supplyCapRule = m.contractAt("SupplyCapRule", p("supplyCapRule"));
+      configured.push(m.call(supplyCapRule, "setSupplyCap", [token, m.getParameter<bigint>("supplyCap")], { after: [deployed] }));
+    }
     if (product.rules.includes("windowRule")) {
       const windowRule = m.contractAt("SettlementWindowRule", p("windowRule"));
       configured.push(
@@ -74,6 +85,39 @@ export function productModule(product: Product) {
           { after: [deployed] },
         ),
       );
+    }
+
+    // The legos, plugged in under the same admin rights. The vault-side plugs refuse what the council has not attested.
+    const portfolio = product.portfolio === undefined ? undefined : m.contractAt("Portfolio", p("portfolio"));
+    const desk = product.nav === undefined ? undefined : m.contractAt("NavDesk", p("navDesk"));
+    if (portfolio !== undefined) {
+      // Every adapter names its own risk id, and the caps are set against that.
+      const install = (template: "GuardedAccount" | "ERC4626Adapter", name: string, caps: Caps) => {
+        const adapter = m.contractAt(template, p(name), { id: name });
+        const added = m.call(portfolio, "addAdapter", [adapter], { id: `add_${name}`, after: [deployed] });
+        const riskId = m.staticCall(adapter, "RISK_ID", [], 0, { id: `risk_${name}` });
+        configured.push(added, m.call(portfolio, "setCaps", [riskId, caps.absoluteCap, caps.relativeCapBps], { id: `caps_${name}`, after: [added] }));
+        return adapter;
+      };
+      for (const custodian of product.portfolio?.custodians ?? []) {
+        const account = install("GuardedAccount", `account_${custodian.key}`, custodian);
+        configured.push(
+          m.call(account, "setPermission", [p("asset"), TRANSFER, p(`validator_${custodian.key}`)], { id: `permit_${custodian.key}`, after: [deployed] }),
+        );
+      }
+      for (const target of product.portfolio?.targets ?? []) install("ERC4626Adapter", `adapter_${target.key}`, target);
+    }
+    if (desk !== undefined) {
+      const { periodLength, cooldown, maxReportAge } = product.nav!;
+      if (portfolio !== undefined) {
+        configured.push(m.call(desk, "setSettings", [portfolio, zeroAddress, periodLength, cooldown, maxReportAge], { after: [deployed] }));
+      }
+      if (product.fees !== undefined) configured.push(m.call(desk, "setFeeModel", [p("feeModel")], { after: [deployed] }));
+    } else if (portfolio !== undefined) {
+      const vault = m.contractAt("Gated4626Vault", proxy, { id: "vaultPlugs" });
+      const plugged = m.call(vault, "setPortfolio", [portfolio, product.portfolio!.maxRateBps!], { after: [deployed] });
+      configured.push(plugged);
+      if (product.fees !== undefined) configured.push(m.call(vault, "setFeeModel", [p("feeModel")], { after: [plugged] }));
     }
 
     // 2. Roles.
@@ -87,7 +131,9 @@ export function productModule(product: Product) {
     if (product.template === "GatedToken" || product.template === "IntentToken") {
       granted.push(grant("minter", ROLES.MINTER, p("minter")), grant("burner", ROLES.BURNER, p("burner")));
     }
-    if (product.template === "Gated7540Vault") granted.push(grant("settler", ROLES.SETTLER, p("settler")));
+    if (product.template === "Gated7540Vault") granted.push(grant("settler", ROLES.SETTLER, desk ?? p("settler")));
+    if (desk !== undefined) granted.push(grant("reporter", ROLES.REPORTER, p("reporter")), grant("checker", ROLES.CHECKER, p("checker")));
+    if (portfolio !== undefined) granted.push(grant("allocator", ROLES.ALLOCATOR, p("allocator")));
     if (product.executors?.includes("intent")) granted.push(grant("executor", ROLES.EXECUTOR, p("executor")));
     if (product.executors?.includes("dvp")) granted.push(grant("dvp_executor", ROLES.EXECUTOR, p("dvpExecutor")));
 

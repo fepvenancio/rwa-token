@@ -11,6 +11,9 @@ export const ROLES = {
   UPGRADER: keccak256(toHex("UPGRADER_ROLE")),
   EXECUTOR: keccak256(toHex("EXECUTOR_ROLE")),
   SETTLER: keccak256(toHex("SETTLER_ROLE")),
+  REPORTER: keccak256(toHex("REPORTER_ROLE")),
+  CHECKER: keccak256(toHex("CHECKER_ROLE")),
+  ALLOCATOR: keccak256(toHex("ALLOCATOR_ROLE")),
   OPERATOR: keccak256(toHex("OPERATOR_ROLE")),
   CANCELLER: keccak256(toHex("CANCELLER_ROLE")),
   RECOVERY: keccak256(toHex("RECOVERY_ROLE")),
@@ -20,7 +23,7 @@ export const ROLES = {
  * `Quals.sol`: the qualification bits an attester asserts and a token's policy asks for. `InterfaceFreeze` pins them in
  * Solidity, so a change there fails the build before it can disagree with this copy.
  */
-export const QUALS = { KYC: 1, PROFESSIONAL: 2, QUALIFIED: 4, INSTITUTIONAL: 8, FUND: 16, LICENSED: 32, CUSTOMER: 64, INFRA: 128 } as const;
+export const QUALS = { KYC: 1, PROFESSIONAL: 2, QUALIFIED: 4, INSTITUTIONAL: 8, FUND: 16, LICENSED: 32, CUSTOMER: 64, INFRA: 128, US_PERSON: 256, EEA: 512 } as const;
 
 /** Default token identities. A token's symbol is its CREATE2 salt, so the symbols predicted before a product launches must be the ones it uses. */
 export const TOKENS = {

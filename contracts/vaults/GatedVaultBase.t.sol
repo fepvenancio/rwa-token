@@ -72,7 +72,7 @@ abstract contract GatedVaultBaseTest is Test {
     address _who,
     uint256 _validFor
   ) internal {
-    _creds.set(_who, uint64(block.timestamp + _validFor), Quals.KYC, 756);
+    _creds.set(_who, uint64(block.timestamp + _validFor), Quals.KYC);
   }
 
   function _fund(
@@ -400,9 +400,9 @@ contract GatedVaultBase_7540 is GatedVaultBaseTest {
   }
 
   function test_TheVaultNeedsNoCredentialToHoldItsEscrow() external view {
-    // The record's standing, its qualifications, country and attester: only the standing matters here.
+    // The record's standing, its qualifications and attester: only the standing matters here.
     // solhint-disable-next-line no-unused-vars
-    (ICredentialRegistry.Status _status,,,) = _creds.profileOf(address(_vault));
+    (ICredentialRegistry.Status _status,,) = _creds.profileOf(address(_vault));
     assertEq(uint8(_status), uint8(ICredentialRegistry.Status.NONE));
     assertTrue(_vault.canReceive(address(_vault)));
     assertTrue(_vault.canSend(address(_vault)));

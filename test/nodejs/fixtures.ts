@@ -16,9 +16,11 @@ import {
   type Address,
   type Hex,
   zeroAddress,
+  parseAbi,
 } from "viem";
 
 import { coreModule } from "../../ignition/modules/Core.js";
+import { hasLegos, legosModule } from "../../ignition/modules/Legos.js";
 import { coreHandoverModule } from "../../ignition/modules/CoreHandover.js";
 import { fundModule } from "../../ignition/modules/Fund.js";
 import { fundOpenModule } from "../../ignition/modules/FundOpen.js";
@@ -73,6 +75,8 @@ const REASON_NAMES = [
   "RECEIVER_NOT_ELIGIBLE",
   "NOT_EXECUTOR",
   "ZERO_RECEIVER",
+  "ABOVE_SUPPLY_CAP",
+  "TRANSFER_NOT_EXECUTED",
 ] as const;
 
 /** `Errors.sol` reason codes, keyed by name; `reasonName` maps a code back for readable assertions. */
@@ -90,7 +94,14 @@ export const WINDOW_CLOSE = 17 * 3_600;
 /** The fund-wide investor cap, one number for the three demo classes. */
 export const FUND_HOLDER_CAP = 3n;
 
-const ATTEST = { HOOK: 1, RULE: 2, IMPLEMENTATION: 3 } as const;
+const LEGO_ABI = parseAbi([
+  "function VAULT() view returns (address)",
+  "function portfolio() view returns (address)",
+  "function feeModel() view returns (address)",
+  "function adapters() view returns (address[])",
+]);
+const SAFE_ABI = parseAbi(["function getThreshold() view returns (uint256)"]);
+const ATTEST = { HOOK: 1, RULE: 2, IMPLEMENTATION: 3, PORTFOLIO: 4, ADAPTER: 5, VALIDATOR: 6, FEE_MODEL: 7 } as const;
 /** The timelocks' delay: the least the hand-over check accepts. */
 const DAY = 86_400n;
 
@@ -98,8 +109,6 @@ const DAY = 86_400n;
 export { QUALS };
 /** `ICredentialRegistry.Status`, as the registry returns it. `LAPSED` is only ever returned, never stored. */
 export const STATUS = { NONE: 0, ACTIVE: 1, EXIT_ONLY: 2, BLOCKED: 3, LAPSED: 4 } as const;
-/** ISO 3166-1 numeric: Switzerland, the country every demo credential carries. */
-export const COUNTRY = 756;
 /** How long the demo credentials last: far past anything a test does with the clock. Tests of expiry write their own. */
 export const DEMO_VALIDITY = 3_650n * 86_400n;
 
@@ -131,7 +140,7 @@ export async function deployUntilProducts(connection: NetworkConnection) {
     const validUntil = (await s.publicClient.getBlock()).timestamp + DEMO_VALIDITY;
     // The KYC attester vouches for the holders used by the tests and the recovery account.
     for (const w of [alice, bob, carol, dave, s.wallets.recovery]) {
-      await s.credentials!.write.set([w.account.address, validUntil, QUALS.KYC, COUNTRY], { account: s.wallets.kyc.account });
+      await s.credentials!.write.set([w.account.address, validUntil, QUALS.KYC], { account: s.wallets.kyc.account });
     }
     return {
       ...s,
@@ -155,7 +164,7 @@ export async function deployUntilProducts(connection: NetworkConnection) {
 
 export type Stack = Awaited<ReturnType<typeof deployStack>>;
 export type ProfileStack = Awaited<ReturnType<typeof deployProfile>>;
-type HandedOverKeys = "publicClient" | "wallets" | "timelock" | "recoveryTimelock" | "registry" | "hook" | "proxyDeployer" | "credentials" | "funds" | "executor" | "dvpExecutor" | "rules" | "deployed";
+type HandedOverKeys = "legos" | "parameters" | "profile" | "publicClient" | "wallets" | "timelock" | "recoveryTimelock" | "registry" | "hook" | "proxyDeployer" | "credentials" | "funds" | "executor" | "dvpExecutor" | "rules" | "deployed";
 type Parameters_ = Record<string, Address | bigint | number>;
 
 /** `Core`, then the council step. Returns what the later stages need, and a function that runs them. */
@@ -181,6 +190,10 @@ async function stages(connection: NetworkConnection, profile: Profile) {
     eve,
     kyc,
     operations,
+    reporter,
+    checker,
+    allocator,
+    feeRecipient,
   ] = await viem.getWalletClients();
   const address = (w: typeof deployer) => w.account.address;
 
@@ -211,6 +224,8 @@ async function stages(connection: NetworkConnection, profile: Profile) {
     minPositionRule: has("minPositionRule") ? await viem.getContractAt("MinPositionRule", components.minPositionRule.address) : undefined,
     holderRestrictionRule: has("holderRestrictionRule") ? await viem.getContractAt("HolderRestrictionRule", components.holderRestrictionRule.address) : undefined,
     windowRule: has("windowRule") ? await viem.getContractAt("SettlementWindowRule", components.windowRule.address) : undefined,
+    supplyCapRule: has("supplyCapRule") ? await viem.getContractAt("SupplyCapRule", components.supplyCapRule.address) : undefined,
+    executedOnlyRule: has("executedOnlyRule") ? await viem.getContractAt("ExecutedOnlyRule", components.executedOnlyRule.address) : undefined,
   };
 
   const attest = async (target: Address, kind: number, uri: string) => {
@@ -240,12 +255,15 @@ async function stages(connection: NetworkConnection, profile: Profile) {
     agent: address(agent),
     operator: address(operator),
     settler: address(settler),
+    reporter: address(reporter),
+    checker: address(checker),
+    allocator: address(allocator),
     windowOpen: WINDOW_OPEN,
     windowClose: WINDOW_CLOSE,
     windowDays: rules.windowRule === undefined ? 0 : await rules.windowRule.read.MON_TO_FRI(),
   };
 
-  const wallets = { deployer, governance, attester, guardian, minter, burner, agent, operator, settler, custody, recovery, kyc, operations };
+  const wallets = { deployer, governance, attester, guardian, minter, burner, agent, operator, settler, custody, recovery, kyc, operations, reporter, checker, allocator, feeRecipient };
 
   /** A fund as the stack knows it: its contract, its rule, its intended cap and the classes it opened with. */
   type FundStack = {
@@ -294,17 +312,65 @@ async function stages(connection: NetworkConnection, profile: Profile) {
     const [firstFund] = Object.values(funds);
 
     const placed: Record<string, Awaited<ReturnType<typeof attach>>> = {};
+    const legos: Record<string, Record<string, Address>> = {};
+
+    /** Runs `Legos` for a product that has them, with the council attesting each. Returns what `Product` plugs in. */
+    const buildLegos = async (product: Product, assetAddress: Address) => {
+      if (!hasLegos(product)) return {};
+      const implementation = p[IMPLEMENTATION_KEY[product.template]] as Address;
+      const vault = await proxyDeployer.read.predict([product.symbol, implementation]);
+      const module = legosModule(product);
+      // An outside vault the test can pay yield into, unless the test named one.
+      const targets = await Promise.all(
+        (product.portfolio?.targets ?? []).map(async (t) => [
+          `target_${t.key}`,
+          p[`target_${t.key}`] ?? (await viem.deployContract("MockERC4626Target", [assetAddress])).address,
+        ]),
+      );
+      const built = await ignition.deploy(module, {
+        parameters: {
+          [module.id]: {
+            ...p,
+            vault,
+            asset: assetAddress,
+            custodianAccount: address(custody),
+            feeRecipient: address(feeRecipient),
+            ...Object.fromEntries((product.portfolio?.custodians ?? []).map((c) => [`custodian_${c.key}`, address(custody)])),
+            ...Object.fromEntries(targets),
+          },
+        },
+        defaultSender: address(operations),
+      });
+      const addresses = Object.fromEntries(Object.entries(built).map(([key, c]) => [key, (c as { address: Address }).address]));
+      const kindOf = (key: string) =>
+        key === "portfolio" ? ATTEST.PORTFOLIO
+        : key.startsWith("validator_") ? ATTEST.VALIDATOR
+        : key === "feeModel" ? ATTEST.FEE_MODEL
+        : key === "navDesk" ? undefined
+        : ATTEST.ADAPTER;
+      for (const [key, target] of Object.entries(addresses)) {
+        const kind = kindOf(key);
+        // Two custodians' validators can be the same code: the council attests it once.
+        if (kind !== undefined && !(await registry.read.isAttested([target, kind]))) await attest(target, kind, `ipfs://lego-review/${target}`);
+      }
+      legos[product.key] = addresses;
+      return addresses;
+    };
 
     /** Runs `Product` as the operations account, with the parameters that are specific to this product. */
     const place = async (product: Product) => {
       const module = productModule(product);
+      const assetAddress = (product.assetProduct === undefined ? p.asset : placed[product.assetProduct].address) as Address;
+      const built = await buildLegos(product, assetAddress);
       const { token } = await ignition.deploy(module, {
         parameters: {
           [module.id]: {
             ...p,
+            ...built,
             implementation: p[IMPLEMENTATION_KEY[product.template]],
             minPosition: p[`${product.key}MinPosition`] ?? 0n,
-            asset: product.assetProduct === undefined ? p.asset : placed[product.assetProduct].address,
+            supplyCap: p[`${product.key}SupplyCap`] ?? 0n,
+            asset: assetAddress,
             ...(product.fund === undefined ? {} : { fundHoldersRule: funds[product.fund].rule.address }),
           },
         },
@@ -315,7 +381,7 @@ async function stages(connection: NetworkConnection, profile: Profile) {
       // credentials it. Its own shares need no credential: `CredentialRule` does not judge a token's own address.
       if (product.template === "Gated7540Vault" && product.assetProduct !== undefined && credentials !== undefined) {
         const validUntil = (await publicClient.getBlock()).timestamp + DEMO_VALIDITY;
-        await credentials.write.set([contract.address, validUntil, QUALS.KYC | QUALS.INFRA, COUNTRY], { account: kyc.account });
+        await credentials.write.set([contract.address, validUntil, QUALS.KYC | QUALS.INFRA], { account: kyc.account });
       }
       placed[product.key] = contract;
       return contract;
@@ -359,7 +425,10 @@ async function stages(connection: NetworkConnection, profile: Profile) {
       asset,
       deployed: products,
       products: placed,
+      legos,
+      parameters: p,
       place,
+      profile,
     };
     await assertHandedOver(stack);
     return stack;
@@ -384,6 +453,10 @@ async function stages(connection: NetworkConnection, profile: Profile) {
  * - each fund is owned by the timelock, runs the attested rule that points back at it, has the intended cap, and holds the
  *   classes it opened with, in order, each intact (its hook lists the fund's rule: `firstBrokenClass()` is the zero
  *   address);
+ * - a product's legos are wired as its profile says and name this product: its desk holds SETTLER_ROLE and no account
+ *   does, the reporter, the checker and the allocator are different accounts, and the council attested what needs it;
+ * - MINTER_ROLE, BURNER_ROLE, AGENT_ROLE and a desk-less vault's SETTLER_ROLE sit with a Safe of at least two signers,
+ *   unless the profile names the role as an exception;
  * - the recovery timelock holds exactly RECOVERY_ROLE on each product, the executors, the credential registry and the
  *   main timelock (nothing else, nowhere else), has no cancellers, and the guardian holds nothing on it.
  */
@@ -525,6 +598,69 @@ export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
   assert.equal(await s.timelock.read.hasRole([await s.timelock.read.PROPOSER_ROLE(), guardian]), false);
   assert.equal(await s.timelock.read.hasRole([await s.timelock.read.EXECUTOR_ROLE(), guardian]), false);
   assert.ok((await s.timelock.read.getMinDelay()) >= DAY, "timelock delay below 24 hours");
+
+  // A product's legos. Their roles live outside the vault's role scan, so they are asked by name.
+  const named = s.parameters as Record<string, Address>;
+  const read = <T>(address: Address, functionName: "VAULT" | "portfolio" | "feeModel" | "adapters") =>
+    s.publicClient.readContract({ address, abi: LEGO_ABI, functionName }) as Promise<T>;
+  const isSame = async (address: Address, functionName: "VAULT" | "portfolio" | "feeModel", expected: Address) =>
+    isAddressEqual(await read<Address>(address, functionName), expected);
+  for (const { product, contract } of s.deployed) {
+    const legos = s.legos[product.key] ?? {};
+    /** The role sits with `holder` and with no other account the stack knows about. */
+    const heldOnlyBy = async (role: Hex, holder: Address, label: string) => {
+      assert.equal(await contract.read.hasRole([role, holder]), true, `no ${label} on ${contract.address}`);
+      for (const account of known) {
+        if (!isAddressEqual(account, holder)) assert.equal(await contract.read.hasRole([role, account]), false, `${account} is also ${label} on ${contract.address}`);
+      }
+    };
+    const functions = [
+      ...(product.nav === undefined ? [] : [named.reporter, named.checker]),
+      ...(product.portfolio === undefined ? [] : [named.allocator]),
+    ].map((account) => account.toLowerCase());
+    assert.equal(new Set(functions).size, functions.length, `the reporter, the checker and the allocator of ${contract.address} are not different accounts`);
+    if (product.nav !== undefined) {
+      assert.ok(await isSame(legos.navDesk, "VAULT", contract.address), `the desk of ${contract.address} names another vault`);
+      await heldOnlyBy(ROLES.SETTLER, legos.navDesk, "settler");
+      await heldOnlyBy(ROLES.REPORTER, named.reporter, "reporter");
+      await heldOnlyBy(ROLES.CHECKER, named.checker, "checker");
+    }
+    if (product.portfolio !== undefined) {
+      const { portfolio } = legos;
+      assert.ok(await isSame(portfolio, "VAULT", contract.address), `the portfolio of ${contract.address} names another vault`);
+      assert.ok(await isSame(legos.navDesk ?? contract.address, "portfolio", portfolio), `the portfolio of ${contract.address} is not plugged in`);
+      assert.equal(await s.registry.read.isAttested([portfolio, ATTEST.PORTFOLIO]), true, "the portfolio is not attested");
+      await heldOnlyBy(ROLES.ALLOCATOR, named.allocator, "allocator");
+      const adapters = Object.entries(legos).flatMap(([key, target]) => (key.startsWith("account_") || key.startsWith("adapter_") ? [target] : []));
+      const lowered = (list: readonly Address[]) => list.map((account) => account.toLowerCase()).sort();
+      assert.deepEqual(lowered(await read<Address[]>(portfolio, "adapters")), lowered(adapters), `the adapters of ${contract.address}`);
+      for (const adapter of adapters) assert.equal(await s.registry.read.isAttested([adapter, ATTEST.ADAPTER]), true, `adapter ${adapter} is not attested`);
+    }
+    if (product.fees !== undefined) {
+      assert.ok(await isSame(legos.navDesk ?? contract.address, "feeModel", legos.feeModel), `the fee model of ${contract.address} is not plugged in`);
+      assert.equal(await s.registry.read.isAttested([legos.feeModel, ATTEST.FEE_MODEL]), true, "the fee model is not attested");
+    }
+    // The sensitive roles sit with a Safe of at least two signers, unless the profile says otherwise on purpose.
+    const sensitive = [
+      ["minter", ROLES.MINTER],
+      ["burner", ROLES.BURNER],
+      ["agent", ROLES.AGENT],
+      ["settler", ROLES.SETTLER],
+    ] as const;
+    for (const [name, role] of sensitive) {
+      if (s.profile.singleSigners?.includes(name) || !(await contract.read.hasRole([role, named[name]]))) continue;
+      assert.ok(await isMultiSigner(s.publicClient, named[name]), `${name} on ${contract.address} is a single signer and the profile names no exception`);
+    }
+  }
+}
+
+/** Whether an account answers a Safe's `getThreshold()` with two or more. */
+async function isMultiSigner(publicClient: ProfileStack["publicClient"], account: Address) {
+  try {
+    return (await publicClient.readContract({ address: account, abi: SAFE_ABI, functionName: "getThreshold" })) >= 2n;
+  } catch {
+    return false;
+  }
 }
 
 export const INTENT_TYPES = {
@@ -763,15 +899,6 @@ export async function deployGatedCashToken(connection: NetworkConnection, s: Sta
   return token;
 }
 
-// ---- Credentials -------------------------------------------------------------------------------------------------------
-
-type Who = Address | { account: { address: Address } };
-const addressOf = (who: Who) => (typeof who === "string" ? who : who.account.address);
-
-/**
- * The demo KYC attester vouches for `who`: a credential from now, valid for `validFor` seconds (far past any test by
- * default) with `quals`. Writes over an earlier credential of the same attester.
- */
 // ---- Dealing ----
 
 /** Shares per asset unit at par: the shares of a 7540 have 6 more decimals than its asset. */
@@ -807,9 +934,37 @@ export async function settlePeriod(s: DealingStack, vault: DealingVault, nav?: b
   await vault.write.settlePeriod([value, 0n, custody.address, zeroAddress], { account: settler });
 }
 
+/**
+ * One period through a product's desk, as it runs live: anyone closes it once the period is over, the reporter proposes the
+ * value it was given, the checker accepts that proposal by its hash, and anyone executes after the cooldown.
+ */
+export async function settleThroughDesk(connection: NetworkConnection, s: ProfileStack, key: string, reported: bigint) {
+  const { viem, networkHelpers } = connection;
+  const desk = await viem.getContractAt("NavDesk", s.legos[key].navDesk);
+  const portfolio = s.legos[key].portfolio;
+  await networkHelpers.time.increase(await desk.read.periodLength());
+  await desk.write.closePeriod();
+  const moves = portfolio === undefined ? 0n : await (await viem.getContractAt("Portfolio", portfolio)).read.moves();
+  const asOf = BigInt(await networkHelpers.time.latest());
+  await desk.write.propose([reported, keccak256(toHex(`report:${asOf}`)), asOf, moves], { account: s.wallets.reporter.account });
+  const hash = await desk.read.hashOf([await desk.read.proposal()]);
+  await desk.write.accept([hash], { account: s.wallets.checker.account });
+  await networkHelpers.time.increase(await desk.read.cooldown());
+  await desk.write.execute();
+}
+
+// ---- Credentials -------------------------------------------------------------------------------------------------------
+
+type Who = Address | { account: { address: Address } };
+const addressOf = (who: Who) => (typeof who === "string" ? who : who.account.address);
+
+/**
+ * The demo KYC attester vouches for `who`: a credential from now, valid for `validFor` seconds (far past any test by
+ * default) with `quals`. Writes over an earlier credential of the same attester.
+ */
 export async function verify(s: Pick<ProfileStack, "publicClient" | "credentials" | "wallets">, who: Who, opts: { quals?: number; validFor?: bigint } = {}) {
   const now = (await s.publicClient.getBlock()).timestamp;
-  await s.credentials!.write.set([addressOf(who), now + (opts.validFor ?? DEMO_VALIDITY), opts.quals ?? QUALS.KYC, COUNTRY], {
+  await s.credentials!.write.set([addressOf(who), now + (opts.validFor ?? DEMO_VALIDITY), opts.quals ?? QUALS.KYC], {
     account: s.wallets.kyc.account,
   });
 }

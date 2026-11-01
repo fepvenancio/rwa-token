@@ -9,15 +9,18 @@ import {IFund} from 'interfaces/IFund.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 
 import {ProxyDeployer} from 'contracts/deploy/ProxyDeployer.sol';
+import {Distributor} from 'contracts/distribution/Distributor.sol';
 import {Fund} from 'contracts/fund/Fund.sol';
 import {GovernanceTimelock} from 'contracts/governance/GovernanceTimelock.sol';
 import {PolicyRegistry} from 'contracts/governance/PolicyRegistry.sol';
 import {ComplianceHook} from 'contracts/hooks/ComplianceHook.sol';
 import {CredentialRule} from 'contracts/hooks/rules/CredentialRule.sol';
+import {ExecutedOnlyRule} from 'contracts/hooks/rules/ExecutedOnlyRule.sol';
 import {FundHoldersRule} from 'contracts/hooks/rules/FundHoldersRule.sol';
 import {HolderRestrictionRule} from 'contracts/hooks/rules/HolderRestrictionRule.sol';
 import {MinPositionRule} from 'contracts/hooks/rules/MinPositionRule.sol';
 import {SettlementWindowRule} from 'contracts/hooks/rules/SettlementWindowRule.sol';
+import {SupplyCapRule} from 'contracts/hooks/rules/SupplyCapRule.sol';
 import {CredentialRegistry} from 'contracts/identity/CredentialRegistry.sol';
 import {DvPExecutor} from 'contracts/intents/DvPExecutor.sol';
 import {IntentExecutor} from 'contracts/intents/IntentExecutor.sol';
@@ -72,6 +75,9 @@ contract ContractSizesTest is Test {
     _assertFits('Portfolio', address(new Portfolio(address(this), IERC20(address(_asset)), true)));
     _assertFits('NavDesk', address(new NavDesk(address(this), address(this), 1 days, 1 hours, 1 days)));
     _assertFits('SignedEntry', address(new SignedEntry()));
+    _assertFits('SupplyCapRule', address(new SupplyCapRule()));
+    _assertFits('ExecutedOnlyRule', address(new ExecutedOnlyRule()));
+    _assertFits('Distributor', address(new Distributor(address(this))));
     _assertFits('FeeModel', address(new FeeModel(address(this), 0, 0, 0, false)));
     _assertFits('ERC20CallValidator', address(new ERC20CallValidator(address(this), 0)));
     _assertFits('ERC4626CallValidator', address(new ERC4626CallValidator()));

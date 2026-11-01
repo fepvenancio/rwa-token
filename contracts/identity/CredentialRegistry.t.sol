@@ -16,7 +16,6 @@ contract CredentialRegistryUnitTest is Helpers {
   uint256 internal constant _NOW = 1_792_198_800; // Sat 2026-10-17 01:00 UTC
   uint32 internal constant _ALL = type(uint32).max;
   uint32 internal constant _KYC_MASK = Quals.KYC | Quals.PROFESSIONAL | Quals.CUSTOMER;
-  uint16 internal constant _CH = 756;
 
   CredentialRegistry internal _registry;
   MockERC1271Wallet internal _wallet;
@@ -55,7 +54,7 @@ contract CredentialRegistryUnitTest is Helpers {
     uint32 _quals
   ) internal {
     vm.prank(_by);
-    _registry.set(_who, _until, _quals, _CH);
+    _registry.set(_who, _until, _quals);
   }
 
   function _active(
@@ -73,7 +72,7 @@ contract CredentialRegistryUnitTest is Helpers {
     uint8 _attester
   ) internal pure returns (ICredentialRegistry.Credential memory _c) {
     _c = ICredentialRegistry.Credential({
-      subject: _who, validUntil: _until, quals: _quals, country: _CH, issuedAt: _issuedAt, attester: _attester
+      subject: _who, validUntil: _until, quals: _quals, issuedAt: _issuedAt, attester: _attester
     });
   }
 
@@ -96,7 +95,7 @@ contract CredentialRegistryUnitTest is Helpers {
   function _status(
     address _who
   ) internal view returns (ICredentialRegistry.Status _s) {
-    (_s,,,) = _registry.profileOf(_who);
+    (_s,,) = _registry.profileOf(_who);
   }
 
   function _unauthorized(
@@ -145,9 +144,7 @@ contract CredentialRegistryUnit_Constructor is CredentialRegistryUnitTest {
   function test_WhenReadingTheTypehash_ItMatchesTheCredentialType() external view {
     assertEq(
       _registry.CREDENTIAL_TYPEHASH(),
-      keccak256(
-        'Credential(address subject,uint64 validUntil,uint32 quals,uint16 country,uint64 issuedAt,uint8 attester)'
-      )
+      keccak256('Credential(address subject,uint64 validUntil,uint32 quals,uint64 issuedAt,uint8 attester)')
     );
   }
 }
@@ -256,7 +253,7 @@ contract CredentialRegistryUnit_AttesterAdmin is CredentialRegistryUnitTest {
 
     vm.expectRevert(abi.encodeWithSelector(ICredentialRegistry.CredentialRegistry_NotAnAttester.selector, _kyc));
     vm.prank(_kyc);
-    _registry.set(_subject, uint64(_NOW + 1 days), Quals.KYC, _CH);
+    _registry.set(_subject, uint64(_NOW + 1 days), Quals.KYC);
     _active(_new, _subject);
     assertEq(uint8(_status(_subject)), uint8(ICredentialRegistry.Status.ACTIVE));
   }
@@ -280,7 +277,7 @@ contract CredentialRegistryUnit_AttesterAdmin is CredentialRegistryUnitTest {
     vm.prank(_admin);
     _registry.setAttesterQuals(0, Quals.KYC);
 
-    (ICredentialRegistry.Status _s, uint32 _quals,,) = _registry.profileOf(_subject);
+    (ICredentialRegistry.Status _s, uint32 _quals,) = _registry.profileOf(_subject);
     assertEq(uint8(_s), uint8(ICredentialRegistry.Status.ACTIVE));
     assertEq(_quals, Quals.PROFESSIONAL | Quals.KYC);
 
@@ -290,7 +287,7 @@ contract CredentialRegistryUnit_AttesterAdmin is CredentialRegistryUnitTest {
       )
     );
     vm.prank(_kyc);
-    _registry.set(_other, uint64(_NOW + 1 days), Quals.PROFESSIONAL, _CH);
+    _registry.set(_other, uint64(_NOW + 1 days), Quals.PROFESSIONAL);
   }
 }
 
@@ -298,13 +295,13 @@ contract CredentialRegistryUnit_Set is CredentialRegistryUnitTest {
   function test_WhenTheCallerIsNotAnAttester_ItReverts() external {
     vm.expectRevert(abi.encodeWithSelector(ICredentialRegistry.CredentialRegistry_NotAnAttester.selector, _stranger));
     vm.prank(_stranger);
-    _registry.set(_subject, uint64(_NOW + 1 days), Quals.KYC, _CH);
+    _registry.set(_subject, uint64(_NOW + 1 days), Quals.KYC);
   }
 
   function test_WhenTheSubjectIsZero_ItReverts() external {
     _expect(ICredentialRegistry.CredentialRegistry_ZeroAddress.selector);
     vm.prank(_kyc);
-    _registry.set(address(0), uint64(_NOW + 1 days), Quals.KYC, _CH);
+    _registry.set(address(0), uint64(_NOW + 1 days), Quals.KYC);
   }
 
   function test_WhenTheAttesterIsKilled_ItReverts() external {
@@ -312,7 +309,7 @@ contract CredentialRegistryUnit_Set is CredentialRegistryUnitTest {
     _registry.killAttester(0);
     vm.expectRevert(abi.encodeWithSelector(ICredentialRegistry.CredentialRegistry_AttesterKilled.selector, 0));
     vm.prank(_kyc);
-    _registry.set(_subject, uint64(_NOW + 1 days), Quals.KYC, _CH);
+    _registry.set(_subject, uint64(_NOW + 1 days), Quals.KYC);
   }
 
   function test_WhenTheQualsAreOutsideTheAllowedMask_ItReverts(
@@ -323,7 +320,7 @@ contract CredentialRegistryUnit_Set is CredentialRegistryUnitTest {
       abi.encodeWithSelector(ICredentialRegistry.CredentialRegistry_QualsNotAllowed.selector, 0, _quals, _KYC_MASK)
     );
     vm.prank(_kyc);
-    _registry.set(_subject, uint64(_NOW + 1 days), _quals, _CH);
+    _registry.set(_subject, uint64(_NOW + 1 days), _quals);
   }
 
   function test_WhenTheValidityIsNotInTheFuture_ItReverts(
@@ -332,7 +329,7 @@ contract CredentialRegistryUnit_Set is CredentialRegistryUnitTest {
     _until = uint64(bound(_until, 0, _NOW));
     vm.expectRevert(abi.encodeWithSelector(ICredentialRegistry.CredentialRegistry_ValidityInPast.selector, _until));
     vm.prank(_kyc);
-    _registry.set(_subject, _until, Quals.KYC, _CH);
+    _registry.set(_subject, _until, Quals.KYC);
   }
 
   function test_WhenTheValidityIsOneSecondAhead_ItIsAccepted() external {
@@ -342,21 +339,19 @@ contract CredentialRegistryUnit_Set is CredentialRegistryUnitTest {
 
   function test_WhenValid_ItStoresTheRecordAndEmits(
     uint64 _until,
-    uint32 _quals,
-    uint16 _country
+    uint32 _quals
   ) external {
     _until = uint64(bound(_until, _NOW + 1, type(uint64).max));
     _quals = _quals & _KYC_MASK;
     vm.expectEmit(address(_registry));
-    emit ICredentialRegistry.CredentialSet(_subject, 0, _until, _quals, _country, uint64(_NOW));
+    emit ICredentialRegistry.CredentialSet(_subject, 0, _until, _quals, uint64(_NOW));
     vm.prank(_kyc);
-    _registry.set(_subject, _until, _quals, _country);
+    _registry.set(_subject, _until, _quals);
 
     ICredentialRegistry.Record memory _r = _registry.recordOf(_subject);
     assertEq(_r.validUntil, _until);
     assertEq(uint8(_r.status), uint8(ICredentialRegistry.Status.ACTIVE));
     assertEq(_r.quals, _quals);
-    assertEq(_r.country, _country);
     assertEq(_r.attester, 0);
     assertEq(_r.issuedAt, uint64(_NOW));
     assertFalse(_r.guardianBlock);
@@ -378,7 +373,7 @@ contract CredentialRegistryUnit_Set is CredentialRegistryUnitTest {
       abi.encodeWithSelector(ICredentialRegistry.CredentialRegistry_RecordOwnedByAnotherAttester.selector, _subject, 0)
     );
     vm.prank(_attester1);
-    _registry.set(_subject, uint64(_NOW + 1 days), Quals.KYC, _CH);
+    _registry.set(_subject, uint64(_NOW + 1 days), Quals.KYC);
   }
 
   function test_WhenAnotherActiveAttesterBlockedTheRecord_ItStillReverts() external {
@@ -389,7 +384,7 @@ contract CredentialRegistryUnit_Set is CredentialRegistryUnitTest {
       abi.encodeWithSelector(ICredentialRegistry.CredentialRegistry_RecordOwnedByAnotherAttester.selector, _subject, 0)
     );
     vm.prank(_attester1);
-    _registry.set(_subject, uint64(_NOW + 1 days), Quals.KYC, _CH);
+    _registry.set(_subject, uint64(_NOW + 1 days), Quals.KYC);
   }
 
   function test_WhenTheOwningAttesterIsKilled_AnotherMayTakeTheRecordOver() external {
@@ -415,7 +410,7 @@ contract CredentialRegistryUnit_Register is CredentialRegistryUnitTest {
   function test_WhenSignedByAnEoaAttester_AnyoneCanSubmitIt() external {
     (ICredentialRegistry.Credential memory _c, bytes memory _sig) = _signedByAttester2(_subject, uint64(_NOW));
     vm.expectEmit(address(_registry));
-    emit ICredentialRegistry.CredentialSet(_subject, 2, _c.validUntil, _c.quals, _c.country, _c.issuedAt);
+    emit ICredentialRegistry.CredentialSet(_subject, 2, _c.validUntil, _c.quals, _c.issuedAt);
     vm.prank(_stranger);
     _registry.register(_c, _sig);
 
@@ -866,20 +861,18 @@ contract CredentialRegistryUnit_Guardian is CredentialRegistryUnitTest {
 
 contract CredentialRegistryUnit_ProfileOf is CredentialRegistryUnitTest {
   function test_WhenNeverWritten_ItReadsNone() external view {
-    (ICredentialRegistry.Status _s, uint32 _quals, uint16 _country, uint8 _attester) = _registry.profileOf(_subject);
+    (ICredentialRegistry.Status _s, uint32 _quals, uint8 _attester) = _registry.profileOf(_subject);
     assertEq(uint8(_s), uint8(ICredentialRegistry.Status.NONE));
     assertEq(_quals, 0);
-    assertEq(_country, 0);
     assertEq(_attester, 0);
     assertFalse(_registry.isVerified(_subject));
   }
 
   function test_WhenActiveAndWithinValidity_ItReadsActiveWithTheStoredFields() external {
     _set(_attester1, _subject, uint64(_NOW + 5 days), Quals.KYC | Quals.LICENSED);
-    (ICredentialRegistry.Status _s, uint32 _quals, uint16 _country, uint8 _attester) = _registry.profileOf(_subject);
+    (ICredentialRegistry.Status _s, uint32 _quals, uint8 _attester) = _registry.profileOf(_subject);
     assertEq(uint8(_s), uint8(ICredentialRegistry.Status.ACTIVE));
     assertEq(_quals, Quals.KYC | Quals.LICENSED);
-    assertEq(_country, _CH);
     assertEq(_attester, 1);
     assertTrue(_registry.isVerified(_subject));
   }
@@ -994,9 +987,7 @@ contract CredentialRegistryUnit_CredentialHash is CredentialRegistryUnitTest {
   function test_WhenHashing_ItIsTheEip712DigestOfTheTypedData() external view {
     ICredentialRegistry.Credential memory _c = _credential(_subject, uint64(_NOW + 1 days), Quals.KYC, uint64(_NOW), 2);
     bytes32 _structHash = keccak256(
-      abi.encode(
-        _registry.CREDENTIAL_TYPEHASH(), _c.subject, _c.validUntil, _c.quals, _c.country, _c.issuedAt, _c.attester
-      )
+      abi.encode(_registry.CREDENTIAL_TYPEHASH(), _c.subject, _c.validUntil, _c.quals, _c.issuedAt, _c.attester)
     );
     bytes32 _domain = keccak256(
       abi.encode(
@@ -1066,7 +1057,7 @@ contract CredentialRegistryHandler is Helpers {
     uint64 _before = _registry.recordOf(_subject).issuedAt;
     _until = uint64(bound(_until, 0, block.timestamp + 400 days));
     vm.prank(_attesters[_by % 3]);
-    try _registry.set(_subject, _until, _quals, 756) {
+    try _registry.set(_subject, _until, _quals) {
       ++writes;
     } catch {
       ++rejections;
@@ -1084,7 +1075,7 @@ contract CredentialRegistryHandler is Helpers {
     _until = uint64(bound(_until, 0, block.timestamp + 400 days));
     _issuedAt = uint64(bound(_issuedAt, 0, block.timestamp + 1 days));
     ICredentialRegistry.Credential memory _c = ICredentialRegistry.Credential({
-      subject: _subject, validUntil: _until, quals: Quals.KYC, country: 756, issuedAt: _issuedAt, attester: 2
+      subject: _subject, validUntil: _until, quals: Quals.KYC, issuedAt: _issuedAt, attester: 2
     });
     (uint8 _v, bytes32 _r, bytes32 _s) = vm.sign(_signerPk, _registry.credentialHash(_c));
     try _registry.register(_c, abi.encodePacked(_r, _s, _v)) {
