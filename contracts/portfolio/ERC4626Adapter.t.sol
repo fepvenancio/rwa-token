@@ -128,6 +128,40 @@ contract ERC4626AdapterUnit_Reads is ERC4626AdapterUnitTest {
     assertEq(_adapter.liquid(), 0);
   }
 
+  /// @dev A `try` does not catch a target with no code, which a bad upgrade of the target's proxy can leave
+  function test_ATargetWithNoCodeIsZeroAndNotFresh() external {
+    _allocate(100e6);
+    vm.etch(address(_target), '');
+    assertEq(_adapter.value(), 0);
+    assertFalse(_adapter.fresh());
+    assertEq(_adapter.liquid(), 0);
+  }
+
+  /// @dev Nor does it catch a target that answers with too little: 31 bytes here
+  function test_ATargetThatReturnsTooLittleIsZeroAndNotFresh() external {
+    _allocate(100e6);
+    vm.etch(address(_target), hex'601f6000f3');
+    assertEq(_adapter.value(), 0);
+    assertFalse(_adapter.fresh());
+    assertEq(_adapter.liquid(), 0);
+  }
+
+  /// @dev A target that cannot name the balance has no position to price, even if it can price nothing
+  function test_ATargetThatCannotNameTheBalanceIsZeroAndNotFresh() external {
+    _allocate(100e6);
+    vm.mockCallRevert(address(_target), abi.encodeCall(IERC20.balanceOf, (address(_adapter))), 'outage');
+    assertEq(_adapter.value(), 0);
+    assertFalse(_adapter.fresh());
+  }
+
+  /// @dev A target that answers with one word of zero has answered: an empty position is not an outage
+  function test_ATargetThatReturnsOneWordIsFresh() external {
+    _allocate(100e6);
+    vm.etch(address(_target), hex'60206000f3');
+    assertEq(_adapter.value(), 0);
+    assertTrue(_adapter.fresh());
+  }
+
   function test_LiquidReadsTheTargetsLimit() external {
     _allocate(100e6);
     assertEq(_adapter.liquid(), 100e6);

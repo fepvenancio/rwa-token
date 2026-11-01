@@ -184,7 +184,7 @@ interface IGated7540Vault {
    * @param _asset The underlying asset; its `decimals()` must answer, and the shares take that plus 6
    * @param _name The share token name, also the EIP-712 domain name
    * @param _symbol The share token symbol
-   * @param _admin The timelock, granted DEFAULT_ADMIN_ROLE
+   * @param _admin The first admin, granted DEFAULT_ADMIN_ROLE: the operations account in a launch, which hands it to the timelock
    * @param _guardian The guardian multisig, granted GUARDIAN_ROLE
    * @param _registry The policy registry
    * @param _hook The initial policy hook; must be attested as HOOK and name the same registry
@@ -219,7 +219,7 @@ interface IGated7540Vault {
    * @notice Recovers a controller's whole pending redemption to a verified account (an enforcement action)
    * @dev AGENT_ROLE while the request's period is open, SETTLER_ROLE once it has closed. Clears the controller's pending
    *      bookkeeping and moves the escrowed shares to `_to` internally as FORCED: bypasses pause, lockup and the holder
-   *      cap, but `_to` must pass identity. The path for a controller that was de-verified, whose reject reverts. Reverts
+   *      cap, but `_to` must pass the token's policy (identity, freeze, fund class). The path for a controller that was de-verified, whose reject reverts. Reverts
    *      if nothing is pending
    * @param _controller The controller
    * @param _to The verified recovery account, e.g. the treasury

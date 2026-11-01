@@ -28,7 +28,7 @@ interface ITemplated {
 
   /**
    * @notice The template this implementation belongs to
-   * @return _id `keccak256('IntentToken')`, `keccak256('Gated4626Vault')` or `keccak256('Gated7540Vault')`
+   * @return _id `keccak256('GatedToken')`, `keccak256('IntentToken')`, `keccak256('Gated4626Vault')` or `keccak256('Gated7540Vault')`
    */
   function templateId() external pure returns (bytes32 _id);
 }

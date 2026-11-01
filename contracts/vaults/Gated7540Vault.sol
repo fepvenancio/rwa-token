@@ -469,7 +469,7 @@ contract Gated7540Vault is
 
   /**
    * @inheritdoc IERC4626
-   * @dev The controller's claimable redemption shares; 0 when paused
+   * @dev The controller's claimable redemption shares; 0 when paused or when a burn from the controller would be rejected
    */
   function maxRedeem(
     address _controller
@@ -480,7 +480,7 @@ contract Gated7540Vault is
 
   /**
    * @inheritdoc IERC4626
-   * @dev The controller's claimable redemption assets; 0 when paused
+   * @dev The controller's claimable redemption assets; 0 when paused or when a burn from the controller would be rejected
    */
   function maxWithdraw(
     address _controller

@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {IERC4626} from '@openzeppelin/contracts/interfaces/IERC4626.sol';
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {SafeERC20} from '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
+import {LowLevelCall} from '@openzeppelin/contracts/utils/LowLevelCall.sol';
 
 import {IAdapter} from 'interfaces/IAdapter.sol';
 import {IERC4626Adapter} from 'interfaces/IERC4626Adapter.sol';
@@ -85,11 +86,7 @@ contract ERC4626Adapter is IERC4626Adapter {
 
   /// @inheritdoc IAdapter
   function liquid() external view returns (uint256 _liquid) {
-    try TARGET.maxWithdraw(address(this)) returns (uint256 _max) {
-      _liquid = _max;
-    } catch {
-      _liquid = 0;
-    }
+    (, _liquid) = _ask(abi.encodeCall(IERC4626.maxWithdraw, (address(this))));
   }
 
   /// @inheritdoc IAdapter
@@ -116,15 +113,26 @@ contract ERC4626Adapter is IERC4626Adapter {
    * @return _value The position's value in assets, zero when `_ok` is false
    */
   function _read() private view returns (bool _ok, uint256 _value) {
-    try TARGET.balanceOf(address(this)) returns (uint256 _shares) {
-      try TARGET.previewRedeem(_shares) returns (uint256 _assets) {
-        _ok = true;
-        _value = _assets;
-      } catch {
-        _ok = false;
-      }
-    } catch {
-      _ok = false;
-    }
+    uint256 _shares;
+    (_ok, _shares) = _ask(abi.encodeCall(IERC20.balanceOf, (address(this))));
+    if (_ok) (_ok, _value) = _ask(abi.encodeCall(IERC4626.previewRedeem, (_shares)));
+  }
+
+  /**
+   * @notice Asks the target for one number, treating any failure as no answer
+   * @dev Low level, because a `try` does not catch a target with no code or one that returns too little: the decoding
+   *      reverts here. It reads the first word and copies nothing else
+   * @param _call The call
+   * @return _ok True if the target answered with at least one word
+   * @return _answer The answer, zero when `_ok` is false
+   */
+  function _ask(
+    bytes memory _call
+  ) private view returns (bool _ok, uint256 _answer) {
+    // The second word of the scratch space is not needed.
+    // slither-disable-next-line unused-return
+    (bool _success, bytes32 _word,) = LowLevelCall.staticcallReturn64Bytes(address(TARGET), _call);
+    _ok = _success && LowLevelCall.returnDataSize() >= 32;
+    if (_ok) _answer = uint256(_word);
   }
 }

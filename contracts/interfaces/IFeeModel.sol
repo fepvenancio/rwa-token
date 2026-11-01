@@ -21,7 +21,7 @@ interface IFeeModel {
   /// @notice Thrown when a rate is above its ceiling
   error FeeModel_RateTooHigh();
 
-  /// @notice Thrown when a rate would be charged with nobody to pay it to
+  /// @notice Thrown when a model names nobody to pay, even with no rate: a swap to it must still pay what is owed
   error FeeModel_ZeroRecipient();
 
   /*///////////////////////////////////////////////////////////////

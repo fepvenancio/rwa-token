@@ -82,8 +82,8 @@ interface ITransferIntent {
 
   /**
    * @notice Executes a signed intent
-   * @dev Only EXECUTOR_ROLE. Checks the deadline, the nonce, the consideration, the executor and the window, then the
-   *      signature (ECDSA or ERC-1271), then moves the tokens as EXECUTED through the policy hook. The executor cannot
+   * @dev Only EXECUTOR_ROLE. Checks the deadline, the nonce, the consideration, the executor, the window and a zero
+   *      receiver, then the signature (ECDSA or ERC-1271), then moves the tokens as EXECUTED through the policy hook. The executor cannot
    *      alter the intent. Reverts with `PolicyGated_TransferRejected` carrying the reason `canExecute` returns
    * @param _intent The intent
    * @param _sig The holder's signature over `intentHash(_intent)`

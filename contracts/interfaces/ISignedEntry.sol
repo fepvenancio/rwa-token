@@ -71,6 +71,12 @@ interface ISignedEntry {
   /// @notice Thrown when the signature is not the investor's
   error SignedEntry_BadSignature();
 
+  /**
+   * @notice Thrown when the vault did not take all the cash, as when a 7540 treats a deposit as a claim for this contract
+   * @param _left The allowance the vault left unspent
+   */
+  error SignedEntry_CashNotTaken(uint256 _left);
+
   /// @notice Thrown after the deadline
   error SignedEntry_Expired();
 

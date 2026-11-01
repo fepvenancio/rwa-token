@@ -47,12 +47,17 @@ contract FeeModel_Construction is FeeModelTest {
     new FeeModel(_recipient, 0, 0, 5001, false);
   }
 
-  function test_ARateWithNobodyToPayIsRefused() external {
+  /// @dev Even with no rate: a model swapped in with nobody to pay would strand what the last one left owed
+  function test_NobodyToPayIsRefused() external {
     vm.expectRevert(IFeeModel.FeeModel_ZeroRecipient.selector);
     new FeeModel(address(0), 1, 0, 0, false);
     vm.expectRevert(IFeeModel.FeeModel_ZeroRecipient.selector);
     new FeeModel(address(0), 0, 1, 0, false);
+    vm.expectRevert(IFeeModel.FeeModel_ZeroRecipient.selector);
     new FeeModel(address(0), 0, 0, 100, false);
+    vm.expectRevert(IFeeModel.FeeModel_ZeroRecipient.selector);
+    new FeeModel(address(0), 0, 0, 0, false);
+    new FeeModel(_recipient, 0, 0, 0, false);
   }
 }
 
@@ -179,6 +184,24 @@ contract FeeModel_Performance is FeeModelTest {
       assertFalse(_moved);
       _mark = _newMark;
     }
+  }
+}
+
+contract FeeModel_RoundedCharges is FeeModelTest {
+  /// @dev A charge too small to pay leaves the price where it was. On a dust position the next investor buys near that
+  ///      price, and a mark left below it would be charged on their principal
+  function test_WhenTheChargeRoundsToNoFeeTheMarkIsThePrice() external {
+    (uint256 _fee, uint256 _newMark, bool _moved) = _model(0, 5000, 0, false).quote(5, 3e6, 1e12, 0, 0);
+    assertEq(_fee, 0);
+    assertEq(_newMark, uint256(5e18) / 3e6);
+    assertTrue(_moved);
+  }
+
+  function test_TheMarkIsThePriceAfterWhatIsActuallyCharged() external {
+    (uint256 _fee, uint256 _newMark, bool _moved) = _model(0, 5000, 0, false).quote(7, 3e6, 1e12, 0, 0);
+    assertEq(_fee, 1);
+    assertEq(_newMark, uint256(7e18) / 3e6 - uint256(1e18) / 3e6);
+    assertTrue(_moved);
   }
 }
 

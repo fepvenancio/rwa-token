@@ -95,7 +95,7 @@ interface IDistributor {
   /// @notice Thrown when claiming after the expiry
   error Distributor_Expired();
 
-  /// @notice Thrown when a claim or a sweep is on a distribution not approved
+  /// @notice Thrown when approving a distribution nobody proposed, or when a claim or a sweep is on one not approved
   error Distributor_NotApproved();
 
   /// @notice Thrown when sweeping before the expiry

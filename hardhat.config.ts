@@ -27,7 +27,7 @@ export default defineConfig({
     default: { type: "edr-simulated", accounts: { count: 24 } },
   },
   solidity: {
-    // Hardhat emits artifacts only for project sources; Ignition deploys OZ's own timelock by name.
+    // Hardhat emits artifacts only for project sources; a governance test deploys OZ's own timelock by name.
     npmFilesToBuild: ["@openzeppelin/contracts/governance/TimelockController.sol"],
     profiles: {
       default: compiler,

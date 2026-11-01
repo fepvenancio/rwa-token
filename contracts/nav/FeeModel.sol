@@ -49,7 +49,7 @@ contract FeeModel is IFeeModel {
 
   /**
    * @notice Deploys the model
-   * @param _recipient Who is paid; needed when a rate is charged
+   * @param _recipient Who is paid; not zero, even with no rate, as a swap to this model must still pay what is owed
    * @param _managementBps The yearly management rate
    * @param _performanceBps The performance rate
    * @param _hurdleBps The yearly hurdle rate
@@ -65,7 +65,7 @@ contract FeeModel is IFeeModel {
     if (_managementBps > _MAX_MANAGEMENT_BPS || _performanceBps > _MAX_RATE_BPS || _hurdleBps > _MAX_RATE_BPS) {
       revert FeeModel_RateTooHigh();
     }
-    if (_recipient == address(0) && (_managementBps != 0 || _performanceBps != 0)) revert FeeModel_ZeroRecipient();
+    if (_recipient == address(0)) revert FeeModel_ZeroRecipient();
     RECIPIENT = _recipient;
     MANAGEMENT_BPS = _managementBps;
     PERFORMANCE_BPS = _performanceBps;
@@ -91,9 +91,11 @@ contract FeeModel is IFeeModel {
 
     uint256 _charged = _performance(_price, _mark, _hurdled);
     if (_charged == 0) return (_fee, _mark, false);
-    _fee += Math.mulDiv(_charged, _supply, _PRICE_SCALE);
-    // Never below the hurdle: what is charged never exceeds what is above it.
-    _newMark = _price - _charged;
+    uint256 _paid = Math.mulDiv(_charged, _supply, _PRICE_SCALE);
+    _fee += _paid;
+    // The price after what is actually paid, never below the hurdle: what is charged never exceeds what is above it. A
+    // charge that rounds down stays in the price, and a mark below that would be charged on the next investor's principal.
+    _newMark = _price - Math.mulDiv(_paid, _PRICE_SCALE, _supply);
     _markMoved = true;
   }
 

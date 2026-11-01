@@ -240,7 +240,7 @@ abstract contract PolicyGatedERC20Upgradeable is
    * @notice Initializes the base and its OpenZeppelin parents
    * @param _name The token name, also the EIP-712 domain name
    * @param _symbol The token symbol
-   * @param _admin The timelock, granted DEFAULT_ADMIN_ROLE
+   * @param _admin The first admin, granted DEFAULT_ADMIN_ROLE: the operations account in a launch, which hands it to the timelock
    * @param _guardian The guardian multisig, granted GUARDIAN_ROLE
    * @param _registry The policy registry
    * @param _hook The initial policy hook; must be attested as HOOK and name the same registry
@@ -266,7 +266,7 @@ abstract contract PolicyGatedERC20Upgradeable is
 
   /**
    * @notice Initializes the base's own state
-   * @param _admin The timelock, granted DEFAULT_ADMIN_ROLE
+   * @param _admin The first admin, granted DEFAULT_ADMIN_ROLE: the operations account in a launch, which hands it to the timelock
    * @param _guardian The guardian multisig, granted GUARDIAN_ROLE
    * @param _registry The policy registry
    * @param _hook The initial policy hook; must be attested as HOOK and name the same registry
@@ -396,8 +396,7 @@ abstract contract PolicyGatedERC20Upgradeable is
    * @notice Lowers an account's frozen amount by the part of an enforcement action that comes out of it
    * @dev The unfrozen balance is what an action can take without touching the frozen amount; only the rest of `_amount`
    *      is released, so a frozen amount above the balance (ERC-7943 allows it) loses exactly what leaves. Emits `Frozen`
-   *      before the token `Transfer`, as ERC-7943 requires. Internal so templates' own enforcement moves (e.g. the 7540
-   *      escrow returns) release the same way
+   *      before the token `Transfer`, as ERC-7943 requires
    * @param _account The account losing tokens
    * @param _amount The amount it loses
    */

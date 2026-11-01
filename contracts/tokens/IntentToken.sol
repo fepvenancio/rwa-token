@@ -41,7 +41,8 @@ contract IntentToken is IntentSettledUpgradeable {
    * @param _name The token name, also the EIP-712 domain name
    * @param _symbol The token symbol
    * @param _decimals The token's decimals, fixed from here on: for a cash token, its ledger's precision
-   * @param _admin The timelock. Holds DEFAULT_ADMIN_ROLE and grants every other role
+   * @param _admin The first admin, which holds DEFAULT_ADMIN_ROLE and grants every other role: the operations account in a
+   *        launch, which hands it to the timelock
    * @param _guardian The guardian multisig. Can pause and, through the timelock's CANCELLER_ROLE, veto; nothing else
    * @param _registry The policy registry, fixed after initialization
    * @param _hook The initial policy hook; must be attested as HOOK and name the same registry

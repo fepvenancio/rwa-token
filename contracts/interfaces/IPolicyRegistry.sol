@@ -3,8 +3,8 @@ pragma solidity ^0.8.28;
 
 /**
  * @title IPolicyRegistry
- * @notice Allowlist of reviewed code. Hooks, rules and token implementations may only be installed if their runtime
- *         codehash is attested here. Checked at install time only
+ * @notice Allowlist of reviewed code. Hooks, rules, token implementations, portfolios, adapters, validators and fee models
+ *         may only be installed if their runtime codehash is attested here. Checked at install time only
  * @dev A codehash covers runtime code including `immutable` values, but not storage. Components whose authority lives
  *      in storage can be cloned under the same codehash, so security-relevant configuration must be immutable
  */
@@ -21,6 +21,8 @@ interface IPolicyRegistry {
    * @param IMPLEMENTATION A token implementation, installable with a UUPS upgrade
    * @param PORTFOLIO A portfolio, which a vault can plug in and another portfolio can migrate to
    * @param ADAPTER An adapter, installable in a portfolio
+   * @param VALIDATOR A call validator, which a guarded account's permission can name
+   * @param FEE_MODEL A fee model, which a 4626 vault or a desk can plug in
    */
   enum AttestKind {
     NONE,

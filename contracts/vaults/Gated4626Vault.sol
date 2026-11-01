@@ -35,7 +35,7 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
    * @notice ERC-7201 namespaced storage of the vault. All of it is unused while no portfolio is plugged
    * @param portfolio The portfolio; zero while the vault keeps its own money
    * @param lastAt When `last` was counted
-   * @param exitOnly Whether an earlier portfolio wrote off an adapter
+   * @param exitOnly Whether an earlier portfolio wrote off an adapter, or a count found the value fallen by more than half
    * @param feeModel The fee model, or zero for none
    * @param markMovedAt When the mark last moved
    * @param lastFeeAt When a fee was last charged
@@ -61,8 +61,17 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
   /// @notice A year's worth of the rate's denominator: basis points per year, in seconds
   uint256 private constant _RATE_DENOMINATOR = 1e4 * 365 days;
 
+  /// @notice The ceiling on the limit, so the arithmetic cannot overflow. It leaves the timelock room to raise the limit
+  uint256 private constant _MAX_RATE_BPS = 1e9;
+
   /// @notice A price's scale: assets per this many share units
   uint256 private constant _PRICE_SCALE = 1e18;
+
+  /// @notice The virtual shares of the decimals offset: share units per unit of the asset at par
+  uint256 private constant _VIRTUAL_SHARES = 1e6;
+
+  /// @notice The mark at par, the lowest it can be: getting back to par recovers principal, and is no gain
+  uint256 private constant _PAR_MARK = _PRICE_SCALE / _VIRTUAL_SHARES;
 
   /// @notice keccak256(abi.encode(uint256(keccak256('gated.storage.Gated4626Vault')) - 1)) & ~bytes32(uint256(0xff))
   // Read in assembly by the ERC-7201 accessor (test: Gated4626VaultPortfolio_Storage).
@@ -105,6 +114,7 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
     uint256 _maxRateBps
   ) external onlyRole(DEFAULT_ADMIN_ROLE) {
     if (_maxRateBps == 0) revert Gated4626Vault_ZeroRate();
+    if (_maxRateBps > _MAX_RATE_BPS) revert Gated4626Vault_RateTooHigh(_maxRateBps);
     // View interfaces, compiled to STATICCALL: nothing re-enters before the writes below.
     // aderyn-ignore-next-line(reentrancy-state-change)
     if (!IPolicyRegistry(this.registry()).isAttested(_portfolio, IPolicyRegistry.AttestKind.PORTFOLIO)) {
@@ -112,25 +122,32 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
     }
     IPortfolio _next = IPortfolio(_portfolio);
     // aderyn-ignore-next-line(reentrancy-state-change)
-    if (_next.VAULT() != address(this) || _next.ACCEPTS_REPORTED()) revert Gated4626Vault_PortfolioRefused(_portfolio);
+    IERC20 _asset = IERC20(asset());
+    // aderyn-ignore-next-line(reentrancy-state-change)
+    if (_next.VAULT() != address(this) || _next.ASSET() != _asset || _next.ACCEPTS_REPORTED()) {
+      revert Gated4626Vault_PortfolioRefused(_portfolio);
+    }
 
     Gated4626Storage storage $ = _getGated4626Storage();
     address _old = $.portfolio;
-    if (_old != address(0)) {
+    if (_old == address(0)) {
+      $.lastAt = uint64(block.timestamp);
+    } else {
+      // An adapter on the list can hold a position that cannot be read now, which `pricedValue()` counts as nothing.
+      // A replacement keeps the limit's clock, so the next count allows what it would have allowed anyway.
       // View interfaces, compiled to STATICCALL, and the portfolio is attested: nothing re-enters before these writes.
       // aderyn-ignore-next-line(reentrancy-state-change)
-      if (IPortfolio(_old).pricedValue() != 0) revert Gated4626Vault_PortfolioNotEmpty();
+      if (IPortfolio(_old).adapters().length != 0 || IPortfolio(_old).pricedValue() != 0) {
+        revert Gated4626Vault_PortfolioNotEmpty();
+      }
       // aderyn-ignore-next-line(reentrancy-state-change)
       if (IPortfolio(_old).writtenOff()) $.exitOnly = true;
     }
-    // aderyn-ignore-next-line(reentrancy-state-change)
-    IERC20 _asset = IERC20(asset());
     // aderyn-ignore-next-line(reentrancy-state-change)
     uint256 _held = _asset.balanceOf(address(this));
     $.portfolio = _portfolio;
     $.maxRateBps = _maxRateBps;
     $.last += _held;
-    $.lastAt = uint64(block.timestamp);
     emit PortfolioSet(_portfolio);
     emit MaxRateSet(_maxRateBps);
     if (_held != 0) _asset.safeTransfer(_portfolio, _held);
@@ -146,6 +163,7 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
         revert Gated4626Vault_Unauthorized(_msgSender());
       }
     }
+    if (_maxRateBps > _MAX_RATE_BPS) revert Gated4626Vault_RateTooHigh(_maxRateBps);
     // The old rate decides what has counted so far.
     _accrue();
     $.maxRateBps = _maxRateBps;
@@ -166,7 +184,8 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
     _accrue();
     if ($.feeModel == address(0)) {
       if ($.mark == 0) {
-        $.mark = _convertToAssets(_PRICE_SCALE, Math.Rounding.Floor);
+        // From what was counted, not from `totalAssets()`, which during a read of nothing would start the mark at nothing.
+        $.mark = Math.max(Math.mulDiv(_PRICE_SCALE, $.last + 1, totalSupply() + _VIRTUAL_SHARES), _PAR_MARK);
         $.markMovedAt = uint64(block.timestamp);
       }
       $.lastFeeAt = uint64(block.timestamp);
@@ -182,7 +201,7 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
   }
 
   /// @inheritdoc IGated4626Vault
-  function collectFees() external {
+  function collectFees() external whenNotPaused {
     Gated4626Storage storage $ = _getGated4626Storage();
     address _feeModel = $.feeModel;
     if (_feeModel == address(0)) revert Gated4626Vault_NoFeeModel();
@@ -434,12 +453,12 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
     _offset = 6;
   }
 
-  /// @notice Brings the counted value up to date and charges any fee; does nothing with no portfolio or no price
+  /// @notice Brings the counted value up to date and charges any fee; does nothing with no portfolio or no usable price
   function _accrue() private {
     Gated4626Storage storage $ = _getGated4626Storage();
-    address _portfolio = $.portfolio;
-    if (_portfolio == address(0) || !IPortfolio(_portfolio).priceFresh()) return;
+    if ($.portfolio == address(0) || _dealingStopped()) return;
     (uint256 _counted, uint256 _fee, uint256 _newMark, bool _markMoved) = _counting();
+    if (_fellTooFar(_counted)) $.exitOnly = true;
     $.last = _counted - _fee;
     $.lastAt = uint64(block.timestamp);
     emit Accrued(_counted, _fee);
@@ -447,13 +466,13 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
     $.feesOwed += _fee;
     $.mark = _newMark;
     $.lastFeeAt = uint64(block.timestamp);
-    // With no shares the first investors do not pay for time before they arrived.
-    if (_markMoved || totalSupply() == 0) $.markMovedAt = uint64(block.timestamp);
+    if (_markMoved) $.markMovedAt = uint64(block.timestamp);
   }
 
   /**
    * @notice The value to count now, and the fee due on it
-   * @return _counted The value: the priced value net of fees owed, up to the rate limit; the last counted while no price
+   * @return _counted The value: the priced value net of fees owed, up to the rate limit; the last counted while no price;
+   *         zero with no shares
    * @return _fee The fee due now
    * @return _newMark The mark after that fee
    * @return _markMoved Whether the mark moved
@@ -464,6 +483,9 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
     _counted = $.last;
     _newMark = $.mark;
     if (!_portfolio.priceFresh()) return (_counted, 0, _newMark, false);
+    // With no shares nothing is anyone's. A price struck on what is left would be charged as a gain on the next investor's
+    // principal, so they buy at par, and the mark starts there. What is left counts for them under the limit.
+    if (totalSupply() == 0) return (0, 0, _PAR_MARK, true);
 
     uint256 _priced = _portfolio.pricedValue();
     uint256 _owed = $.feesOwed;
@@ -478,22 +500,43 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
   }
 
   /**
-   * @notice Whether a price cannot be read, which stops deposits and withdrawals
-   * @return _stopped True when one cannot
+   * @notice Whether no price can be used, which stops deposits and withdrawals: it cannot be read, or the value net of
+   *         fees reads nothing although holders have a value counted. Nothing is written down, so the value can come back
+   * @return _stopped True when none can
    */
   function _dealingStopped() private view returns (bool _stopped) {
-    address _portfolio = _getGated4626Storage().portfolio;
-    _stopped = _portfolio != address(0) && !IPortfolio(_portfolio).priceFresh();
+    Gated4626Storage storage $ = _getGated4626Storage();
+    IPortfolio _portfolio = IPortfolio($.portfolio);
+    if (address(_portfolio) == address(0)) return false;
+    if (!_portfolio.priceFresh()) return true;
+    _stopped = $.last != 0 && totalSupply() != 0 && _portfolio.pricedValue() <= $.feesOwed;
   }
 
   /**
-   * @notice Whether a portfolio, this one or an earlier one, wrote off an adapter
-   * @return _closed True when one did
+   * @notice Whether deposits are closed: a portfolio, this one or an earlier one, wrote off an adapter, or a count found the
+   *         value fallen by more than half, or one now would
+   * @return _closed True when they are
    */
   function _closedForGood() private view returns (bool _closed) {
     Gated4626Storage storage $ = _getGated4626Storage();
     address _portfolio = $.portfolio;
-    _closed = $.exitOnly || (_portfolio != address(0) && IPortfolio(_portfolio).writtenOff());
+    if ($.exitOnly) return true;
+    if (_portfolio == address(0)) return false;
+    if (IPortfolio(_portfolio).writtenOff()) return true;
+    (uint256 _counted,,,) = _counting();
+    _closed = _fellTooFar(_counted);
+  }
+
+  /**
+   * @notice Whether a value counted now is less than half of the last, with holders who bore it. Someone depositing at that
+   *         price would take part of any recovery from them, as after a write-off
+   * @param _counted The value counted now
+   * @return _fell True when it is
+   */
+  function _fellTooFar(
+    uint256 _counted
+  ) private view returns (bool _fell) {
+    _fell = _counted * 2 < _getGated4626Storage().last && totalSupply() != 0;
   }
 
   /**

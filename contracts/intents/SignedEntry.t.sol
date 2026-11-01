@@ -408,6 +408,34 @@ contract SignedEntry_Permit is SignedEntryTest {
     _shares = _router.enterWithPermit(_e, _sig, _v, _r, _s);
   }
 
+  /// @dev Someone named this contract the controller of a settled request, and the entry was signed as a 4626 for a 7540.
+  ///      The deposit would succeed as that claim, pull no cash, and leave the investor's here for good
+  function test_WhenTheVaultDoesNotTakeTheCash_NothingHappens() external {
+    Gated7540Vault _async = _vault7540(address(_asset));
+    address _payer = makeAddr('payer');
+    _credential(_payer);
+    _asset.mint(_payer, _ASSETS);
+    vm.startPrank(_payer);
+    _asset.approve(address(_async), _ASSETS);
+    _async.requestDeposit(_ASSETS, address(_router), _payer);
+    vm.stopPrank();
+    address _settler = makeAddr('settler');
+    _async.grantRole(_async.SETTLER_ROLE(), _settler);
+    vm.startPrank(_settler);
+    _async.closePeriod();
+    _async.settlePeriod(0, 0, makeAddr('cash'), address(0));
+    vm.stopPrank();
+
+    ISignedEntry.Entry memory _e = _entry(address(_async), false);
+    bytes memory _sig = _sign(_e);
+    vm.expectRevert(abi.encodeWithSelector(ISignedEntry.SignedEntry_CashNotTaken.selector, _ASSETS));
+    vm.prank(_relayer);
+    _router.enterWithPermit(_e, _sig, _v, _r, _s);
+    assertEq(_asset.balanceOf(_investor), 10 * _ASSETS);
+    assertEq(_asset.balanceOf(address(_router)), 0);
+    assertEq(_async.balanceOf(_investor), 0);
+  }
+
   function test_ARequestNamingAMinimumIsRefused() external {
     Gated7540Vault _async = _vault7540(address(_asset));
     ISignedEntry.Entry memory _e = _entry(address(_async), true);
