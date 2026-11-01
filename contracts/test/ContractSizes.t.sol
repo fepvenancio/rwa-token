@@ -21,6 +21,7 @@ import {SettlementWindowRule} from 'contracts/hooks/rules/SettlementWindowRule.s
 import {CredentialRegistry} from 'contracts/identity/CredentialRegistry.sol';
 import {DvPExecutor} from 'contracts/intents/DvPExecutor.sol';
 import {IntentExecutor} from 'contracts/intents/IntentExecutor.sol';
+import {SignedEntry} from 'contracts/intents/SignedEntry.sol';
 import {FeeModel} from 'contracts/nav/FeeModel.sol';
 import {NavDesk} from 'contracts/nav/NavDesk.sol';
 import {ERC20CallValidator} from 'contracts/portfolio/ERC20CallValidator.sol';
@@ -70,6 +71,7 @@ contract ContractSizesTest is Test {
     MockAsset _asset = new MockAsset(6);
     _assertFits('Portfolio', address(new Portfolio(address(this), IERC20(address(_asset)), true)));
     _assertFits('NavDesk', address(new NavDesk(address(this), address(this), 1 days, 1 hours, 1 days)));
+    _assertFits('SignedEntry', address(new SignedEntry()));
     _assertFits('FeeModel', address(new FeeModel(address(this), 0, 0, 0, false)));
     _assertFits('ERC20CallValidator', address(new ERC20CallValidator(address(this), 0)));
     _assertFits('ERC4626CallValidator', address(new ERC4626CallValidator()));

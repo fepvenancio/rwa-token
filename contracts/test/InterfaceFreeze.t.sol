@@ -39,6 +39,7 @@ import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {IPortfolio} from 'interfaces/IPortfolio.sol';
 import {IProxyDeployer} from 'interfaces/IProxyDeployer.sol';
 import {ISettlementWindowRule} from 'interfaces/ISettlementWindowRule.sol';
+import {ISignedEntry} from 'interfaces/ISignedEntry.sol';
 import {ITemplated} from 'interfaces/ITemplated.sol';
 import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
 import {Quals} from 'interfaces/Quals.sol';
@@ -120,6 +121,7 @@ contract InterfaceFreezeTest is Test {
     // Re-pinned 2026-10-31 on owner instruction: dealing periods replace per-investor fulfilment.
     assertEq(type(IGated7540Vault).interfaceId, bytes4(0xc6a5eee9), 'IGated7540Vault');
     assertEq(type(INavDesk).interfaceId, bytes4(0x6d2f4b62), 'INavDesk');
+    assertEq(type(ISignedEntry).interfaceId, bytes4(0x05cc4f78), 'ISignedEntry');
     assertEq(type(IGuardedAccount).interfaceId, bytes4(0x30444861), 'IGuardedAccount');
     assertEq(type(ICallValidator).interfaceId, bytes4(0x9e8d53da), 'ICallValidator');
     assertEq(type(IERC20CallValidator).interfaceId, bytes4(0x4095b410), 'IERC20CallValidator');
@@ -189,6 +191,8 @@ contract InterfaceFreezeTest is Test {
     assertEq(IGated4626Vault.FeesCollected.selector, 0x9dc46f23cfb5ddcad0ae7ea2be38d47fec07bb9382ec7e564efc69e036dd66ce);
     assertEq(IGated4626Vault.MaxRateSet.selector, 0x08ee7b4c9309523d0db8e9554983c42a2b594b0a05a721d6237edb07bec7dab3);
     assertEq(IGated4626Vault.PortfolioSet.selector, 0x0d5636196773d6bc83dfcd7e1aadeb530723d82fce181c4a3680a0bcfe0b2f0f);
+    assertEq(ISignedEntry.EntryCancelled.selector, 0x112e0bf83077a00b180a2c526e1e40fd2b7ce442cc2bfb9c6d3510870ddf0e96);
+    assertEq(ISignedEntry.EntryExecuted.selector, 0xb98db96ae7f09fd2003f14676b3a4f20fb1592e2f5adb29d28d14c116a594be0);
     assertEq(IGuardedAccount.CallMade.selector, 0xf7069cb373783a30940dc185ef11ac49cdc063baa4035fbd6c914a9ab6975350);
     assertEq(
       IGuardedAccount.PermissionRevoked.selector, 0x9490008f9cc8bcb46b963024434fb1ff254b868936cc6c7614597b1b1a37c6a7
