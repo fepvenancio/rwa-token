@@ -10,6 +10,7 @@ import {SafeCast} from '@openzeppelin/contracts/utils/math/SafeCast.sol';
 import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IFund} from 'interfaces/IFund.sol';
+import {IFundHoldersRule} from 'interfaces/IFundHoldersRule.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 
@@ -18,7 +19,8 @@ import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
  * @notice The set of share classes of one fund, with the investor count and each investor's class mask, as specified in
  *         `IFund`. Not a proxy, and it holds no policy: the installed rule decides, the fund only records
  * @dev `Ownable` like `ProxyDeployer`: the deployer owns it while it is configured, the operations account while its first
- *      classes are registered, and `FundHandover` hands ownership to the timelock. An immutable admin would force a timelock operation, and its delay, onto every first deployment.
+ *      classes are registered, and `FundOpen` hands ownership to the timelock. An immutable admin would force a timelock
+ *      operation, and its delay, onto every first deployment.
  *      An account's state is one slot: bit `n - 1` for class `n`, and the top bit for "exempt". The installed rule, the
  *      investor count and the cap share one slot. The first count write is then never a write to an empty slot, and the
  *      rule, which the rule checks on every movement, is read together with the count and the cap at no extra cost
@@ -115,6 +117,11 @@ contract Fund is Ownable, ERC165, IFund {
     // View interface: compiled to STATICCALL, so the registry cannot change state or re-enter before the write below.
     // aderyn-ignore-next-line(reentrancy-state-change)
     if (!REGISTRY.isAttested(_rule, IPolicyRegistry.AttestKind.RULE)) revert Fund_NotAttested(_rule);
+    // Every FundHoldersRule shares one ruleId and one attested codehash, so a hook accepts any of them: only the fund
+    // can tell that a rule counts into another fund's state. A view interface too, so no state changes before the write.
+    // aderyn-ignore-next-line(reentrancy-state-change)
+    address _named = address(IFundHoldersRule(_rule).FUND());
+    if (_named != address(this)) revert Fund_RuleForAnotherFund(_rule, _named);
     address _oldRule = _investors.rule;
     _investors.rule = _rule;
     emit RuleSet(_oldRule, _rule);

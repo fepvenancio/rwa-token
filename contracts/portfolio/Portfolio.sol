@@ -5,6 +5,7 @@ import {IAccessControl} from '@openzeppelin/contracts/access/IAccessControl.sol'
 import {IERC4626} from '@openzeppelin/contracts/interfaces/IERC4626.sol';
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {SafeERC20} from '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
+import {Pausable} from '@openzeppelin/contracts/utils/Pausable.sol';
 import {ReentrancyGuardTransient} from '@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol';
 import {SafeCast} from '@openzeppelin/contracts/utils/math/SafeCast.sol';
 import {EnumerableSet} from '@openzeppelin/contracts/utils/structs/EnumerableSet.sol';
@@ -164,6 +165,7 @@ contract Portfolio is ReentrancyGuardTransient, IPortfolio {
     uint256 _minAdded
   ) external {
     if (!_hasRole(ALLOCATOR_ROLE)) revert Portfolio_Unauthorized(msg.sender);
+    if (Pausable(VAULT).paused()) revert Portfolio_VaultPaused();
     _requireInstalled(_adapter);
     // A caller's argument, not a balance.
     // slither-disable-next-line incorrect-equality

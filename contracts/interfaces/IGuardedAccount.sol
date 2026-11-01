@@ -88,6 +88,9 @@ interface IGuardedAccount is IAdapter {
    */
   error GuardedAccount_Unauthorized(address _caller);
 
+  /// @notice Thrown when a call is asked for while the vault is paused
+  error GuardedAccount_VaultPaused();
+
   /// @notice Thrown when an address given is zero
   error GuardedAccount_ZeroAddress();
 
@@ -97,7 +100,8 @@ interface IGuardedAccount is IAdapter {
 
   /**
    * @notice Makes calls, atomically
-   * @dev The vault's ALLOCATOR_ROLE
+   * @dev The vault's ALLOCATOR_ROLE, and not while the vault is paused: a pause stops money going out. `deallocate` still
+   *      brings this account's balance back
    * @param _calls The calls
    */
   function execute(

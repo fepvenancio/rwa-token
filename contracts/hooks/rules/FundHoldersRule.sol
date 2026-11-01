@@ -35,9 +35,10 @@ contract FundHoldersRule is BaseRule, IFundHoldersRule {
 
   /**
    * @inheritdoc IComplianceRule
-   * @dev Joins a receiver whose class balance went from zero to positive, and leaves a sender whose balance reached
-   *      zero. A movement to a holder of the class, or from one who keeps a balance, writes nothing. The fund ignores
-   *      the class itself and reverts for a token that is not a registered class
+   * @dev Leaves a sender whose balance reached zero, then joins a receiver whose class balance went from zero to
+   *      positive, so a net-zero move at a full fund never shows the count above the cap. A movement to a holder of the
+   *      class, or from one who keeps a balance, writes nothing. The fund ignores the class itself and reverts for a
+   *      token that is not a registered class
    */
   function after_(
     IPolicyHook.TransferContext calldata _ctx
@@ -47,8 +48,8 @@ contract FundHoldersRule is BaseRule, IFundHoldersRule {
     // Exact equalities are the holder definition: the receiver holds the class only if its balance before the move
     // was 0, and the sender leaves it if the move takes its whole balance (balance after == 0).
     // slither-disable-start incorrect-equality
-    if (_ctx.to != address(0) && _toBalance == 0) FUND.join(_ctx.token, _ctx.to);
     if (_ctx.from != address(0) && _fromBalance == _ctx.amount) FUND.leave(_ctx.token, _ctx.from);
+    if (_ctx.to != address(0) && _toBalance == 0) FUND.join(_ctx.token, _ctx.to);
     // slither-disable-end incorrect-equality
   }
 

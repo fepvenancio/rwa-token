@@ -3,7 +3,8 @@ pragma solidity ^0.8.28;
 
 /**
  * @title MockPortfolioVault
- * @notice The three things a `Portfolio` asks its vault: who holds a role, which registry it uses, and its total assets
+ * @notice The four things a `Portfolio` asks its vault: who holds a role, which registry it uses, its total assets, and
+ *         whether it is paused
  */
 contract MockPortfolioVault {
   /// @notice The registry the vault names
@@ -11,6 +12,9 @@ contract MockPortfolioVault {
 
   /// @notice The total assets the vault reports
   uint256 public totalAssets;
+
+  /// @notice Whether the vault is paused
+  bool public paused;
 
   /// @notice Who holds which role
   mapping(bytes32 _role => mapping(address _account => bool _held)) public hasRole;
@@ -47,5 +51,15 @@ contract MockPortfolioVault {
     uint256 _totalAssets
   ) external {
     totalAssets = _totalAssets;
+  }
+
+  /**
+   * @notice Pauses or unpauses
+   * @param _paused Whether it is paused
+   */
+  function setPaused(
+    bool _paused
+  ) external {
+    paused = _paused;
   }
 }

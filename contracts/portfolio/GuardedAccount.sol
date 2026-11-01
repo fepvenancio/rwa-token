@@ -5,6 +5,7 @@ import {IAccessControl} from '@openzeppelin/contracts/access/IAccessControl.sol'
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {SafeERC20} from '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
 import {Address} from '@openzeppelin/contracts/utils/Address.sol';
+import {Pausable} from '@openzeppelin/contracts/utils/Pausable.sol';
 
 import {IAdapter} from 'interfaces/IAdapter.sol';
 import {ICallValidator} from 'interfaces/ICallValidator.sol';
@@ -79,6 +80,7 @@ contract GuardedAccount is IGuardedAccount {
     Call[] calldata _calls
   ) external {
     if (!_hasRole(_ALLOCATOR_ROLE)) revert GuardedAccount_Unauthorized(msg.sender);
+    if (Pausable(VAULT).paused()) revert GuardedAccount_VaultPaused();
     uint256 _count = _calls.length;
     // All or nothing, by design: a batch that moves money must not half-run.
     // aderyn-ignore-next-line(require-revert-in-loop)

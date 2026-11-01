@@ -3,12 +3,16 @@ import type { NamedArtifactContractDeploymentFuture } from "@nomicfoundation/ign
 
 import { activeProfile, IMPLEMENTATION_KEY, type Profile } from "../profiles.js";
 
+/** The recovery timelock's own recovery argument: nobody holds RECOVERY_ROLE on it. */
+const NO_RECOVERY = "0x0000000000000000000000000000000000000000";
+
 /**
  * Stage 1, once per issuer. Everything that does not depend on a product:
  *
- * - The recovery timelock (plain OZ TimelockController, governance as proposer and executor) and the main timelock
- *   (`GovernanceTimelock`: proposer and executor are the governance multisig only; the recovery timelock may revoke
- *   CANCELLER_ROLE there and nothing else). The deployer is the admin of both only until `CoreHandover` finishes.
+ * - The recovery timelock (`GovernanceTimelock` with no recovery of its own, so the one-hour floor holds on it too;
+ *   governance as proposer and executor) and the main timelock (`GovernanceTimelock`: proposer and executor are the
+ *   governance multisig only; the recovery timelock may revoke CANCELLER_ROLE there and nothing else). The deployer is
+ *   the admin of both only until `CoreHandover` finishes.
  * - The registry, administered by the timelock from the start, and the one shared `ComplianceHook` that every product
  *   uses. Its only immutable is the registry, so the council attests one codehash for all of them, and each product's
  *   rules are installed by the product itself when it is placed.
@@ -41,9 +45,10 @@ export function coreModule(profile: Profile) {
     const guardian = m.getParameter<string>("guardian");
     const minDelay = m.getParameter<bigint>("minDelay", 24n * 3_600n);
 
-    // The recovery timelock (same delay, governance proposes and executes, no cancellers, guardian holds nothing)
-    // can only unpause and remove the guardian everywhere; deployed first so the main timelock can name it.
-    const recoveryTimelock = m.contract("TimelockController", [minDelay, [governance], [governance], deployer], {
+    // The recovery timelock (same delay and the same floor, governance proposes and executes, no cancellers, guardian
+    // holds nothing) can only unpause and remove the guardian everywhere; deployed first so the main timelock can name
+    // it. It has no recovery of its own, hence the zero address.
+    const recoveryTimelock = m.contract("GovernanceTimelock", [minDelay, [governance], [governance], deployer, NO_RECOVERY], {
       id: "recoveryTimelock",
     });
     const timelock = m.contract("GovernanceTimelock", [minDelay, [governance], [governance], deployer, recoveryTimelock]);

@@ -34,11 +34,18 @@ contract GovernanceTimelockUnitTest is Test {
     _revertData = abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, _caller, _role);
   }
 
-  function test_WhenTheRecoveryAddressIsZero_ItReverts() external {
+  /// @dev The recovery timelock is this contract with no recovery of its own: the floor holds there too, and the role
+  ///      is held by nobody
+  function test_WhenDeployedWithNoRecovery_NobodyHoldsTheRoleAndTheFloorHolds() external {
     address[] memory _members = new address[](1);
     _members[0] = _governance;
-    vm.expectRevert(IGovernanceTimelock.GovernanceTimelock_ZeroAddress.selector);
-    new GovernanceTimelock(_DELAY, _members, _members, address(0), address(0));
+    GovernanceTimelock _recoveryTimelock = new GovernanceTimelock(_DELAY, _members, _members, address(0), address(0));
+    assertFalse(_recoveryTimelock.hasRole(_recoveryTimelock.RECOVERY_ROLE(), address(0)));
+    assertFalse(_recoveryTimelock.hasRole(_recoveryTimelock.RECOVERY_ROLE(), _governance));
+    assertEq(_recoveryTimelock.getMinDelay(), _DELAY);
+
+    vm.expectRevert(_belowFloor(_FLOOR - 1));
+    new GovernanceTimelock(_FLOOR - 1, _members, _members, address(0), address(0));
   }
 
   function test_TheRecoveryRoleIsHeldByTheRecoveryTimelockOnly() external view {

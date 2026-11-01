@@ -212,7 +212,7 @@ async function stages(connection: NetworkConnection, profile: Profile) {
   const has = (key: string) => components[key] !== undefined;
 
   const timelock = await viem.getContractAt("GovernanceTimelock", components.timelock.address);
-  const recoveryTimelock = await viem.getContractAt("TimelockController", components.recoveryTimelock.address);
+  const recoveryTimelock = await viem.getContractAt("GovernanceTimelock", components.recoveryTimelock.address);
   const registry = await viem.getContractAt("PolicyRegistry", components.registry.address);
   const hook = await viem.getContractAt("ComplianceHook", components.hook.address);
   const proxyDeployer = await viem.getContractAt("ProxyDeployer", components.proxyDeployer.address);
@@ -465,6 +465,13 @@ export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
   const operations = s.wallets.operations.account.address;
   const guardian = s.wallets.guardian.account.address;
   const timelock = s.timelock.address;
+  // The same code as the main timelock, so its delay has the same floor. First, because the role reads below would only
+  // revert on another contract.
+  assert.equal(
+    await s.publicClient.getCode({ address: s.recoveryTimelock.address }),
+    await s.publicClient.getCode({ address: timelock }),
+    "the recovery timelock is not a GovernanceTimelock",
+  );
   const known = Object.values(s.wallets).map((w) => w.account.address);
   const tokens = s.deployed.map(({ contract }) => contract);
   const executors = [s.executor, s.dvpExecutor].filter((c) => c !== undefined);
@@ -521,6 +528,10 @@ export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
   assert.equal(await s.recoveryTimelock.read.hasRole([await s.recoveryTimelock.read.PROPOSER_ROLE(), governance]), true);
   assert.equal(await s.recoveryTimelock.read.hasRole([await s.recoveryTimelock.read.EXECUTOR_ROLE(), governance]), true);
   assert.ok((await s.recoveryTimelock.read.getMinDelay()) >= DAY, "recovery timelock delay below 24 hours");
+  // No recovery power over itself.
+  for (const account of [...known, recovery, timelock]) {
+    assert.equal(await s.recoveryTimelock.read.hasRole([ROLES.RECOVERY, account]), false, `${account} holds RECOVERY_ROLE on the recovery timelock`);
+  }
   // Each executor: the stack's operator submits through it and the guardian can pause it.
   for (const executor of executors) {
     assert.deepEqual(await heldBy(executor, s.wallets.operator.account.address), [ROLES.OPERATOR], `executor operator on ${executor.address}`);

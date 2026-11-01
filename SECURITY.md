@@ -46,7 +46,7 @@ In scope, all under `contracts/` (`.t.sol` files and `contracts/test/` are test 
 Also in scope: `ignition/modules/{Core,CoreHandover,Fund,Legos,Product,FundOpen,roles}.ts` and `ignition/profiles.ts`, which carry
 the deployment order, role grants, the hand-over to the timelock and each product's rule list.
 
-Out of scope: OpenZeppelin 5.6.1 (`@openzeppelin/contracts`, `-upgradeable`; `TimelockController` is used unmodified for the recovery timelock and as the base of `GovernanceTimelock`),
+Out of scope: OpenZeppelin 5.6.1 (`@openzeppelin/contracts`, `-upgradeable`; `TimelockController` is the base of `GovernanceTimelock`, which both timelocks are),
 the KYC attesters' off-chain verification, and test mocks.
 
 Build: solc 0.8.30, `evmVersion: cancun`, optimizer 200 runs, no metadata hash, the same in Hardhat and forge.
@@ -287,6 +287,16 @@ Further limits recorded during review:
   back from a write-off outside its caps (`test_AddingAPositionBackCannotTakeExposurePastTheCap`). A reported adapter's money
   can be off-chain, so it comes back at zero, and caps cannot see what a custodian still holds: the timelock must set them
   knowing that when it adds one back (`test_AReportedAdapterStartsAtZeroWhateverItHolds`).
+- **A pause stops money going out of a portfolio, not coming back.** While the vault is paused `Portfolio.allocate` and
+  `GuardedAccount.execute` revert, and `deallocate` still works, for the guardian too. So a permission that pulls money back
+  through `execute`, such as a target's `redeem`, waits for the unpause; no deployment profile grants one. Money a custodian
+  holds comes back off-chain. Pinned by `Portfolio.t.sol::PortfolioUnit_WhileThePauseHolds` and
+  `GuardedAccount.t.sol::test_WhileTheVaultIsPaused_ItRefusesAndNothingMoves`.
+- **`ProxyDeployer` and `Fund` transfer ownership in one step.** A two-step transfer would make the timelock schedule an
+  accept for every fund, which puts its delay into a launch. The post-deploy check pins each owner, and a mistaken
+  `ProxyDeployer` transfer costs a new deployer, not money.
+- **`IntentExecutor.executeBatch` names the failing index only for a failure it can catch.** A token that returns malformed
+  data reverts the whole batch with no index. Batches are atomic, so nothing moves.
 - **`pricedValue()` can read low and can revert.** An adapter that cannot be read counts as zero, so a reader must check
   `priceFresh()` as well. In the middle of a move the money is in neither place or in both, so `pricedValue()` reverts
   then, which stops anything pricing against a half-finished transfer. Pinned by
@@ -432,6 +442,7 @@ Each row is a bug deliberately planted, the tests that caught it, then the file 
 | `SupplyCapRule`, `ExecutedOnlyRule`, `Distributor` (2026-11-01) | the cap judging every kind, refusing at the cap, reverting when lowered below the supply, set by anyone or not stored; the wrong kind refused, or none; each role, value, window end and refusal in the distributor, a proof or a leaf that means less, claims not counted or above the funding, a sweep early, unapproved, twice or to the caller. 34 mutants, including the credential type without its bits, all caught | |
 | Ignition legos and the hand-over check (2026-11-01) | each grant and plug in `Product` dropped (settler, reporter, checker, allocator, the desk's portfolio and fee model, the 4626's fee model, the caps, the permission, the supply cap); a 7540's portfolio refusing reported money, a desk with no cash account, a validator naming the wrong account; each clause of the hand-over check; each refusal in `assertUsable`. 33 mutants, all caught | |
 | Halmos, `Portfolio.allocate` (2026-11-01) | the absolute cap dropped, the relative cap dropped, a second risk not checked | the symbolic property fails on each |
+| The pause on a portfolio, the fund's count order, the recovery timelock's floor, a fund's own rule (2026-11-01) | `allocate` or `execute` ignoring a pause, running only while paused, or asking the pause before the role; a pause also stopping `deallocate`; the receiver joining before the sender leaves; a fund taking another fund's rule, or swapping the refusal's arguments; a zero recovery granted the role, a real one not; `Core` deploying a plain recovery timelock; the check not comparing the two timelocks, or letting someone hold recovery on the recovery one | 15 of 15 caught. The last two survived at first, and each got a test |
 
 ## 6. Toolchain supply chain
 

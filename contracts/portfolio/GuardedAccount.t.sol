@@ -215,6 +215,35 @@ contract GuardedAccount_Execute is GuardedAccountTest {
     _account.execute(_list);
   }
 
+  function test_WhileTheVaultIsPaused_ItRefusesAndNothingMoves() external {
+    _permit();
+    _vault.setPaused(true);
+    IGuardedAccount.Call[] memory _list = _pay(_custodian, 1);
+    vm.expectRevert(IGuardedAccount.GuardedAccount_VaultPaused.selector);
+    vm.prank(_allocator);
+    _account.execute(_list);
+    assertEq(_asset.balanceOf(_custodian), 0);
+  }
+
+  function test_WhileTheVaultIsPaused_AStrangerStillGetsTheRoleError() external {
+    _permit();
+    _vault.setPaused(true);
+    IGuardedAccount.Call[] memory _list = _pay(_custodian, 1);
+    vm.expectRevert(_unauthorized(_stranger));
+    vm.prank(_stranger);
+    _account.execute(_list);
+  }
+
+  function test_WhenThePauseIsLifted_ItCallsAgain() external {
+    _permit();
+    _vault.setPaused(true);
+    _vault.setPaused(false);
+    IGuardedAccount.Call[] memory _list = _pay(_custodian, 1);
+    vm.prank(_allocator);
+    _account.execute(_list);
+    assertEq(_asset.balanceOf(_custodian), 1);
+  }
+
   function test_ARevokedAllocatorStopsAtOnce() external {
     _permit();
     _vault.setRole(_ALLOCATOR_ROLE, _allocator, false);
@@ -406,6 +435,16 @@ contract GuardedAccount_AsAnAdapter is GuardedAccountTest {
     vm.expectRevert();
     vm.prank(_allocator);
     _portfolio.deallocate(address(_account), 200e6);
+  }
+
+  function test_WhileTheVaultIsPaused_TheGuardianStillBringsItsBalanceBack() external {
+    vm.prank(_allocator);
+    _portfolio.allocate(address(_account), 400e6, 0);
+    _vault.setPaused(true);
+    vm.prank(_guardian);
+    _portfolio.deallocate(address(_account), 400e6);
+    assertEq(_asset.balanceOf(address(_account)), 0);
+    assertEq(_asset.balanceOf(address(_portfolio)), 500e6);
   }
 
   function test_ItCountsAgainstBothRisks() external {

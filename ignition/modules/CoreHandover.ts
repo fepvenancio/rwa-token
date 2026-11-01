@@ -27,7 +27,7 @@ export function coreHandoverModule(profile: Profile) {
     const operations = p("operations");
 
     const timelock = m.contractAt("GovernanceTimelock", p("timelock"));
-    const recoveryTimelock = m.contractAt("TimelockController", p("recoveryTimelock"), { id: "recoveryTimelock" });
+    const recoveryTimelock = m.contractAt("GovernanceTimelock", p("recoveryTimelock"), { id: "recoveryTimelock" });
     const proxyDeployer = m.contractAt("ProxyDeployer", p("proxyDeployer"));
 
     const configured: ReturnType<typeof m.call>[] = [];

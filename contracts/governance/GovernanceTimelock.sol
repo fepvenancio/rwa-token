@@ -13,7 +13,8 @@ import {IGovernanceTimelock} from 'interfaces/IGovernanceTimelock.sol';
  * @notice The main governance timelock: OZ's TimelockController with a one-hour floor on its delay and one recovery
  *         power. The recovery timelock (its own delay, governance as proposer and executor, no cancellers) holds
  *         RECOVERY_ROLE here and may revoke CANCELLER_ROLE, so a guardian that vetoes its own removal can be stripped of
- *         its cancel right
+ *         its cancel right. The recovery timelock is this same contract deployed with no recovery of its own, so the
+ *         floor holds on both
  * @dev RECOVERY_ROLE is deliberately not a role admin: an admin could also grant. Its admin is DEFAULT_ADMIN_ROLE
  *      (this timelock itself after hand-over), like every other role
  */
@@ -30,7 +31,8 @@ contract GovernanceTimelock is TimelockController, IGovernanceTimelock {
    * @param _proposers The proposers (and, per OZ, cancellers): the governance multisig
    * @param _executors The executors: the governance multisig
    * @param _admin The optional bootstrap admin (the deployer), renounced after configuration
-   * @param _recovery The recovery timelock, granted RECOVERY_ROLE
+   * @param _recovery The recovery timelock, granted RECOVERY_ROLE; zero for a timelock with no recovery power over it,
+   *        which is how the recovery timelock itself is deployed
    */
   constructor(
     uint256 _initialMinDelay,
@@ -39,11 +41,10 @@ contract GovernanceTimelock is TimelockController, IGovernanceTimelock {
     address _admin,
     address _recovery
   ) TimelockController(_initialMinDelay, _proposers, _executors, _admin) {
-    if (_recovery == address(0)) revert GovernanceTimelock_ZeroAddress();
     if (_initialMinDelay < _MIN_DELAY) revert GovernanceTimelock_DelayBelowFloor(_initialMinDelay, _MIN_DELAY);
     // _grantRole returns false only if the role is already held; either way the account ends up holding it.
     // aderyn-ignore-next-line(unchecked-return)
-    _grantRole(RECOVERY_ROLE, _recovery);
+    if (_recovery != address(0)) _grantRole(RECOVERY_ROLE, _recovery);
   }
 
   /**
