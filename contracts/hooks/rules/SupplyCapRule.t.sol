@@ -56,6 +56,12 @@ contract SupplyCapRuleUnitTest is Helpers {
 }
 
 contract SupplyCapRuleUnit_Set is SupplyCapRuleUnitTest {
+  function test_ItAnswersForItsInterfaces() external view {
+    assertTrue(_rule.supportsInterface(type(ISupplyCapRule).interfaceId));
+    assertTrue(_rule.supportsInterface(type(IComplianceRule).interfaceId));
+    assertFalse(_rule.supportsInterface(0xdeadbeef));
+  }
+
   function test_TheAdminSetsItAndItEmits() external {
     vm.expectEmit(address(_rule));
     emit ISupplyCapRule.SupplyCapSet(_token, _CAP, 7);

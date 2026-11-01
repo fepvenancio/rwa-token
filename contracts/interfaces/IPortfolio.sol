@@ -64,7 +64,7 @@ interface IPortfolio {
   /**
    * @notice Emitted when money comes back from an adapter
    * @param _adapter The adapter
-   * @param _assets The assets returned
+   * @param _assets The assets it was asked to return
    * @param _deallocated What was taken off its allocation
    */
   event Deallocated(address indexed _adapter, uint256 _assets, uint256 _deallocated);
@@ -317,7 +317,9 @@ interface IPortfolio {
   /**
    * @notice Moves the idle money to a successor for the same vault
    * @dev The vault's DEFAULT_ADMIN_ROLE. No adapter may be installed. The successor must be attested as PORTFOLIO in the
-   *      vault's registry. A timelock batch runs this together with the vault's own plug change
+   *      vault's registry. A timelock batch runs this together with the vault's own plug change. From here on `priceFresh()`
+   *      is false, so if the batch is split a vault holds its price and stops dealing until the plug. It can run again, to
+   *      send on what arrived since
    * @param _successor The new portfolio
    */
   function migrateTo(
@@ -417,7 +419,7 @@ interface IPortfolio {
   function pricedValue() external view returns (uint256 _value);
 
   /**
-   * @notice Whether every priced adapter can be read right now
+   * @notice Whether every priced adapter can be read right now, and the money has not gone to a successor
    * @return _fresh False stops dealing, and the last counted value stands
    */
   function priceFresh() external view returns (bool _fresh);

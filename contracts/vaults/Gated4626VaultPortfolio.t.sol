@@ -6,6 +6,7 @@ import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {Test} from 'forge-std/Test.sol';
 
 import {IAccessControl} from '@openzeppelin/contracts/access/IAccessControl.sol';
+import {Pausable} from '@openzeppelin/contracts/utils/Pausable.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IGated4626Vault} from 'interfaces/IGated4626Vault.sol';
@@ -29,6 +30,7 @@ abstract contract Gated4626VaultPortfolioTest is Test {
   uint256 internal constant _NOW = 1_792_198_800;
   uint256 internal constant _YEAR = 365 days;
   uint256 internal constant _RATE = 1000; // 10% a year
+  uint256 internal constant _MAX_RATE = 1e9;
   uint256 internal constant _IN = 1000e6;
   bytes32 internal constant _ALLOCATOR_ROLE = keccak256('ALLOCATOR_ROLE');
   bytes32 internal constant _SHARED = keccak256('the target');
@@ -204,6 +206,21 @@ contract Gated4626VaultPortfolio_Plug is Gated4626VaultPortfolioTest {
     _vault.setPortfolio(address(_reported), _RATE);
   }
 
+  function test_APortfolioForAnotherAssetIsRefused() external {
+    MockAsset _other = new MockAsset(6);
+    Portfolio _wrong = new Portfolio(address(_vault), IERC20(address(_other)), false);
+    _registry.attest(address(_wrong).codehash, IPolicyRegistry.AttestKind.PORTFOLIO, '');
+    vm.expectRevert(abi.encodeWithSelector(IGated4626Vault.Gated4626Vault_PortfolioRefused.selector, address(_wrong)));
+    _vault.setPortfolio(address(_wrong), _RATE);
+  }
+
+  function test_ARateAboveTheCeilingIsRefused() external {
+    vm.expectRevert(abi.encodeWithSelector(IGated4626Vault.Gated4626Vault_RateTooHigh.selector, _MAX_RATE + 1));
+    _vault.setPortfolio(address(_portfolio), _MAX_RATE + 1);
+    _vault.setPortfolio(address(_portfolio), _MAX_RATE);
+    assertEq(_vault.maxRate(), _MAX_RATE);
+  }
+
   function test_AFirstPlugStartsFromTheMoneyTheVaultHeldAndKeepsThePrice() external {
     uint256 _shares = _deposit(_alice, _IN);
     uint256 _before = _vault.convertToAssets(_shares);
@@ -249,6 +266,114 @@ contract Gated4626VaultPortfolio_Plug is Gated4626VaultPortfolioTest {
     _portfolio.migrateTo(address(_next));
     _vault.setPortfolio(address(_next), _RATE);
     assertApproxEqAbs(_vault.convertToAssets(_shares), _IN, 1);
+  }
+}
+
+contract Gated4626VaultPortfolio_Replacement is Gated4626VaultPortfolioTest {
+  uint256 internal _shares;
+  Portfolio internal _next;
+
+  function setUp() public override {
+    super.setUp();
+    _plug();
+    _shares = _deposit(_alice, _IN);
+    _next = _newPortfolio();
+  }
+
+  /// @dev A timelock batch has no gap, and nothing makes a timelock use one. Anyone can call `accrue` in a gap
+  function test_InTheGapThePriceHoldsAndDealingStops() external {
+    _portfolio.migrateTo(address(_next));
+    assertEq(_vault.totalAssets(), _IN);
+    vm.warp(block.timestamp + _YEAR);
+    vm.prank(_stranger);
+    _vault.accrue();
+    assertEq(_vault.lastCounted(), _IN);
+    assertEq(_vault.totalAssets(), _IN);
+    assertEq(_vault.maxDeposit(_bob), 0);
+    assertEq(_vault.maxMint(_bob), 0);
+    assertEq(_vault.maxRedeem(_alice), 0);
+    assertEq(_vault.maxWithdraw(_alice), 0);
+    vm.expectRevert(abi.encodeWithSelector(ERC4626Upgradeable.ERC4626ExceededMaxDeposit.selector, _bob, 1, 0));
+    vm.prank(_bob);
+    _vault.deposit(1, _bob);
+
+    _vault.setPortfolio(address(_next), _RATE);
+    assertEq(_vault.totalAssets(), _IN);
+    assertApproxEqRel(_deposit(_bob, _IN), _shares, 0.0001e18, 'the next investor pays the same price');
+  }
+
+  /// @dev Money sent to the outgoing portfolio in the gap cannot set the price, and follows the rest
+  function test_ADonationInTheGapCannotSetThePrice() external {
+    _portfolio.migrateTo(address(_next));
+    _asset.mint(address(_portfolio), 1);
+    _vault.accrue();
+    assertEq(_vault.lastCounted(), _IN);
+    vm.expectRevert(IGated4626Vault.Gated4626Vault_PortfolioNotEmpty.selector);
+    _vault.setPortfolio(address(_next), _RATE);
+    _portfolio.migrateTo(address(_next));
+    _vault.setPortfolio(address(_next), _RATE);
+    assertEq(_vault.totalAssets(), _IN);
+    assertEq(_asset.balanceOf(address(_next)), _IN + 1);
+  }
+
+  /// @dev With the target out and nothing idle, `pricedValue()` is 0 and the position is still there
+  function test_APortfolioWithAnAdapterOnItsListCannotBeReplaced() external {
+    _install();
+    _allocate(_IN);
+    _target.setBroken(true);
+    assertEq(_portfolio.pricedValue(), 0);
+    vm.expectRevert(IGated4626Vault.Gated4626Vault_PortfolioNotEmpty.selector);
+    _vault.setPortfolio(address(_next), _RATE);
+  }
+
+  /// @dev An adapter worth nothing still has to come off first, so a replacement never leaves one behind
+  function test_AnEmptyAdapterComesOffFirst() external {
+    _install();
+    vm.prank(_alice);
+    _vault.redeem(_shares, _alice, _alice);
+    assertEq(_portfolio.pricedValue(), 0);
+    vm.expectRevert(IGated4626Vault.Gated4626Vault_PortfolioNotEmpty.selector);
+    _vault.setPortfolio(address(_next), _RATE);
+    _portfolio.removeAdapter(address(_adapter));
+    _vault.setPortfolio(address(_next), _RATE);
+    assertEq(_vault.portfolio(), address(_next));
+  }
+
+  /// @dev Half a year at 10% with the money waiting. The next depositor would otherwise buy that gain cheap
+  function test_AReplacementKeepsWhatTheLimitHadAllowed() external {
+    _asset.mint(address(_portfolio), _IN);
+    vm.warp(block.timestamp + _YEAR / 2);
+    uint256 _due = _vault.totalAssets();
+    assertEq(_due, _IN + _IN * _RATE / 10_000 / 2);
+    _portfolio.migrateTo(address(_next));
+    _vault.setPortfolio(address(_next), _RATE);
+    assertEq(_vault.totalAssets(), _due);
+    _vault.accrue();
+    assertEq(_vault.lastCounted(), _due);
+  }
+
+  /// @dev A replacement is no reason to jump: what the limit had not allowed still waits for it
+  function test_AReplacementKeepsTheRestUnderTheLimit() external {
+    _asset.mint(address(_portfolio), _IN);
+    _portfolio.migrateTo(address(_next));
+    _vault.setPortfolio(address(_next), _RATE);
+    assertEq(_vault.totalAssets(), _IN);
+    vm.warp(block.timestamp + _YEAR);
+    assertEq(_vault.totalAssets(), _IN + _IN * _RATE / 10_000);
+  }
+
+  /// @dev A plug naming the wrong portfolio writes nothing down, so the money can still follow it
+  function test_APlugOfAnEmptyPortfolioStopsDealingUntilTheMoneyArrives() external {
+    Portfolio _other = _newPortfolio();
+    _portfolio.migrateTo(address(_next));
+    _vault.setPortfolio(address(_other), _RATE);
+    assertEq(_vault.totalAssets(), 0);
+    _vault.accrue();
+    assertEq(_vault.lastCounted(), _IN);
+    assertEq(_vault.maxDeposit(_bob), 0);
+    _next.migrateTo(address(_other));
+    assertEq(_vault.totalAssets(), _IN);
+    assertGt(_vault.maxDeposit(_bob), 0);
   }
 }
 
@@ -412,6 +537,128 @@ contract Gated4626VaultPortfolio_Counting is Gated4626VaultPortfolioTest {
     assertApproxEqAbs(_vault.lastCounted(), 900e6, 2);
   }
 
+  /// @dev A read of nothing writes nothing: a holder cannot sell for nothing, and nobody buys for nothing
+  function test_AReadOfNothingIsNotWrittenDownAndDealingStops() external {
+    _allocate(_IN);
+    _target.lose(_IN);
+    assertTrue(_portfolio.priceFresh());
+    assertEq(_portfolio.pricedValue(), 0);
+    assertEq(_vault.totalAssets(), 0);
+    vm.prank(_stranger);
+    _vault.accrue();
+    assertEq(_vault.lastCounted(), _IN);
+    assertEq(_vault.maxDeposit(_bob), 0);
+    assertEq(_vault.maxMint(_bob), 0);
+    assertEq(_vault.maxRedeem(_alice), 0);
+    assertEq(_vault.maxWithdraw(_alice), 0);
+    vm.expectRevert(abi.encodeWithSelector(ERC4626Upgradeable.ERC4626ExceededMaxDeposit.selector, _bob, 1, 0));
+    vm.prank(_bob);
+    _vault.deposit(1, _bob);
+    vm.expectRevert(abi.encodeWithSelector(ERC4626Upgradeable.ERC4626ExceededMaxRedeem.selector, _alice, 1, 0));
+    vm.prank(_alice);
+    _vault.redeem(1, _alice, _alice);
+  }
+
+  function test_WhenTheValueReturnsThePriceIsWhatItWas() external {
+    _allocate(_IN);
+    vm.prank(_allocator);
+    _portfolio.setLiquidityAdapter(address(_adapter));
+    _target.lose(_IN);
+    _vault.accrue();
+    vm.warp(block.timestamp + 30 days);
+    _asset.mint(address(_target), _IN);
+    assertApproxEqAbs(_vault.totalAssets(), _IN, 2);
+    assertApproxEqRel(_vault.maxRedeem(_alice), _shares, 0.0001e18);
+    assertGt(_vault.maxDeposit(_bob), 0);
+  }
+
+  /// @dev A value below what was counted, and not nothing, counts at once as it always has
+  function test_ALowReadIsStillALoss() external {
+    _allocate(_IN);
+    _target.lose(_IN - 1e6);
+    _vault.accrue();
+    assertApproxEqAbs(_vault.lastCounted(), 1e6, 2);
+    assertGt(_vault.maxDeposit(_bob), 0);
+  }
+
+  /// @dev With no shares there is nobody to protect, and a unit of rounding left in `last` must not close the vault
+  function test_WithNoSharesAReadOfNothingDoesNotStopDeposits() external {
+    _allocate(_IN);
+    vm.prank(_allocator);
+    _portfolio.setLiquidityAdapter(address(_adapter));
+    _asset.mint(address(_target), 1e6);
+    vm.warp(block.timestamp + _YEAR);
+    uint256 _all = _vault.balanceOf(_alice);
+    vm.prank(_alice);
+    _vault.redeem(_all, _alice, _alice);
+    assertEq(_vault.totalSupply(), 0);
+    assertGt(_vault.lastCounted(), 0);
+
+    _target.lose(_asset.balanceOf(address(_target)));
+    assertEq(_portfolio.pricedValue(), 0);
+    assertGt(_vault.maxDeposit(_bob), 0);
+    assertGt(_deposit(_bob, _IN), 0);
+    assertEq(_vault.totalAssets(), _IN);
+  }
+
+  /// @dev Nothing counted is not a read of nothing: a holder who withdrew everything leaves dust shares behind
+  function test_AVaultDrainedToDustSharesKeepsTakingDeposits() external {
+    _allocate(_IN);
+    _target.lose(100e6);
+    vm.prank(_allocator);
+    _portfolio.setLiquidityAdapter(address(_adapter));
+    uint256 _max = _vault.maxWithdraw(_alice);
+    vm.prank(_alice);
+    _vault.withdraw(_max, _alice, _alice);
+    assertEq(_vault.lastCounted(), 0);
+    assertGt(_vault.totalSupply(), 0);
+    assertGt(_vault.maxDeposit(_bob), 0);
+    assertGt(_deposit(_bob, _IN), 0);
+    assertApproxEqAbs(_vault.totalAssets(), _IN, 2);
+  }
+
+  /// @dev A `try` does not catch a target with no code, which a bad upgrade of the target's proxy can leave
+  function test_WhenTheTargetHasNoCodeThePriceHoldsAndItCanBeWrittenOff() external {
+    _allocate(800e6);
+    uint256 _held = _vault.totalAssets();
+    vm.etch(address(_target), '');
+    assertFalse(_portfolio.priceFresh());
+    assertEq(_vault.totalAssets(), _held);
+    assertEq(_vault.maxDeposit(_bob), 0);
+    assertEq(_vault.maxRedeem(_alice), 0);
+    _vault.accrue();
+    assertEq(_vault.lastCounted(), _held);
+
+    _portfolio.writeOffAdapter(address(_adapter));
+    assertTrue(_vault.exitOnly());
+    assertApproxEqAbs(_vault.totalAssets(), 200e6, 2);
+    uint256 _max = _vault.maxRedeem(_alice);
+    vm.prank(_alice);
+    assertApproxEqAbs(_vault.redeem(_max, _alice, _alice), 200e6, 2);
+  }
+
+  function test_ARateAboveTheCeilingIsRefusedAndTheCeilingIsNot() external {
+    vm.expectRevert(abi.encodeWithSelector(IGated4626Vault.Gated4626Vault_RateTooHigh.selector, _MAX_RATE + 1));
+    _vault.setMaxRate(_MAX_RATE + 1);
+    _vault.setMaxRate(_MAX_RATE);
+    assertEq(_vault.maxRate(), _MAX_RATE);
+  }
+
+  function testFuzz_NoRateTheAdminCanSetJamsTheVault(
+    uint256 _rate,
+    uint256 _elapsed
+  ) external {
+    _vault.setMaxRate(bound(_rate, 0, _MAX_RATE));
+    _asset.mint(address(_portfolio), _IN);
+    vm.warp(block.timestamp + bound(_elapsed, 0, 1000 * _YEAR));
+    _creds.set(_bob, uint64(block.timestamp + 3650 days), Quals.KYC);
+    _vault.totalAssets();
+    _deposit(_bob, 1e6);
+    vm.prank(_bob);
+    _vault.withdraw(1e5, _bob, _bob);
+    _vault.setMaxRate(1);
+  }
+
   function test_DepositsAndWithdrawalsMoveLastByExactlyTheirAmount() external {
     vm.warp(block.timestamp + 1 days);
     _deposit(_bob, 300e6);
@@ -572,6 +819,16 @@ contract Gated4626VaultPortfolio_Fees is Gated4626VaultPortfolioTest {
     assertApproxEqRel(_vault.mark(), 1e12, 0.0001e18);
   }
 
+  /// @dev Plugged during a read of nothing, a mark taken from `totalAssets()` would charge a performance fee on principal
+  function test_AFirstPlugDuringAReadOfNothingStartsTheMarkAtTheLastPrice() external {
+    uint256 _price = _vault.convertToAssets(1e18);
+    _allocate(_IN);
+    _target.lose(_IN);
+    assertEq(_vault.totalAssets(), 0);
+    _charge();
+    assertEq(_vault.mark(), _price);
+  }
+
   function test_TheManagementFeeAccruesWithTime() external {
     _charge();
     vm.warp(block.timestamp + _YEAR);
@@ -684,20 +941,53 @@ contract Gated4626VaultPortfolio_Fees is Gated4626VaultPortfolioTest {
     _vault.collectFees();
   }
 
-  /// @dev After a near-total loss the fees owed can exceed the value, and ERC-4626 says `totalAssets` must not revert
+  /// @dev After a near-total loss the fees owed can exceed the value, and ERC-4626 says `totalAssets` must not revert.
+  ///      Net of the fees that is a read of nothing, so nothing is written down and dealing stops
   function test_ALossBelowTheFeesOwedReadsAsZeroAndNothingReverts() external {
     _charge();
     _allocate(_IN);
     vm.warp(block.timestamp + _YEAR);
     _vault.accrue();
+    uint256 _counted = _vault.lastCounted();
     assertGt(_vault.feesOwed(), 0);
     _target.lose(_IN);
     assertEq(_vault.totalAssets(), 0);
-    _vault.maxRedeem(_alice);
-    _vault.maxWithdraw(_alice);
+    assertEq(_vault.maxRedeem(_alice), 0);
+    assertEq(_vault.maxWithdraw(_alice), 0);
+    assertEq(_vault.maxDeposit(_bob), 0);
     _vault.convertToAssets(_shares);
     _vault.accrue();
-    assertEq(_vault.lastCounted(), 0);
+    assertEq(_vault.lastCounted(), _counted);
+  }
+
+  /// @dev Idle money below the fees owed: there is cash, and all of it is owed
+  function test_AValueBelowTheFeesOwedIsAlsoAReadOfNothing() external {
+    _charge();
+    _allocate(_IN);
+    vm.warp(block.timestamp + _YEAR);
+    _vault.accrue();
+    uint256 _owed = _vault.feesOwed();
+    uint256 _counted = _vault.lastCounted();
+    _target.lose(_IN);
+    _asset.mint(address(_portfolio), _owed);
+    assertEq(_vault.totalAssets(), 0);
+    _vault.accrue();
+    assertEq(_vault.lastCounted(), _counted);
+    assertEq(_vault.maxDeposit(_bob), 0);
+    _asset.mint(address(_portfolio), 1);
+    assertEq(_vault.totalAssets(), 1);
+    assertGt(_vault.maxDeposit(_bob), 0);
+  }
+
+  function test_FeesAreNotPaidWhilePaused() external {
+    _charge();
+    vm.warp(block.timestamp + _YEAR);
+    _vault.accrue();
+    vm.prank(_guardian);
+    _vault.pause();
+    vm.expectRevert(Pausable.EnforcedPause.selector);
+    _vault.collectFees();
+    assertEq(_asset.balanceOf(_recipient), 0);
   }
 
   function test_WithNoSharesTheFirstInvestorsDoNotPayForTimeBeforeThey() external {

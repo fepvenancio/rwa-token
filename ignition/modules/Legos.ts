@@ -15,7 +15,8 @@ export const hasLegos = (product: Product) =>
  * attested and `Product` plugs them in. `NavDesk` is not attested: it holds no money, and it acts by the role `Product`
  * grants it, which the hand-over check pins.
  *
- * Every setting of an attested lego is a constructor argument, so its codehash covers it. A desk with no portfolio names
+ * An attested lego's constructor arguments are in its codehash. A portfolio's caps and adapters and a guarded account's
+ * permissions are set after it, and no attestation covers them. A desk with no portfolio names
  * its custodian's account here; one with a portfolio is told so by `Product`, while the operations account is the admin.
  */
 export function legosModule(product: Product) {

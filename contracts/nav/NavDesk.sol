@@ -120,6 +120,7 @@ contract NavDesk is INavDesk {
       if (
         !_registry.isAttested(_portfolio, IPolicyRegistry.AttestKind.PORTFOLIO)
           || IPortfolio(_portfolio).VAULT() != VAULT
+          || IPortfolio(_portfolio).ASSET() != IERC20(IERC4626(VAULT).asset())
       ) revert NavDesk_PortfolioRefused();
     }
     _setSettings(_portfolio, _custodianAccount, _periodLength, _cooldown, _maxReportAge);
@@ -223,11 +224,18 @@ contract NavDesk is INavDesk {
     if (_p.acceptedAt == 0) revert NavDesk_AcceptanceWrong();
     if (block.timestamp < _p.proposedAt + cooldown) revert NavDesk_TooEarly();
     if (block.timestamp > _p.asOf + maxReportAge) revert NavDesk_StaleReport();
+    // The supply says nothing about which period is closed.
+    // slither-disable-next-line unused-return
+    (uint64 _closed,) = _closedPeriod();
+    if (_p.period != _closed) revert NavDesk_WrongPeriod(_p.period, _closed);
     bytes32 _hash = hashOf(_p);
     delete _proposal;
-    mark = _p.mark;
-    markMovedAt = _p.markMovedAt;
-    lastFeeAt = _p.proposedAt;
+    // With no model it froze no fee state, and a first plug since then must keep its own. A model always names a recipient.
+    if (_p.feeRecipient != address(0)) {
+      mark = _p.mark;
+      markMovedAt = _p.markMovedAt;
+      lastFeeAt = _p.proposedAt;
+    }
     emit ProposalExecuted(_hash, _p.period);
     IGated7540Vault(VAULT).settlePeriod(_p.nav, _p.fee, _p.cash, _p.feeRecipient);
   }
@@ -265,11 +273,17 @@ contract NavDesk is INavDesk {
     _adopted = true;
     // aderyn-ignore-next-line(reentrancy-state-change)
     lastCutoff = _old.lastCutoff();
+    // A desk that never charged has no mark to pass on, and a plug made here must keep its own.
     // aderyn-ignore-next-line(reentrancy-state-change)
-    mark = _old.mark();
+    uint256 _oldMark = _old.mark();
+    if (_oldMark != 0) {
+      mark = _oldMark;
+      // aderyn-ignore-next-line(reentrancy-state-change)
+      markMovedAt = _old.markMovedAt();
+    }
+    // With its model off the old desk's fee clock stopped, and no fee is due for the time since.
     // aderyn-ignore-next-line(reentrancy-state-change)
-    markMovedAt = _old.markMovedAt();
-    lastFeeAt = _old.lastFeeAt();
+    if (_old.feeModel() != address(0)) lastFeeAt = _old.lastFeeAt();
     emit DeskAdopted(_oldDesk);
   }
 
@@ -288,7 +302,7 @@ contract NavDesk is INavDesk {
     Proposal memory _p
   ) public pure returns (bytes32 _hash) {
     _hash = keccak256(
-      abi.encode(_p.period, _p.nav, _p.fee, _p.mark, _p.markMovedAt, _p.reportHash, _p.cash, _p.feeRecipient)
+      abi.encode(_p.period, _p.nav, _p.fee, _p.mark, _p.markMovedAt, _p.reportHash, _p.cash, _p.feeRecipient, _p.asOf)
     );
   }
 

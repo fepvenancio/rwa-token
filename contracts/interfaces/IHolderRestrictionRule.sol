@@ -12,7 +12,7 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
  *      The lock covers the whole balance. `checkSend` returns `Reasons.LOCKED` for a holder whose lockup is running, so
  *      `canSend` says so; `check` applies the lock by kind, and the exemptions (FORCED, an enforcement burn) are for the
  *      movement to decide, which an account question cannot know.
- *      Freeze: a frozen account can neither send nor receive. `checkSend` returns `Reasons.SENDER_FROZEN` and
+ *      Freeze: a frozen account can send only by a FORCED move, and cannot receive. `checkSend` returns `Reasons.SENDER_FROZEN` and
  *      `checkReceive` returns `Reasons.RECEIVER_FROZEN`, and `check` applies the same to a movement: a frozen sender is
  *      rejected for every kind except FORCED, a frozen receiver for every kind except BURN, so a mint to a frozen
  *      account and a forced transfer into one are rejected. A quarantine account is therefore never frozen. State is keyed

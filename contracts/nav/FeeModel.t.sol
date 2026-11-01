@@ -47,12 +47,17 @@ contract FeeModel_Construction is FeeModelTest {
     new FeeModel(_recipient, 0, 0, 5001, false);
   }
 
-  function test_ARateWithNobodyToPayIsRefused() external {
+  /// @dev Even with no rate: a model swapped in with nobody to pay would strand what the last one left owed
+  function test_NobodyToPayIsRefused() external {
     vm.expectRevert(IFeeModel.FeeModel_ZeroRecipient.selector);
     new FeeModel(address(0), 1, 0, 0, false);
     vm.expectRevert(IFeeModel.FeeModel_ZeroRecipient.selector);
     new FeeModel(address(0), 0, 1, 0, false);
+    vm.expectRevert(IFeeModel.FeeModel_ZeroRecipient.selector);
     new FeeModel(address(0), 0, 0, 100, false);
+    vm.expectRevert(IFeeModel.FeeModel_ZeroRecipient.selector);
+    new FeeModel(address(0), 0, 0, 0, false);
+    new FeeModel(_recipient, 0, 0, 0, false);
   }
 }
 

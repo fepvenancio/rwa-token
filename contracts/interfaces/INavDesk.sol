@@ -152,7 +152,7 @@ interface INavDesk {
   /// @notice Thrown when a price would be proposed with no cash account
   error NavDesk_NoCashAccount();
 
-  /// @notice Thrown when proposing with no closed period
+  /// @notice Thrown when proposing or executing with no closed period
   error NavDesk_NoClosedPeriod();
 
   /// @notice Thrown when acting on a proposal that is not there
@@ -180,7 +180,7 @@ interface INavDesk {
    */
   error NavDesk_FeeModelRefused(address _feeModel);
 
-  /// @notice Thrown when the portfolio is not attested or is another vault's
+  /// @notice Thrown when the portfolio is not attested, is another vault's, or holds another asset
   error NavDesk_PortfolioRefused();
 
   /// @notice Thrown when the portfolio cannot price every adapter
@@ -212,6 +212,13 @@ interface INavDesk {
   error NavDesk_TooEarly();
 
   /**
+   * @notice Thrown when executing a proposal for a period that is no longer the closed one, which takes a second settler
+   * @param _proposed The period it priced
+   * @param _closed The period closed now
+   */
+  error NavDesk_WrongPeriod(uint256 _proposed, uint256 _closed);
+
+  /**
    * @notice Thrown when the caller lacks the vault role this needs
    * @param _caller The caller
    */
@@ -226,8 +233,9 @@ interface INavDesk {
 
   /**
    * @notice Accepts the proposal on the table
-   * @dev The vault's CHECKER_ROLE, never the proposer. The hash covers the period, the value, the fee, the mark, the
-   *      report, the cash account and the fee recipient, so a replaced proposal cannot pick up an approval meant for another
+   * @dev The vault's CHECKER_ROLE, never the proposer. The hash covers the period, the value, the fee, the mark and its
+   *      clock, the report and its date, the cash account and the fee recipient, so a replaced proposal cannot pick up an
+   *      approval meant for another
    * @param _proposalHash The proposal
    */
   function accept(
@@ -237,7 +245,9 @@ interface INavDesk {
   /**
    * @notice Takes over from a desk being replaced: its last cut-off and its fee state, read at this moment, so nothing is
    *         charged twice however long the timelock took
-   * @dev The vault's DEFAULT_ADMIN_ROLE, once, in the batch that moves SETTLER_ROLE
+   * @dev The vault's DEFAULT_ADMIN_ROLE, once, in the batch that moves SETTLER_ROLE. Plug a fee model before this, as a
+   *      first plug after it restarts the fee clock. A desk that never charged passes on no mark, and a desk with its
+   *      model off passes on no fee clock, so a plug made here keeps those
    * @param _oldDesk The desk it replaces; it must have nothing on the table
    */
   function adopt(
@@ -258,8 +268,8 @@ interface INavDesk {
 
   /**
    * @notice Settles the period at the accepted price
-   * @dev Anyone, after acceptance and the cooldown, with a report no older than `maxReportAge`. Reverts if the cash account
-   *      is short, so the desk raises cash before proposing
+   * @dev Anyone, after acceptance and the cooldown, with a report no older than `maxReportAge`, while the period it priced
+   *      is still the closed one. Reverts if the cash account is short, so the desk raises cash before proposing
    */
   function execute() external;
 
@@ -309,7 +319,8 @@ interface INavDesk {
   /**
    * @notice Plugs a fee model, or zero for none
    * @dev The vault's DEFAULT_ADMIN_ROLE. A first plug starts the mark at the vault's current price, so principal is never
-   *      charged, and the fee clock at now. A proposal on the table keeps the fee it froze
+   *      charged, and the fee clock at now. A proposal on the table keeps the fee it froze; one made with no model froze
+   *      none, and leaves what this plug set alone
    * @param _feeModel The fee model, attested as FEE_MODEL
    */
   function setFeeModel(
@@ -319,7 +330,7 @@ interface INavDesk {
   /**
    * @notice Changes the settings
    * @dev The vault's DEFAULT_ADMIN_ROLE
-   * @param _portfolio The portfolio, attested for this vault, or zero for none. When plugged it is both the cash account
+   * @param _portfolio The portfolio, attested for this vault and its asset, or zero for none. When plugged it is both the cash account
    *        and the source of on-chain value
    * @param _custodianAccount The cash account when there is no portfolio; it approves the vault to pull
    * @param _periodLength The time between cut-offs; not zero

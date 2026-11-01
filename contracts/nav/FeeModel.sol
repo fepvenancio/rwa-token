@@ -49,7 +49,7 @@ contract FeeModel is IFeeModel {
 
   /**
    * @notice Deploys the model
-   * @param _recipient Who is paid; needed when a rate is charged
+   * @param _recipient Who is paid; not zero, even with no rate, as a swap to this model must still pay what is owed
    * @param _managementBps The yearly management rate
    * @param _performanceBps The performance rate
    * @param _hurdleBps The yearly hurdle rate
@@ -65,7 +65,7 @@ contract FeeModel is IFeeModel {
     if (_managementBps > _MAX_MANAGEMENT_BPS || _performanceBps > _MAX_RATE_BPS || _hurdleBps > _MAX_RATE_BPS) {
       revert FeeModel_RateTooHigh();
     }
-    if (_recipient == address(0) && (_managementBps != 0 || _performanceBps != 0)) revert FeeModel_ZeroRecipient();
+    if (_recipient == address(0)) revert FeeModel_ZeroRecipient();
     RECIPIENT = _recipient;
     MANAGEMENT_BPS = _managementBps;
     PERFORMANCE_BPS = _performanceBps;

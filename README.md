@@ -94,8 +94,8 @@ two run the same code.
 | token `AGENT_ROLE` → rules | issuer | none | set or clear per-holder lockups, freeze or unfreeze a holder (`HolderRestrictionRule`) |
 | `ALLOCATOR_ROLE` (on a vault, asked by its `Portfolio` and `GuardedAccount`s) | fund manager | none | send money to an installed adapter within caps (not while the vault is paused), bring it back, choose the liquidity adapter |
 | `SETTLER_ROLE` (7540 vault) | a `NavDesk` | none | close and settle periods; take a request back once its period has closed |
-| `REPORTER_ROLE`, `CHECKER_ROLE` (on a vault, asked by its `NavDesk`) | fund administration; risk or the depositary | none | propose a price; accept or cancel one. Never the same account |
-| `DISTRIBUTION_MAKER_ROLE`, `CHECKER_ROLE` (on a token, asked by its `Distributor`) | corporate actions; a second function | none | propose a distribution; approve one and pull its funding. Never the same account |
+| `REPORTER_ROLE`, `CHECKER_ROLE` (on a vault, asked by its `NavDesk`) | fund administration; risk or the depositary | none | propose a price; accept or cancel one. An account cannot accept its own proposal |
+| `DISTRIBUTION_MAKER_ROLE`, `CHECKER_ROLE` (on a token, asked by its `Distributor`) | corporate actions; a second function | none | propose a distribution; approve one and pull its funding. An account cannot approve its own |
 
 - **Attested code only.** Hooks, rules and implementations are installed only if their runtime codehash is attested.
   Attestation is checked at install time; revoking it later does not silently change a live token.

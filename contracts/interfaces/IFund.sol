@@ -256,8 +256,9 @@ interface IFund {
    * @notice Whether a class is intact: registered, and its hook still lists the fund's installed rule
    * @dev A class whose hook does not list the installed rule is not capped by the fund, and the hook cannot know: dropping
    *      the rule from a class's list, or replacing the rule without updating the list, leaves it unprotected or, for a
-   *      replaced rule, failing every movement closed. This is the monitor's view of both. It never reverts: a token that
-   *      cannot name its hook, or a hook that cannot list its rules, is not intact
+   *      replaced rule, failing every movement closed. This is the monitor's view of both. A token or a hook that reverts
+   *      is not intact. A token naming a hook with no code makes this revert, which no shipped template can do, as each
+   *      refuses such a hook
    * @param _token The token
    * @return _intact True if `_token` is a registered class and its hook lists the installed rule
    */

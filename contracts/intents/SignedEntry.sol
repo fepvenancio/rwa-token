@@ -145,6 +145,9 @@ contract SignedEntry is EIP712, ISignedEntry {
       _shares = IERC4626(_entry.vault).deposit(_entry.assets, _entry.investor);
       if (_shares < _entry.minShares) revert SignedEntry_TooFewShares(_entry.minShares, _shares);
     }
+    // An allowance and not a balance: anyone can send this contract a balance, and that must not stop an entry.
+    uint256 _left = _asset.allowance(address(this), _entry.vault);
+    if (_left != 0) revert SignedEntry_CashNotTaken(_left);
     emit EntryExecuted(_hash, _entry.investor, _entry.vault, _entry.assets, _shares);
   }
   // slither-disable-end reentrancy-events

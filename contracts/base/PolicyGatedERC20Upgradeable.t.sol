@@ -1315,7 +1315,7 @@ contract PolicyGatedUnit_MintAs is PolicyGatedUnitTest {
     _token.mintAs(_bob, 5, IPolicyHook.TransferKind.MINT);
   }
 
-  /// @dev The announced kind is consumed: a plain movement right after is still inferred, not FORCED
+  /// @dev The kind belongs to that one call: a plain movement right after is still inferred, not FORCED
   function test_WhenAForcedMintIsFollowedByAPlainTransfer_TheTransferIsPlain() external {
     _token.mintAs(_bob, 5, IPolicyHook.TransferKind.FORCED);
     vm.expectCall(
@@ -1589,7 +1589,7 @@ contract PolicyGatedUnit_Multicall is PolicyGatedUnitTest {
     assertEq(_token.balanceOf(_bob), 3);
   }
 
-  /// @dev The kind announced for a forced transfer is cleared before the next call of the batch
+  /// @dev The kind of a forced transfer does not carry over to the next call of the batch
   function test_WhenAForcedTransferIsFollowedByAPlainTransferInOneBatch_TheSecondIsPlain() external {
     vm.startPrank(_admin);
     _token.grantRole(_token.AGENT_ROLE(), _alice);

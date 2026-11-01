@@ -41,7 +41,7 @@ In scope, all under `contracts/` (`.t.sol` files and `contracts/test/` are test 
 | Portfolio | `portfolio/Portfolio`, `portfolio/ERC4626Adapter`, `portfolio/GuardedAccount` (immutable, attested as `PORTFOLIO` and `ADAPTER`), `portfolio/ERC20CallValidator`, `portfolio/ERC4626CallValidator` (attested as `VALIDATOR`) |
 | Pricing | `nav/NavDesk` (immutable, not attested: it acts by the `SETTLER_ROLE` it holds), `nav/FeeModel` (immutable, attested as `FEE_MODEL`) |
 | Distribution | `distribution/Distributor` (immutable, one per token, not attested: it holds its own funding and asks the token for roles) |
-| Interfaces | `interfaces/*` (frozen; ERC-165 ids, event topics and reason codes pinned by `contracts/test/InterfaceFreeze.t.sol`; the owner has reopened them on instruction, most recently 2026-10-23 to 24 for the review items, 2026-10-27 for `IProxyDeployer` and 2026-10-30 for the portfolio lego and a renamed `Quals` bit, and they are frozen again) |
+| Interfaces | `interfaces/*` (frozen; ERC-165 ids, event topics and reason codes pinned by `contracts/test/InterfaceFreeze.t.sol`; the owner has reopened them on instruction, most recently 2026-10-23 to 24 for the review items, 2026-10-27 for `IProxyDeployer` 2026-10-30 for the portfolio lego and a renamed `Quals` bit, and 2026-11-01 for three errors and NatSpec, moving no id, and they are frozen again) |
 
 Also in scope: `ignition/modules/{Core,CoreHandover,Fund,Legos,Product,FundOpen,roles}.ts` and `ignition/profiles.ts`, which carry
 the deployment order, role grants, the hand-over to the timelock and each product's rule list.
@@ -87,7 +87,7 @@ Build: solc 0.8.30, `evmVersion: cancun`, optimizer 200 runs, no metadata hash, 
      - after the initialiser, only the token's admin (the timelock) can change the list, and only the timelock can
        install another hook, which must name the token's own registry (`PolicyGated_HookRegistryMismatch`);
      - `ProxyDeployer` reverts unless the hook holds exactly the expected rules for the new token;
-     - the post-deploy check asserts every token runs the one recorded hook and that its list equals `RULE_ORDER`.
+     - the post-deploy check asserts every token runs the one recorded hook and that its list equals the product's `rules`.
    - Tests: a second hook on the same registry is attested through the shared codehash, `Product` completes on it, and
      the post-deploy check refuses it; a hook on another registry is refused by the token before anything is created
      (`deployment.test.ts`).
@@ -116,7 +116,7 @@ Further limits recorded during review:
   (`test_WhenAnOperatorSubstitutesACounterfeitSecurityToken_TheAuthorizationIsRefused`). There is no on-chain allowlist
   of tokens: a party who signs a trade that names a counterfeit token loses to it. In the ERC-3009 form the buyer's
   wallet shows an opaque nonce and cannot show what the buyer receives.
-- **DvP pre-flight limits.** It does not check `OPERATOR_ROLE` or the executor's `EXECUTOR_ROLE` on the tokens. For an
+- **DvP pre-flight limits.** It does not check `OPERATOR_ROLE`. For an
   ERC-3009 cash token it cannot check the buyer's signature or the token's pause and blocklist. Legs on tokens that share
   policy state, such as two classes of one fund, are each checked against the state before either has run, so a swap
   that the first leg turns into a new investor can pass pre-flight and fail on the second leg
@@ -133,7 +133,7 @@ Further limits recorded during review:
 - **7540 operators are full delegates** (review L-5). Per ERC-7540, an approved operator can create requests that pull
   the owner's assets or shares under any controller, not only claim. Owners should approve only custodians they would
   trust with the assets. Pinned by `test_WhenAnOperatorRequestsUnderItsOwnController_ItIsAFullDelegatePerErc7540`.
-- **Dust and the investor cap** (review L-1). Anyone can deposit 1 wei into the 4626 vault for a credentialed, empty receiver
+- **Dust and the investor cap** (review L-1). A payer the policy accepts can deposit 1 wei into the 4626 vault for a credentialed, empty receiver
   and take a fund investor slot, and 1 wei sent to an exiting holder breaks an exact-balance exit.
   `MinPositionRule` closes the slot grab where it is listed with a non-zero minimum: a transfer or mint that would leave an account between 0
   and the minimum is refused (`BELOW_MIN_POSITION`), as is an exit that would leave such a remainder. It does not stop 1
@@ -155,7 +155,7 @@ Further limits recorded during review:
   operational: the agent rejects deposit requests near the cap, and a monitor alerts when `Fund.holderCount()` is
   above `Fund.holderCap()`. Whether a redeeming investor still counts as a holder is for counsel. Pinned by
   `FundIntegration.t.sol::test_WhenARejectedRedemptionReturnsSharesToAnInvestorWhoWasReplaced_TheFundCapAppliesAndRecoveryIsCounted`
-  and `Gated7540Vault.t.sol::test_WhenACapFilledAfterFulfilment_TheAgentDeliversTheStrandedShares`.
+  and `Gated7540Vault.t.sol::test_WhenACapFilledAfterSettlement_TheAgentDeliversTheStrandedShares`.
 - **Dropping the fund rule from a class's list un-caps it silently.** The hook accepts any attested list, and nothing in it
   knows about the fund, so a list without `FundHoldersRule` stops the class from counting investors and from enforcing
   the cap (a fourth investor gets in at a full cap, and the fund's count does not know). Replacing the rule in the fund
@@ -225,22 +225,23 @@ Further limits recorded during review:
   a controller. One controller's redemption is rejected, or moved with `recoverRedeemRequest`. Tooling
   that calls `setFrozenTokens` on the vault's address, or forces booked shares out of it, sees a revert. Pinned by
   `Gated7540VaultUnit_Escrow`.
-- **The timelocks wait 24 hours by default, and the main one has a floor of 1 hour.** `GovernanceTimelock` refuses less
+- **The timelocks wait 24 hours by default, and each has a floor of 1 hour.** `GovernanceTimelock` refuses less
   than the floor at deployment and in `updateDelay` (`GovernanceTimelock_DelayBelowFloor`). The post-deploy check asserts
   at least 24 hours on both timelocks at hand-over. So the guardian has a day to cancel a bad change, and governance can
-  later lower the main delay to 1 hour through a delayed operation. The recovery timelock is OpenZeppelin's own, without
-  a floor; its powers only undo the guardian's. Pinned by `GovernanceTimelockUnitTest`.
+  later lower the main delay to 1 hour through a delayed operation. The recovery timelock is the same contract, and its
+  powers only undo the guardian's. Pinned by `GovernanceTimelockUnitTest`.
 - **The operations account places products without a delay.** It owns `ProxyDeployer`, because a launch only adds a proxy
   over attested code and touches nothing that exists. A stolen operations key can still place a token over an attested
   implementation with its own admin, and can use up a symbol. It cannot change an existing product, and such a token is
-  not one the issuer published: holders and integrators should take addresses from the issuer's list, and the post-deploy
-  check runs on each real product. Recovery from a stolen key is a new `ProxyDeployer`, which changes where later tokens land.
+  not one the issuer published: holders and integrators should take addresses from the issuer's list. The post-deploy
+  check is the fixture `assertHandedOver`, which every test deployment runs; nothing yet points it at a live network, so
+  running it on each real product needs its own tooling. Recovery from a stolen key is a new `ProxyDeployer`, which changes where later tokens land.
 - **Revoking an attestation does not affect live tokens.** Attestation is checked at install and upgrade time only.
   The guardian pauses while the timelock removes the component.
 - **`totalAssets` of the 7540 vault is indicative** (all shares at the last settlement's value); `preview*` revert, as
   ERC-7540 requires.
 - **A `GuardedAccount` is the most dangerous lego in the stack.** It makes whatever calls its permissions allow. Default deny, one narrow validator per call and a timelock on every grant reduce that, and only a review of each permission set closes it. An `approve` gives the spender up to what it allows, and a validator's codehash covers its settings, not the target's behaviour. A custodian that does not return money is an off-chain risk no contract covers.
-- **Fees on a 4626 are charged on the counted value,** so a gain pays only once it has passed the rate limit, and a holder can drain idle money ahead of fees owed: `collectFees` pays what idle money allows, and holders come first. A loss below the fees owed reads as zero. A fee model replaced with fees still owed pays them to the new model's recipient, so a timelock batch collects first.
+- **Fees on a 4626 are charged on the counted value,** so a gain pays only once it has passed the rate limit, and a holder can drain idle money ahead of fees owed: `collectFees` pays what idle money allows, not while paused, and holders come first. A loss below the fees owed reads as zero. A fee model replaced with fees still owed pays them to the new model's recipient, so a timelock batch collects first.
 - **A signed entry's minimum protects only on a 4626.** A 7540 request has no price yet, so `SignedEntry` refuses a request that names one, and the investor's protection is the period's approved price. A permit is not bound to one entry the way an ERC-3009 authorization is: a permit left unspent can pay for another entry of the same investor, which that investor also signed. A relayer can hold a signed entry back until its deadline, so a short deadline is the investor's control; `cancelEntry` needs a transaction.
 - **Who holds `SETTLER_ROLE` sets the price.** The vault takes whatever `settlePeriod` is given, and the holder can name any
   cash account that approved the vault. So the role belongs to a `NavDesk`, where two people approve every price and a
@@ -281,8 +282,23 @@ Further limits recorded during review:
   only control on the target itself. The portfolio gives its vault an unlimited allowance at construction, so whoever can
   upgrade the vault (the timelock) could take the idle money; the delay makes that public. Pinned by
   `Portfolio.t.sol::test_ItStoresItsSettingsAndLetsTheVaultPullTheIdleMoney`.
-- **A portfolio's caps are checked on allocate and on install.** An exit, or a gain in a target, can leave a risk above
-  its relative cap, and lowering a cap leaves what is already allocated where it is. Pinned by
+- **A 4626's portfolio is replaced in one batch: `migrateTo`, then `setPortfolio`.** Nothing forces the batch, so a portfolio
+  that has sent its money on gives no price from then on, and the vault holds its price and stops dealing until the plug.
+  `setPortfolio` refuses while the old portfolio has an adapter on its list or holds anything, so a position that cannot be
+  read must be written off first, which leaves the vault exit-only. A replacement keeps the limit's clock, so the next count
+  allows what it would have allowed anyway, at the rate the call names. Pinned by
+  `Gated4626VaultPortfolio.t.sol::Gated4626VaultPortfolio_Replacement`.
+- **A read of nothing stops a 4626, and a low read does not.** While the value net of fees reads nothing although holders
+  have a value counted, `totalAssets()` reads zero, nothing is written down and deposits and withdrawals stop, so a holder
+  cannot sell for nothing, nobody buys for nothing, and the value can come back under the limit. A low read that is not
+  nothing counts at once with deposits open at that price, and recovers at `maxRate`: that is the design, and the council
+  reads each target before it attests. During a read of nothing a donor can make it a low read with one unit of the asset.
+  Closing that takes a limit on how far one read may fall, which would also stop holders leaving at a real written-down
+  price, so it is the owner's call. Pinned by `test_AReadOfNothingIsNotWrittenDownAndDealingStops` and
+  `test_AValueBelowTheFeesOwedIsAlsoAReadOfNothing`.
+- **A portfolio's caps are checked on allocate and on install.** An exit can leave a risk above its relative cap, a gain
+  in a target can take the real position above a cap while its allocation stays put, and lowering a cap leaves what is
+  already allocated where it is. Pinned by
   `Portfolio.t.sol::test_ItWorksAboveALoweredCap`. A priced adapter's value counts at install, so a position cannot come
   back from a write-off outside its caps (`test_AddingAPositionBackCannotTakeExposurePastTheCap`). A reported adapter's money
   can be off-chain, so it comes back at zero, and caps cannot see what a custodian still holds: the timelock must set them
@@ -323,12 +339,12 @@ Inline suppressions (each carries its reason on the line above, in the source):
 | `FundHoldersRule` `after_`, `_senderLeavesFund` | `incorrect-equality` | Same definition of a holder, for a class balance |
 | `FundHoldersRule` `_senderLeavesFund`, `_classReason` | `unused-return` | Only the fields the call needs are read from `admission`; `_senderLeavesFund` needs the sender's classes and exemption, since the rest was read for the receiver, and `_classReason` needs the class number and the installed rule |
 | `CredentialRegistry` `profileOf`, `isVerified` | `incorrect-equality` | Compares an enum standing with a constant, not a balance. The lapse itself is a strict `>` on the time, so a record reads `ACTIVE` through its last second |
-| `CredentialRule` `_sendReason`, `_receiveReason` | `unused-return` | Only the standing is read for a sender, and the standing, the bits and the attester for a receiver; the country is stored for later rules and no policy reads it |
+| `CredentialRule` `_sendReason`, `_receiveReason` | `unused-return` | Only the standing decides for a sender; the bits and the attester matter for a receiver |
 | `Fund` `positionsOf` | `uninitialized-local` | The class count and the entries written start at zero by design |
 | `HolderRestrictionRule` `setLockup` | `uninitialized-local` | The stored unlock time starts at zero, the value of a cleared lockup |
 | `Gated7540Vault` `settlePeriod` | `reentrancy-no-eth`, `boolean-cst`, `arbitrary-send-erc20` | The book is written before the burn and `_net` writes no state: what Slither reads as a write is the storage pointer. A boolean mapping key is not a misused constant. The settler names the cash account, and only one that approved the vault can be pulled from; the role belongs to a `NavDesk`, and `SETTLER_ROLE` is timelock-granted |
 | `Distributor.approve` | `arbitrary-send-erc20` | It pulls from the funder a maker named and a different checker approved, and only an account that approved this contract can be pulled from |
-| `NavDesk` | `incorrect-equality`, `unused-return`, `uninitialized-local` | Zero means nothing on the table, nothing accepted or no mark yet, not a balance. The unclaimed shares say nothing about whether a period is stuck. A proposal is filled in a field at a time |
+| `NavDesk` | `incorrect-equality`, `unused-return`, `uninitialized-local` | Zero means nothing on the table, nothing accepted or no mark yet, not a balance. The unclaimed shares say nothing about whether a period is stuck, and the supply nothing about which period is closed. A proposal is filled in a field at a time |
 | `ERC4626CallValidator` | `unused-state` | Slither does not see a constant used as a slice's bound |
 | `SignedEntry` | `arbitrary-send-erc20`, `arbitrary-send-erc20-permit`, `reentrancy-events`, `unused-return` | The investor signed the entry naming these assets, checked first. What it bought is known only after the vault's call, and the nonce was spent before it. A 7540 request returns the aggregated id, 0, which says nothing |
 | `GuardedAccount` `execute` | `unused-return` | A permission is a timelock decision and the validator has judged the parameters, so what the call returns is not needed |
@@ -338,7 +354,7 @@ Inline suppressions (each carries its reason on the line above, in the source):
 | `ComplianceHook` `_setRules` | `uninitialized-local` | The after-mask starts at zero by design |
 | `Portfolio` `_allocate`, `_deallocate` | `reentrancy-benign`, `reentrancy-events`, `reentrancy-balance` | The guard is held, the adapter is attested, and what the move changed can only be measured after the call: the balance read before it is the point of the comparison. A reentrant target is refused (`test_AReentrantTargetCannotAllocateAgainMidCall`) |
 | `Portfolio` `allocate`, `_deallocate`, `removeAdapter` | `incorrect-equality` | A zero test on a caller's argument, and the definition of an empty adapter. A donation only delays a removal until the allocator brings it back |
-| `Portfolio` `_takeOff`, `ERC4626Adapter` `allocate`, `deallocate` | `unused-return` | The list removal is false only if the adapter was not there, which the caller has checked; the portfolio measures what a target move changed |
+| `Portfolio` `_takeOff`, `ERC4626Adapter` `allocate`, `deallocate`, `_ask` | `unused-return` | The list removal is false only if the adapter was not there, which the caller has checked; the portfolio measures what a target move changed; a read needs only the first word of the answer |
 | `Gated7540Vault` | `missing-inheritance` | `IERC7575` re-declares inherited ERC-4626 functions; conformance pinned by ERC-165 id `0x2f0a18c5` |
 | `Gated7540Vault` `requestDeposit` | `arbitrary-send-erc20` | `owner` is the caller or an approved operator. Fuzzed: a non-operator with a victim owner reverts and moves nothing. Removing the guard fails 2 tests |
 | `ProxyDeployer` `deploy` | `unused-return` | `initialize` returns nothing; success is checked by the post-init assertions |
@@ -376,7 +392,7 @@ Inline acknowledgements (reason on the line above each `aderyn-ignore`):
 | `unsafe-erc20-operation` | `ERC20CallValidator.validate` | It only reads the selectors and moves no tokens | |
 | `unsafe-casting` | `Gated7540Vault._claim` | Neither part exceeds what the request holds, each being a share of it at most | `testFuzz_TheSumOfClaimsNeverExceedsTheBookAndFallsShortByAtMostOneUnitEach` |
 | `state-no-address-check` | `NavDesk._setSettings` | Zero is a choice for both: no portfolio, or a portfolio to be plugged | `test_WithNoCashAccount_ItReverts` |
-| `unused-state-variable` | `GatedToken` and `Gated7540Vault` ERC-7201 locations | False positive: read in assembly | `GatedTokenIntegrationTest::test_TheErc7201LocationHoldsTheDecimals` and `Gated7540VaultUnit_Storage`: the formula equals the constant and the slot holds the decimals, or custody and `lastPrice` |
+| `unused-state-variable` | `GatedToken` and `Gated7540Vault` ERC-7201 locations | False positive: read in assembly | `GatedTokenIntegrationTest::test_TheErc7201LocationHoldsTheDecimals` and `Gated7540VaultUnit_Storage`: the formula equals the constant and the slot holds the decimals, or the asset |
 | `unchecked-return` | `EnumerableSet.remove` in `Portfolio`; `deposit` and `withdraw` in `ERC4626Adapter`; `_grantRole` in constructors and initialisers (`CredentialRegistry` included), and `_revokeRole` in the `revokeRole` overrides of the base, `GovernanceTimelock`, both executors and `CredentialRegistry` (it returns false only if the role was not held, and either way the account ends up without it); `Address.functionCall` in `ProxyDeployer`; `_executeLeg` in `DvPExecutor` | `_grantRole` returns false only if the role is already held; `initialize` returns nothing; the cash leg's digest is not needed and the securities leg's digest was read before the call | Role, deploy and DvP tests |
 | `costly-loop`, `require-revert-in-loop` | `ComplianceHook._setRules`, `IntentExecutor.executeBatch`, `Portfolio._addAllocation`, `_subtractAllocation` | By design: at most 16 rules, and invalid rules must fail closed; batches are atomic; an adapter names only a few risks, and a move past any cap fails whole | Hook, batch and portfolio tests |
 | `literal-instead-of-constant` | calendar arithmetic; `10 ** decimals()` | Calendar constants; `decimals()` is read at runtime | Window and vault tests |
@@ -408,7 +424,7 @@ Each row is a bug deliberately planted, the tests that caught it, then the file 
 | `Gated7540Vault` | withdraw shares rounded down; mint assets rounded down; reject keeps pending; recovery keeps pending; operator guard removed | 1+ tests each; invariant `escrow == Σ pending` |
 | Phase 6 (TS) | executor hand-over skipped; `canExecute` skips the hook; NAV price rounds up; deadline exclusive | 46 / 8 / 1 / 1 failing |
 | `ProxyDeployer` | no hook-binding check; no salt check | unit test + Ignition tamper test; unit test |
-| `ProxyDeployer` implementation check (2026-10-27, audit finding 1) | the check removed; the check moved after CREATE2; the wrong kind asked (`HOOK`); the check moved before the salt check; the constructor not storing its registry; the zero-registry check removed; the token-registry check removed; `Components` passing the timelock as the registry | 8 of 8. The seven contract bugs fail 7, 1, 5, 1, 25, 1 and 1 of the 30 `ProxyDeployer.t.sol` tests. `deployment.test.ts` fails 1, 9, 10 and 10 of its 10 tests for the check removed, the wrong kind, the registry not stored and the timelock in `Components`. The check moved after CREATE2 is caught only by the implementation with no code: a revert undoes the proxy either way, so the order shows only in the error a bad implementation gets |
+| `ProxyDeployer` implementation check (2026-10-27, finding 1 of the 2026-10-26 review) | the check removed; the check moved after CREATE2; the wrong kind asked (`HOOK`); the check moved before the salt check; the constructor not storing its registry; the zero-registry check removed; the token-registry check removed; `Components` passing the timelock as the registry | 8 of 8. The seven contract bugs fail 7, 1, 5, 1, 25, 1 and 1 of the 30 `ProxyDeployer.t.sol` tests. `deployment.test.ts` fails 1, 9, 10 and 10 of its 10 tests for the check removed, the wrong kind, the registry not stored and the timelock in `Components`. The check moved after CREATE2 is caught only by the implementation with no code: a revert undoes the proxy either way, so the order shows only in the error a bad implementation gets |
 | Portfolio lego (2026-10-30) | Every role gate, on all nine entry points; each `addAdapter` refusal and the attested kind; a priced adapter installed unreadable, a reported one required to be readable, a held position left uncounted, a reported adapter counted at install, the install skipping the relative cap or its event hiding the allocation; a write-off not remembered, a removal counted as one, adding back clearing the flag; each `removeAdapter` and `writeOffAdapter` condition, and what taking an adapter off must clear; the guardian raising either cap; both caps removed or off by one; a stale price before and during a call; a priced move counting what was sent rather than the change in value; the floor at zero; the reentrancy guard and the mid-move price guard; each `raise` and `migrateTo` condition; what `pricedValue`, `priceFresh` and `liquidAssets` count; the adapter's gates, its receiver, its leftover allowance, its risk ids and a failed read counted as fresh | 87 of 87 caught, by `Portfolio.t.sol` and `ERC4626Adapter.t.sol` |
 | One movement path (2026-10-31) | Each of the three zero-address checks removed; the guard removed from `_move`; the kind, the ref or the deadline dropped from `_moveAs`; the kind dropped from `_mintAs`; every plain movement read as a transfer | 9 of 9 caught, by `PolicyGatedERC20Upgradeable.t.sol`, `IntentToken.t.sol` and `IntentSettledUpgradeable.t.sol` |
 | Core and products (2026-10-30) | The timelock floor at 7 days, 2 hours or zero; `GatedToken` reporting another template, its implementation left initialisable, ignoring the decimals it is given, reporting 18 whatever it was given, or keeping them at another location; the default delay at 7 days or 23 hours; `Core` always deploying the window rule; `ProxyDeployer` left with the deployer or moved to the timelock; the deployer keeping the timelock admin; the guardian not made a canceller; the operations account keeping a product's admin, or the admin going elsewhere; UPGRADER to the agent; RECOVERY skipped; a product's stated policy ignored, or its decimals ignored, or a plain token defaulting to 6; MINTER not granted on a plain token; the window rule allowed on any template; a fund rule without a fund accepted, or a fund without the fund rule; every fund opening with every class; a fund starting with the deployer; opening without installing the rule or setting the cap; a fund left with the operations account; classes opening in reverse order | 32 of 32 caught, by `GatedToken.t.sol`, `GovernanceTimelock.t.sol`, `products.test.ts` and `deployment.test.ts` |
@@ -443,6 +459,7 @@ Each row is a bug deliberately planted, the tests that caught it, then the file 
 | Ignition legos and the hand-over check (2026-11-01) | each grant and plug in `Product` dropped (settler, reporter, checker, allocator, the desk's portfolio and fee model, the 4626's fee model, the caps, the permission, the supply cap); a 7540's portfolio refusing reported money, a desk with no cash account, a validator naming the wrong account; each clause of the hand-over check; each refusal in `assertUsable`. 33 mutants, all caught | |
 | Halmos, `Portfolio.allocate` (2026-11-01) | the absolute cap dropped, the relative cap dropped, a second risk not checked | the symbolic property fails on each |
 | The pause on a portfolio, the fund's count order, the recovery timelock's floor, a fund's own rule (2026-11-01) | `allocate` or `execute` ignoring a pause, running only while paused, or asking the pause before the role; a pause also stopping `deallocate`; the receiver joining before the sender leaves; a fund taking another fund's rule, or swapping the refusal's arguments; a zero recovery granted the role, a real one not; `Core` deploying a plain recovery timelock; the check not comparing the two timelocks, or letting someone hold recovery on the recovery one | 15 of 15 caught. The last two survived at first, and each got a test |
+| The fifteen fixes found while writing the pages (2026-11-01) | the mark on a migrated portfolio set or read; the adapter list or the value not checked on a replacement; each term of a read of nothing dropped or moved; `accrue` writing through it; the first mark from `totalAssets()`; the adapter's success or size check dropped or off by one, or a failed first read ignored; `execute` always or never writing the fee state; `adopt` always or never taking the mark or the fee clock, or dropping the mark's clock; `asOf` out of the hash; the period not compared; the rate ceiling dropped or moved by one on either path; `ISupplyCapRule` not answered; a zero recipient accepted with no rate; fees through a pause; the asset not compared by the vault or the desk; the cash not checked; a replacement restarting the clock, or a first plug not starting it | 37 planted, 36 caught at first. The survivor, a failed first read ignored, was a missing test, written and now caught |
 
 ## 6. Toolchain supply chain
 

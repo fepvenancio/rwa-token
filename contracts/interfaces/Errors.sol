@@ -15,11 +15,11 @@ library Reasons {
   bytes32 internal constant TRANSFER_OK = keccak256('TRANSFER_OK');
   /// @notice The token is paused and the movement is not a forced transfer
   bytes32 internal constant PAUSED = keccak256('PAUSED');
-  /// @notice The sender's unfrozen balance is lower than the amount
+  /// @notice The sender's unfrozen balance is lower than the amount; a DvP pre-flight also says this of a plain cash shortfall
   bytes32 internal constant INSUFFICIENT_UNFROZEN = keccak256('INSUFFICIENT_UNFROZEN');
-  /// @notice The sender is not verified in the identity registry
+  /// @notice The sender is not verified in the credential registry
   bytes32 internal constant SENDER_NOT_VERIFIED = keccak256('SENDER_NOT_VERIFIED');
-  /// @notice The receiver is not verified in the identity registry
+  /// @notice The receiver is not verified in the credential registry
   bytes32 internal constant RECEIVER_NOT_VERIFIED = keccak256('RECEIVER_NOT_VERIFIED');
   /// @notice The movement happens outside the configured settlement window
   bytes32 internal constant OUTSIDE_SETTLEMENT_WINDOW = keccak256('OUTSIDE_SETTLEMENT_WINDOW');

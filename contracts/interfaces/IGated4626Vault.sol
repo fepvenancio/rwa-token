@@ -26,8 +26,9 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
  *      `totalAssets()` is `min(pricedValue() − feesOwed, last + last × elapsed × maxRate)`, with the subtraction stopping at
  *      zero: losses count at once, gains are limited and none count again in the same block, so a donation cannot jump the
  *      price. Deposits and withdrawals move `last` by exactly their amount. While `priceFresh()` is false `totalAssets()` is
- *      the last counted value and deposits and withdrawals stop. `maxWithdraw` and `maxRedeem` are limited by what the
- *      portfolio can raise
+ *      the last counted value and deposits and withdrawals stop. While the value net of fees reads nothing, although
+ *      holders have a value counted, `totalAssets()` reads zero, nothing is written down and deposits and withdrawals stop,
+ *      so the value can come back under the limit. `maxWithdraw` and `maxRedeem` are limited by what the portfolio can raise
  */
 interface IGated4626Vault {
   /*///////////////////////////////////////////////////////////////
@@ -82,15 +83,21 @@ interface IGated4626Vault {
    */
   error Gated4626Vault_NotAttested(address _target);
 
-  /// @notice Thrown when the portfolio being replaced still holds value
+  /// @notice Thrown when the portfolio being replaced still holds value or has an adapter on its list
   error Gated4626Vault_PortfolioNotEmpty();
 
   /**
-   * @notice Thrown when a portfolio is another vault's, or accepts reported adapters. On an instant vault a stale price is
-   *         free money for whoever notices first
+   * @notice Thrown when a portfolio is another vault's, holds another asset, or accepts reported adapters. On an instant
+   *         vault a stale price is free money for whoever notices first
    * @param _portfolio The portfolio
    */
   error Gated4626Vault_PortfolioRefused(address _portfolio);
+
+  /**
+   * @notice Thrown when a limit on counted gains is above the ceiling, which is there so the arithmetic cannot overflow
+   * @param _maxRateBps The limit
+   */
+  error Gated4626Vault_RateTooHigh(uint256 _maxRateBps);
 
   /**
    * @notice Thrown when the caller may not change the limit that way
@@ -110,7 +117,7 @@ interface IGated4626Vault {
    * @param _asset The underlying asset
    * @param _name The share token name, also the EIP-712 domain name
    * @param _symbol The share token symbol
-   * @param _admin The timelock, granted DEFAULT_ADMIN_ROLE
+   * @param _admin The first admin, granted DEFAULT_ADMIN_ROLE: the operations account in a launch, which hands it to the timelock
    * @param _guardian The guardian multisig, granted GUARDIAN_ROLE
    * @param _registry The policy registry
    * @param _hook The initial policy hook; must be attested as HOOK and name the same registry
@@ -135,7 +142,7 @@ interface IGated4626Vault {
 
   /**
    * @notice Pays fees owed to the fee model's recipient, from the portfolio's idle money
-   * @dev Anyone. Pays what idle money allows
+   * @dev Anyone, while not paused. Pays what idle money allows
    */
   function collectFees() external;
 
@@ -151,8 +158,8 @@ interface IGated4626Vault {
 
   /**
    * @notice Changes the limit on counted gains
-   * @dev DEFAULT_ADMIN_ROLE sets anything; GUARDIAN_ROLE may only lower it
-   * @param _maxRateBps The most the counted value may rise in a year, in basis points
+   * @dev DEFAULT_ADMIN_ROLE sets anything up to the ceiling; GUARDIAN_ROLE may only lower it
+   * @param _maxRateBps The most the counted value may rise in a year, in basis points; at most 1e9
    */
   function setMaxRate(
     uint256 _maxRateBps
@@ -160,11 +167,14 @@ interface IGated4626Vault {
 
   /**
    * @notice Plugs a portfolio, or replaces one that has been emptied with `migrateTo`
-   * @dev DEFAULT_ADMIN_ROLE. It must be attested as PORTFOLIO, be this vault's, and refuse reported adapters. The vault's
-   *      money goes to it and counts at once, so a first plug starts from what the vault held and a replacement keeps its
-   *      price. A portfolio that has written off an adapter leaves the vault exit-only for good, whichever portfolio follows
+   * @dev DEFAULT_ADMIN_ROLE. It must be attested as PORTFOLIO, be this vault's, hold this asset and refuse reported
+   *      adapters. The one it replaces must have no adapter on its list and hold nothing, so an adapter that cannot be read
+   *      has to be written off first. The vault's money goes to the new one and counts at once, so a first plug starts from
+   *      what the vault held. A replacement keeps the price and the limit's clock: the next count allows what it would have
+   *      allowed anyway, at the rate given here. A portfolio that has written off an adapter leaves the vault exit-only for
+   *      good, whichever portfolio follows
    * @param _portfolio The portfolio
-   * @param _maxRateBps The most the counted value may rise in a year, in basis points; not zero
+   * @param _maxRateBps The most the counted value may rise in a year, in basis points; not zero, and at most 1e9
    */
   function setPortfolio(
     address _portfolio,

@@ -61,6 +61,9 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
   /// @notice A year's worth of the rate's denominator: basis points per year, in seconds
   uint256 private constant _RATE_DENOMINATOR = 1e4 * 365 days;
 
+  /// @notice The ceiling on the limit, so the arithmetic cannot overflow. It leaves the timelock room to raise the limit
+  uint256 private constant _MAX_RATE_BPS = 1e9;
+
   /// @notice A price's scale: assets per this many share units
   uint256 private constant _PRICE_SCALE = 1e18;
 
@@ -105,6 +108,7 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
     uint256 _maxRateBps
   ) external onlyRole(DEFAULT_ADMIN_ROLE) {
     if (_maxRateBps == 0) revert Gated4626Vault_ZeroRate();
+    if (_maxRateBps > _MAX_RATE_BPS) revert Gated4626Vault_RateTooHigh(_maxRateBps);
     // View interfaces, compiled to STATICCALL: nothing re-enters before the writes below.
     // aderyn-ignore-next-line(reentrancy-state-change)
     if (!IPolicyRegistry(this.registry()).isAttested(_portfolio, IPolicyRegistry.AttestKind.PORTFOLIO)) {
@@ -112,25 +116,32 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
     }
     IPortfolio _next = IPortfolio(_portfolio);
     // aderyn-ignore-next-line(reentrancy-state-change)
-    if (_next.VAULT() != address(this) || _next.ACCEPTS_REPORTED()) revert Gated4626Vault_PortfolioRefused(_portfolio);
+    IERC20 _asset = IERC20(asset());
+    // aderyn-ignore-next-line(reentrancy-state-change)
+    if (_next.VAULT() != address(this) || _next.ASSET() != _asset || _next.ACCEPTS_REPORTED()) {
+      revert Gated4626Vault_PortfolioRefused(_portfolio);
+    }
 
     Gated4626Storage storage $ = _getGated4626Storage();
     address _old = $.portfolio;
-    if (_old != address(0)) {
+    if (_old == address(0)) {
+      $.lastAt = uint64(block.timestamp);
+    } else {
+      // An adapter on the list can hold a position that cannot be read now, which `pricedValue()` counts as nothing.
+      // A replacement keeps the limit's clock, so the next count allows what it would have allowed anyway.
       // View interfaces, compiled to STATICCALL, and the portfolio is attested: nothing re-enters before these writes.
       // aderyn-ignore-next-line(reentrancy-state-change)
-      if (IPortfolio(_old).pricedValue() != 0) revert Gated4626Vault_PortfolioNotEmpty();
+      if (IPortfolio(_old).adapters().length != 0 || IPortfolio(_old).pricedValue() != 0) {
+        revert Gated4626Vault_PortfolioNotEmpty();
+      }
       // aderyn-ignore-next-line(reentrancy-state-change)
       if (IPortfolio(_old).writtenOff()) $.exitOnly = true;
     }
-    // aderyn-ignore-next-line(reentrancy-state-change)
-    IERC20 _asset = IERC20(asset());
     // aderyn-ignore-next-line(reentrancy-state-change)
     uint256 _held = _asset.balanceOf(address(this));
     $.portfolio = _portfolio;
     $.maxRateBps = _maxRateBps;
     $.last += _held;
-    $.lastAt = uint64(block.timestamp);
     emit PortfolioSet(_portfolio);
     emit MaxRateSet(_maxRateBps);
     if (_held != 0) _asset.safeTransfer(_portfolio, _held);
@@ -146,6 +157,7 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
         revert Gated4626Vault_Unauthorized(_msgSender());
       }
     }
+    if (_maxRateBps > _MAX_RATE_BPS) revert Gated4626Vault_RateTooHigh(_maxRateBps);
     // The old rate decides what has counted so far.
     _accrue();
     $.maxRateBps = _maxRateBps;
@@ -166,7 +178,8 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
     _accrue();
     if ($.feeModel == address(0)) {
       if ($.mark == 0) {
-        $.mark = _convertToAssets(_PRICE_SCALE, Math.Rounding.Floor);
+        // From what was counted, not from `totalAssets()`, which during a read of nothing would start the mark at nothing.
+        $.mark = Math.mulDiv(_PRICE_SCALE, $.last + 1, totalSupply() + 10 ** _decimalsOffset());
         $.markMovedAt = uint64(block.timestamp);
       }
       $.lastFeeAt = uint64(block.timestamp);
@@ -182,7 +195,7 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
   }
 
   /// @inheritdoc IGated4626Vault
-  function collectFees() external {
+  function collectFees() external whenNotPaused {
     Gated4626Storage storage $ = _getGated4626Storage();
     address _feeModel = $.feeModel;
     if (_feeModel == address(0)) revert Gated4626Vault_NoFeeModel();
@@ -434,11 +447,10 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
     _offset = 6;
   }
 
-  /// @notice Brings the counted value up to date and charges any fee; does nothing with no portfolio or no price
+  /// @notice Brings the counted value up to date and charges any fee; does nothing with no portfolio or no usable price
   function _accrue() private {
     Gated4626Storage storage $ = _getGated4626Storage();
-    address _portfolio = $.portfolio;
-    if (_portfolio == address(0) || !IPortfolio(_portfolio).priceFresh()) return;
+    if ($.portfolio == address(0) || _dealingStopped()) return;
     (uint256 _counted, uint256 _fee, uint256 _newMark, bool _markMoved) = _counting();
     $.last = _counted - _fee;
     $.lastAt = uint64(block.timestamp);
@@ -478,12 +490,16 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
   }
 
   /**
-   * @notice Whether a price cannot be read, which stops deposits and withdrawals
-   * @return _stopped True when one cannot
+   * @notice Whether no price can be used, which stops deposits and withdrawals: it cannot be read, or the value net of
+   *         fees reads nothing although holders have a value counted. Nothing is written down, so the value can come back
+   * @return _stopped True when none can
    */
   function _dealingStopped() private view returns (bool _stopped) {
-    address _portfolio = _getGated4626Storage().portfolio;
-    _stopped = _portfolio != address(0) && !IPortfolio(_portfolio).priceFresh();
+    Gated4626Storage storage $ = _getGated4626Storage();
+    IPortfolio _portfolio = IPortfolio($.portfolio);
+    if (address(_portfolio) == address(0)) return false;
+    if (!_portfolio.priceFresh()) return true;
+    _stopped = $.last != 0 && totalSupply() != 0 && _portfolio.pricedValue() <= $.feesOwed;
   }
 
   /**

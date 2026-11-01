@@ -104,7 +104,7 @@ interface IERC7943Fungible is IERC165 {
 
   /**
    * @notice Whether an account may send tokens at all
-   * @dev Account-level and independent of any amount or receiver. Never reverts
+   * @dev Account-level and independent of any amount or receiver. A policy's refusal is a false, not a revert
    * @param _account The account
    * @return _allowed True if the account may send
    */
@@ -114,7 +114,7 @@ interface IERC7943Fungible is IERC165 {
 
   /**
    * @notice Whether an account may receive tokens at all
-   * @dev Account-level and independent of any amount or sender. Never reverts
+   * @dev Account-level and independent of any amount or sender. A policy's refusal is a false, not a revert
    * @param _account The account
    * @return _allowed True if the account may receive
    */

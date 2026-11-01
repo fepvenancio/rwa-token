@@ -1198,6 +1198,27 @@ contract PortfolioUnit_Migrate is PortfolioUnitTest {
     _portfolio.migrateTo(address(_successor));
   }
 
+  /// @dev The money has gone, so what is left says nothing about what the vault owns
+  function test_AfterMigratingItNeverGivesAPriceAgain() external {
+    _removeAdapters();
+    assertTrue(_portfolio.priceFresh());
+    vm.prank(_admin);
+    _portfolio.migrateTo(address(_successor));
+    assertFalse(_portfolio.priceFresh());
+    assertTrue(_successor.priceFresh());
+  }
+
+  function test_MigratingAgainSendsOnWhatArrivedSince() external {
+    _removeAdapters();
+    vm.prank(_admin);
+    _portfolio.migrateTo(address(_successor));
+    _asset.mint(address(_portfolio), 5);
+    vm.prank(_admin);
+    _portfolio.migrateTo(address(_successor));
+    assertEq(_asset.balanceOf(address(_successor)), _IDLE + 5);
+    assertEq(_asset.balanceOf(address(_portfolio)), 0);
+  }
+
   function test_WhenTheSuccessorIsNotAttested_ItReverts() external {
     _removeAdapters();
     vm.mockCall(

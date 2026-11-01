@@ -261,7 +261,7 @@ contract ProxyDeployerUnit_Deploy is ProxyDeployerUnitTest {
   }
 
   /// @dev After the hand-over the deployer EOA cannot place a token outside governance
-  function test_WhenOwnershipMovedToTheTimelock_TheFormerOwnerCannotDeploy() external {
+  function test_WhenOwnershipMoved_TheFormerOwnerCannotDeploy() external {
     address _timelock = makeAddr('timelock');
     vm.prank(_owner);
     _deployer.transferOwnership(_timelock);

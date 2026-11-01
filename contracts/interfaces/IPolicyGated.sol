@@ -118,8 +118,8 @@ interface IPolicyGated is IERC7943Fungible {
    * @notice Pre-flight for a plain transfer by `_from`, a mint (`_from` == 0) or a burn (`_to` == 0), with the reason
    * @dev Runs the same mechanical checks and hook call as the state-changing path, minus the write. The operator in
    *      the context is `_from`, or the caller for a mint. It models holder-driven movements only: a burn
-   *      (`_to` == 0) is simulated as a holder or vault burn, so frozen tokens count against `_amount`. The enforcement
-   *      paths differ: `burn` and `forcedTransfer` release frozen tokens first, and `forcedTransfer` also bypasses pause.
+   *      (`_to` == 0) is simulated as a holder or vault burn, so frozen tokens count against `_amount` unless `_from` holds
+   *      BURNER_ROLE. The enforcement paths differ: `burn` and `forcedTransfer` release frozen tokens first, and `forcedTransfer` also bypasses pause.
    *      Every shortfall counts here, an amount above the balance included. The boolean `canTransfer` is this function's
    *      first value except for a balance shortfall with no frozen amount in the way, which it leaves to the base standard
    * @param _from The sender, or address(0) for a mint

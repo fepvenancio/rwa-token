@@ -82,7 +82,7 @@ describe("credentials: the registry and the rule through the real deployment", a
 
     const attester = await credentials.read.attesterAt([0]);
     assert.equal(getAddress(attester.account), getAddress(s.wallets.kyc.account.address));
-    assert.equal(attester.allowedQuals, 255, "the demo provider may assert the eight named bits");
+    assert.equal(attester.allowedQuals, 1023, "the demo provider may assert the ten named bits");
 
     const alice = s.holders.alice.account.address;
     assert.deepEqual(await credentials.read.profileOf([alice]), [STATUS.ACTIVE, QUALS.KYC, 0]);

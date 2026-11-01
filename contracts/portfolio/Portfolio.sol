@@ -69,6 +69,9 @@ contract Portfolio is ReentrancyGuardTransient, IPortfolio {
   /// @notice The installed adapters
   EnumerableSet.AddressSet internal _adapters;
 
+  /// @notice Whether the money has gone to a successor, after which this portfolio gives no price
+  bool internal _migrated;
+
   /**
    * @notice Deploys the portfolio and lets its vault pull the idle money
    * @param _vault The vault it serves
@@ -213,6 +216,7 @@ contract Portfolio is ReentrancyGuardTransient, IPortfolio {
     _requireAdmin();
     uint256 _count = _adapters.length();
     if (_count != 0) revert Portfolio_AdaptersInstalled(_count);
+    _migrated = true;
     if (!_registry().isAttested(_successor, IPolicyRegistry.AttestKind.PORTFOLIO)) {
       revert Portfolio_NotAttested(_successor);
     }
@@ -249,6 +253,7 @@ contract Portfolio is ReentrancyGuardTransient, IPortfolio {
 
   /// @inheritdoc IPortfolio
   function priceFresh() external view returns (bool _fresh) {
+    if (_migrated) return false;
     uint256 _count = _adapters.length();
     for (uint256 _i; _i < _count; ++_i) {
       IAdapter _plug = IAdapter(_adapters.at(_i));
@@ -301,7 +306,7 @@ contract Portfolio is ReentrancyGuardTransient, IPortfolio {
 
   /**
    * @notice Brings money back and takes what left the position off the allocation
-   * @dev A priced adapter's allocation falls by the change in its value, unless it cannot be read: then by what came back.
+   * @dev A priced adapter's allocation falls by the change in its value, unless it cannot be read: then by what it was asked for.
    *      It never falls below zero, so a gain taken out leaves nothing against the cap
    * @param _adapter The adapter
    * @param _assets The assets it must return

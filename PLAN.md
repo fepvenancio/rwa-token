@@ -3206,7 +3206,47 @@ A CI run took about 70 minutes, and `slither .` was 55 of them. It compiled and 
 - It loses nothing on shipped code. With all 59 suppressions removed from the shipped contracts, both runs report the same 56 findings, across 14 detectors and 22 files, and both exit non-zero. All 76 shipped files are in the narrower build, and no test or mock is.
 - The swap step is gone, because it existed for Slither's memory.
 - `concurrency` cancels a PR's run when a newer push replaces it. Runs on `main` finish.
-- Not done: splitting the tests and the reproducibility check into more jobs. It would take about 18 minutes to about 12, for about 6 more billed minutes a run.
+- Not done: splitting the tests and the reproducibility check into more jobs. Measured on the first run after this change (17 minutes, the analysis job the longest), it would save about 3 minutes and bill another job's setup.
+
+## Fifteen code problems found while writing the HTML pages (2026-11-01)
+
+Writing the pages against `60c1de3`, and checking them claim by claim, found these. Nothing is deployed, so no money was ever at risk. The owner said to fix them before the pages land. The interfaces reopen only for three new errors, one reworded error and NatSpec: no function changes, so no interface id moves, and `InterfaceFreeze.t.sol` shows it.
+
+Can cost holders money after one mistake or one odd event:
+
+| # | What happens today | Fix |
+|---|---|---|
+| 1 | `migrateTo` and `setPortfolio` must run in one batch and nothing enforces it. In the gap `totalAssets()` reads 0 and anyone's `accrue()` writes `last = 0` for good. | `migrateTo` marks the portfolio, and `priceFresh()` reads false from then on. The vault holds its price and stops dealing until the replacement. `migrateTo` can run again, to send on anything that arrived since. |
+| 2 | During an outage with nothing idle, `pricedValue()` reads 0, so `setPortfolio` passes with no write-off. The position is left behind and deposits open at about zero. | `setPortfolio` refuses while the old portfolio has an adapter on its list (`Gated4626Vault_PortfolioNotEmpty`). The way out of an outage is the write-off, which leaves the vault exit-only. |
+| 3 | A read of nothing with `fresh()` true writes `last = 0`, which never recovers, and deposits stay open at about zero. | While the value net of fees reads nothing, a value was counted and shares exist, `accrue` writes nothing and the `max*` views are 0. `totalAssets()` still reads 0, because the read is what it is. When the value returns it counts under the limit from `last`. A first fee model plugged meanwhile takes its mark from `last`, not from that zero. A vault drained to dust shares has counted nothing (`last == 0`) and a vault with no shares has nobody to protect, so both keep taking deposits. |
+| 4 | `ERC4626Adapter` uses `try`, which does not catch a target with no code or short return data. Every read reverts, so the adapter can never come off, and only a vault upgrade gets out. | A checked `staticcall` that reads one word, so any failure is an outage and the write-off works. |
+| 5 | `NavDesk`: a first `setFeeModel` during a cooldown, or a plug before `adopt` from a feeless desk: the mark of 0 overwrites the plug's, and the next quote charges performance on the whole price. | `execute` leaves the mark and the clocks alone when the proposal had no model. `adopt` takes the old mark only if there is one, and the fee clock only if the old desk has a model. NatSpec says to plug, then adopt. |
+| 15 | `setPortfolio` restarts the limit's clock, so the gain the limit had already allowed is dropped and the next depositor buys that much cheap. | A replacement keeps the clock. The next count allows what it would have allowed anyway, so nothing has to be counted before `migrateTo`. The rate passed to `setPortfolio` applies to that time, as `setMaxRate` during an outage does. |
+
+Smaller:
+
+| # | What happens today | Fix |
+|---|---|---|
+| 6 | `NavDesk.hashOf` leaves out `asOf`, so an approval carries over to the same numbers on a later report. | The hash covers `asOf`. |
+| 7 | `NavDesk.execute` does not compare the period (needs a second settler). | `NavDesk_WrongPeriod(proposed, closed)`. |
+| 8 | `maxRate` has no upper bound, and overflow jams the vault. | `Gated4626Vault_RateTooHigh(rate)` above 1e9 basis points a year. The bound is there for the arithmetic only, and leaves the timelock room to raise the rate after a low read. |
+| 9 | `kycAllowedQuals` defaults to 255, so the default attester cannot assert `US_PERSON` or `EEA`, and a `forbidAny` on them refuses nobody. | The default is 1023, the ten named bits. |
+| 10 | `SupplyCapRule` does not answer ERC-165 for `ISupplyCapRule`. | It does, as the older rules do. |
+| 11 | A fee model with a zero recipient strands `feesOwed`. | `FeeModel_ZeroRecipient` on any zero recipient. |
+| 12 | `Gated4626Vault.collectFees` runs through a pause. | `whenNotPaused`. |
+| 13 | `setPortfolio` and `NavDesk.setSettings` do not compare `ASSET()`. | They refuse another asset. |
+| 14 | `SignedEntry`: a wrong `asynchronous` flag on a 7540 where the router is the controller of a settled request claims those shares and strands the investor's cash. | `SignedEntry_CashNotTaken(left)` when the allowance is not back to zero. An allowance and not a balance, because anyone can send the router a balance and stop every entry. |
+
+Fix 3 differs from what the owner first read ("a first non-zero read counts from zero"). Writing nothing is simpler and stricter: no read can jump the price, and it also rescues a plug that named the wrong successor, as the money can still follow it.
+
+Fix 11 is what makes fix 5 sound: a proposal's `feeRecipient` is zero only when no model was plugged.
+
+Not fixed, on purpose:
+
+- A read that is low and not zero still counts at once, with deposits open at that price, and recovers at `maxRate`. That is the agreed design, and the council reads each target before attesting it. During a read of nothing, a donor can turn it into a low read with 1 unit of the asset. Closing that needs a limit on how far one read can fall, which would also stop holders leaving at a real written-down price. That is the owner's call, as is anything else about how a fund suspends dealing.
+- The four items left for the owner: a relayed exit by permit is an allowance; caps measure the change in value, not the cash sent; killing an attester does not protect its stored blocks; `assertHandedOver` is a test fixture, and nothing runs it on a live network.
+
+Order of work: the three errors and NatSpec, tests with the red run, the fixes, every gate and the mutants, the stale lines in `SECURITY.md`, `CLAUDE.md`, the README and the NatSpec, one PR from `main`. Then the pages: re-pin them and re-check the sentences these fixes change.
 
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.

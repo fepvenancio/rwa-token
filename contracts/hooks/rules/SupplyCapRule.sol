@@ -53,4 +53,11 @@ contract SupplyCapRule is BaseRule, ISupplyCapRule {
   function ruleId() external pure returns (bytes32 _id) {
     _id = keccak256('SupplyCapRule.v1');
   }
+
+  /// @inheritdoc BaseRule
+  function supportsInterface(
+    bytes4 _interfaceId
+  ) public view override returns (bool _supported) {
+    _supported = _interfaceId == type(ISupplyCapRule).interfaceId || super.supportsInterface(_interfaceId);
+  }
 }

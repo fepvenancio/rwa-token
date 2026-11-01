@@ -7,9 +7,9 @@ import { ROLES } from "./roles.js";
  * Stage 2, once per issuer, after the council has attested the core. It takes the addresses `Core` produced as parameters.
  *
  * 1. Configure what only the deployer can: the first KYC attester.
- * 2. Grant the core's roles: the guardian becomes a timelock canceller; the recovery timelock gets RECOVERY_ROLE (unpause
- *    and revoke GUARDIAN_ROLE only) on the credential registry, where it also clears a guardian block and revives an
- *    attester, and on the executors; the executors get their operator.
+ * 2. Grant the core's roles: the guardian becomes a timelock canceller; the recovery timelock gets RECOVERY_ROLE on the
+ *    credential registry (clear a guardian block, revive an attester, revoke GUARDIAN_ROLE) and on the executors (unpause
+ *    and revoke GUARDIAN_ROLE); the executors get their operator.
  * 3. Hand over: DEFAULT_ADMIN_ROLE to the timelock on the credential registry and the executors, and the deployer
  *    renounces everywhere. `ProxyDeployer` goes to the operations account: products then launch without waiting.
  *
@@ -42,10 +42,10 @@ export function coreHandoverModule(profile: Profile) {
 
     if (rules.has("credentialRule")) {
       const credentials = m.contractAt("CredentialRegistry", p("credentialRegistry"));
-      // The one attester is the issuer's KYC function, id 0. It may assert the eight named qualification bits unless the
+      // The one attester is the issuer's KYC function, id 0. It may assert the ten named qualification bits unless the
       // deployment narrows that.
       configured.push(
-        m.call(credentials, "addAttester", [p("kycAttester"), m.getParameter<number>("kycAllowedQuals", 255)]),
+        m.call(credentials, "addAttester", [p("kycAttester"), m.getParameter<number>("kycAllowedQuals", 1023)]),
       );
       grant("credentials_recovery", credentials, ROLES.RECOVERY, recoveryTimelock);
       administered.push({ key: "credentials", contract: credentials });

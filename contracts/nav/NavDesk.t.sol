@@ -461,6 +461,9 @@ contract NavDesk_Accept is NavDeskTest {
     _q = _desk.proposal();
     _q.feeRecipient = address(1);
     assertTrue(_desk.hashOf(_q) != _base, 'fee recipient');
+    _q = _desk.proposal();
+    _q.asOf += 1;
+    assertTrue(_desk.hashOf(_q) != _base, 'the report date');
   }
 }
 
@@ -611,6 +614,32 @@ contract NavDesk_Execute is NavDeskTest {
     _vault.pause();
     vm.warp(block.timestamp + _COOLDOWN);
     vm.expectRevert(Pausable.EnforcedPause.selector);
+    _desk.execute();
+  }
+
+  /// @dev A second settler dealt the period this priced and closed the next. Executing would deal that one at this price
+  function test_WhenAnotherPeriodIsClosedNow_ItReverts() external {
+    _accept();
+    address _settler = makeAddr('settler');
+    _vault.grantRole(_vault.SETTLER_ROLE(), _settler);
+    vm.startPrank(_settler);
+    _vault.settlePeriod(0, 0, _custodian, address(0));
+    _vault.closePeriod();
+    vm.stopPrank();
+    vm.warp(block.timestamp + _COOLDOWN);
+    vm.expectRevert(abi.encodeWithSelector(INavDesk.NavDesk_WrongPeriod.selector, 1, 2));
+    _desk.execute();
+    assertEq(_desk.proposal().period, 1, 'cancelling is the way out');
+  }
+
+  function test_WhenNoPeriodIsClosedNow_ItReverts() external {
+    _accept();
+    address _settler = makeAddr('settler');
+    _vault.grantRole(_vault.SETTLER_ROLE(), _settler);
+    vm.prank(_settler);
+    _vault.settlePeriod(0, 0, _custodian, address(0));
+    vm.warp(block.timestamp + _COOLDOWN);
+    vm.expectRevert(INavDesk.NavDesk_NoClosedPeriod.selector);
     _desk.execute();
   }
 }
@@ -1081,6 +1110,99 @@ contract NavDesk_Fees is NavDeskTest {
     assertEq(_next.lastFeeAt(), _feeAt);
     assertEq(_next.feeModel(), address(0), 'the batch plugs the model itself');
   }
+
+  /// @dev The proposal froze no mark, as there was no model. Writing that over the plug's would charge principal
+  function test_AFirstPlugDuringACooldownKeepsItsMarkAndChargesNoPrincipal() external {
+    _close();
+    _propose(1000e6);
+    _accept();
+    _plug();
+    uint256 _mark = _desk.mark();
+    uint256 _at = block.timestamp;
+    vm.warp(block.timestamp + _COOLDOWN);
+    _desk.execute();
+    assertEq(_desk.mark(), _mark);
+    assertEq(_desk.markMovedAt(), _at);
+    assertEq(_desk.lastFeeAt(), _at);
+    assertEq(_asset.balanceOf(_recipient), 0);
+
+    // An unchanged value pays a day's management fee, and no performance fee.
+    _close();
+    _propose(1000e6);
+    assertLt(_desk.proposal().fee, 100e3);
+    assertEq(_desk.proposal().mark, _mark);
+  }
+
+  /// @dev The same numbers on a later report are another price: the staleness check runs from the report's date
+  function test_AnApprovalDoesNotCarryOverToALaterReportWithTheSameNumbers() external {
+    _close();
+    _propose(1000e6);
+    bytes32 _earlier = _hash();
+    vm.prank(_checker);
+    _desk.cancel();
+    vm.warp(block.timestamp + 1);
+    _propose(1000e6);
+    vm.expectRevert(INavDesk.NavDesk_ProposalMismatch.selector);
+    vm.prank(_checker);
+    _desk.accept(_earlier);
+  }
+
+  function test_WithNoModelExecutingLeavesTheFeeStateAlone() external {
+    _close();
+    _propose(1000e6);
+    _accept();
+    vm.warp(block.timestamp + _COOLDOWN);
+    _desk.execute();
+    assertEq(_desk.mark(), 0);
+    assertEq(_desk.markMovedAt(), 0);
+    assertEq(_desk.lastFeeAt(), 0);
+  }
+
+  /// @dev Plugging then adopting from a desk that never charged: its mark of 0 says nothing, and must not replace the plug's
+  function test_AdoptingFromADeskThatNeverChargedKeepsThePlug() external {
+    NavDesk _next = new NavDesk(address(_vault), _custodian, _LENGTH, _COOLDOWN, _MAX_AGE);
+    _next.setFeeModel(address(_model));
+    uint256 _mark = _next.mark();
+    uint256 _at = block.timestamp;
+    assertGt(_mark, 0);
+    vm.warp(block.timestamp + 1 days);
+    _next.adopt(address(_desk));
+    assertEq(_next.mark(), _mark);
+    assertEq(_next.markMovedAt(), _at);
+    assertEq(_next.lastFeeAt(), _at);
+    assertEq(_next.lastCutoff(), _desk.lastCutoff());
+  }
+
+  /// @dev Plugging then adopting from a desk that charges: the time since its last fee is still charged
+  function test_PluggingThenAdoptingTakesTheOldDesksClocks() external {
+    _plug();
+    uint256 _mark = _desk.mark();
+    uint256 _at = block.timestamp;
+    vm.warp(block.timestamp + 30 days);
+    NavDesk _next = new NavDesk(address(_vault), _custodian, _LENGTH, _COOLDOWN, _MAX_AGE);
+    _next.setFeeModel(address(_model));
+    _next.adopt(address(_desk));
+    assertEq(_next.mark(), _mark);
+    assertEq(_next.markMovedAt(), _at);
+    assertEq(_next.lastFeeAt(), _at);
+  }
+
+  /// @dev A desk with its model taken off keeps a mark, so no gain pays twice, and no time without a model is charged
+  function test_AdoptingFromADeskWithItsModelOffTakesTheMarkAndNotTheFeeClock() external {
+    _plug();
+    uint256 _mark = _desk.mark();
+    uint256 _movedAt = _desk.markMovedAt();
+    vm.warp(block.timestamp + 30 days);
+    _desk.setFeeModel(address(0));
+    vm.warp(block.timestamp + 30 days);
+    NavDesk _next = new NavDesk(address(_vault), _custodian, _LENGTH, _COOLDOWN, _MAX_AGE);
+    _next.setFeeModel(address(_model));
+    uint256 _at = block.timestamp;
+    _next.adopt(address(_desk));
+    assertEq(_next.mark(), _mark);
+    assertEq(_next.markMovedAt(), _movedAt);
+    assertEq(_next.lastFeeAt(), _at);
+  }
 }
 
 /// @notice With a `Portfolio` plugged it is both the cash account and the source of on-chain value
@@ -1113,6 +1235,27 @@ contract NavDesk_WithAPortfolio is NavDeskTest {
     uint256 _asOf = block.timestamp;
     vm.prank(_reporter);
     _desk.propose(_reported, _REPORT, _asOf, _moves);
+  }
+
+  function test_APortfolioForAnotherAssetIsRefused() external {
+    MockAsset _other = new MockAsset(6);
+    Portfolio _wrong = new Portfolio(address(_vault), IERC20(address(_other)), true);
+    _registry.attest(address(_wrong).codehash, IPolicyRegistry.AttestKind.PORTFOLIO, '');
+    vm.expectRevert(INavDesk.NavDesk_PortfolioRefused.selector);
+    _desk.setSettings(address(_wrong), address(0), _LENGTH, _COOLDOWN, _MAX_AGE);
+  }
+
+  /// @dev A portfolio that has sent its money on prices nothing, and no price can be struck against it
+  function test_AfterAMigrationNoPriceIsProposed() external {
+    _portfolio.removeAdapter(address(_adapter));
+    Portfolio _next = new Portfolio(address(_vault), IERC20(address(_asset)), true);
+    _portfolio.migrateTo(address(_next));
+    _request(_alice, 1000);
+    _close();
+    uint256 _asOf = block.timestamp;
+    vm.expectRevert(INavDesk.NavDesk_PriceNotFresh.selector);
+    vm.prank(_reporter);
+    _desk.propose(0, _REPORT, _asOf, 0);
   }
 
   function test_NetInflowGoesToThePortfolio() external {
