@@ -623,7 +623,7 @@ export async function revertOf(call: Promise<unknown>, abi: Abi) {
 // ---- DvP ---------------------------------------------------------------------------------------------------------------
 
 /** The typed data of an ERC-3009 `receiveWithAuthorization`, as Circle's FiatToken and the test mock define it. */
-const RECEIVE_AUTHORIZATION_TYPES = {
+export const RECEIVE_AUTHORIZATION_TYPES = {
   ReceiveWithAuthorization: [
     { name: "from", type: "address" },
     { name: "to", type: "address" },

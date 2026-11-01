@@ -8,7 +8,7 @@ import { fundOpenModule } from "../../ignition/modules/FundOpen.js";
 import { productModule } from "../../ignition/modules/Product.js";
 import { QUALS } from "../../ignition/modules/roles.js";
 import { PROFILES, type Product, type Profile } from "../../ignition/profiles.js";
-import { assertHandedOver, deployProduct, deployProfile, deployStack, deverify, REASONS, verify, PAR, settlePeriod } from "./fixtures.js";
+import { assertHandedOver, deployProduct, deployProfile, deployStack, deverify, PAR, REASONS, RECEIVE_AUTHORIZATION_TYPES, settlePeriod, verify } from "./fixtures.js";
 
 const PLAIN = ["credentialRule", "holderRestrictionRule"] as const;
 const CORE = ["credentialRegistry", "credentialRule", "holderRestrictionRule", "hook", "proxyDeployer", "recoveryTimelock", "registry", "timelock"];
@@ -311,6 +311,75 @@ describe("each fund is its own lego", async function () {
     assert.throws(() => productModule(noFund), /a: fundHoldersRule needs a fund/);
     const noRule: Product = { key: "b", template: "GatedToken", name: "B", symbol: "B", rules: ["credentialRule"], fund: "usd" };
     assert.throws(() => productModule(noRule), /b: names a fund without fundHoldersRule/);
+  });
+});
+
+describe("a signed entry", async function () {
+  const connection = await network.create();
+  const { viem, networkHelpers } = connection;
+
+  const ENTRY_TYPES = {
+    Entry: [
+      { name: "investor", type: "address" },
+      { name: "vault", type: "address" },
+      { name: "assets", type: "uint256" },
+      { name: "minShares", type: "uint256" },
+      { name: "asynchronous", type: "bool" },
+      { name: "nonce", type: "bytes32" },
+      { name: "validAfter", type: "uint256" },
+      { name: "deadline", type: "uint256" },
+    ],
+  } as const;
+
+  it("an investor signs twice, a relayer pays the gas, and the shares arrive", async function () {
+    const usdc = await viem.deployContract("MockERC3009Token");
+    const s = await deployProfile(connection, PROFILES.vault4626, { asset: usdc.address });
+    const vault = await viem.getContractAt("Gated4626Vault", s.products.fund.address);
+    const router = await viem.deployContract("SignedEntry");
+    const alice = s.holders.alice;
+    const a = alice.account.address;
+    await verify(s, alice);
+    await verify(s, router.address); // a vault's policy decides whether to accept it as a payer
+    await usdc.write.mint([a, usd(100n)]);
+
+    const now = (await s.publicClient.getBlock()).timestamp;
+    const entry = {
+      investor: a,
+      vault: vault.address,
+      assets: usd(100n),
+      minShares: 1n,
+      asynchronous: false,
+      nonce: keccak256(toHex("one entry")),
+      validAfter: 0n,
+      deadline: now + 3_600n,
+    };
+    const chainId = await s.publicClient.getChainId();
+    const entrySig = await alice.signTypedData({
+      domain: { name: "SignedEntry", version: "1", chainId, verifyingContract: router.address },
+      types: ENTRY_TYPES,
+      primaryType: "Entry",
+      message: entry,
+    });
+    const cashSig = await alice.signTypedData({
+      domain: { name: "Mock USD", version: "2", chainId, verifyingContract: usdc.address },
+      types: RECEIVE_AUTHORIZATION_TYPES,
+      primaryType: "ReceiveWithAuthorization",
+      message: {
+        from: a,
+        to: router.address,
+        value: entry.assets,
+        validAfter: entry.validAfter,
+        validBefore: entry.deadline,
+        nonce: await router.read.cashNonce([entry]),
+      },
+    });
+
+    // The relayer is not the investor, and holds no asset.
+    await router.write.enterWith3009([entry, entrySig, cashSig], { account: s.holders.bob.account });
+    assert.ok((await vault.read.balanceOf([a])) > 0n);
+    assert.equal(await usdc.read.balanceOf([a]), 0n);
+    assert.equal(await usdc.read.balanceOf([router.address]), 0n);
+    assert.equal(await router.read.nonceUsed([a, entry.nonce]), true);
   });
 });
 
