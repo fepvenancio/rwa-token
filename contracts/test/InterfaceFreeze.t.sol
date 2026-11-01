@@ -6,11 +6,13 @@ import {Test} from 'forge-std/Test.sol';
 import {Reasons} from 'interfaces/Errors.sol';
 
 import {IAdapter} from 'interfaces/IAdapter.sol';
+import {ICallValidator} from 'interfaces/ICallValidator.sol';
 import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {ICredentialRegistry} from 'interfaces/ICredentialRegistry.sol';
 import {ICredentialRule} from 'interfaces/ICredentialRule.sol';
 import {IDvPExecutor} from 'interfaces/IDvPExecutor.sol';
+import {IERC20CallValidator} from 'interfaces/IERC20CallValidator.sol';
 import {IERC3009} from 'interfaces/IERC3009.sol';
 import {IERC4626Adapter} from 'interfaces/IERC4626Adapter.sol';
 import {IERC7540Deposit} from 'interfaces/IERC7540Deposit.sol';
@@ -18,11 +20,13 @@ import {IERC7540Operator} from 'interfaces/IERC7540Operator.sol';
 import {IERC7540Redeem} from 'interfaces/IERC7540Redeem.sol';
 import {IERC7575} from 'interfaces/IERC7575.sol';
 import {IERC7943Fungible} from 'interfaces/IERC7943Fungible.sol';
+import {IFeeModel} from 'interfaces/IFeeModel.sol';
 import {IFund} from 'interfaces/IFund.sol';
 import {IFundHoldersRule} from 'interfaces/IFundHoldersRule.sol';
 import {IGated4626Vault} from 'interfaces/IGated4626Vault.sol';
 import {IGated7540Vault} from 'interfaces/IGated7540Vault.sol';
 import {IGovernanceTimelock} from 'interfaces/IGovernanceTimelock.sol';
+import {IGuardedAccount} from 'interfaces/IGuardedAccount.sol';
 import {IHolderRestrictionRule} from 'interfaces/IHolderRestrictionRule.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IIntentExecutor} from 'interfaces/IIntentExecutor.sol';
@@ -69,6 +73,8 @@ contract InterfaceFreezeTest is Test {
     assertEq(uint8(IPolicyRegistry.AttestKind.IMPLEMENTATION), 3);
     assertEq(uint8(IPolicyRegistry.AttestKind.PORTFOLIO), 4);
     assertEq(uint8(IPolicyRegistry.AttestKind.ADAPTER), 5);
+    assertEq(uint8(IPolicyRegistry.AttestKind.VALIDATOR), 6);
+    assertEq(uint8(IPolicyRegistry.AttestKind.FEE_MODEL), 7);
   }
 
   function test_WhenInterfacesCompile_TheirErc165IdsArePinned() external pure {
@@ -101,7 +107,8 @@ contract InterfaceFreezeTest is Test {
     // 0x0e091382)
     // Added in Phase 5a (2026-10-17)
     // Re-pinned in S1 of the review items (2026-10-24): `initialize` takes the token's initial rules (was 0xb008690c)
-    assertEq(type(IGated4626Vault).interfaceId, bytes4(0x6208cbc1), 'IGated4626Vault');
+    // Re-pinned 2026-11-01 on owner instruction: the portfolio plug.
+    assertEq(type(IGated4626Vault).interfaceId, bytes4(0x56f3979a), 'IGated4626Vault');
     // Added in Phase 5b (2026-10-17). The four ERC-7540 / ERC-7575 ids are the standard's own values.
     assertEq(type(IERC7540Operator).interfaceId, bytes4(0xe3bc4e65), 'IERC7540Operator');
     assertEq(type(IERC7540Deposit).interfaceId, bytes4(0xce3bbe50), 'IERC7540Deposit');
@@ -112,7 +119,11 @@ contract InterfaceFreezeTest is Test {
     // Re-pinned in S1 of the review items (2026-10-24): `initialize` takes the token's initial rules (was 0x75f5b0db)
     // Re-pinned 2026-10-31 on owner instruction: dealing periods replace per-investor fulfilment.
     assertEq(type(IGated7540Vault).interfaceId, bytes4(0xc6a5eee9), 'IGated7540Vault');
-    assertEq(type(INavDesk).interfaceId, bytes4(0x2d3ee46c), 'INavDesk');
+    assertEq(type(INavDesk).interfaceId, bytes4(0x6d2f4b62), 'INavDesk');
+    assertEq(type(IGuardedAccount).interfaceId, bytes4(0x30444861), 'IGuardedAccount');
+    assertEq(type(ICallValidator).interfaceId, bytes4(0x9e8d53da), 'ICallValidator');
+    assertEq(type(IERC20CallValidator).interfaceId, bytes4(0x4095b410), 'IERC20CallValidator');
+    assertEq(type(IFeeModel).interfaceId, bytes4(0xb7b102a7), 'IFeeModel');
     assertEq(type(IIdentityRegistry).interfaceId, bytes4(0xb9209e33), 'IIdentityRegistry');
     // Added in Phase 7 (2026-10-17), after ProxyDeployer moved to OZ Ownable
     // Re-pinned in S1 of the review items (2026-10-24): `deploy` takes and checks the expected rules (was 0x886d8cd8)
@@ -172,6 +183,17 @@ contract InterfaceFreezeTest is Test {
     // Added in Phase 5b (2026-10-17)
     assertEq(IGated7540Vault.PeriodClosed.selector, 0x5263beccfd97c2947207bf7254d7c0c216431d4b9cea8c9b3371e8187020851b);
     assertEq(IGated7540Vault.PeriodSettled.selector, 0x59d402dbba7176d35eb7a36b22a3d102e56f927fa636f911d542ce9ddff6677f);
+    assertEq(INavDesk.FeeModelSet.selector, 0x57e1682cf9947a26bcd0a26e75237738985e93b1cb7b5cff920f48b9e72b0eb7);
+    assertEq(IGated4626Vault.Accrued.selector, 0xe0c50b11a6cc6d75470f28bd76d20c8d223c626324486a273eefadf6c6e973a7);
+    assertEq(IGated4626Vault.FeeModelSet.selector, 0x57e1682cf9947a26bcd0a26e75237738985e93b1cb7b5cff920f48b9e72b0eb7);
+    assertEq(IGated4626Vault.FeesCollected.selector, 0x9dc46f23cfb5ddcad0ae7ea2be38d47fec07bb9382ec7e564efc69e036dd66ce);
+    assertEq(IGated4626Vault.MaxRateSet.selector, 0x08ee7b4c9309523d0db8e9554983c42a2b594b0a05a721d6237edb07bec7dab3);
+    assertEq(IGated4626Vault.PortfolioSet.selector, 0x0d5636196773d6bc83dfcd7e1aadeb530723d82fce181c4a3680a0bcfe0b2f0f);
+    assertEq(IGuardedAccount.CallMade.selector, 0xf7069cb373783a30940dc185ef11ac49cdc063baa4035fbd6c914a9ab6975350);
+    assertEq(
+      IGuardedAccount.PermissionRevoked.selector, 0x9490008f9cc8bcb46b963024434fb1ff254b868936cc6c7614597b1b1a37c6a7
+    );
+    assertEq(IGuardedAccount.PermissionSet.selector, 0x0075380c8fcf1e82a38d57f9741e445075fd2eead9d6890b827c9a9935e8cbb3);
     assertEq(INavDesk.CutOff.selector, 0x3059172a9b0c574ae2c014e7ae803574138d1151319008a9d8712f37a87c375b);
     assertEq(INavDesk.DeskAdopted.selector, 0xa66dee6ab9d4713c6eda1dfbdfcaa28b4ca7a43d637d84a3310c088708ea6cbb);
     assertEq(INavDesk.ProposalAccepted.selector, 0x6931ab328a92d5384b647f50bea59bf9c0154a2c39315df2738ad91bb3c9d769);

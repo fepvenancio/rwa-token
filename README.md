@@ -82,7 +82,7 @@ can change its own.
 | `ProxyDeployer` owner | operations account | none | place a new product, only over an attested implementation. It touches nothing that exists |
 | `Fund` owner | timelock | ≥ 24 hours | register a class, set the fund's rule and investor cap, exempt an account. Only the installed rule records which classes an account holds |
 | token `AGENT_ROLE` → rules | issuer | none | set or clear per-holder lockups, freeze or unfreeze a holder (`HolderRestrictionRule`) |
-| `ALLOCATOR_ROLE` (on a vault, asked by its `Portfolio`) | fund manager | none | send money to an installed adapter within caps, bring it back, choose the liquidity adapter |
+| `ALLOCATOR_ROLE` (on a vault, asked by its `Portfolio` and `GuardedAccount`s) | fund manager | none | send money to an installed adapter within caps, bring it back, choose the liquidity adapter |
 | `SETTLER_ROLE` (7540 vault) | a `NavDesk` | none | close and settle periods; take a request back once its period has closed |
 | `REPORTER_ROLE`, `CHECKER_ROLE` (on a vault, asked by its `NavDesk`) | fund administration; risk or the depositary | none | propose a price; accept or cancel one. Never the same account |
 

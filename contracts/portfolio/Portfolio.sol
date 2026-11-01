@@ -240,7 +240,8 @@ contract Portfolio is ReentrancyGuardTransient, IPortfolio {
     uint256 _count = _adapters.length();
     for (uint256 _i; _i < _count; ++_i) {
       IAdapter _plug = IAdapter(_adapters.at(_i));
-      if (!_plug.reported()) _value += _plug.value();
+      // A portfolio that refuses reported adapters has none to ask about, and this is a hot path behind a 4626.
+      if (!ACCEPTS_REPORTED || !_plug.reported()) _value += _plug.value();
     }
   }
 
@@ -249,7 +250,7 @@ contract Portfolio is ReentrancyGuardTransient, IPortfolio {
     uint256 _count = _adapters.length();
     for (uint256 _i; _i < _count; ++_i) {
       IAdapter _plug = IAdapter(_adapters.at(_i));
-      if (!_plug.reported() && !_plug.fresh()) return false;
+      if ((!ACCEPTS_REPORTED || !_plug.reported()) && !_plug.fresh()) return false;
     }
     _fresh = true;
   }

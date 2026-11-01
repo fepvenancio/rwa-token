@@ -17,6 +17,7 @@ import {PolicyRegistry} from 'contracts/governance/PolicyRegistry.sol';
 import {ComplianceHook} from 'contracts/hooks/ComplianceHook.sol';
 import {CredentialRule} from 'contracts/hooks/rules/CredentialRule.sol';
 import {CredentialRegistry} from 'contracts/identity/CredentialRegistry.sol';
+import {FeeModel} from 'contracts/nav/FeeModel.sol';
 import {NavDesk} from 'contracts/nav/NavDesk.sol';
 import {Portfolio} from 'contracts/portfolio/Portfolio.sol';
 import {MockAdapter} from 'contracts/test/MockAdapter.sol';
@@ -346,6 +347,7 @@ contract NavDesk_Propose is NavDeskTest {
       nav: 500,
       fee: 0,
       mark: 0,
+      markMovedAt: block.timestamp, // no shares yet, so the clocks restart
       reportHash: _REPORT,
       cash: _custodian,
       feeRecipient: address(0)
@@ -447,6 +449,9 @@ contract NavDesk_Accept is NavDeskTest {
     _q = _desk.proposal();
     _q.mark += 1;
     assertTrue(_desk.hashOf(_q) != _base, 'mark');
+    _q = _desk.proposal();
+    _q.markMovedAt += 1;
+    assertTrue(_desk.hashOf(_q) != _base, 'the clock');
     _q = _desk.proposal();
     _q.reportHash = bytes32(uint256(_q.reportHash) + 1);
     assertTrue(_desk.hashOf(_q) != _base, 'report');
@@ -885,6 +890,196 @@ contract NavDesk_Adopt is NavDeskTest {
     vm.warp(block.timestamp + _COOLDOWN);
     _next.execute();
     assertEq(_vault.maxMint(_bob), 20 * _PAR);
+  }
+}
+
+contract NavDesk_Fees is NavDeskTest {
+  uint256 internal constant _YEAR = 365 days;
+  address internal _recipient = makeAddr('recipient');
+  FeeModel internal _model;
+
+  function setUp() public override {
+    super.setUp();
+    _model = new FeeModel(_recipient, 200, 2000, 0, false);
+    _registry.attest(address(_model).codehash, IPolicyRegistry.AttestKind.FEE_MODEL, '');
+    // 1,000 in, at par, and claimed.
+    _request(_alice, 1000e6);
+    _deal(0);
+    vm.prank(_alice);
+    _vault.mint(1000e6 * _PAR, _alice, _alice);
+  }
+
+  function _plug() internal {
+    _desk.setFeeModel(address(_model));
+  }
+
+  function testFuzz_OnlyTheAdminPlugsAModel(
+    address _caller
+  ) external {
+    if (_caller == address(this)) _caller = _stranger;
+    vm.expectRevert(_unauthorized(_caller));
+    vm.prank(_caller);
+    _desk.setFeeModel(address(_model));
+  }
+
+  function test_AnUnattestedModelIsRefused() external {
+    FeeModel _rogue = new FeeModel(_stranger, 500, 5000, 0, false);
+    vm.expectRevert(abi.encodeWithSelector(INavDesk.NavDesk_FeeModelRefused.selector, address(_rogue)));
+    _desk.setFeeModel(address(_rogue));
+  }
+
+  function test_TheFirstPlugStartsTheMarkAtTheCurrentPrice() external {
+    vm.expectEmit(address(_desk));
+    emit INavDesk.FeeModelSet(address(_model));
+    _plug();
+    assertEq(_desk.feeModel(), address(_model));
+    assertEq(_desk.mark(), _vault.convertToAssets(1e18));
+    assertEq(_desk.lastFeeAt(), block.timestamp);
+    assertEq(_desk.markMovedAt(), block.timestamp);
+  }
+
+  function test_ASwapKeepsTheMarkAndTheClocks() external {
+    _plug();
+    uint256 _mark = _desk.mark();
+    uint256 _at = block.timestamp;
+    vm.warp(block.timestamp + 1 days);
+    FeeModel _next = new FeeModel(_recipient, 100, 1000, 0, false);
+    _registry.attest(address(_next).codehash, IPolicyRegistry.AttestKind.FEE_MODEL, '');
+    _desk.setFeeModel(address(_next));
+    assertEq(_desk.mark(), _mark);
+    assertEq(_desk.lastFeeAt(), _at);
+  }
+
+  function test_UnpluggingStopsTheFee() external {
+    _plug();
+    _desk.setFeeModel(address(0));
+    vm.warp(block.timestamp + _YEAR);
+    _close();
+    _propose(1000e6);
+    assertEq(_desk.proposal().fee, 0);
+    assertEq(_desk.proposal().nav, 1000e6);
+  }
+
+  function test_TheFeeIsQuotedFrozenAndPaid() external {
+    _plug();
+    vm.warp(block.timestamp + _YEAR);
+    _close();
+    uint256 _at = block.timestamp;
+    uint256 _gross = 1000e6;
+    (uint256 _quoted,,) =
+      _model.quote(_gross, _vault.totalSupply(), _desk.mark(), _at - _desk.markMovedAt(), _at - _desk.lastFeeAt());
+    _propose(_gross);
+    INavDesk.Proposal memory _p = _desk.proposal();
+    assertEq(_p.fee, _quoted);
+    assertGt(_p.fee, 0);
+    assertEq(_p.nav, _gross - _quoted);
+    assertEq(_p.feeRecipient, _recipient);
+    _accept();
+    vm.warp(block.timestamp + _COOLDOWN);
+    uint256 _cashBefore = _asset.balanceOf(_custodian);
+    _desk.execute();
+    assertEq(_asset.balanceOf(_recipient), _quoted);
+    assertEq(_asset.balanceOf(_custodian), _cashBefore - _quoted);
+  }
+
+  /// @dev The frozen fee is the fee paid, even if the model is swapped in the cooldown
+  function test_TheFrozenFeeIsTheFeePaid() external {
+    _plug();
+    vm.warp(block.timestamp + _YEAR);
+    _close();
+    _propose(1000e6);
+    uint256 _frozen = _desk.proposal().fee;
+    _accept();
+    _desk.setFeeModel(address(0));
+    vm.warp(block.timestamp + _COOLDOWN);
+    _desk.execute();
+    assertEq(_asset.balanceOf(_recipient), _frozen);
+  }
+
+  function test_ExecutingMovesTheMarkAndTheClocks() external {
+    _plug();
+    vm.warp(block.timestamp + _YEAR);
+    _close();
+    uint256 _at = block.timestamp;
+    _propose(2000e6); // the value doubled
+    uint256 _newMark = _desk.proposal().mark;
+    assertGt(_newMark, _desk.mark());
+    _accept();
+    vm.warp(block.timestamp + _COOLDOWN);
+    _desk.execute();
+    assertEq(_desk.mark(), _newMark);
+    assertEq(_desk.markMovedAt(), _at);
+    assertEq(_desk.lastFeeAt(), _at);
+  }
+
+  function test_BelowTheMarkItStaysAndItsClockRunsOn() external {
+    _plug();
+    uint256 _mark = _desk.mark();
+    uint256 _movedAt = _desk.markMovedAt();
+    vm.warp(block.timestamp + _YEAR);
+    _close();
+    uint256 _at = block.timestamp;
+    _propose(500e6);
+    _accept();
+    vm.warp(block.timestamp + _COOLDOWN);
+    _desk.execute();
+    assertEq(_desk.mark(), _mark);
+    assertEq(_desk.markMovedAt(), _movedAt);
+    assertEq(_desk.lastFeeAt(), _at);
+  }
+
+  /// @dev A cancel leaves the fee clocks where they were, so nothing is lost or charged twice
+  function test_ACancelledProposalChargesNothing() external {
+    _plug();
+    uint256 _feeAt = _desk.lastFeeAt();
+    vm.warp(block.timestamp + _YEAR);
+    _close();
+    _propose(1000e6);
+    vm.prank(_checker);
+    _desk.cancel();
+    assertEq(_desk.lastFeeAt(), _feeAt);
+    assertEq(_asset.balanceOf(_recipient), 0);
+  }
+
+  /// @dev With no shares the first investors pay nothing for time before they arrived
+  function test_WithNoSharesThereIsNoFeeAndTheClocksRestart() external {
+    _plug();
+    vm.prank(_alice);
+    _vault.requestRedeem(1000e6 * _PAR, _alice, _alice);
+    _deal(1000e6);
+    assertEq(_vault.totalSupply(), 0);
+
+    vm.warp(block.timestamp + _YEAR);
+    _close();
+    uint256 _at = block.timestamp;
+    _propose(0);
+    assertEq(_desk.proposal().fee, 0);
+    _accept();
+    vm.warp(block.timestamp + _COOLDOWN);
+    _desk.execute();
+    assertEq(_desk.markMovedAt(), _at);
+    assertEq(_desk.lastFeeAt(), _at);
+  }
+
+  function test_ADeskThatAdoptsChargesNothingTwice() external {
+    _plug();
+    vm.warp(block.timestamp + _YEAR);
+    _close();
+    _propose(2000e6);
+    _accept();
+    vm.warp(block.timestamp + _COOLDOWN);
+    _desk.execute();
+    uint256 _mark = _desk.mark();
+    uint256 _movedAt = _desk.markMovedAt();
+    uint256 _feeAt = _desk.lastFeeAt();
+
+    vm.warp(block.timestamp + 30 days); // a long timelock delay
+    NavDesk _next = new NavDesk(address(_vault), _custodian, _LENGTH, _COOLDOWN, _MAX_AGE);
+    _next.adopt(address(_desk));
+    assertEq(_next.mark(), _mark);
+    assertEq(_next.markMovedAt(), _movedAt);
+    assertEq(_next.lastFeeAt(), _feeAt);
+    assertEq(_next.feeModel(), address(0), 'the batch plugs the model itself');
   }
 }
 

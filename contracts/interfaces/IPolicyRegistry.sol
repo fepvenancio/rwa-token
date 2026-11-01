@@ -28,7 +28,9 @@ interface IPolicyRegistry {
     RULE,
     IMPLEMENTATION,
     PORTFOLIO,
-    ADAPTER
+    ADAPTER,
+    VALIDATOR,
+    FEE_MODEL
   }
 
   /*///////////////////////////////////////////////////////////////

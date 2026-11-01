@@ -24,6 +24,7 @@ interface INavDesk {
    * @param nav The net asset value
    * @param fee The fee, in assets
    * @param mark The high-water mark after this price
+   * @param markMovedAt When the mark last moved, as of this price
    * @param reportHash The hash of the off-chain NAV pack
    * @param cash The cash account
    * @param feeRecipient The fee recipient
@@ -37,6 +38,7 @@ interface INavDesk {
     uint256 nav;
     uint256 fee;
     uint256 mark;
+    uint256 markMovedAt;
     bytes32 reportHash;
     address cash;
     address feeRecipient;
@@ -114,6 +116,12 @@ interface INavDesk {
   );
 
   /**
+   * @notice Emitted when the fee model changes
+   * @param _feeModel The fee model, or zero for none
+   */
+  event FeeModelSet(address indexed _feeModel);
+
+  /**
    * @notice Emitted when this desk closes the vault's open period
    * @param _at The new cut-off
    */
@@ -165,6 +173,12 @@ interface INavDesk {
 
   /// @notice Thrown when closing before `periodLength` has passed
   error NavDesk_PeriodNotOver();
+
+  /**
+   * @notice Thrown when a fee model is not attested in the registry the vault names
+   * @param _feeModel The fee model
+   */
+  error NavDesk_FeeModelRefused(address _feeModel);
 
   /// @notice Thrown when the portfolio is not attested or is another vault's
   error NavDesk_PortfolioRefused();
@@ -250,7 +264,9 @@ interface INavDesk {
   function execute() external;
 
   /**
-   * @notice Proposes the price of the closed period: `nav = reported + pricedValue() - fee`
+   * @notice Proposes the price of the closed period: `nav = reported + pricedValue() - fee`, the fee being quoted now and
+   *         frozen with the rest. With no shares there is no fee, and both fee clocks restart when it executes, so the
+   *         first investors do not pay for time before they arrived
    * @dev The vault's REPORTER_ROLE. One at a time
    * @param _reported One number covering everything not priced on-chain; the breakdown is in the NAV pack. It leaves out
    *        what the vault itself holds, which belongs to investors with open requests and claims
@@ -288,6 +304,16 @@ interface INavDesk {
   function refundRequest(
     address _controller,
     bool _isDeposit
+  ) external;
+
+  /**
+   * @notice Plugs a fee model, or zero for none
+   * @dev The vault's DEFAULT_ADMIN_ROLE. A first plug starts the mark at the vault's current price, so principal is never
+   *      charged, and the fee clock at now. A proposal on the table keeps the fee it froze
+   * @param _feeModel The fee model, attested as FEE_MODEL
+   */
+  function setFeeModel(
+    address _feeModel
   ) external;
 
   /**
@@ -377,6 +403,30 @@ interface INavDesk {
    * @return _maxReportAge In seconds
    */
   function maxReportAge() external view returns (uint256 _maxReportAge);
+
+  /**
+   * @notice The fee model
+   * @return _feeModel The fee model, or zero for none
+   */
+  function feeModel() external view returns (address _feeModel);
+
+  /**
+   * @notice The high-water mark
+   * @return _mark Assets per 1e18 share units
+   */
+  function mark() external view returns (uint256 _mark);
+
+  /**
+   * @notice When the mark last moved
+   * @return _at The time
+   */
+  function markMovedAt() external view returns (uint256 _at);
+
+  /**
+   * @notice When a fee was last charged
+   * @return _at The time
+   */
+  function lastFeeAt() external view returns (uint256 _at);
 
   /**
    * @notice The last cut-off

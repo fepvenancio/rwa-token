@@ -21,8 +21,12 @@ import {SettlementWindowRule} from 'contracts/hooks/rules/SettlementWindowRule.s
 import {CredentialRegistry} from 'contracts/identity/CredentialRegistry.sol';
 import {DvPExecutor} from 'contracts/intents/DvPExecutor.sol';
 import {IntentExecutor} from 'contracts/intents/IntentExecutor.sol';
+import {FeeModel} from 'contracts/nav/FeeModel.sol';
 import {NavDesk} from 'contracts/nav/NavDesk.sol';
+import {ERC20CallValidator} from 'contracts/portfolio/ERC20CallValidator.sol';
 import {ERC4626Adapter} from 'contracts/portfolio/ERC4626Adapter.sol';
+import {ERC4626CallValidator} from 'contracts/portfolio/ERC4626CallValidator.sol';
+import {GuardedAccount} from 'contracts/portfolio/GuardedAccount.sol';
 import {Portfolio} from 'contracts/portfolio/Portfolio.sol';
 import {MockAsset} from 'contracts/test/MockAsset.sol';
 import {MockERC4626Target} from 'contracts/test/MockERC4626Target.sol';
@@ -66,6 +70,13 @@ contract ContractSizesTest is Test {
     MockAsset _asset = new MockAsset(6);
     _assertFits('Portfolio', address(new Portfolio(address(this), IERC20(address(_asset)), true)));
     _assertFits('NavDesk', address(new NavDesk(address(this), address(this), 1 days, 1 hours, 1 days)));
+    _assertFits('FeeModel', address(new FeeModel(address(this), 0, 0, 0, false)));
+    _assertFits('ERC20CallValidator', address(new ERC20CallValidator(address(this), 0)));
+    _assertFits('ERC4626CallValidator', address(new ERC4626CallValidator()));
+    Portfolio _reportedPortfolio = new Portfolio(address(this), IERC20(address(_asset)), true);
+    _assertFits(
+      'GuardedAccount', address(new GuardedAccount(address(_reportedPortfolio), bytes32(uint256(1)), bytes32(0)))
+    );
     MockERC4626Target _target = new MockERC4626Target(IERC20(address(_asset)));
     _assertFits('ERC4626Adapter', address(new ERC4626Adapter(address(this), _target, bytes32(0))));
     _assertFits(

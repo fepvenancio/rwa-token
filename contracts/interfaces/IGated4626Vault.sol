@@ -20,9 +20,87 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
  *      `maxWithdraw` is `convertToAssets(maxRedeem, Floor)`. `preview*` stay pure conversions. Share
  *      supply moves only through deposits and redemptions: the issuer `mint` / `burn` primitives revert. A payer other
  *      than the receiver, and a receiver of redemption cash other than the owner, must pass the token's policy
- *      (`IGatedVaultBase`); the `max*` views name one account and cannot say so
+ *      (`IGatedVaultBase`); the `max*` views name one account and cannot say so.
+ *
+ *      With a `Portfolio` plugged the vault holds no working money: deposits go on to it, and withdrawals raise from it.
+ *      `totalAssets()` is `min(pricedValue() − feesOwed, last + last × elapsed × maxRate)`, with the subtraction stopping at
+ *      zero: losses count at once, gains are limited and none count again in the same block, so a donation cannot jump the
+ *      price. Deposits and withdrawals move `last` by exactly their amount. While `priceFresh()` is false `totalAssets()` is
+ *      the last counted value and deposits and withdrawals stop. `maxWithdraw` and `maxRedeem` are limited by what the
+ *      portfolio can raise
  */
 interface IGated4626Vault {
+  /*///////////////////////////////////////////////////////////////
+                            EVENTS
+  //////////////////////////////////////////////////////////////*/
+
+  /**
+   * @notice Emitted when the value is counted, which every deposit and withdrawal does first
+   * @param _counted The value counted, before the fee
+   * @param _fee The fee charged on it
+   */
+  event Accrued(uint256 _counted, uint256 _fee);
+
+  /**
+   * @notice Emitted when fees owed are paid
+   * @param _recipient The fee model's recipient
+   * @param _assets The assets paid
+   */
+  event FeesCollected(address indexed _recipient, uint256 _assets);
+
+  /**
+   * @notice Emitted when the fee model changes
+   * @param _feeModel The fee model
+   */
+  event FeeModelSet(address indexed _feeModel);
+
+  /**
+   * @notice Emitted when the limit on counted gains changes
+   * @param _maxRateBps The most the counted value may rise in a year, in basis points
+   */
+  event MaxRateSet(uint256 _maxRateBps);
+
+  /**
+   * @notice Emitted when the portfolio changes
+   * @param _portfolio The portfolio
+   */
+  event PortfolioSet(address indexed _portfolio);
+
+  /*///////////////////////////////////////////////////////////////
+                            ERRORS
+  //////////////////////////////////////////////////////////////*/
+
+  /// @notice Thrown when charging or collecting fees with no fee model
+  error Gated4626Vault_NoFeeModel();
+
+  /// @notice Thrown when something needs a portfolio and none is plugged
+  error Gated4626Vault_NoPortfolio();
+
+  /**
+   * @notice Thrown when a component is not attested in the registry this vault names
+   * @param _target The component
+   */
+  error Gated4626Vault_NotAttested(address _target);
+
+  /// @notice Thrown when the portfolio being replaced still holds value
+  error Gated4626Vault_PortfolioNotEmpty();
+
+  /**
+   * @notice Thrown when a portfolio is another vault's, or accepts reported adapters. On an instant vault a stale price is
+   *         free money for whoever notices first
+   * @param _portfolio The portfolio
+   */
+  error Gated4626Vault_PortfolioRefused(address _portfolio);
+
+  /**
+   * @notice Thrown when the caller may not change the limit that way
+   * @param _caller The caller
+   */
+  error Gated4626Vault_Unauthorized(address _caller);
+
+  /// @notice Thrown when plugging a portfolio with no limit on counted gains
+  error Gated4626Vault_ZeroRate();
+
   /*///////////////////////////////////////////////////////////////
                             LOGIC
   //////////////////////////////////////////////////////////////*/
@@ -48,4 +126,91 @@ interface IGated4626Vault {
     address _hook,
     IComplianceRule[] memory _initialRules
   ) external;
+
+  /**
+   * @notice Brings the counted value up to date, charging any fee
+   * @dev Anyone. Every deposit and withdrawal does this first
+   */
+  function accrue() external;
+
+  /**
+   * @notice Pays fees owed to the fee model's recipient, from the portfolio's idle money
+   * @dev Anyone. Pays what idle money allows
+   */
+  function collectFees() external;
+
+  /**
+   * @notice Plugs a fee model
+   * @dev DEFAULT_ADMIN_ROLE. Needs a portfolio. The model must be attested as FEE_MODEL. Fees are charged only on gains that
+   *      have passed the rate limit. The first plug starts the mark at the current price, so principal is never charged
+   * @param _feeModel The fee model
+   */
+  function setFeeModel(
+    address _feeModel
+  ) external;
+
+  /**
+   * @notice Changes the limit on counted gains
+   * @dev DEFAULT_ADMIN_ROLE sets anything; GUARDIAN_ROLE may only lower it
+   * @param _maxRateBps The most the counted value may rise in a year, in basis points
+   */
+  function setMaxRate(
+    uint256 _maxRateBps
+  ) external;
+
+  /**
+   * @notice Plugs a portfolio, or replaces one that has been emptied with `migrateTo`
+   * @dev DEFAULT_ADMIN_ROLE. It must be attested as PORTFOLIO, be this vault's, and refuse reported adapters. The vault's
+   *      money goes to it and counts at once, so a first plug starts from what the vault held and a replacement keeps its
+   *      price. A portfolio that has written off an adapter leaves the vault exit-only for good, whichever portfolio follows
+   * @param _portfolio The portfolio
+   * @param _maxRateBps The most the counted value may rise in a year, in basis points; not zero
+   */
+  function setPortfolio(
+    address _portfolio,
+    uint256 _maxRateBps
+  ) external;
+
+  /**
+   * @notice The portfolio
+   * @return _portfolio The portfolio; zero while the vault keeps its own money
+   */
+  function portfolio() external view returns (address _portfolio);
+
+  /**
+   * @notice The fee model
+   * @return _feeModel The fee model, or zero for none
+   */
+  function feeModel() external view returns (address _feeModel);
+
+  /**
+   * @notice The most the counted value may rise in a year
+   * @return _maxRateBps In basis points
+   */
+  function maxRate() external view returns (uint256 _maxRateBps);
+
+  /**
+   * @notice The value last counted
+   * @return _last In assets
+   */
+  function lastCounted() external view returns (uint256 _last);
+
+  /**
+   * @notice Fees charged and not yet paid
+   * @return _assets In assets
+   */
+  function feesOwed() external view returns (uint256 _assets);
+
+  /**
+   * @notice The high-water mark
+   * @return _mark Assets per 1e18 share units
+   */
+  function mark() external view returns (uint256 _mark);
+
+  /**
+   * @notice Whether deposits are closed for good, because a portfolio wrote off an adapter. Someone depositing at the
+   *         written-down price would otherwise take part of any recovery from the holders who bore the loss
+   * @return _exitOnly True when they are
+   */
+  function exitOnly() external view returns (bool _exitOnly);
 }

@@ -5,6 +5,7 @@ import {ERC1967Proxy} from '@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {ReentrancyGuardTransient} from '@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol';
 import {SafeCast} from '@openzeppelin/contracts/utils/math/SafeCast.sol';
+import {Test} from 'forge-std/Test.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
@@ -829,6 +830,69 @@ contract PortfolioUnit_Raise is PortfolioUnitTest {
     vm.prank(_allocator);
     _portfolio.setLiquidityAdapter(address(_reported));
     assertEq(_portfolio.liquidityAdapter(), address(_reported));
+  }
+}
+
+/// @dev A portfolio that refuses reported adapters skips asking each adapter, on the 4626's hot path
+contract PortfolioUnit_OnChainOnly is Test {
+  bytes32 internal constant _DEFAULT_ADMIN_ROLE = 0x00;
+  uint256 internal constant _ADAPTERS = 8;
+
+  /// @dev What a read costs, on a portfolio with eight priced adapters
+  function _measure(
+    bool _acceptsReported
+  ) internal returns (uint256 _pricedValueGas, uint256 _priceFreshGas) {
+    MockAsset _asset = new MockAsset(6);
+    PolicyRegistry _registry = new PolicyRegistry(address(this), address(this));
+    MockPortfolioVault _vault = new MockPortfolioVault(address(_registry));
+    _vault.setRole(_DEFAULT_ADMIN_ROLE, address(this), true);
+    Portfolio _portfolio = new Portfolio(address(_vault), IERC20(address(_asset)), _acceptsReported);
+    bytes32 _attested;
+    for (uint256 _i; _i < _ADAPTERS; ++_i) {
+      bytes32[] memory _ids = new bytes32[](1);
+      _ids[0] = keccak256(abi.encode(_i));
+      MockAdapter _adapter = new MockAdapter(address(_portfolio), address(_asset), false, _ids);
+      bytes32 _codehash = address(_adapter).codehash;
+      if (_codehash != _attested) {
+        _registry.attest(_codehash, IPolicyRegistry.AttestKind.ADAPTER, '');
+        _attested = _codehash;
+      }
+      _portfolio.addAdapter(address(_adapter));
+    }
+    uint256 _before = gasleft();
+    _portfolio.pricedValue();
+    _pricedValueGas = _before - gasleft();
+    _before = gasleft();
+    _portfolio.priceFresh();
+    _priceFreshGas = _before - gasleft();
+  }
+
+  function test_RefusingReportedAdaptersMakesTheReadsCheaper() external {
+    (uint256 _valueWhenAccepting, uint256 _freshWhenAccepting) = _measure(true);
+    (uint256 _valueWhenRefusing, uint256 _freshWhenRefusing) = _measure(false);
+    emit log_named_uint('pricedValue accepting', _valueWhenAccepting);
+    emit log_named_uint('pricedValue refusing', _valueWhenRefusing);
+    assertLt(_valueWhenRefusing, _valueWhenAccepting);
+    assertLt(_freshWhenRefusing, _freshWhenAccepting);
+  }
+
+  /// @dev It asks nothing about reported adapters, so a priced adapter still counts
+  function test_APricedAdapterStillCountsAndStaleness() external {
+    MockAsset _asset = new MockAsset(6);
+    PolicyRegistry _registry = new PolicyRegistry(address(this), address(this));
+    MockPortfolioVault _vault = new MockPortfolioVault(address(_registry));
+    _vault.setRole(_DEFAULT_ADMIN_ROLE, address(this), true);
+    Portfolio _portfolio = new Portfolio(address(_vault), IERC20(address(_asset)), false);
+    bytes32[] memory _ids = new bytes32[](1);
+    _ids[0] = keccak256('one');
+    MockAdapter _adapter = new MockAdapter(address(_portfolio), address(_asset), false, _ids);
+    _registry.attest(address(_adapter).codehash, IPolicyRegistry.AttestKind.ADAPTER, '');
+    _portfolio.addAdapter(address(_adapter));
+    _adapter.setValue(70);
+    assertEq(_portfolio.pricedValue(), 70);
+    assertTrue(_portfolio.priceFresh());
+    _adapter.setFresh(false);
+    assertFalse(_portfolio.priceFresh());
   }
 }
 
