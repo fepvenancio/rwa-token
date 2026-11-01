@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Distributor · Gated Token Stack</title>
+<meta name="description" content="How Distributor pays a funded distribution to one token's holders from a Merkle root: who proposes and approves, how holders claim, what a blocked holder experiences, and where unclaimed money goes.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="../index.html">Gated Token Stack</a>
+  <a href="../index.html">Overview</a>
+  <a href="../index.html#contracts">Contracts</a>
+  <a href="../roles.html">Who can do what</a>
+  <a href="../movement.html">One movement</a>
+  <a href="../deployment.html">Deployment and governance</a>
+  <a href="../money.html">Where the money sits</a>
+  <a href="../review.html">Security review</a>
+</nav>
+<main class="page">
+
+<header class="top">
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Settlement and distribution</div>
+  <h1>Distributor</h1>
+  <p class="lede wrap-any">Pays one token's holders a funded distribution, such as a dividend or a coupon. A maker proposes a list, a different checker approves it and the approval pulls the money in, holders claim with a proof, and what is left returns to the funder after an expiry.</p>
+  <div class="facts">
+    <span class="fact"><b>contracts/distribution/Distributor.sol</b></span>
+    <span class="fact">immutable, <b>not a proxy</b></span>
+    <span class="fact">one per token</span>
+    <span class="fact">no role table: it asks the token</span>
+    <span class="fact">not attested</span>
+    <span class="fact"><b>no deployment module yet</b></span>
+  </div>
+</header>
+
+<section id="in-one-minute">
+  <div class="callout wrap-any">
+    <h3>In one minute</h3>
+    <p>To pay a dividend or a coupon, someone has to know who was owed what on the record date. Keeping that inside the token would add a cost to every transfer. Here the list is built off-chain at the record date, and only its Merkle root goes on-chain: one hash that commits to the whole list and lets each line be proved on its own. The token gains no snapshots and its transfers cost the same.</p>
+    <p>Two accounts must agree on the root, and the second one's approval pulls the money in, so a distribution that can be claimed is one that was paid for. A holder, or anyone on its behalf, claims with a proof, and the money goes only to the holder. Nothing is paid automatically: a holder who does not claim by the expiry gets nothing from this distribution, and the money goes back to the funder. The root proves which list was used, not that the list is right.</p>
+  </div>
+</section>
+
+<section id="how">
+  <div class="prose wrap-any">
+    <h2>One distribution, step by step</h2>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 780 250" role="img" aria-label="Where the money goes in one distribution. A maker with DISTRIBUTION_MAKER_ROLE proposes it, and no money moves. A checker with CHECKER_ROLE, who is not the maker, approves it, and the approval pulls the total from the funder into the Distributor. Anyone can then claim for a holder up to the expiry, and the holder is paid the amount in its line. After the expiry anyone can sweep, and what is left goes back to the funder.">
+        <defs>
+          <marker id="di-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+        </defs>
+
+        <rect class="b2" x="40" y="14" width="200" height="48" rx="8"/>
+        <text x="56" y="34" class="bold">Checker</text>
+        <text x="56" y="52" class="mono sm">CHECKER_ROLE</text>
+        <path class="ln dash" d="M140 62 V106 H350 V118" marker-end="url(#di-arrow)"/>
+        <text x="150" y="82" class="mono sm">2. approve(_id)</text>
+        <text x="150" y="98" class="sm m">not the maker</text>
+
+        <rect class="b2" x="290" y="14" width="210" height="48" rx="8"/>
+        <text x="306" y="34" class="bold">Maker</text>
+        <text x="306" y="52" class="mono sm">DISTRIBUTION_MAKER_ROLE</text>
+        <line class="ln dash" x1="395" y1="62" x2="395" y2="118" marker-end="url(#di-arrow)"/>
+        <text x="406" y="84" class="mono sm">1. propose(_root, _asset, _total, _expiry, _funder)</text>
+        <text x="406" y="102" class="sm m">records it; no money moves</text>
+
+        <rect class="b" x="30" y="120" width="160" height="70" rx="8"/>
+        <text x="46" y="144" class="bold">Funder</text>
+        <text x="46" y="162" class="sm m">has approved this</text>
+        <text x="46" y="178" class="sm m">contract for the total</text>
+
+        <rect class="act" x="320" y="120" width="170" height="70" rx="8"/>
+        <text x="336" y="150" class="bold">Distributor</text>
+        <text x="336" y="170" class="sm">holds the funding</text>
+
+        <rect class="b" x="620" y="120" width="130" height="70" rx="8"/>
+        <text x="634" y="144" class="bold">Holder</text>
+        <text x="634" y="162" class="sm m">named in a line</text>
+        <text x="634" y="178" class="sm m">of the list</text>
+
+        <line class="ln" x1="190" y1="142" x2="318" y2="142" marker-end="url(#di-arrow)"/>
+        <text x="254" y="134" text-anchor="middle" class="sm">the total</text>
+        <line class="ln" x1="320" y1="172" x2="192" y2="172" marker-end="url(#di-arrow)"/>
+        <text x="254" y="187" text-anchor="middle" class="sm">what is left</text>
+        <line class="ln" x1="490" y1="155" x2="618" y2="155" marker-end="url(#di-arrow)"/>
+        <text x="554" y="147" text-anchor="middle" class="sm">the line's amount</text>
+
+        <text x="254" y="214" text-anchor="middle" class="mono sm">4. sweep(_id)</text>
+        <text x="254" y="232" text-anchor="middle" class="sm m">anyone, after the expiry; back to the funder</text>
+        <text x="575" y="214" text-anchor="middle" class="mono sm">3. claim(_id, _holder, _amount, _proof)</text>
+        <text x="575" y="232" text-anchor="middle" class="sm m">anyone, up to the expiry; paid to the holder</text>
+      </svg>
+    </div>
+    <figcaption class="wrap-any"><b>Where the money goes.</b> Dashed lines are the two role-gated calls, and solid lines are money. The checker's call is what pulls the total from the funder.</figcaption>
+  </figure>
+  <ol class="steps wrap-any">
+    <li><div><b>Build the list, off-chain.</b> At the record date the issuer works out what each holder is owed and builds a Merkle tree of those lines. The token is not involved.</div></li>
+    <li><div><b>Propose.</b> A holder of the token's <code>DISTRIBUTION_MAKER_ROLE</code> calls <code>propose(_root, _asset, _total, _expiry, _funder)</code>. It reverts with <code>Distributor_InvalidValue</code> for a zero root, asset, total or funder, or an expiry that is not in the future. It records the caller as the maker, returns an id counting up from 1, and emits <code>DistributionProposed</code>. No money moves.</div></li>
+    <li><div><b>Approve.</b> A holder of the token's <code>CHECKER_ROLE</code> calls <code>approve(_id)</code>. It reverts for the account that proposed this distribution (<code>Distributor_SelfApproval</code>), for an id that does not exist (<code>Distributor_NotApproved</code>) and on a second approval (<code>Distributor_AlreadyApproved</code>). It marks the distribution approved, emits <code>DistributionApproved</code> and pulls the total from the funder. A funder without the money or the allowance makes the whole call revert (<code>test_AFunderShortOfMoneyStopsTheApproval</code>).</div></li>
+    <li><div><b>Claim.</b> Anyone can call <code>claim(_id, _holder, _amount, _proof)</code>, and the money goes to <code>_holder</code> (<code>testFuzz_AnyoneSubmitsAndTheMoneyGoesToTheHolder</code>). The checks run in this order: approved (<code>Distributor_NotApproved</code>), not past the expiry (<code>Distributor_Expired</code>), not yet claimed (<code>Distributor_AlreadyClaimed</code>), the token's <code>canReceive(_holder)</code> (<code>Distributor_HolderMayNotReceive(_holder)</code>), the proof (<code>Distributor_BadProof</code>), and an amount within what is left of the total (<code>Distributor_OverFunding</code>). It then records the claim, emits <code>DistributionClaimed</code> and pays.</div></li>
+    <li><div><b>Sweep.</b> After the expiry anyone can call <code>sweep(_id)</code>, which sends the total less what was claimed to the funder and emits <code>DistributionSwept</code>. It reverts before then (<code>Distributor_NotExpired</code>) and on a distribution that was not approved (<code>Distributor_NotApproved</code>). A second sweep pays nothing (<code>test_ASecondSweepPaysNothing</code>). The expiry is the last moment to claim: at that exact time a claim passes and a sweep reverts (<code>test_AtTheExpiryAClaimPassesAndAfterItIsRefused</code>, <code>test_BeforeTheExpiryItReverts</code>).</div></li>
+  </ol>
+</section>
+
+<section id="root">
+  <div class="prose wrap-any">
+    <h2>What the root must contain</h2>
+    <p>The contract never sees the list. These are what the list has to be for the claims to work as intended, and only the first is checked, line by line, when someone claims.</p>
+    <ul class="plain">
+      <li><b>The right leaf format.</b> Each line is one <code>address</code> and one <code>uint256</code>, the holder and its amount in the asset's smallest unit. The leaf is <code>keccak256(bytes.concat(keccak256(abi.encode(holder, amount))))</code>, the double hash of OpenZeppelin's <code>StandardMerkleTree</code>, and a claim checks it with <code>MerkleProof.verify</code>.</li>
+      <li><b>One line per holder.</b> <code>hasClaimed</code> is kept per distribution and holder, so a second line for the same holder cannot be claimed (<code>Distributor_AlreadyClaimed</code>).</li>
+      <li><b>Amounts that add up to the total.</b> A list that sums above the total pays first come, first served, and the claim that would pass the total reverts (<code>test_ClaimsCannotPassTheFunding</code>). A list that sums below it leaves the rest to be swept back.</li>
+      <li><b>The address that should be paid.</b> The money goes to the address in the line. A line that names a custodian or another contract pays that account.</li>
+      <li><b>A decision on who counts as a holder.</b> The list is whatever the issuer builds. On a <a href="Gated7540Vault.html">Gated7540Vault</a>, for example, shares waiting to be redeemed sit in escrow at the vault's own address, and shares bought but not yet claimed are in nobody's balance, so a plain reading of balances does not give the entitlements.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="holders">
+  <div class="prose wrap-any">
+    <h2>What a frozen, unverified or paused holder experiences</h2>
+    <p><code>claim</code> asks the token one question about the holder: <code>canReceive(_holder)</code>. It does not read the holder's balance, frozen amount or lockup. <code>canReceive</code> is false while the token is paused or has no hook. Otherwise it follows the hook's <code>checkReceive</code>, which goes through the token's rules and stops at the first refusal. A hook that holds no rules for the token refuses too (<code>NO_RULES</code>). So the answer depends on the token's rule list. With <code>CredentialRule</code> and <code>HolderRestrictionRule</code> listed:</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>The holder or the token</th><th><code>canReceive</code></th><th>What a claim does</th></tr></thead>
+      <tbody>
+        <tr><td>The token is paused</td><td class="c no">false</td><td>Reverts with <code>Distributor_HolderMayNotReceive(_holder)</code>, for every holder and every distribution of this token. Claims work again after the unpause, up to each expiry. <code>propose</code>, <code>approve</code> and <code>sweep</code> do not ask and keep working.</td></tr>
+        <tr><td>No credential (<code>NONE</code>), or blocked (<code>BLOCKED</code>)</td><td class="c no">false</td><td>Reverts with the same error. The rule's reason is <code>RECEIVER_NOT_VERIFIED</code>.</td></tr>
+        <tr><td>Credential lapsed (<code>LAPSED</code>), or its attester killed (<code>EXIT_ONLY</code>)</td><td class="c no">false</td><td>Reverts with the same error, although this holder can still send and exit. The rule's reason is <code>CREDENTIAL_EXPIRED</code> for a lapse and <code>RECEIVER_NOT_VERIFIED</code> for the other. A renewed credential lets the claim through, up to the expiry.</td></tr>
+        <tr><td>An <code>ACTIVE</code> credential the token's policy does not accept</td><td class="c no">false</td><td>Reverts with the same error. The rule's reason is <code>RECEIVER_NOT_ELIGIBLE</code>. A token with no policy set gives that reason for every holder.</td></tr>
+        <tr><td>Address-frozen: <code>setFrozen</code> on <code>HolderRestrictionRule</code></td><td class="c no">false</td><td>Reverts with the same error until the freeze is lifted. The rule's reason is <code>RECEIVER_FROZEN</code>.</td></tr>
+        <tr><td>Tokens frozen: <code>setFrozenTokens</code> on the token</td><td class="c ok">true</td><td>Paid. The frozen amount concerns the token balance, which a claim does not touch.</td></tr>
+        <tr><td>Under a lockup: <code>setLockup</code> on <code>HolderRestrictionRule</code></td><td class="c ok">true</td><td>Paid. A lockup stops sending (<code>canSend</code> is false), not receiving.</td></tr>
+        <tr><td>Sold its tokens after the record date</td><td class="c ok">true</td><td>Paid, if nothing above applies. The list decides, not the balance.</td></tr>
+        <tr><td>Bought its tokens after the record date</td><td class="c ok">true</td><td>Reverts with <code>Distributor_BadProof</code>: it is not in the list.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose wrap-any">
+    <p>On a fund class, <code>FundHoldersRule</code> answers too: false for every holder on a token that is not a registered class. The investor cap is not part of the answer, so a full fund does not stop a claim.</p>
+    <p><b>A block delays, and the expiry does not wait.</b> A holder who is blocked can claim once the block is lifted (<code>test_AHolderWhoMayNotReceiveCannotClaim</code>). After the expiry the claim reverts with <code>Distributor_Expired</code>, and <code>sweep</code> sends that holder's share back to the funder with the rest, including when the block was a pause that outlasted the expiry. Paying that holder is then a matter for a further distribution or for the issuer off-chain.</p>
+    <p><code>Distributor.t.sol</code> mocks the token's <code>canReceive</code>. So this table rests on the code of the base and the rules, and on a run of these cases against a real <code>GatedToken</code> at this commit, and not on a test in the repository.</p>
+  </div>
+</section>
+
+<section id="functions">
+  <div class="prose wrap-any"><h2>What it can do</h2></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><span class="wrap-any"><code>propose(_root, _asset, _total, _expiry, _funder)</code></span></td><td>The token's <code>DISTRIBUTION_MAKER_ROLE</code></td><td>Records a distribution and returns its id. Emits <code>DistributionProposed</code>. Reverts with <code>Distributor_InvalidValue</code>.</td></tr>
+        <tr><td><code>approve(_id)</code></td><td>The token's <code>CHECKER_ROLE</code>, not this distribution's maker</td><td>Approves it and pulls the funding. Emits <code>DistributionApproved</code>. Reverts with <code>Distributor_SelfApproval</code>, <code>Distributor_AlreadyApproved</code> or <code>Distributor_NotApproved</code>.</td></tr>
+        <tr><td><span class="wrap-any"><code>claim(_id, _holder, _amount, _proof)</code></span></td><td>Anyone</td><td>Pays a holder's line, to the holder. Emits <code>DistributionClaimed</code>. Reverts as listed above.</td></tr>
+        <tr><td><code>sweep(_id)</code></td><td>Anyone, after the expiry</td><td>Sends what is left to the funder. Emits <code>DistributionSwept</code>. Reverts with <code>Distributor_NotExpired</code> or <code>Distributor_NotApproved</code>.</td></tr>
+        <tr><td><code>distributionOf(_id)</code>, <code>hasClaimed(_id, _holder)</code></td><td>Anyone (read-only)</td><td>A <code>Distribution</code> (its root, asset, total, claimed, expiry, maker, funder and whether approved), and whether a holder has claimed.</td></tr>
+        <tr><td><code>TOKEN()</code>, <code>DISTRIBUTION_MAKER_ROLE()</code>, <code>CHECKER_ROLE()</code></td><td>Anyone (read-only)</td><td>The token, fixed at construction (a zero token reverts with <code>Distributor_InvalidValue</code>), and the two role ids. The roles are held on the token.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose wrap-any">
+    <p>A caller without the role gets <code>Distributor_Unauthorized(_caller)</code>.</p>
+  </div>
+</section>
+
+<section id="why">
+  <div class="prose wrap-any">
+    <h2>Why it is built this way</h2>
+    <ul class="plain">
+      <li><b>The record is off-chain and the root on-chain.</b> The token needs no checkpoints, so it stays small and a transfer costs the same whether or not the token pays distributions. The price of that is that the record is a claim made by the people who approve it.</li>
+      <li><b>The approval pulls the funding.</b> Once a distribution can be claimed, the money for it is in the contract.</li>
+      <li><b>Each distribution keeps its own count.</b> Distributions in one asset share a balance, and <code>claimed</code> cannot pass <code>total</code>, so a list that sums too high cannot take another distribution's money.</li>
+      <li><b>Anyone can submit a claim.</b> A relayer or the issuer can pay the gas for a holder, and the money still goes only to the holder.</li>
+      <li><b>The token's policy decides who may be paid.</b> Asking <code>canReceive</code> means a frozen or unverified address is not paid while that holds, without this contract knowing any rule.</li>
+      <li><b>No role table.</b> Roles are asked of the token at call time, so the token's <code>DEFAULT_ADMIN_ROLE</code> (the timelock, after hand-over) manages them in one place.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="prose wrap-any">
+    <h2>What it does not do</h2>
+    <ul class="plain">
+      <li><b>It does not check the list.</b> A wrong record date or a wrong amount is paid as approved, up to the funded total.</li>
+      <li><b>It does not pay anyone automatically.</b> A holder who does not claim by the expiry gets nothing from this distribution.</li>
+      <li><b>An approved distribution cannot be cancelled.</b> There is no function for it. The direct stop is the token's <code>pause()</code>, which stops claims on every distribution of the token along with the token's ordinary movements, and the money comes back only after the expiry. A proposal that is never approved stays recorded, with no money in it.</li>
+      <li><b>It does not move a holder's line.</b> A holder who lost its key, or whose tokens were moved with <code>forcedTransfer</code>, stays in the list at the same address.</li>
+      <li><b>It tells two addresses apart, not two people.</b> The check is that the checker is not this distribution's maker. An account holding both roles can approve another maker's distribution. <code>CHECKER_ROLE</code> here is the same role id as on <a href="NavDesk.html">NavDesk</a>, so on a vault with a desk the same accounts check prices and distributions.</li>
+      <li><b><code>approve</code> does not look at the expiry.</b> Approving after the expiry pulls the funding, no holder can claim, and <code>sweep</code> sends it straight back.</li>
+      <li><b>It does not limit a funder's allowance.</b> Any distribution a maker and a checker approve can draw on an allowance the funder has given this contract, up to that distribution's total and in that asset. A funder that approves only the amount of the distribution in hand limits this.</li>
+      <li><b>It does not check what the asset does.</b> It trusts the amounts of a transfer and does not compare balances, so a fee-on-transfer asset would leave less than the total, and claims could then draw on another distribution's money in that asset. If the asset is itself a gated token, this contract is an ordinary holder of it: it needs what that token's policy asks of a receiver, and each payment is judged by that token's rules as well.</li>
+      <li><b>It has no deployment module yet.</b> No module in <code>ignition/</code> deploys it or grants <code>DISTRIBUTION_MAKER_ROLE</code>, which is not in <code>roles.ts</code>, and the post-deploy check does not look at it. <code>Product</code> grants <code>CHECKER_ROLE</code> only on a product with a desk. Until a module exists, the deployment and the grants are done by hand, the grants through the token's admin.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="connected">
+  <div class="prose wrap-any"><h2>Connected to</h2></div>
+  <div class="cards">
+    <a class="card" href="PolicyGatedERC20Upgradeable.html"><span class="name">PolicyGatedERC20Upgradeable</span><p>Answers <code>canReceive</code> and holds the two roles. It gains no snapshots.</p></a>
+    <a class="card" href="CredentialRule.html"><span class="name">CredentialRule</span><p>Decides whether a holder's credential allows it to receive.</p></a>
+    <a class="card" href="HolderRestrictionRule.html"><span class="name">HolderRestrictionRule</span><p>An address freeze stops a claim, and a lockup does not.</p></a>
+    <a class="card" href="FundHoldersRule.html"><span class="name">FundHoldersRule</span><p>Answers for a fund class. The investor cap is not part of the answer.</p></a>
+    <a class="card" href="../roles.html"><span class="name">Who can do what</span><p>The maker and the checker, across the stack.</p></a>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose wrap-any">
+    <h2>Source and tests</h2>
+    <ul class="plain">
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/distribution/Distributor.sol"><code>contracts/distribution/Distributor.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/IDistributor.sol"><code>IDistributor.sol</code></a></li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/distribution/Distributor.t.sol"><code>Distributor.t.sol</code></a> (unit tests with a real asset and a mocked token)</li>
+    </ul>
+  </div>
+</section>
+
+<footer>Describes the contracts at commit <code>babef08</code> on <code>main</code>.</footer>
+</main>
+</body>
+</html>

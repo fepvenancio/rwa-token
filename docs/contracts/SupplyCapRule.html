@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SupplyCapRule · Gated Token Stack</title>
+<meta name="description" content="How SupplyCapRule refuses a mint that would take a token's supply above its cap, so a stolen minter key cannot mint without limit, and why it belongs on tokens and not on vaults.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="../index.html">Gated Token Stack</a>
+  <a href="../index.html">Overview</a>
+  <a href="../index.html#contracts">Contracts</a>
+  <a href="../roles.html">Who can do what</a>
+  <a href="../movement.html">One movement</a>
+  <a href="../deployment.html">Deployment and governance</a>
+  <a href="../money.html">Where the money sits</a>
+  <a href="../review.html">Security review</a>
+</nav>
+<main class="page">
+
+<header class="top">
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Policy</div>
+  <h1>SupplyCapRule</h1>
+  <p class="lede">A ceiling on what can be minted. A mint that would take a token's supply above its cap is refused, so a stolen minter key cannot mint without limit.</p>
+  <div class="facts">
+    <span class="fact"><b>contracts/hooks/rules/SupplyCapRule.sol</b></span>
+    <span class="fact">immutable, <b>not a proxy</b></span>
+    <span class="fact">cap set per token by the token's <b>DEFAULT_ADMIN_ROLE</b></span>
+    <span class="fact">attested as <b>RULE</b></span>
+    <span class="fact">ruleId: <b>keccak256('SupplyCapRule.v1')</b></span>
+  </div>
+</header>
+
+<section id="in-one-minute">
+  <div class="callout">
+    <h3>In one minute</h3>
+    <p>A token's minter can create new units. If that key is stolen, nothing else in the token limits how many. This rule gives each token a ceiling: a mint that would take the total supply above the cap is refused with <code>ABOVE_SUPPLY_CAP</code>. Transfers, burns and enforcement moves are not judged, so holders keep moving at the cap. The token's administrator sets the cap, and raising it after hand-over is a delayed governance operation.</p>
+    <p>A token that lists the rule and sets no cap admits no mint: zero here is a cap of zero, not off. The rule goes on tokens and not on vaults, because a vault asks its rules about a very large mint to learn whether a receiver is allowed in, and a cap would answer no for everybody.</p>
+  </div>
+</section>
+
+<section id="how">
+  <div class="prose">
+    <h2>How a mint is judged</h2>
+  </div>
+  <ol class="steps">
+    <li><div><b>Not a mint: pass.</b> For every kind but <code>MINT</code>, <code>check(ctx)</code> returns <code>TRANSFER_OK</code> and asks the token nothing.</div></li>
+    <li><div><b>Read the cap and the supply.</b> The cap is the rule's own record for <code>ctx.token</code>. The supply comes from the token's <code>totalSupply()</code>, a read-only call.</div></li>
+    <li><div><b>Compare before subtracting.</b> If the supply is already above the cap, or the amount is above <code>cap - supply</code>, the answer is <code>ABOVE_SUPPLY_CAP</code>. A mint up to the cap exactly passes. Because the rule compares before it subtracts, no amount and no lowered cap can make it revert.</div></li>
+  </ol>
+</section>
+
+<section id="kinds">
+  <div class="prose">
+    <h2>What it does for each kind of movement</h2>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Kind</th><th>What the rule does</th></tr></thead>
+      <tbody>
+        <tr><td><span class="k k-transfer">TRANSFER</span></td><td class="ok">passes; not judged</td></tr>
+        <tr><td><span class="k k-executed">EXECUTED</span></td><td class="ok">passes; not judged</td></tr>
+        <tr><td><span class="k k-forced">FORCED</span></td><td class="ok">passes; not judged, an enforcement mint included</td></tr>
+        <tr><td><span class="k k-mint">MINT</span></td><td>judged against the cap: <span class="no"><code>ABOVE_SUPPLY_CAP</code></span>, the one reason code, when the supply is above the cap or the amount does not fit under it</td></tr>
+        <tr><td><span class="k k-burn">BURN</span></td><td class="ok">passes; not judged</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <p>The token reverts a refused mint with <code>PolicyGated_TransferRejected(ABOVE_SUPPLY_CAP)</code>, and <code>canTransferWithReason(address(0), to, amount)</code> says the same without moving anything.</p>
+  </div>
+</section>
+
+<section id="account">
+  <div class="prose">
+    <h2>The account questions</h2>
+    <p><code>checkSend</code> and <code>checkReceive</code> answer <code>TRANSFER_OK</code> for every account: they are the <a href="BaseRule.html"><code>BaseRule</code></a> defaults. A cap is quantitative, and ERC-7943 keeps quantitative rules out of the account questions. So at a full cap <code>canReceive</code> still reads true, and the mint is refused.</p>
+  </div>
+</section>
+
+<section id="config">
+  <div class="prose">
+    <h2>Who sets the cap, and what zero means</h2>
+    <p><b>Zero is a cap of zero, not off: it fails closed.</b> A token that lists the rule and has set no cap refuses every mint of a non-zero amount. A token that wants no cap leaves the rule out of its list.</p>
+    <p><code>setSupplyCap</code> asks the token at call time whether the caller holds <code>DEFAULT_ADMIN_ROLE</code>, through a read-only call. While a product launches that is the operations account, and the <code>Product</code> module calls <code>setSupplyCap</code> with the <code>supplyCap</code> parameter, which has no default in the module. After the hand-over the main timelock is the admin, so raising a cap waits out its delay. A cap below the supply stops further mints and takes nothing back.</p>
+  </div>
+</section>
+
+<section id="order">
+  <div class="prose">
+    <h2>Where it sits, and who lists it</h2>
+    <p>The demo deployment does not list it, and neither does any other profile in <code>ignition/profiles.ts</code> at this commit, so it has no set position. A product asks for it by naming <code>supplyCapRule</code> in its <code>rules</code>. The <code>Core</code> module then deploys it, and the council attests it before the product can list it. A test does this with a <code>GatedToken</code> listing <code>credentialRule</code> then <code>supplyCapRule</code>.</p>
+  </div>
+</section>
+
+<section id="vaults">
+  <div class="prose">
+    <h2>Why it is for tokens and not for vaults</h2>
+    <p>Both vault templates decide whether a receiver is allowed in by asking the rules about a mint of a very large amount, <code>type(uint128).max</code>. They use a large amount so that an investor cap sees a new investor and a minimum position does not read as a block. A supply cap would see that same mint and refuse it, for every receiver, unless the cap were at least the supply plus that amount. On a vault that would mean:</p>
+    <ul class="plain">
+      <li><code>maxDeposit</code> and <code>maxMint</code> read 0 for everybody.</li>
+      <li>On <a href="Gated4626Vault.html"><code>Gated4626Vault</code></a>, a deposit above zero reverts with OpenZeppelin's <code>ERC4626ExceededMaxDeposit</code>, and a mint above zero with <code>ERC4626ExceededMaxMint</code>.</li>
+      <li>On <a href="Gated7540Vault.html"><code>Gated7540Vault</code></a>, <code>requestDeposit</code> and the deposit claim revert with <code>Gated7540Vault_ControllerNotEligible(ABOVE_SUPPLY_CAP)</code>.</li>
+    </ul>
+    <p><code>assertUsable</code> in <code>ignition/profiles.ts</code> throws "a vault cannot use supplyCapRule" when a module is built. That check is in the deployment tooling. On chain, the hook accepts any attested rule on any token.</p>
+  </div>
+</section>
+
+<section id="functions">
+  <div class="prose"><h2>What it can do</h2></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>setSupplyCap(token, cap)</code></td><td>The token's <code>DEFAULT_ADMIN_ROLE</code></td><td>Sets the token's cap. Emits <code>SupplyCapSet</code> with the token, the previous cap and the one set. Reverts with <code>SupplyCapRule_OnlyTokenAdmin(token, caller)</code> for anyone else.</td></tr>
+        <tr><td><code>supplyCap(token)</code></td><td>Anyone (read-only)</td><td>The token's cap; 0 when not set.</td></tr>
+        <tr><td><code>check(ctx)</code></td><td>Anyone (read-only); the hook in practice</td><td>The decision above: <code>TRANSFER_OK</code> or <code>ABOVE_SUPPLY_CAP</code>.</td></tr>
+        <tr><td><code>checkSend</code>, <code>checkReceive</code></td><td>Anyone (read-only)</td><td><code>TRANSFER_OK</code> for every account.</td></tr>
+        <tr><td><code>after_(ctx)</code></td><td>The hook of <code>ctx.token</code></td><td>The empty default. The hook does not call it, because <code>wantsAfter()</code> is false.</td></tr>
+        <tr><td><code>ruleId()</code>, <code>wantsAfter()</code>, <code>supportsInterface(id)</code></td><td>Anyone (read-only)</td><td><code>keccak256('SupplyCapRule.v1')</code>; false; ERC-165 for <code>ISupplyCapRule</code>, <code>IComplianceRule</code> and <code>IERC165</code> (<code>test_ItAnswersForItsInterfaces</code>).</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="why">
+  <div class="prose">
+    <h2>Why it is built this way</h2>
+    <ul class="plain">
+      <li><b>The limit sits outside the key it limits.</b> The minter holds <code>MINTER_ROLE</code> and cannot change the cap. That takes <code>DEFAULT_ADMIN_ROLE</code>, which after hand-over is the timelock, whose delay gives the guardian time to cancel.</li>
+      <li><b>Failing closed.</b> A cap nobody set refuses mints, so a token that lists the rule does not run with an unlimited minter because a setting was forgotten.</li>
+      <li><b>One instance for every token.</b> Caps are stored per token and authorised by that token's own admin.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="prose">
+    <h2>What it does not do</h2>
+    <ul class="plain">
+      <li><b>It is not a rate limit.</b> A stolen minter key can still mint in one call up to whatever room is left under the cap.</li>
+      <li><b>It caps the supply, not the total ever minted.</b> The rule reads <code>totalSupply()</code> at the moment of the mint, so units burned free room for further mints.</li>
+      <li><b>It takes nothing back.</b> Lowering a cap below the supply stops further mints and leaves existing balances as they are.</li>
+      <li><b><code>FORCED</code> is exempt.</b> An enforcement mint is not judged. At this commit <code>Gated7540Vault.recoverClaimable</code> is the only function that makes one, so on a <code>GatedToken</code> or an <code>IntentToken</code> no such route exists.</li>
+      <li><b>A zero-amount mint can pass.</b> With the supply at or below the cap, including an unset cap at zero supply, a mint of 0 passes this rule. It creates nothing.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="connected">
+  <div class="prose"><h2>Connected to</h2></div>
+  <div class="cards">
+    <a class="card" href="GatedToken.html"><span class="name">GatedToken</span><p>A template this rule is for, with an issuer's <code>mint</code> behind <code>MINTER_ROLE</code>.</p></a>
+    <a class="card" href="IntentToken.html"><span class="name">IntentToken</span><p>The other token template this rule can go on.</p></a>
+    <a class="card" href="ComplianceHook.html"><span class="name">ComplianceHook</span><p>Holds each token's list and asks this rule on a movement.</p></a>
+    <a class="card" href="BaseRule.html"><span class="name">BaseRule</span><p>The parent this rule inherits its defaults from.</p></a>
+    <a class="card" href="Gated4626Vault.html"><span class="name">Gated4626Vault</span><p>Where the large mint probe behind <code>maxDeposit</code> runs.</p></a>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose">
+    <h2>Source and tests</h2>
+    <ul class="plain">
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/hooks/rules/SupplyCapRule.sol"><code>contracts/hooks/rules/SupplyCapRule.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/ISupplyCapRule.sol"><code>ISupplyCapRule.sol</code></a>, reason codes in <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/Errors.sol"><code>Errors.sol</code></a></li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/hooks/rules/SupplyCapRule.t.sol"><code>SupplyCapRule.t.sol</code></a> (who sets it, up to the cap and one above, a fuzz test of the supply already there, a lowered cap, no cap set, every other kind, on a real hook and token with a stolen minter key stopping at the cap) and <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/legos.test.ts"><code>test/nodejs/legos.test.ts</code></a> (a cap set at launch through the modules, and the module refusing the rule on a vault)</li>
+    </ul>
+  </div>
+</section>
+
+<footer>Describes the contracts at commit <code>babef08</code> on <code>main</code>.</footer>
+</main>
+</body>
+</html>

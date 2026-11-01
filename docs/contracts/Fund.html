@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Fund · Gated Token Stack</title>
-<meta name="description" content="How Fund records which share classes each investor holds and how many distinct investors the whole fund has, for the investor cap that FundHoldersRule enforces.">
+<meta name="description" content="How Fund lists a fund's share classes and counts distinct investors across them, who may write to it, who owns it at each stage, and how a monitor sees a broken class.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
@@ -24,13 +24,13 @@
 <main class="page">
 
 <header class="top">
-  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Fund</div>
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Identity and fund</div>
   <h1>Fund</h1>
   <p class="lede">One fund, several share classes. <code>Fund</code> keeps what no single class can know: which tokens are its classes, how many distinct investors hold any of them, and which classes each investor holds.</p>
   <div class="facts">
     <span class="fact"><b>contracts/fund/Fund.sol</b></span>
-    <span class="fact">immutable, <b>not a proxy</b></span>
-    <span class="fact">owner: <b>the main timelock</b> after deployment</span>
+    <span class="fact">immutable, <b>not a proxy</b>, one per fund</span>
+    <span class="fact">owner: <b>the operations account</b>, then <b>the main timelock</b> after <code>FundOpen</code></span>
     <span class="fact">not attested: the <b>FundHoldersRule</b> that points at it is</span>
   </div>
 </header>
@@ -38,8 +38,8 @@
 <section id="in-one-minute">
   <div class="callout">
     <h3>In one minute</h3>
-    <p>A fund can issue several classes of shares, and here each class is its own token with its own balances. In the demo deployment the three classes are a token settled through signed intents, a vault and an asynchronous vault. A fund may be allowed only so many investors in total, counted across all its classes. No class token can count that alone, because it sees only its own holders.</p>
-    <p><code>Fund</code> is the shared record. It knows the fund's classes, which of them each address holds, and how many distinct investors that makes. An investor in three classes counts once. It decides nothing itself: <a href="FundHoldersRule.html">FundHoldersRule</a>, a rule listed on every class, reads it to apply the cap and tells it when someone starts or stops holding a class.</p>
+    <p>A fund can issue several classes of shares, and here each class is its own token with its own balances. In the demo deployment the three classes are a token settled through signed intents, an instant vault and a request-and-claim vault. A fund may be allowed only so many investors in total, counted across its classes. No class token can count that alone, because it sees its own holders and no others.</p>
+    <p><code>Fund</code> is the shared record. It knows the fund's classes, which of them each address holds, and how many distinct investors that makes. An investor in three classes counts once. It decides nothing itself: <a href="FundHoldersRule.html">FundHoldersRule</a>, a rule listed on each class, reads it to apply the cap and tells it when someone starts or stops holding a class.</p>
   </div>
 </section>
 
@@ -50,7 +50,7 @@
   </div>
   <figure>
     <div class="fig-scroll">
-      <svg class="d" viewBox="0 0 780 395" role="img" aria-label="An example state of a fund with three classes: INT as class 1 (bit 0), gFUND as class 2 (bit 1) and gASYNC as class 3 (bit 2). Alice holds all three, so her mask is 7 and she counts once. Bob holds class 1, mask 1, counts once. A treasury holds class 2 but is exempt, mask 2, not counted. The gASYNC vault holds shares of pending redemptions at its own address, but a class is never recorded, mask 0. Carol sold her last class, mask 0, not counted. The fund's shared slot holds the installed rule, the count of 2 and a cap of 3.">
+      <svg class="d" viewBox="0 0 780 395" role="img" aria-label="An example state of a fund with three classes: INT as class 1 (bit 0), gFUND as class 2 (bit 1) and gASYNC as class 3 (bit 2). Alice holds all three, so her mask is 7 and she counts once. Bob holds class 1, mask 1, counts once. A treasury holds class 2 but is exempt, mask 2, not counted. The gASYNC vault holds shares of pending redemptions at its own address, but a class is not recorded, mask 0. Carol sold her last class, mask 0, not counted. The fund's shared slot holds the installed rule, the count of 2 and a cap of 3.">
         <text x="20" y="51" class="sm m">account</text>
         <text x="300" y="22" class="sm m" text-anchor="middle">class 1</text>
         <text x="300" y="37" class="mono sm" text-anchor="middle">INT</text>
@@ -102,7 +102,7 @@
         <rect class="b2" x="434" y="210" width="52" height="28" rx="4"/><text x="460" y="228" class="mono sm m" text-anchor="middle">0</text>
         <rect class="b2" x="524" y="210" width="52" height="28" rx="4"/><text x="550" y="228" class="mono sm m" text-anchor="middle">0</text>
         <text x="640" y="228" class="mono bold" text-anchor="middle">0</text>
-        <text x="725" y="228" class="sm m" text-anchor="middle">never</text>
+        <text x="725" y="228" class="sm m" text-anchor="middle">not counted</text>
 
         <text x="20" y="268" class="bold">Carol</text>
         <text x="20" y="284" class="sm m">sold her last class</text>
@@ -113,7 +113,7 @@
         <text x="640" y="274" class="mono bold" text-anchor="middle">0</text>
         <text x="725" y="274" class="sm m" text-anchor="middle">left the fund</text>
 
-        <text x="20" y="314" class="sm m">The fund's shared word: what the rule reads on every movement, in one read</text>
+        <text x="20" y="314" class="sm m">The fund's shared word: what the rule reads on a movement, in one read</text>
         <rect class="seg-b" x="20" y="322" width="330" height="40" rx="4"/>
         <text x="34" y="347">rule: the installed FundHoldersRule</text>
         <rect class="seg-a" x="350" y="322" width="210" height="40" rx="4"/>
@@ -125,20 +125,20 @@
         <text x="574" y="381" class="sm m">48 bits, set by the owner</text>
       </svg>
     </div>
-    <figcaption><b>Many classes per investor, one count per fund.</b> An example state. Alice's mask is 7 (bits 0, 1 and 2), and she is one investor. The treasury's class bit is recorded but its exempt flag keeps it out of the count. The vault's own address never gets a bit, so shares waiting in its escrow are never an investor.</figcaption>
+    <figcaption><b>Many classes per investor, one count per fund.</b> An example state. Alice's mask is 7 (bits 0, 1 and 2), and she is one investor. The treasury's class bit is recorded but its exempt flag keeps it out of the count. The vault's own address gets no bit, so shares waiting in its escrow are not an investor.</figcaption>
   </figure>
   <ol class="steps">
     <li><div><b>An investor</b> is an account that holds at least one class and is not exempt. It counts once, however many classes it holds.</div></li>
-    <li><div><b>A class never counts itself.</b> <code>Gated7540Vault</code> holds the shares of pending redemptions at its own address. <code>join</code> ignores a class token joining itself, so the escrow is never recorded and needs no exemption.</div></li>
-    <li><div><b>The count moves only at the edges.</b> It rises when an account gets its first class bit while not exempt, and falls when a non-exempt account loses its last one. A second class, or an extra unit of one already held, writes nothing to the count.</div></li>
-    <li><div><b>The shared word.</b> The installed rule, the count and the cap sit in one storage slot, so the rule reads all three at once, and the first count write is never a write to an empty slot.</div></li>
+    <li><div><b>A class does not count itself.</b> <a href="Gated7540Vault.html"><code>Gated7540Vault</code></a> holds the shares of pending redemptions at its own address. <code>join</code> ignores a class token joining itself, so the escrow is not recorded and needs no exemption.</div></li>
+    <li><div><b>The count moves at the edges.</b> It rises when an account gets its first class bit while not exempt, and falls when a non-exempt account loses its last one. A second class, or an extra unit of one already held, writes nothing to the count.</div></li>
+    <li><div><b>The shared word.</b> The installed rule, the count and the cap sit in one storage slot, so the rule reads all three at once, and the first count write is not a write to an empty slot.</div></li>
   </ol>
 </section>
 
 <section id="journey">
-  <div class="prose">
+  <div class="prose wrap-any">
     <h2>One investor across three classes</h2>
-    <p>The sequence an integration test runs on a real deployment of the three templates, registered as classes 1, 2 and 3. Each movement reaches the fund through <a href="FundHoldersRule.html"><code>FundHoldersRule</code></a> after the balances have moved.</p>
+    <p>The sequence an integration test runs on one fund with the three templates registered as classes 1, 2 and 3 (<code>test_WhenAnInvestorLeavesEveryClass_TheCountReturnsToZeroOnlyAfterTheLastOne</code>). Each movement reaches the fund through <a href="FundHoldersRule.html"><code>FundHoldersRule</code></a> after the balances have moved. A class's rule list decides whether it reaches the fund at all.</p>
   </div>
   <div class="table-wrap">
     <table>
@@ -146,74 +146,46 @@
       <tbody>
         <tr><td>The minter mints INT to Alice</td><td><span class="k k-mint">MINT</span></td><td><code>join(INT, Alice)</code>: her first class</td><td class="c">1</td><td class="c">1</td></tr>
         <tr><td>Alice deposits into the gFUND vault</td><td><span class="k k-mint">MINT</span></td><td><code>join(gFUND, Alice)</code></td><td class="c">3</td><td class="c">1</td></tr>
-        <tr><td>Alice claims her fulfilled gASYNC deposit</td><td><span class="k k-mint">MINT</span></td><td><code>join(gASYNC, Alice)</code></td><td class="c">7</td><td class="c">1</td></tr>
+        <tr><td>Alice claims her settled gASYNC deposit</td><td><span class="k k-mint">MINT</span></td><td><code>join(gASYNC, Alice)</code></td><td class="c">7</td><td class="c">1</td></tr>
         <tr><td>The burner burns all her INT</td><td><span class="k k-burn">BURN</span></td><td><code>leave(INT, Alice)</code></td><td class="c">6</td><td class="c">1</td></tr>
         <tr><td>Alice redeems all her gFUND shares</td><td><span class="k k-burn">BURN</span></td><td><code>leave(gFUND, Alice)</code></td><td class="c">4</td><td class="c">1</td></tr>
-        <tr><td>Alice requests redemption of all her gASYNC shares, which move to the vault's escrow</td><td><span class="k k-transfer">TRANSFER</span></td><td><code>join(gASYNC, vault)</code>, which the fund ignores because the vault is the class itself, then <code>leave(gASYNC, Alice)</code></td><td class="c">0</td><td class="c">0</td></tr>
+        <tr><td>Alice requests redemption of all her gASYNC shares, which move to the vault's escrow</td><td><span class="k k-transfer">TRANSFER</span></td><td><code>leave(gASYNC, Alice)</code>, then <code>join(gASYNC, vault)</code>, which the fund ignores because the vault is the class itself</td><td class="c">0</td><td class="c">0</td></tr>
       </tbody>
     </table>
   </div>
-  <div class="prose">
-    <p>When the redemption is later fulfilled, the shares are burnt from the escrow, and the count does not move: the escrow was never an investor.</p>
-  </div>
-</section>
-
-<section id="functions">
-  <div class="prose">
-    <h2>What it can do</h2>
-    <p>Errors are shown without their <code>Fund_</code> prefix.</p>
-  </div>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th><th>Reverts</th></tr></thead>
-      <tbody>
-        <tr><td><code>registerClass(token)</code></td><td>The owner</td><td>Adds a class under the next number, permanently. Emits <code>ClassRegistered(token, index)</code>.</td><td>see <a href="#register">Registering a class</a></td></tr>
-        <tr><td><code>setRule(rule)</code></td><td>The owner</td><td>Installs the rule that may write. It must be attested as <code>RULE</code> in the registry. Emits <code>RuleSet(oldRule, newRule)</code>.</td><td><code>ZeroAddress</code>, <code>NotAttested</code></td></tr>
-        <tr><td><code>setHolderCap(cap)</code></td><td>The owner</td><td>Sets the investor cap. Does not touch the count. 0 admits no new investor. Emits <code>HolderCapSet(oldCap, newCap)</code>.</td><td>OpenZeppelin <code>SafeCast</code> above <code>type(uint48).max</code></td></tr>
-        <tr><td><code>setExempt(account, exempt)</code></td><td>The owner</td><td>Sets or clears the exempt flag. For an account that holds a class, the count moves by one with it. No event if nothing changes; otherwise <code>ExemptSet</code>.</td><td><code>ZeroAddress</code></td></tr>
-        <tr><td><code>join(token, account)</code></td><td>The installed rule</td><td>Records that the account now holds the class. Does nothing for the class itself or a class already held. Raises the count for a new, non-exempt investor.</td><td><code>OnlyRule</code>, <code>NotAClass</code></td></tr>
-        <tr><td><code>leave(token, account)</code></td><td>The installed rule</td><td>Records that the account has stopped holding the class. Does nothing if it did not. Lowers the count when a non-exempt account loses its last class.</td><td><code>OnlyRule</code>, <code>NotAClass</code></td></tr>
-        <tr><td><code>admission(token, account)</code></td><td>Anyone (read-only)</td><td>Everything the rule needs in one call: the class number (0 if not a class), the account's mask, its exempt flag, the count, the cap and the installed rule.</td><td></td></tr>
-        <tr><td><code>isClassIntact(token)</code>, <code>firstBrokenClass()</code></td><td>Anyone (read-only)</td><td>The monitor, below. Never revert.</td><td></td></tr>
-        <tr><td><code>positionsOf(account)</code></td><td>Anyone (read-only)</td><td>The classes the account holds and its balance in each. It calls every held class token, so it is meant for off-chain reads.</td><td></td></tr>
-        <tr><td><code>heldClasses(account)</code>, <code>isExempt(account)</code></td><td>Anyone (read-only)</td><td>The account's mask, without the exempt flag; the flag.</td><td></td></tr>
-        <tr><td><code>holderCount()</code>, <code>holderCap()</code>, <code>rule()</code></td><td>Anyone (read-only)</td><td>The count, the cap, the installed rule.</td><td></td></tr>
-        <tr><td><code>classCount()</code>, <code>classAt(n)</code>, <code>classIndexOf(token)</code></td><td>Anyone (read-only)</td><td>How many classes; the token of class <code>n</code>; the number of a token, 0 when it is not a class.</td><td><code>ClassOutOfRange</code> (for <code>classAt</code>)</td></tr>
-        <tr><td><code>MAX_CLASSES()</code>, <code>REGISTRY()</code></td><td>Anyone (read-only)</td><td>32; the policy registry that must attest the rule, fixed at construction.</td><td></td></tr>
-        <tr><td><code>transferOwnership</code>, <code>renounceOwnership</code></td><td>The owner</td><td>OpenZeppelin <code>Ownable</code>. Renouncing would freeze the configuration for good: no new class, rule, cap or exemption.</td><td></td></tr>
-      </tbody>
-    </table>
+  <div class="prose wrap-any">
+    <p>When that period is later settled, the shares are burnt from the escrow, and the count does not move: the escrow was not an investor (<code>test_WhenARedemptionIsSettled_TheBurnFromTheEscrowChangesNothing</code>).</p>
   </div>
 </section>
 
 <section id="register">
   <div class="prose">
     <h2>Registering a class</h2>
-    <p>The owner calls <code>registerClass(token)</code>. The checks run in this order:</p>
+    <p>Four conditions decide whether a token can become a class: the caller is the owner, the token reports ERC-165 support for <code>IPolicyGated</code>, the interface of a gated token, its current hook lists the fund's installed rule, and its total supply is zero. <code>registerClass(token)</code> runs them with the housekeeping checks, in this order:</p>
   </div>
   <ol class="steps">
+    <li><div>The caller is the owner (<code>OwnableUnauthorizedAccount</code>).</div></li>
     <li><div>The token is not the zero address (<code>Fund_ZeroAddress</code>) and is not already a class (<code>Fund_AlreadyRegistered</code>).</div></li>
     <li><div>The fund has fewer than <code>MAX_CLASSES</code>, 32, classes (<code>Fund_TooManyClasses</code>). The mask has a bit for each.</div></li>
     <li><div>A rule is installed (<code>Fund_RuleNotSet</code>).</div></li>
-    <li><div>The token reports ERC-165 support for <code>IPolicyGated</code>, the interface of every gated token (<code>Fund_NotPolicyGated</code>).</div></li>
-    <li><div>The token's current hook lists the installed rule for it (<code>Fund_RuleNotListed</code>). A token with no hook fails here too: the call to its hook reverts.</div></li>
-    <li><div>The token's total supply is zero (<code>Fund_ClassHasSupply</code>). A class with holders the fund never saw would start with a wrong count.</div></li>
+    <li><div>The token reports ERC-165 support for <code>IPolicyGated</code> (<code>Fund_NotPolicyGated</code>).</div></li>
+    <li><div>The token's current hook lists the installed rule for it (<code>Fund_RuleNotListed</code>). A token whose hook cannot answer fails here too, with the revert of that call.</div></li>
+    <li><div>The token's total supply is zero (<code>Fund_ClassHasSupply</code>). A class with holders the fund did not see would start with a wrong count. This also means a fund has no seed step: there is no function that sets a count or a mask.</div></li>
   </ol>
   <div class="prose">
-    <p>Registration is permanent; there is no function to remove a class. Until a token is registered, <code>FundHoldersRule</code> rejects every movement on it with <code>NOT_FUND_CLASS</code>, so no balance can exist before the fund records it. The calls to the token and its hook are read-only.</p>
-    <p>In the deployment, <code>Activate</code> installs the rule and sets the cap (the <code>fundHolderCap</code> parameter, which has no default), then registers the intent token, the 4626 vault and the 7540 vault one after another, as classes 1, 2 and 3, and only then hands ownership of the fund to the main timelock.</p>
+    <p>Registration is permanent; there is no function to remove a class. Until a token that lists the rule is registered, <code>FundHoldersRule</code> rejects each movement on it with <code>NOT_FUND_CLASS</code>, so such a token has no balance before the fund can record it. The calls to the token and its hook are read-only (<code>FundUnit_CallsAreStatic</code>).</p>
   </div>
 </section>
 
 <section id="writers">
   <div class="prose">
     <h2>Who may change the record</h2>
-    <p>The fund's state is shared by every class, so a token that merely names itself in a movement must not reach it. Two gates stand in the way:</p>
+    <p>The fund's state is shared by each of its classes, so a token that merely names itself in a movement must not reach it. Two gates stand in the way:</p>
     <ul class="plain">
-      <li><b>Only the installed rule.</b> <code>join</code> and <code>leave</code> revert for any other caller (<code>Fund_OnlyRule</code>). The rule in turn accepts <code>after_</code> only from the hook the token currently has installed.</li>
-      <li><b>Only a registered class.</b> <code>join</code> and <code>leave</code> revert for a token that is not a class (<code>Fund_NotAClass</code>). A fake token with its own fake hook can get past the rule's hook check, and is stopped here.</li>
+      <li><b>From the installed rule.</b> <code>join</code> and <code>leave</code> revert for any other caller (<code>Fund_OnlyRule</code>). The rule in turn accepts <code>after_</code> from whichever hook the token named in the call has installed.</li>
+      <li><b>For a registered class.</b> <code>join</code> and <code>leave</code> revert for a token that is not a class (<code>Fund_NotAClass</code>). A fake token with its own fake hook can get past the rule's hook check, and is stopped here.</li>
     </ul>
-    <p>The owner's <code>setExempt</code> is the one other path that moves the count, and only by one, for an account that holds a class. The owner cannot set a class mask or the count directly.</p>
+    <p>The owner's <code>setExempt</code> is the one other path that moves the count, and by one, for an account that holds a class. No function lets the owner set a class mask or the count directly.</p>
   </div>
 </section>
 
@@ -221,71 +193,131 @@
   <div class="prose">
     <h2>The cap and the exemptions</h2>
     <ul class="plain">
-      <li><b>The cap.</b> <code>setHolderCap</code> stores it and leaves the count alone. Lowering it below the current count does not remove anyone: existing investors keep their classes, can trade among themselves and can leave, and while the count is above the cap the rule admits nobody new. A cap of 0 admits no new investor. The count and the cap are 48-bit numbers.</li>
-      <li><b>Exemptions.</b> An exempt account, such as a treasury, never counts and never triggers the cap. Its class bits are still recorded, so if the owner ends the exemption while it holds a class, it enters the count at once, and the reverse when an exemption starts. Exempting an account that holds nothing changes only the flag.</li>
-      <li><b>Not checked by the fund.</b> Neither change looks at the classes or the rule. Both are owner calls, which after deployment means main-timelock operations with their delay.</li>
+      <li><b>The cap.</b> <code>setHolderCap</code> stores it and leaves the count alone. Lowering it below the current count does not remove anyone: existing investors keep their classes, can trade among themselves and can leave, and while the count is above the cap the rule admits nobody new. A cap of 0 admits no new investor. The count and the cap are 48-bit numbers. The fund holds the numbers and <a href="FundHoldersRule.html"><code>FundHoldersRule</code></a> applies them.</li>
+      <li><b>Exemptions.</b> An exempt account, such as a treasury, does not count and does not trigger the cap. Its class bits are still recorded, so if the owner ends the exemption while it holds a class, it enters the count at once, and the reverse when an exemption starts. Exempting an account that holds nothing changes only the flag.</li>
+      <li><b>Not checked by the fund.</b> Neither change looks at the classes or the rule, and ending an exemption can put the count above the cap.</li>
     </ul>
   </div>
 </section>
 
 <section id="rule-change">
-  <div class="prose">
-    <h2>Changing the rule</h2>
-    <p><code>setRule(newRule)</code> takes effect at once: from then on only <code>newRule</code> may call <code>join</code> and <code>leave</code>. The count and the masks stay where they are, and the new rule starts from them. But each class's hook lists its rules by address. A class whose list still names the old rule sends it every movement, and the old rule, seeing from <code>admission</code> that it is not the installed rule, rejects every movement of that class with <code>NOT_FUND_CLASS</code>, forced transfers and burns included. The pre-flight calls give the same answer and the fund's state does not change, but the class is closed until its list names the new rule.</p>
-    <p>So the change goes through the main timelock as one batch: <code>fund.setRule(newRule)</code> and, for every registered class, <code>hook.setRules(class, list)</code> with the old rule replaced by the new one in the class's list. A second rule instance for the same fund has the same code hash as the first, because the fund's address is its only immutable, so it is already attested.</p>
+  <div class="prose wrap-any">
+    <h2>Installing and changing the rule</h2>
+    <p><code>setRule(rule)</code> has three conditions: the rule is not zero (<code>Fund_ZeroAddress</code>), it is attested as <code>RULE</code> in the fund's registry (<code>Fund_NotAttested</code>), and its <code>FUND()</code> is this fund (<code>Fund_RuleForAnotherFund</code>). The last one matters because another fund's rule is attested too, and a hook accepts a rule by its attestation and its <code>ruleId</code>, which every <code>FundHoldersRule</code> shares. Only the fund can tell that a rule counts into another fund's state (<code>test_WhenARealRuleOfAnotherFundIsInstalled_Reverts</code>).</p>
+    <p>It takes effect at once: from then on only that rule may call <code>join</code> and <code>leave</code>. The count and the masks stay where they are, and the incoming rule starts from them. But each class's hook lists its rules by address. A class whose list still names the outgoing rule sends it each movement, and that rule, seeing from <code>admission</code> that it is not the installed one, rejects each movement of the class with <code>NOT_FUND_CLASS</code>, forced transfers and burns included. The pre-flight calls give the same answer and the fund's state does not change, but the class is closed until its list names the installed rule.</p>
+    <p>So the change goes through the main timelock as one batch: <code>setRule</code> on the fund and, for each registered class, <code>setRules</code> on its hook with the rule swapped in the class's list. A second rule instance for the same fund has the same code hash as the first, because the fund's address is its one immutable, so it is already attested.</p>
   </div>
 </section>
 
 <section id="monitor">
   <div class="prose">
     <h2>The monitor: isClassIntact and firstBrokenClass</h2>
-    <p>The cap lives in the fund, but it applies to a class only while that class's rule list in the hook names the fund's installed rule. The hook accepts any list of attested rules, so it cannot know when a list loses the fund's rule. The fund can check.</p>
+    <p>The cap lives in the fund, but it applies to a class only while that class's rule list in the hook names the fund's installed rule. The hook accepts a list of attested rules without knowing about the fund, so it does not notice when a list loses the fund's rule. The fund can check.</p>
   </div>
   <div class="table-wrap">
     <table>
       <thead><tr><th>View</th><th>Answer</th></tr></thead>
       <tbody>
-        <tr><td><code>isClassIntact(token)</code></td><td>True when the token is a registered class and its current hook's <code>rules(token)</code> lists the installed rule. False otherwise, including when the token cannot name its hook or the hook cannot list its rules.</td></tr>
-        <tr><td><code>firstBrokenClass()</code></td><td>The first registered class, in registration order, that is not intact; the zero address when every class is. One call, at most 32 classes.</td></tr>
+        <tr><td><code>isClassIntact(token)</code></td><td>True when the token is a registered class and its current hook's <code>rules(token)</code> lists the installed rule. False otherwise, including when the call to the token or to its hook reverts.</td></tr>
+        <tr><td><code>firstBrokenClass()</code></td><td>The first registered class, in registration order, that is not intact; the zero address when none is broken. One call, at most 32 classes.</td></tr>
       </tbody>
     </table>
   </div>
   <div class="prose">
-    <p>Neither view reverts on the thing it watches. They report three situations and prevent none of them: the fund's rule dropped from a class's list (the class runs uncapped and the fund's count goes stale), the fund's rule replaced while a list still names the old one (the class fails closed with <code>NOT_FUND_CLASS</code>), and a class's hook swapped for one that does not list the rule. The post-deployment check asserts that <code>firstBrokenClass()</code> is the zero address.</p>
+    <p>They report three situations and prevent none of them: the fund's rule dropped from a class's list (the class runs uncapped and the fund's count goes stale), the fund's rule replaced while a list still names the outgoing one (the class fails closed with <code>NOT_FUND_CLASS</code>), and a class's hook swapped for one that does not list the rule. They read the list as it stands, so once a dropped rule is listed again they report that class as intact, whatever moved in between. The post-deploy check asserts that <code>firstBrokenClass()</code> is the zero address, and a monitor should poll it.</p>
   </div>
 </section>
 
-<section id="events">
-  <div class="prose"><h2>Events</h2></div>
+<section id="owner">
+  <div class="prose">
+    <h2>Who owns it at each stage</h2>
+    <p>A fund is not part of the core: an issuer has as many as it has funds, each with its own contract, rule and cap. The deployment modules take it through these stages.</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Stage</th><th>Owner</th><th>What happens</th></tr></thead>
+      <tbody>
+        <tr><td><code>Fund</code> module</td><td>The operations account, named in the constructor</td><td>Deploys the fund and the <code>FundHoldersRule</code> that points at it. The council reads the fund's code and owner, then attests the rule.</td></tr>
+        <tr><td><code>Product</code> module, per class</td><td>The operations account</td><td>Places the class with the rule in its list. It does not touch the fund, so a launch cannot fail on one. The fund's rule refuses each movement of the class (<code>NOT_FUND_CLASS</code>).</td></tr>
+        <tr><td><code>FundOpen</code> module</td><td>The operations account, then the main timelock</td><td><code>setRule</code>, <code>setHolderCap</code>, <code>registerClass</code> for each first class in the order given, and last <code>transferOwnership</code> to the main timelock.</td></tr>
+        <tr><td>After that</td><td>The main timelock</td><td>A later class, a rule change, a cap or an exemption is a timelock operation, because each can change the room existing investors have under the cap. A later class launches through <code>Product</code> like any other, and the fund's rule refuses its movements until <code>registerClass</code> runs.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <p>The post-deploy check asserts that each fund's owner is the timelock, its rule is the attested one and names it, its cap is the intended one, and its classes are the ones it opened with, in order.</p>
+  </div>
+</section>
+
+<section id="functions">
+  <div class="prose"><h2>What it can do</h2></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>registerClass(token)</code></td><td>The owner</td><td>Adds a class under the next number, permanently. Emits <code>ClassRegistered(token, index)</code>. See <a href="#register">Registering a class</a>.</td></tr>
+        <tr><td><code>setRule(rule)</code></td><td>The owner</td><td>Installs the rule that may write. Emits <code>RuleSet(previous, rule)</code>. See <a href="#rule-change">Installing and changing the rule</a>.</td></tr>
+        <tr><td><code>setHolderCap(cap)</code></td><td>The owner</td><td>Sets the investor cap. Does not touch the count. Emits <code>HolderCapSet(previous, cap)</code>. Reverts with OpenZeppelin's <code>SafeCastOverflowedUintDowncast</code> above <code>type(uint48).max</code>.</td></tr>
+        <tr><td><code>setExempt(account, exempt)</code></td><td>The owner</td><td>Sets or clears the exempt flag. For an account that holds a class, the count moves by one with it. Emits <code>ExemptSet</code> when the flag changes. Reverts with <code>Fund_ZeroAddress</code> for the zero address.</td></tr>
+        <tr><td><code>join(token, account)</code></td><td>The installed rule</td><td>Records that the account holds the class. Does nothing for the class itself or a class already held. Raises the count for a non-exempt account with no class yet. Reverts with <code>Fund_OnlyRule</code> or <code>Fund_NotAClass</code>.</td></tr>
+        <tr><td><code>leave(token, account)</code></td><td>The installed rule</td><td>Records that the account has stopped holding the class. Does nothing if it did not hold it. Lowers the count when a non-exempt account loses its last class. Reverts with <code>Fund_OnlyRule</code> or <code>Fund_NotAClass</code>.</td></tr>
+        <tr><td><code>admission(token, account)</code></td><td>Anyone (read-only)</td><td>What the rule needs in one call: the class number (0 if not a class), the account's mask, its exempt flag, the count, the cap and the installed rule.</td></tr>
+        <tr><td><code>isClassIntact(token)</code>, <code>firstBrokenClass()</code></td><td>Anyone (read-only)</td><td>The monitor, above.</td></tr>
+        <tr><td><code>positionsOf(account)</code></td><td>Anyone (read-only)</td><td>The classes the account holds and its balance in each. It calls each held class token, so it is meant for off-chain reads.</td></tr>
+        <tr><td><code>heldClasses(account)</code>, <code>isExempt(account)</code></td><td>Anyone (read-only)</td><td>The account's mask, without the exempt flag; the flag.</td></tr>
+        <tr><td><code>holderCount()</code>, <code>holderCap()</code>, <code>rule()</code></td><td>Anyone (read-only)</td><td>The count, the cap, the installed rule.</td></tr>
+        <tr><td><code>classCount()</code>, <code>classAt(index)</code>, <code>classIndexOf(token)</code></td><td>Anyone (read-only)</td><td>How many classes; the token of a class number (<code>Fund_ClassOutOfRange</code> outside 1 to <code>classCount()</code>); the number of a token, 0 when it is not a class.</td></tr>
+        <tr><td><code>MAX_CLASSES()</code>, <code>REGISTRY()</code>, <code>supportsInterface(id)</code></td><td>Anyone (read-only)</td><td>32; the policy registry that must attest the rule, fixed at construction; ERC-165 for <code>IFund</code>.</td></tr>
+        <tr><td><code>owner()</code></td><td>Anyone (read-only)</td><td>The account that configures the fund.</td></tr>
+        <tr><td><code>transferOwnership(newOwner)</code>, <code>renounceOwnership()</code></td><td>The owner</td><td>OpenZeppelin <code>Ownable</code>, in one step. Emits <code>OwnershipTransferred</code>. Renouncing would freeze the configuration for good: no later class, rule, cap or exemption.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small">The constructor takes the owner and the registry and refuses a zero registry (<code>Fund_ZeroAddress</code>).</p>
   <div class="table-wrap">
     <table>
       <thead><tr><th>Event</th><th>Emitted when</th></tr></thead>
       <tbody>
         <tr><td><code>ClassRegistered(token, index)</code></td><td>A class is registered, with its number</td></tr>
-        <tr><td><code>RuleSet(oldRule, newRule)</code></td><td>The installed rule changes</td></tr>
-        <tr><td><code>HolderCapSet(oldCap, newCap)</code></td><td>The cap is set</td></tr>
+        <tr><td><code>RuleSet(previous, rule)</code></td><td>The installed rule is set</td></tr>
+        <tr><td><code>HolderCapSet(previous, cap)</code></td><td>The cap is set</td></tr>
         <tr><td><code>ExemptSet(account, exempt)</code></td><td>An account's exempt flag changes</td></tr>
-        <tr><td><code>HolderClassesUpdated(account, classes)</code></td><td>The set of classes an account holds changes; carries the new mask</td></tr>
-        <tr><td><code>HolderCountUpdated(count)</code></td><td>The investor count changes; carries the new count</td></tr>
+        <tr><td><code>HolderClassesUpdated(account, classes)</code></td><td>The set of classes an account holds changes; carries the mask after the change</td></tr>
+        <tr><td><code>HolderCountUpdated(count)</code></td><td>The investor count changes; carries the count after the change</td></tr>
       </tbody>
     </table>
   </div>
-  <div class="prose">
-    <p>Together with the class tokens' own <code>Transfer</code> events, <code>HolderClassesUpdated</code> and <code>HolderCountUpdated</code> are the register of investors, so the fund keeps no list of holders on chain. Ownership changes emit OpenZeppelin's <code>OwnershipTransferred</code>.</p>
-  </div>
+  <p class="small">Together with the class tokens' own <code>Transfer</code> events, <code>HolderClassesUpdated</code> and <code>HolderCountUpdated</code> are the register of investors, so the fund keeps no list of holders on chain.</p>
 </section>
 
 <section id="why">
-  <div class="prose">
+  <div class="prose wrap-any">
     <h2>Why it is built this way</h2>
     <ul class="plain">
-      <li><b>State in the fund, policy in the rule.</b> The fund only records. The rule decides. Replacing the rule keeps the count and the masks, because they never lived in the rule.</li>
+      <li><b>State in the fund, policy in the rule.</b> The fund records and the rule decides. Replacing the rule keeps the count and the masks, because they do not live in the rule.</li>
       <li><b>One word per account, one for the fund.</b> A class mask and the exempt flag fit one storage word, and the rule, the count and the cap share another, so the rule's usual question costs one call (<code>admission</code>).</li>
-      <li><b>Supply must be zero at registration.</b> The fund cannot discover holders it never saw, so a class joins before anyone holds it, and the count is right from the first unit.</li>
+      <li><b>Supply must be zero at registration.</b> The fund cannot discover holders it did not see, so a class joins before anyone holds it, and the count is right from the first unit.</li>
       <li><b>Balances are not added up.</b> <code>positionsOf</code> returns each class's balance separately, because units of different classes are not comparable.</li>
-      <li><b>Owned, not administered by a fixed address.</b> Like <code>ProxyDeployer</code>, the fund is <code>Ownable</code>: the deployer configures it during deployment and then hands it to the main timelock. A fixed admin would have forced a timelock operation, and its delay, onto every first deployment.</li>
-      <li><b>Not attested itself.</b> The council attests <code>FundHoldersRule</code>, whose code hash covers the fund's address as an immutable but not the fund's code. The council reads the fund's code and owner before attesting the rule.</li>
-      <li><b>Tested as a whole.</b> An invariant test drives random holder and enforcement actions across the three templates and checks that every class bit matches a positive balance, that the count is the number of non-exempt investors, and that no class and no outside account is ever recorded.</li>
+      <li><b>Owned, with one-step transfer.</b> Like <a href="ProxyDeployer.html"><code>ProxyDeployer</code></a>, the fund is <code>Ownable</code>. A fixed admin would force a timelock operation, and its delay, onto the first deployment, and a two-step transfer would make the timelock schedule an accept for each fund. The post-deploy check pins the owner.</li>
+      <li><b>Not attested itself.</b> The council attests <code>FundHoldersRule</code>, whose code hash covers the fund's address as an immutable but not the fund's code. So the council reads the fund's code and owner before attesting the rule.</li>
+      <li><b>Tested as a whole.</b> An invariant test drives random holder and enforcement actions across the three templates: <code>invariant_ClassBitsMatchBalances</code>, <code>invariant_CountIsTheNumberOfNonExemptInvestors</code> and <code>invariant_NoOneElseIsRecorded</code>.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="prose wrap-any">
+    <h2>What it does not do</h2>
+    <ul class="plain">
+      <li><b>It does not stop a class dropping the rule.</b> The hook accepts a list without <code>FundHoldersRule</code>, and then the class stops counting investors and stops enforcing the cap. The monitor detects it, and nothing prevents it (<code>test_WhenAClassDropsTheFundRule_ItIsUncappedAndTheMonitorNamesIt</code>). The same is true of a hook swap.</li>
+      <li><b>It does not repair a gap.</b> While a class's list lacks the rule its movements are not recorded, and no function sets a mask directly. A seller in the gap stays counted until a later full exit, or until the fund's owner exempts it with <code>setExempt</code>, which takes it out of the count. A buyer with no other class stays uncounted, with the cap treating it as new, until it takes up another class, or its balance reaches zero and it receives again.</li>
+      <li><b>The cap is not an absolute ceiling on the count.</b> A forced move is exempt from the cap and still counted, so the agent's recovery of a stranded position can put the count above the cap, where it stays until investors leave. Ending an exemption can do the same. A monitor should alert when <code>holderCount()</code> is above <code>holderCap()</code>.</li>
+      <li><b>It holds no place for an open request.</b> A full <code>requestRedeem</code> on a 7540 class takes the investor out of the count while the shares wait in the escrow, and <code>requestDeposit</code> reserves nothing. If the fund fills up meanwhile, a reject that returns the shares, or a deposit claim, is refused with <code>MAX_HOLDERS</code> (<code>test_WhenARejectedRedemptionReturnsSharesToAnInvestorWhoWasReplaced_TheFundCapAppliesAndRecoveryIsCounted</code>). The agent's recovery path still works. Whether a redeeming investor still counts as a holder is for counsel.</li>
+      <li><b>It does not judge the size of a position.</b> One unit of a class is a holder. Without a minimum position on the class, 1 wei to an empty, credentialed account takes an investor slot. <a href="MinPositionRule.html"><code>MinPositionRule</code></a> closes that where it is listed with a non-zero minimum.</li>
+      <li><b>It does not know people.</b> An investor is an address. Two wallets of one client count twice, and the count is only as meaningful as the credentials behind it.</li>
+      <li><b>It does not re-check a class after registration.</b> The rule, the class's hook and its list can all change later. The views report the result; they change nothing.</li>
+      <li><b>The monitor views assume a real hook.</b> <code>isClassIntact</code> and <code>firstBrokenClass</code> answer false or name the class when a call to the token or hook reverts. A token that names an address with no code as its hook, or a hook that answers malformed data, makes them revert. The shipped templates refuse a hook with no code, because <code>isAttested</code> is false for it. A hook that answers malformed data would have to be attested first.</li>
+      <li><b>It has no list of holders.</b> The register is rebuilt off-chain from events. <code>positionsOf</code> answers for one account at a time.</li>
     </ul>
   </div>
 </section>
@@ -293,10 +325,12 @@
 <section id="connected">
   <div class="prose"><h2>Connected to</h2></div>
   <div class="cards">
-    <a class="card" href="FundHoldersRule.html"><span class="name">FundHoldersRule</span><p>The rule that reads the fund to apply the cap and is the only one allowed to write it.</p></a>
+    <a class="card" href="FundHoldersRule.html"><span class="name">FundHoldersRule</span><p>The rule that reads the fund to apply the cap, and the one allowed to write it once installed.</p></a>
     <a class="card" href="ComplianceHook.html"><span class="name">ComplianceHook</span><p>Holds each class's rule list, which the monitor reads.</p></a>
-    <a class="card" href="Gated7540Vault.html"><span class="name">Gated7540Vault</span><p>The class whose escrow is its own address, never counted as an investor.</p></a>
-    <a class="card" href="../deployment.html"><span class="name">Deployment and governance</span><p>How the fund is configured, handed to the timelock, and its rule changed in one batch.</p></a>
+    <a class="card" href="Gated7540Vault.html"><span class="name">Gated7540Vault</span><p>The class whose escrow is its own address, not counted as an investor.</p></a>
+    <a class="card" href="PolicyRegistry.html"><span class="name">PolicyRegistry</span><p>Must attest the rule before the fund installs it.</p></a>
+    <a class="card" href="GovernanceTimelock.html"><span class="name">GovernanceTimelock</span><p>The fund's owner once its first classes are registered.</p></a>
+    <a class="card" href="../deployment.html"><span class="name">Deployment and governance</span><p>How the fund is created, opened and handed to the timelock.</p></a>
   </div>
 </section>
 
@@ -304,13 +338,14 @@
   <div class="prose">
     <h2>Source and tests</h2>
     <ul class="plain">
-      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/fund/Fund.sol"><code>contracts/fund/Fund.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/interfaces/IFund.sol"><code>IFund.sol</code></a></li>
-      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/fund/Fund.t.sol"><code>Fund.t.sol</code></a> (every function, the shared slot, a fuzz model of the count, the monitor), <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/fund/FundIntegration.t.sol"><code>FundIntegration.t.sol</code></a> (one fund with the three templates as classes: counting, the cap, registration, the vault escrow, rule and hook replacement, the monitor), <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/fund/FundInvariant.t.sol"><code>FundInvariant.t.sol</code></a> (the three invariants above), and <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/test/nodejs/fund.test.ts"><code>test/nodejs/fund.test.ts</code></a> (through the real deployment, including the timelock batch that replaces the rule)</li>
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/fund/Fund.sol"><code>contracts/fund/Fund.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/IFund.sol"><code>IFund.sol</code></a></li>
+      <li>Deployment: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/ignition/modules/Fund.ts"><code>ignition/modules/Fund.ts</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/ignition/modules/FundOpen.ts"><code>FundOpen.ts</code></a></li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/fund/Fund.t.sol"><code>Fund.t.sol</code></a> (each function, the shared slot, a fuzz model of the count, the monitor), <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/fund/FundIntegration.t.sol"><code>FundIntegration.t.sol</code></a> (one fund with the three templates as classes: counting, the cap, registration, the vault escrow, rule and hook replacement, the monitor), <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/fund/FundInvariant.t.sol"><code>FundInvariant.t.sol</code></a> (the three invariants above), <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/fund.test.ts"><code>test/nodejs/fund.test.ts</code></a> (through the real deployment, including the timelock batch that replaces the rule) and <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/products.test.ts"><code>products.test.ts</code></a> (an issuer with two funds)</li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>cd1e525</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>babef08</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

@@ -24,13 +24,13 @@
 <main class="page">
 
 <header class="top">
-  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Settlement</div>
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Settlement and distribution</div>
   <h1>DvPExecutor</h1>
   <p class="lede">Settles a trade of a security token against cash in one transaction: the shares move and the cash moves, or nothing moves. Each side signs what it gives and what it is to receive, and the executor checks that the two signed statements describe the same trade.</p>
   <div class="facts">
     <span class="fact"><b>contracts/intents/DvPExecutor.sol</b></span>
     <span class="fact">immutable, <b>not a proxy</b></span>
-    <span class="fact">admin: <b>the main timelock</b></span>
+    <span class="fact">admin after hand-over: <b>the main timelock</b></span>
     <span class="fact">not attested: a token trusts it by granting <b>EXECUTOR_ROLE</b></span>
   </div>
 </header>
@@ -38,99 +38,105 @@
 <section id="in-one-minute">
   <div class="callout">
     <h3>In one minute</h3>
-    <p>Delivery versus payment (DvP) means the seller's shares are delivered only if the buyer pays, and the buyer pays only if the shares are delivered. The two parties agree a trade off-chain. The seller signs an intent (a signed transfer instruction) to send shares to the buyer, stating the cash token and the price it expects in return. The buyer signs the payment in one of two ways: an intent on a gated cash token, stating the shares it expects, or an ERC-3009 authorization on a USDC-style token, tied to the seller's intent. An operator submits both. The executor checks that they match, runs the cash first, then the shares, and if any part fails the whole transaction is undone. It does no matching, pricing, fees or partial fills.</p>
+    <p>Delivery versus payment (DvP) means the seller's shares are delivered only if the buyer pays, and the buyer pays only if the shares are delivered. The two parties agree a trade off-chain. The seller signs an intent (a signed transfer instruction) to send shares to the buyer, stating the cash token and the price it expects in return. The buyer signs the payment in one of two ways: an intent on a gated cash token, stating the shares it expects, or an ERC-3009 authorization (a signed permission to pull a payment) tied to the seller's intent. An operator submits both. The executor checks that they describe one trade, runs the cash leg first, then the shares, and if any part fails the whole transaction is undone. It does no matching, pricing, fees or partial fills.</p>
   </div>
 </section>
 
 <section id="how">
   <div class="prose">
     <h2>How a trade settles</h2>
-    <p>Two entry points, one per form of cash. Both are called by an <code>OPERATOR_ROLE</code> holder, both are guarded against reentry, and both stop while the executor is paused. Neither can run one leg alone.</p>
+    <p>There are two entry points, one per form of cash, and the executor has no entry point that runs one leg alone. Both are called by an <code>OPERATOR_ROLE</code> holder, both are guarded against reentry, and both stop while the executor is paused. A <em>leg</em> is one side of the trade: the cash leg pays, the securities leg delivers.</p>
   </div>
   <figure>
     <div class="fig-scroll">
-      <svg class="d" viewBox="0 0 900 440" role="img" aria-label="Gated cash, executeDvPGated: the executor checks that the two legs mirror, else LegsDoNotMatch. Then the buyer's intent on the cash token moves the price straight from the buyer to the seller, and the seller's intent on the security token moves the shares from the seller to the buyer. The executor never holds the cash. ERC-3009 cash, executeDvP3009: the executor checks that the authorization matches the seller's intent, else LegsDoNotMatch. It pulls the price from the buyer to itself with the ERC-3009 authorization, executes the seller's intent so the shares move to the buyer, transfers the price to the seller, and checks that it is back to its starting balance and that the seller is up by exactly the price, else CashNotConserved. Executed intents are checked by their token, including signature, nonce and rules; ERC-3009 and ERC-20 cash movements are plain.">
+      <svg class="d" viewBox="0 0 780 340" role="img" aria-label="Gated cash, executeDvPGated. An operator calls the executor, which checks the role, the pause and that the two legs mirror, otherwise DvPExecutor_LegsDoNotMatch. The cash leg runs first: the buyer's intent on the cash token moves the price straight from the buyer to the seller. The securities leg runs second: the seller's intent on the security token moves the shares from the seller to the buyer. A token that refuses a leg makes the whole trade revert with DvPExecutor_LegFailed naming the leg. Then the executor emits DvPSettled. The cash does not pass through the executor.">
         <defs>
-          <marker id="dvp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
           <marker id="dvp-arrow-ex" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="t-executed"/></marker>
         </defs>
+        <rect class="b" x="40" y="14" width="120" height="40" rx="8"/>
+        <text x="100" y="39" class="bold" text-anchor="middle">Buyer</text>
+        <rect class="act" x="300" y="14" width="180" height="40" rx="8"/>
+        <text x="390" y="39" class="bold" text-anchor="middle">DvPExecutor</text>
+        <rect class="b" x="620" y="14" width="120" height="40" rx="8"/>
+        <text x="680" y="39" class="bold" text-anchor="middle">Seller</text>
+        <line class="life" x1="100" y1="54" x2="100" y2="332"/>
+        <line class="life" x1="390" y1="54" x2="390" y2="332"/>
+        <line class="life" x1="680" y1="54" x2="680" y2="332"/>
 
-        <!-- Gated form -->
-        <text x="20" y="24" class="bold">Gated cash: executeDvPGated</text>
-        <rect class="b" x="30" y="40" width="100" height="40" rx="8"/>
-        <text x="46" y="65" class="bold">Seller</text>
-        <rect class="act" x="155" y="40" width="130" height="40" rx="8"/>
-        <text x="171" y="65" class="bold">DvPExecutor</text>
-        <rect class="b" x="310" y="40" width="100" height="40" rx="8"/>
-        <text x="326" y="65" class="bold">Buyer</text>
-        <line class="life" x1="80" y1="80" x2="80" y2="300"/>
-        <line class="life" x1="220" y1="80" x2="220" y2="300"/>
-        <line class="life" x1="360" y1="80" x2="360" y2="300"/>
+        <rect class="b2" x="235" y="66" width="310" height="62" rx="6"/>
+        <text x="247" y="85" class="sm bold">1. An operator calls executeDvPGated</text>
+        <text x="247" y="102" class="sm">OPERATOR_ROLE, not paused, the legs mirror</text>
+        <text x="247" y="119" class="mono sm rej">else DvPExecutor_LegsDoNotMatch</text>
 
-        <rect class="b2" x="150" y="94" width="140" height="44" rx="6"/>
-        <text x="160" y="112" class="sm">1. legs mirror?</text>
-        <text x="160" y="129" class="sm rej">else LegsDoNotMatch</text>
+        <line class="ln c-executed" x1="100" y1="172" x2="676" y2="172" marker-end="url(#dvp-arrow-ex)"/>
+        <text x="120" y="162" class="sm bold">2. Cash leg: the price, from buyer to seller</text>
+        <text x="120" y="188" class="sm m">cash token, buyer's intent</text>
+        <text x="670" y="188" class="mono sm rej" text-anchor="end">else DvPExecutor_LegFailed(CASH, reason)</text>
 
-        <line class="ln c-executed" x1="360" y1="176" x2="84" y2="176" marker-end="url(#dvp-arrow-ex)"/>
-        <text x="100" y="168" class="sm bold">2. cash: the price</text>
-        <text x="100" y="192" class="sm m">cash token, buyer's intent executed</text>
+        <line class="ln c-executed" x1="680" y1="244" x2="104" y2="244" marker-end="url(#dvp-arrow-ex)"/>
+        <text x="120" y="234" class="sm bold">3. Securities leg: the shares, from seller to buyer</text>
+        <text x="120" y="260" class="sm m">security token, seller's intent</text>
+        <text x="670" y="260" class="mono sm rej" text-anchor="end">else DvPExecutor_LegFailed(SECURITIES, reason)</text>
 
-        <line class="ln c-executed" x1="80" y1="244" x2="356" y2="244" marker-end="url(#dvp-arrow-ex)"/>
-        <text x="100" y="236" class="sm bold">3. shares</text>
-        <text x="100" y="260" class="sm m">security token, seller's intent executed</text>
-
-        <rect class="b2" x="20" y="312" width="410" height="46" rx="8"/>
-        <text x="32" y="331" class="sm">The cash goes straight from the buyer to the seller.</text>
-        <text x="32" y="348" class="sm">The executor never holds it.</text>
-
-        <line class="tick" x1="450" y1="10" x2="450" y2="370"/>
-
-        <!-- ERC-3009 form -->
-        <text x="470" y="24" class="bold">ERC-3009 cash: executeDvP3009</text>
-        <rect class="b" x="470" y="40" width="100" height="40" rx="8"/>
-        <text x="486" y="65" class="bold">Seller</text>
-        <rect class="act" x="615" y="40" width="130" height="40" rx="8"/>
-        <text x="631" y="65" class="bold">DvPExecutor</text>
-        <rect class="b" x="790" y="40" width="100" height="40" rx="8"/>
-        <text x="806" y="65" class="bold">Buyer</text>
-        <line class="life" x1="520" y1="80" x2="520" y2="306"/>
-        <line class="life" x1="680" y1="80" x2="680" y2="306"/>
-        <line class="life" x1="840" y1="80" x2="840" y2="306"/>
-
-        <rect class="b2" x="598" y="94" width="164" height="44" rx="6"/>
-        <text x="608" y="112" class="sm">1. authorization matches?</text>
-        <text x="608" y="129" class="sm rej">else LegsDoNotMatch</text>
-
-        <line class="ln" x1="840" y1="170" x2="684" y2="170" marker-end="url(#dvp-arrow)"/>
-        <text x="690" y="162" class="sm bold">2. cash: the price</text>
-        <text x="690" y="186" class="sm m">ERC-3009 pull</text>
-
-        <line class="ln c-executed" x1="520" y1="226" x2="836" y2="226" marker-end="url(#dvp-arrow-ex)"/>
-        <text x="540" y="218" class="sm bold">3. shares</text>
-        <text x="540" y="242" class="sm m">security token, seller's intent executed</text>
-
-        <line class="ln" x1="680" y1="282" x2="524" y2="282" marker-end="url(#dvp-arrow)"/>
-        <text x="530" y="274" class="sm bold">4. cash: the price</text>
-        <text x="530" y="298" class="sm m">transfer to the seller</text>
-
-        <rect class="b2" x="470" y="312" width="420" height="46" rx="8"/>
-        <text x="482" y="331" class="sm">5. The executor is back to its starting balance and the seller</text>
-        <text x="482" y="348" class="sm">is up by exactly the price, <tspan class="rej">else CashNotConserved</tspan></text>
-
-        <!-- Legend -->
-        <line class="ln c-executed" x1="20" y1="396" x2="60" y2="396" marker-end="url(#dvp-arrow-ex)"/>
-        <text x="72" y="400" class="sm">an executed intent: its token checks the signature, the nonce, the executor binding and its rules</text>
-        <line class="ln" x1="20" y1="422" x2="60" y2="422" marker-end="url(#dvp-arrow)"/>
-        <text x="72" y="426" class="sm">a plain ERC-3009 or ERC-20 cash movement</text>
+        <rect class="act" x="290" y="288" width="200" height="36" rx="6"/>
+        <text x="390" y="311" class="sm bold" text-anchor="middle">4. emit DvPSettled</text>
       </svg>
     </div>
-    <figcaption><b>Cash first, then shares, in one transaction.</b> In the gated form the cash never touches the executor. In the ERC-3009 form it passes through the executor inside the call, which succeeds only if the executor ends with exactly what it started with. A failure at any step reverts every step before it.</figcaption>
+    <figcaption><b>Gated cash: the cash goes straight from the buyer to the seller.</b> The executor calls <code>executeTransfer</code> on each token, and each token checks its own intent and moves its own balance. Both legs reach their token's hook as <span class="k k-executed">EXECUTED</span>. A revert at any step undoes every step before it.</figcaption>
+  </figure>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 780 470" role="img" aria-label="ERC-3009 cash, executeDvP3009. An operator calls the executor, which checks the role, the pause and that the authorization matches the seller's intent, otherwise DvPExecutor_LegsDoNotMatch. The cash leg runs first: the executor pulls the price from the buyer to itself with receiveWithAuthorization. The securities leg runs second: the seller's intent moves the shares from the seller to the buyer. Then the executor pays the price to the seller with safeTransfer. It then requires that it holds what it held before the pull and that the seller is up by exactly the price, otherwise DvPExecutor_CashNotConserved. Then it emits DvPSettled.">
+        <defs>
+          <marker id="dvp2-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+          <marker id="dvp2-arrow-ex" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="t-executed"/></marker>
+        </defs>
+        <rect class="b" x="40" y="14" width="120" height="40" rx="8"/>
+        <text x="100" y="39" class="bold" text-anchor="middle">Buyer</text>
+        <rect class="act" x="300" y="14" width="180" height="40" rx="8"/>
+        <text x="390" y="39" class="bold" text-anchor="middle">DvPExecutor</text>
+        <rect class="b" x="620" y="14" width="120" height="40" rx="8"/>
+        <text x="680" y="39" class="bold" text-anchor="middle">Seller</text>
+        <line class="life" x1="100" y1="54" x2="100" y2="462"/>
+        <line class="life" x1="390" y1="54" x2="390" y2="462"/>
+        <line class="life" x1="680" y1="54" x2="680" y2="462"/>
+
+        <rect class="b2" x="225" y="66" width="330" height="62" rx="6"/>
+        <text x="237" y="85" class="sm bold">1. An operator calls executeDvP3009</text>
+        <text x="237" y="102" class="sm">OPERATOR_ROLE, not paused, authorization matches</text>
+        <text x="237" y="119" class="mono sm rej">else DvPExecutor_LegsDoNotMatch</text>
+
+        <line class="ln" x1="100" y1="170" x2="386" y2="170" marker-end="url(#dvp2-arrow)"/>
+        <text x="112" y="160" class="sm bold">2. Cash leg: the price, to the executor</text>
+        <text x="112" y="186" class="mono sm m">receiveWithAuthorization</text>
+        <text x="400" y="174" class="mono sm rej">else DvPExecutor_LegFailed(CASH, reason)</text>
+
+        <line class="ln c-executed" x1="680" y1="244" x2="104" y2="244" marker-end="url(#dvp2-arrow-ex)"/>
+        <text x="120" y="234" class="sm bold">3. Securities leg: the shares, from seller to buyer</text>
+        <text x="120" y="260" class="sm m">security token, seller's intent</text>
+        <text x="670" y="260" class="mono sm rej" text-anchor="end">else DvPExecutor_LegFailed(SECURITIES, reason)</text>
+
+        <line class="ln" x1="390" y1="310" x2="676" y2="310" marker-end="url(#dvp2-arrow)"/>
+        <text x="400" y="300" class="sm bold">4. Payout: the price, to the seller</text>
+        <text x="400" y="326" class="mono sm m">safeTransfer</text>
+        <text x="482" y="326" class="sm rej">else the token's own error</text>
+
+        <rect class="b2" x="165" y="344" width="450" height="62" rx="6"/>
+        <text x="177" y="363" class="sm bold">5. The executor holds what it held before the pull,</text>
+        <text x="177" y="380" class="sm bold">and the seller is up by exactly the price</text>
+        <text x="177" y="397" class="mono sm rej">else DvPExecutor_CashNotConserved(account, expected, actual)</text>
+
+        <rect class="act" x="290" y="420" width="200" height="36" rx="6"/>
+        <text x="390" y="443" class="sm bold" text-anchor="middle">6. emit DvPSettled</text>
+      </svg>
+    </div>
+    <figcaption><b>ERC-3009 cash: the cash passes through the executor inside the call.</b> The purple arrow is an executed intent, which its token checks and runs through its hook. The plain arrows are movements of a cash token that has no hook. The call succeeds only if the executor ends with the balance it started with.</figcaption>
   </figure>
   <div class="table-wrap">
     <table>
       <thead><tr><th></th><th>Gated cash token</th><th>ERC-3009 cash token</th></tr></thead>
       <tbody>
-        <tr><td>The cash is</td><td>An <a href="IntentToken.html">IntentToken</a> of its own, under its own rule list</td><td>A USDC-style token with <code>receiveWithAuthorization</code></td></tr>
+        <tr><td>The cash is</td><td>An <a href="IntentToken.html">IntentToken</a> of its own, under its own rule list</td><td>A token with <code>receiveWithAuthorization</code> and <code>authorizationState</code> (<code>IERC3009</code>), outside the hook</td></tr>
         <tr><td>The buyer signs</td><td>A transfer intent on the cash token</td><td>An ERC-3009 authorization, payable to the executor</td></tr>
         <tr><td>Entry point</td><td><code>executeDvPGated</code></td><td><code>executeDvP3009</code></td></tr>
         <tr><td>Pre-flight</td><td><code>canExecuteDvPGated</code></td><td><code>canExecuteDvP3009</code></td></tr>
@@ -141,29 +147,10 @@
   </div>
 </section>
 
-<section id="functions">
-  <div class="prose"><h2>What it can do</h2></div>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th><th>Reverts</th></tr></thead>
-      <tbody>
-        <tr><td><code>executeDvPGated(securityToken, cashToken, securitiesIntent, securitiesSig, cashIntent, cashSig)</code></td><td><code>OPERATOR_ROLE</code>, while not paused</td><td>Checks the two intents mirror, executes the cash intent, then the securities intent. Returns the seller intent's hash and emits <code>DvPSettled</code>.</td><td><code>DvPExecutor_LegsDoNotMatch</code>; <code>DvPExecutor_LegFailed(leg, reason)</code></td></tr>
-        <tr><td><code>executeDvP3009(securityToken, cashToken, securitiesIntent, securitiesSig, authorization)</code></td><td><code>OPERATOR_ROLE</code>, while not paused</td><td>Checks the authorization matches the intent, pulls the cash, executes the securities intent, pays the seller, checks the balances. Returns the seller intent's hash and emits <code>DvPSettled</code>.</td><td><code>DvPExecutor_LegsDoNotMatch</code>; <code>DvPExecutor_LegFailed(leg, reason)</code>; <code>DvPExecutor_CashNotConserved(account, expected, actual)</code>; a failing payout with the cash token's own error</td></tr>
-        <tr><td><code>canExecuteDvPGated(…)</code>, <code>canExecuteDvP3009(…)</code></td><td>Anyone (read-only)</td><td>Pre-flight: <code>(ok, reason)</code> for the same arguments, without reverting.</td><td></td></tr>
-        <tr><td><code>pause()</code></td><td><code>GUARDIAN_ROLE</code></td><td>Stops both entry points at once.</td><td><code>EnforcedPause</code> if already paused</td></tr>
-        <tr><td><code>unpause()</code></td><td><code>DEFAULT_ADMIN_ROLE</code> (the main timelock) or <code>RECOVERY_ROLE</code> (the recovery timelock)</td><td>Resumes settlement.</td><td><code>AccessControlUnauthorizedAccount(caller, DEFAULT_ADMIN_ROLE)</code>; <code>ExpectedPause</code></td></tr>
-        <tr><td><code>grantRole</code>, <code>revokeRole</code></td><td><code>DEFAULT_ADMIN_ROLE</code>; <code>RECOVERY_ROLE</code> may revoke <code>GUARDIAN_ROLE</code> only</td><td>Manages operators and the guardian.</td><td><code>AccessControlUnauthorizedAccount</code></td></tr>
-        <tr><td><code>supportsInterface(id)</code></td><td>Anyone (read-only)</td><td>ERC-165: <code>IDvPExecutor</code> and the <code>AccessControl</code> interfaces.</td><td></td></tr>
-      </tbody>
-    </table>
-  </div>
-  <p class="small"><code>DvPSettled(securitiesIntentHash, seller, buyer, securityToken, cashToken, securityAmount, cashAmount, operator)</code> is emitted once per settled trade. The constructor takes the admin and the guardian and refuses a zero address for either (<code>DvPExecutor_ZeroAddress</code>).</p>
-</section>
-
 <section id="signed">
   <div class="prose">
     <h2>What each party signs</h2>
-    <p>Each signature covers both what its signer gives and what it is to receive. The executor builds nothing itself; it only compares the two signed statements.</p>
+    <p>Each signature covers both what its signer gives and what it is to receive. The executor builds nothing itself; it compares the two signed statements.</p>
   </div>
   <div class="table-wrap">
     <table>
@@ -173,118 +160,127 @@
         <tr><td><code>amount</code></td><td>the shares</td><td>the price</td></tr>
         <tr><td><code>considerationToken</code></td><td>the cash token</td><td>the security token</td></tr>
         <tr><td><code>considerationAmount</code></td><td>the price</td><td>the shares</td></tr>
-        <tr><td><code>executor</code></td><td>the <code>DvPExecutor</code></td><td>the <code>DvPExecutor</code></td></tr>
-        <tr><td><code>nonce</code>, <code>deadline</code>, <code>validAfter</code>, <code>ref</code></td><td colspan="2">as for any intent; <code>ref</code> is free for an off-chain reference</td></tr>
+        <tr><td><code>executor</code></td><td>this executor</td><td>this executor</td></tr>
+        <tr><td><code>nonce</code>, <code>deadline</code>, <code>validAfter</code>, <code>ref</code></td><td colspan="2">as for any intent, chosen by each signer; the executor does not compare them across the legs</td></tr>
       </tbody>
     </table>
   </div>
   <div class="prose">
-    <p>In the ERC-3009 form the buyer signs instead an authorization under the cash token's own rules: from the buyer, payable to the executor, for the price, with a validity window and the nonce described below. The executor passes itself as the payee; ERC-3009's <code>receiveWithAuthorization</code> can only be submitted by its payee.</p>
-    <p>An intent that states a consideration must name its executor, and the token refuses it from any other caller. So both intents of a trade name this executor, and neither can be run by the <a href="IntentExecutor.html">IntentExecutor</a> or anyone else. The executor does not compare the <code>executor</code> fields itself; each token does.</p>
+    <p>In the ERC-3009 form the buyer signs instead an authorization in the cash token's own format, held in the struct <code>Authorization</code>: <code>from</code> (the buyer), <code>value</code> (the price), <code>validAfter</code>, <code>validBefore</code>, <code>nonce</code> and <code>signature</code>. The payee is not in the struct: the executor passes itself. ERC-3009's <code>receiveWithAuthorization</code> can be submitted by its payee alone, so nobody else can spend the authorization.</p>
+    <p>A token refuses an intent that states a consideration and names no executor, and refuses an intent that names an executor from any other caller. So both intents of a trade name this executor, and neither can be run by the <a href="IntentExecutor.html">IntentExecutor</a>, which refuses a stated payment before it calls the token. The executor does not compare the <code>executor</code> fields itself; each token does.</p>
   </div>
 </section>
 
 <section id="match">
-  <div class="prose"><h2>When the two legs describe one trade</h2></div>
+  <div class="prose">
+    <h2>When the two legs describe one trade</h2>
+    <p>These checks run before any leg, and any failure reverts with <code>DvPExecutor_LegsDoNotMatch</code>. In the gated form no token has been called yet. In the ERC-3009 form the security token's <code>intentHash</code> has been read and no cash has moved.</p>
+  </div>
   <div class="two">
     <div class="prose">
       <h3>Gated form: the legs mirror</h3>
-      <ul class="plain">
-        <li>The two tokens differ.</li>
-        <li>The parties are swapped: the seller's <code>from</code> is the buyer's <code>to</code>, and the seller's <code>to</code> is the buyer's <code>from</code>.</li>
-        <li>Each amount is the other leg's stated consideration: the shares equal the buyer's <code>considerationAmount</code>, the price equals the seller's.</li>
-        <li>Each stated consideration token is the other leg's token.</li>
-      </ul>
+      <p>Seven conditions, in <code>executeDvPGated</code> and <code>canExecuteDvPGated</code>:</p>
+      <ol class="steps">
+        <li><div>The two tokens differ: <code>securityToken != cashToken</code>.</div></li>
+        <li><div>The seller's <code>from</code> is the buyer's <code>to</code>.</div></li>
+        <li><div>The seller's <code>to</code> is the buyer's <code>from</code>.</div></li>
+        <li><div>The seller's <code>amount</code> (the shares) is the buyer's <code>considerationAmount</code>.</div></li>
+        <li><div>The buyer's <code>amount</code> (the price) is the seller's <code>considerationAmount</code>.</div></li>
+        <li><div>The seller's <code>considerationToken</code> is <code>cashToken</code>.</div></li>
+        <li><div>The buyer's <code>considerationToken</code> is <code>securityToken</code>.</div></li>
+      </ol>
     </div>
     <div class="prose">
       <h3>ERC-3009 form: the authorization matches</h3>
-      <ul class="plain">
-        <li>The two tokens differ.</li>
-        <li>The authorization is from the seller's <code>to</code>, the buyer.</li>
-        <li>Its value is the seller's <code>considerationAmount</code>, and the seller's <code>considerationToken</code> is the cash token.</li>
-        <li>Its nonce is derived from the security token and the seller's intent, as below.</li>
-      </ul>
+      <p>Five conditions, in <code>executeDvP3009</code> and <code>canExecuteDvP3009</code>:</p>
+      <ol class="steps">
+        <li><div>The two tokens differ: <code>securityToken != cashToken</code>.</div></li>
+        <li><div>The authorization's <code>from</code> is the seller's <code>to</code>, the buyer.</div></li>
+        <li><div>The authorization's <code>value</code> is the seller's <code>considerationAmount</code>.</div></li>
+        <li><div>The seller's <code>considerationToken</code> is <code>cashToken</code>.</div></li>
+        <li><div>The authorization's <code>nonce</code> is derived from the security token and the seller's intent, as below.</div></li>
+      </ol>
     </div>
   </div>
-  <p class="small">Any mismatch reverts with <code>DvPExecutor_LegsDoNotMatch</code> before any cash moves. In the gated form no token has been called yet; in the ERC-3009 form only the security token's <code>intentHash</code> has been read.</p>
+  <div class="prose">
+    <p>The conditions do not require the seller and the buyer to be different accounts. A trade between an account and itself passes and settles in both forms. The securities leg is a self-transfer, and so is a gated cash leg. An ERC-3009 cash leg goes out to the executor and comes back (<code>test_WhenTheSellerIsAlsoTheBuyer_AGatedTradeSettlesToo</code>, <code>test_WhenTheSellerIsAlsoTheBuyer_PreflightSaysYesAndTheTradeSettles</code>).</p>
+  </div>
 </section>
 
 <section id="nonce">
   <div class="prose">
     <h2>The ERC-3009 nonce</h2>
-    <p>The buyer's authorization carries this nonce:</p>
+    <p>An ERC-3009 authorization carries a nonce chosen by the signer. Here the buyer's nonce must be this value, which the buyer's client computes before signing:</p>
   </div>
   <pre>keccak256(abi.encode(securityToken, securityToken.intentHash(securitiesIntent)))</pre>
   <div class="prose">
-    <p>The intent hash ties the payment to one exact securities intent: same seller, buyer, shares, price, deadline and nonce. The security token's address is in it on purpose. The executor cannot tell an honest token's <code>intentHash</code> from a counterfeit's, because it simply asks the token. With the bare hash, an operator could pair the buyer's authorization with a counterfeit "security token" that reports the genuine hash, delivers nothing, and names the operator's own account as the seller, so the cash would go to the operator. With the token's address inside, that authorization only matches the token the buyer meant. A test tries exactly this substitution and expects <code>DvPExecutor_LegsDoNotMatch</code> with no cash moved.</p>
+    <p>The intent hash ties the payment to one exact securities intent: the same seller, buyer, shares, price, deadline and nonce. The cash token treats the nonce as an opaque value, so the executor does the comparison, and a buyer who signed this nonce has committed to that intent.</p>
+    <p><b>Why not the bare hash.</b> The executor gets the hash by asking the token it was handed, and it cannot tell an honest token's answer from a counterfeit's. Anyone can compute the genuine hash of an intent. With the bare hash as the nonce, an operator could pair the buyer's authorization with a counterfeit "security token" that reports the genuine hash and delivers nothing, and put its own account in the seller's place, so the cash would go to the operator. With the token's address inside, the executor computes a different nonce for the counterfeit and the authorization does not match. <code>test_WhenAnOperatorSubstitutesACounterfeitSecurityToken_TheAuthorizationIsRefused</code> tries exactly this substitution and expects <code>DvPExecutor_LegsDoNotMatch</code> with no cash moved.</p>
     <p>The buyer's wallet shows the value, the executor as payee and an opaque nonce, so in this form it cannot show what the buyer receives. In the gated form the buyer's intent states the shares in clear.</p>
   </div>
 </section>
 
 <section id="conservation">
   <div class="prose">
-    <h2>Cash conservation in the ERC-3009 form</h2>
-    <p>The executor never keeps settlement money. Before the pull it records its own cash balance. After paying the seller it requires two things, and reverts with <code>DvPExecutor_CashNotConserved(account, expected, actual)</code> otherwise:</p>
+    <h2>The balance checks after the legs</h2>
+    <p>The ERC-3009 form moves cash through the executor, so it measures the result. It reads its own cash balance before the pull, and the seller's cash balance after the securities leg, just before the payout. After paying the seller it requires two things, and reverts with <code>DvPExecutor_CashNotConserved(account, expected, actual)</code> otherwise:</p>
     <ul class="plain">
-      <li>its own balance equals the balance it recorded before the pull;</li>
-      <li>the seller's balance rose by exactly the price. The seller's balance is read after the pull and before the payout, so a seller who is also the payer is measured on the payout alone.</li>
+      <li>its own balance equals what it read before the pull;</li>
+      <li>the seller's balance rose by exactly the price. Because it was read after the pull, a seller who is also the payer is measured on the payout alone.</li>
     </ul>
-    <p>A cash token that takes a fee on transfers fails the trade. Usually the payout itself reverts with the cash token's own error, because the executor received less than it must pay. When a stray balance in the executor covers the shortfall, the conservation check catches it. Anything sent to the executor by mistake stays there: it has no function to sweep it out.</p>
+    <p>A cash token that takes a fee on transfers fails the trade. Usually the payout itself reverts with the cash token's own error, because the executor received less than it must pay (<code>test_WhenTheCashTokenTakesAFee_TheTradeRevertsAndKeepsEverything</code>). When a stray balance in the executor covers the shortfall, or the fee falls on the payout alone, the balance check catches it (<code>test_WhenAStrayBalanceHidesTheShortfall_TheConservationCheckStillCatchesTheFee</code>). The executor has no function to sweep out anything sent to it by mistake, and a settled trade leaves that balance as it was (<code>test_WhenTheTradeSettles_TheExecutorBalanceIsExactlyWhatWasDonated</code>).</p>
+    <p>The gated form has no balance checks. Its cash moves directly between the parties, so the executor holds none of it, and each token reverts if it cannot make the move.</p>
   </div>
 </section>
 
 <section id="errors">
   <div class="prose">
-    <h2>Errors, and what is not wrapped</h2>
-    <p>When a leg fails, the executor wraps the token's revert data so the operator knows which leg failed. The cash leg runs first, so if both legs would fail, the cash leg is the one reported.</p>
-  </div>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Error</th><th>When</th></tr></thead>
-      <tbody>
-        <tr><td><code>DvPExecutor_LegsDoNotMatch()</code></td><td>The legs do not describe one trade (above).</td></tr>
-        <tr><td><code>DvPExecutor_LegFailed(leg, reason)</code></td><td>A token refused a leg. <code>leg</code> is <code>CASH</code> (0) or <code>SECURITIES</code> (1); <code>reason</code> is the token's revert data, for example <code>PolicyGated_TransferRejected(reason)</code>. In the ERC-3009 form the cash leg is the pull.</td></tr>
-        <tr><td><code>DvPExecutor_CashNotConserved(account, expected, actual)</code></td><td>ERC-3009 form only: the executor or the seller does not end with the required balance.</td></tr>
-      </tbody>
-    </table>
-  </div>
-  <div class="prose">
+    <h2>When a leg fails</h2>
+    <p><code>DvPExecutor_LegFailed(leg, reason)</code> wraps the token's revert data so the operator knows which leg failed. <code>leg</code> is <code>CASH</code> (0) or <code>SECURITIES</code> (1), and <code>reason</code> is the token's revert data, for example <code>PolicyGated_TransferRejected(reason)</code>. The cash leg runs first, so if both legs would fail the cash leg is the one reported (<code>test_WhenBothLegsFail_TheCashLegIsReportedBecauseItRunsFirst</code>). In the ERC-3009 form the cash leg is the pull, and the securities leg runs between the pull and the payout.</p>
     <p>Not wrapped, so they arrive with their own error:</p>
     <ul class="plain">
-      <li>The payout to the seller in the ERC-3009 form: the cash token's own error (for a blocklisted seller, say), <code>SafeERC20FailedOperation(token)</code> for a token that returns false, and <code>ReentrancyGuardReentrantCall</code> for a token that calls back into the executor.</li>
-      <li>The executor's own gates: <code>AccessControlUnauthorizedAccount</code>, <code>EnforcedPause</code>, <code>ReentrancyGuardReentrantCall</code>.</li>
-      <li>A leg whose token address has no code reverts with empty revert data, because Solidity does not route that failure to the <code>catch</code>.</li>
+      <li>The payout to the seller in the ERC-3009 form: the cash token's own error (for a blocklisted seller, say), <code>SafeERC20FailedOperation(token)</code> for a token that returns false, and <code>ReentrancyGuardReentrantCall</code> for a token that calls back into the executor during the payout. A token that calls back during the pull, or during a gated leg, is reported as that leg's <code>DvPExecutor_LegFailed</code> with the guard's error inside.</li>
+      <li>The executor's own gates: <code>ReentrancyGuardReentrantCall</code>, <code>AccessControlUnauthorizedAccount</code>, <code>EnforcedPause</code>, in that order.</li>
+      <li>In the ERC-3009 form, the read of the security token's <code>intentHash</code> and the reads of the cash balances, which run outside any leg. A security token with no <code>intentHash</code>, such as a <code>GatedToken</code>, reverts with no data.</li>
+      <li>A token address with no code reverts with empty revert data, because Solidity does not route that failure to the <code>catch</code> (<code>test_WhenTheSecurityTokenHasNoCode_ItRevertsAfterTheCashLegRan</code>). The same goes for a token that returns too little data to read as a hash.</li>
     </ul>
   </div>
 </section>
 
 <section id="preflight">
   <div class="prose">
-    <h2>Pre-flights, and what they cannot see</h2>
-    <p><code>canExecuteDvPGated</code> and <code>canExecuteDvP3009</code> return <code>(ok, reason)</code> and never revert on a refusal. They ask the tokens' own <code>canExecute</code> from the executor's address, so a token's executor binding answers as it will in the real call. In order:</p>
+    <h2>What the pre-flights return</h2>
+    <p><code>canExecuteDvPGated</code> and <code>canExecuteDvP3009</code> take the same arguments as the entry points and return <code>(ok, reason)</code>: a refusal comes back as a reason code, and <code>ok</code> is true when the reason is <code>TRANSFER_OK</code>. Anyone can call them. They ask the tokens' own <code>canExecute</code> with the executor's address, so the answer does not depend on who asks. They answer in this order, stopping at the first refusal:</p>
   </div>
   <div class="two">
-    <ol class="steps">
-      <li><div>The executor's pause: <code>PAUSED</code>.</div></li>
-      <li><div>The mirror: <code>LEGS_DO_NOT_MATCH</code>.</div></li>
-      <li><div>The cash token's <code>canExecute</code> for the buyer's intent.</div></li>
-      <li><div>The security token's <code>canExecute</code> for the seller's intent.</div></li>
-    </ol>
-    <ol class="steps">
-      <li><div>The executor's pause: <code>PAUSED</code>.</div></li>
-      <li><div>The match: <code>LEGS_DO_NOT_MATCH</code>.</div></li>
-      <li><div>The authorization: <code>INTENT_NOT_YET_VALID</code> at or before <code>validAfter</code>, <code>INTENT_EXPIRED</code> at or after <code>validBefore</code>, <code>NONCE_USED</code> if used or cancelled, <code>INSUFFICIENT_UNFROZEN</code> if the buyer's balance is below the value.</div></li>
-      <li><div>The security token's <code>canExecute</code> for the seller's intent.</div></li>
-    </ol>
+    <div class="prose">
+      <h3><code>canExecuteDvPGated</code></h3>
+      <ol class="steps">
+        <li><div>The executor's pause: <code>PAUSED</code>.</div></li>
+        <li><div>The mirror: <code>LEGS_DO_NOT_MATCH</code>.</div></li>
+        <li><div>The cash token's <code>canExecute</code> for the buyer's intent: its reason, such as <code>NOT_EXECUTOR</code> or <code>NONCE_USED</code>.</div></li>
+        <li><div>The security token's <code>canExecute</code> for the seller's intent: its reason, such as <code>LOCKED</code>.</div></li>
+      </ol>
+    </div>
+    <div class="prose">
+      <h3><code>canExecuteDvP3009</code></h3>
+      <ol class="steps">
+        <li><div>The executor's pause: <code>PAUSED</code>.</div></li>
+        <li><div>The match: <code>LEGS_DO_NOT_MATCH</code>.</div></li>
+        <li><div>The authorization: <code>INTENT_NOT_YET_VALID</code> at or before <code>validAfter</code>, <code>INTENT_EXPIRED</code> at or after <code>validBefore</code>, <code>NONCE_USED</code> if used or cancelled, <code>INSUFFICIENT_UNFROZEN</code> if the buyer's balance is below the value.</div></li>
+        <li><div>The security token's <code>canExecute</code> for the seller's intent: its reason.</div></li>
+      </ol>
+    </div>
   </div>
   <div class="prose">
     <p>What they cannot see:</p>
     <ul class="plain">
-      <li><b>Roles.</b> Neither checks <code>OPERATOR_ROLE</code>, nor that the executor still holds <code>EXECUTOR_ROLE</code> on the tokens. After a token revokes the executor, the pre-flight says yes and the trade fails.</li>
-      <li><b>The ERC-3009 side.</b> The buyer's signature (the cash token exposes no view for it), a pause or blocklist on the cash token, and a transfer fee.</li>
-      <li><b>One leg's effect on the other.</b> Both legs are asked against the state before either runs. When the two tokens share policy state, such as two classes of one <a href="Fund.html">Fund</a>, the first leg can change the second's answer. A test shows it: a fund whose investor cap has been lowered below its current count, and a buyer who swaps its only class for another. The buyer leaves the fund on the first leg and counts as a new investor on the second, which the lowered cap refuses, though the pre-flight says yes.</li>
+      <li><b>The operator.</b> Neither checks <code>OPERATOR_ROLE</code>. A token on which the executor holds no <code>EXECUTOR_ROLE</code> does show up, as <code>NOT_EXECUTOR</code> from its own <code>canExecute</code>.</li>
+      <li><b>The ERC-3009 side.</b> The buyer's signature (the cash token exposes no view for it), a pause or blocklist on the cash token, and a transfer fee. So <code>canExecuteDvP3009</code> saying yes means the trade would settle given a valid authorization signature and an ordinary cash token.</li>
+      <li><b>One leg's effect on the other.</b> Both legs are asked against the state before either runs. When the two tokens share policy state, such as two classes of one <a href="Fund.html">Fund</a>, the first leg can change the second's answer. <code>test_WhenTheFundIsAboveItsLoweredCap_ASwapOfTwoClassesPassesPreflightAndFailsOnTheSecondLeg</code> shows it: a fund whose investor cap was lowered below its count, and a buyer who pays with its whole position in one class for shares of another. The buyer leaves the fund on the first leg and counts as a new investor on the second, which the lowered cap refuses, though the pre-flight said yes.</li>
+      <li><b>The next block.</b> A pre-flight answers for the latest block and a write lands in a later one, so at a time boundary the two can differ.</li>
     </ul>
-    <p>Simulating the execute call itself with <code>eth_call</code> from the operator's address shows the real outcome.</p>
+    <p>Simulating the entry point itself from the operator's address shows the real outcome. A token address with no code makes a pre-flight revert, as it does the entry point.</p>
   </div>
 </section>
 
@@ -292,10 +288,11 @@
   <div class="prose">
     <h2>Time, cancellation and policy</h2>
     <ul class="plain">
-      <li><b>Deadlines differ at the edge.</b> An intent's deadline is inclusive: it is valid in the deadline's second. An ERC-3009 <code>validBefore</code> is exclusive. A buyer who signs <code>validBefore</code> equal to the intent's deadline loses that last second, and a trade submitted in it reverts as a whole; one second later, both are valid on the deadline.</li>
+      <li><b>Windows differ at the edge.</b> An intent's <code>deadline</code> and <code>validAfter</code> are inclusive. An ERC-3009 <code>validBefore</code> and <code>validAfter</code> are exclusive. A buyer who signs <code>validBefore</code> equal to the intent's deadline loses that last second, and a trade submitted in it reverts as a whole (<code>test_WhenTheAuthorizationEndsOnTheIntentDeadline_TheIntentsLastSecondIsLost</code>); one second later, both are valid on the deadline (<code>test_WhenTheAuthorizationEndsOneSecondAfterTheIntentDeadline_TheTradeSettlesOnTheDeadline</code>).</li>
       <li><b>Cancelling.</b> The seller, and the buyer in the gated form, cancel by spending their nonce with <code>cancelIntent</code> on their own token. An ERC-3009 authorization is cancelled on the cash token by whatever means it offers; the pre-flight then reads <code>NONCE_USED</code>. Either way the trade then fails as a whole.</li>
-      <li><b>Expiry.</b> A trade nobody submits lapses at the intent's deadline or the authorization's <code>validBefore</code>.</li>
-      <li><b>Policy applies to each executed leg.</b> The securities leg reaches the hook as <span class="k k-executed">EXECUTED</span>, so the settlement window, credentials, holder restrictions, minimum position and the fund-wide holder cap apply to it unchanged. A gated cash leg runs the cash token's own rule list, pause and frozen amounts. The shares go straight from the seller to the buyer, so the executor never holds them and needs no credential.</li>
+      <li><b>Expiry.</b> A trade nobody submits lapses at the first deadline to pass: an intent's <code>deadline</code> or the authorization's <code>validBefore</code>.</li>
+      <li><b>A failed trade spends nothing.</b> The nonces and the authorization stay unused, because the revert undoes their writes, so the same signatures can settle later (<code>test_WhenTheSecuritiesLegIsLocked_NothingMovesAndNoNonceIsSpent</code>, <code>test_WhenTheSecuritiesLegIsLocked_NothingMovesAndTheAuthorizationStaysUnused</code>). A settled trade cannot settle twice (<code>test_WhenTheTradeSettled_ItCannotSettleTwice</code>).</li>
+      <li><b>Policy applies to each executed leg.</b> The securities leg reaches the hook as <span class="k k-executed">EXECUTED</span>, so the rules the token lists apply to it, among them <a href="SettlementWindowRule.html">SettlementWindowRule</a> (<code>test_WhenOutsideTheSettlementWindow_TheTradeWaitsForTheNextOpening</code>) and the fund-wide cap of <a href="FundHoldersRule.html">FundHoldersRule</a> (<code>test_WhenTheFundIsFull_APartialSaleToANewInvestorIsRefusedAtTheSecuritiesLeg</code>). A gated cash leg runs the cash token's own rule list, pause and frozen amounts. The shares go straight from the seller to the buyer, so the executor does not hold them and needs no credential on the security token.</li>
     </ul>
   </div>
 </section>
@@ -304,13 +301,48 @@
   <div class="prose">
     <h2>Roles, pause and reentry</h2>
     <dl class="kv">
-      <dt>OPERATOR_ROLE</dt><dd>Submits trades. Deployed: the operator account, the same as on the intent executor.</dd>
-      <dt>GUARDIAN_ROLE</dt><dd>Pauses with no delay. Deployed: the guardian multisig.</dd>
-      <dt>DEFAULT_ADMIN_ROLE</dt><dd>Grants roles and unpauses. Deployed: the main timelock.</dd>
-      <dt>RECOVERY_ROLE</dt><dd>Only <code>unpause()</code> and revoking <code>GUARDIAN_ROLE</code>. Deployed: the recovery timelock.</dd>
-      <dt>EXECUTOR_ROLE</dt><dd>Held by this contract on each token it settles. The deployment grants it on the intent token. A gated cash token is a separate instrument; its own administrator grants the role.</dd>
+      <dt>OPERATOR_ROLE</dt><dd>Submits trades. Deployed: the account passed as <code>operator</code> to <code>CoreHandover</code>, the same as on the intent executor.</dd>
+      <dt>GUARDIAN_ROLE</dt><dd>Pauses with no delay. Deployed: the guardian multisig, from the constructor.</dd>
+      <dt>DEFAULT_ADMIN_ROLE</dt><dd>Grants roles and unpauses. Deployed: the deployer until <code>CoreHandover</code>, then the main timelock.</dd>
+      <dt>RECOVERY_ROLE</dt><dd><code>unpause()</code> and revoking <code>GUARDIAN_ROLE</code>, and nothing else. Deployed: the recovery timelock.</dd>
+      <dt>EXECUTOR_ROLE</dt><dd>Held by this contract on the tokens it settles. <code>Product</code> grants it on a token whose product lists <code>dvp</code> under <code>executors</code>.</dd>
     </dl>
-    <p>Pausing the executor stops both entry points without touching the tokens. Both entry points carry OpenZeppelin's transient reentrancy guard, so a cash token that calls back into the executor during the pull, the payout or a gated leg is stopped; the tests cover all three. The pre-flights are read-only and unguarded.</p>
+    <p><code>Core</code> deploys the executor only when a product in the profile names it. Of the profiles in <code>ignition/profiles.ts</code>, <code>full</code> does, on its intent token. No profile includes a gated cash token. Such a token is an <code>IntentToken</code> of its own, placed as a product of its own or deployed apart, as <code>test/nodejs/dvp.test.ts</code> does, and it has to grant this executor the role too.</p>
+    <p>Pausing the executor stops both entry points without touching the tokens. Both entry points carry OpenZeppelin's transient reentrancy guard, and the tests cover a cash token calling back during the pull, during the payout and during a gated leg. The pre-flights are read-only and unguarded.</p>
+  </div>
+</section>
+
+<section id="functions">
+  <div class="prose"><h2>What it can do</h2></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>executeDvPGated(securityToken, cashToken, securitiesIntent, securitiesSig, cashIntent, cashSig)</code></td><td><code>OPERATOR_ROLE</code>, while not paused</td><td>Checks that the two intents mirror, executes the cash intent, then the securities intent. Returns the seller intent's hash and emits <code>DvPSettled</code>.</td></tr>
+        <tr><td><code>executeDvP3009(securityToken, cashToken, securitiesIntent, securitiesSig, authorization)</code></td><td><code>OPERATOR_ROLE</code>, while not paused</td><td>Checks that the authorization matches the intent, pulls the cash, executes the securities intent, pays the seller, checks the balances. Returns the seller intent's hash and emits <code>DvPSettled</code>.</td></tr>
+        <tr><td><code>canExecuteDvPGated(…)</code>, <code>canExecuteDvP3009(…)</code></td><td>Anyone (read-only)</td><td>Pre-flight for the same arguments: <code>(ok, reason)</code>.</td></tr>
+        <tr><td><code>pause()</code></td><td><code>GUARDIAN_ROLE</code></td><td>Stops both entry points at once. Reverts with <code>EnforcedPause</code> if already paused.</td></tr>
+        <tr><td><code>unpause()</code></td><td><code>DEFAULT_ADMIN_ROLE</code> or <code>RECOVERY_ROLE</code></td><td>Resumes settlement. Anyone else gets <code>AccessControlUnauthorizedAccount(caller, DEFAULT_ADMIN_ROLE)</code>. Reverts with <code>ExpectedPause</code> if not paused.</td></tr>
+        <tr><td><code>revokeRole(role, account)</code></td><td>The role's admin; <code>RECOVERY_ROLE</code> for <code>GUARDIAN_ROLE</code> as well</td><td>Removes a role.</td></tr>
+        <tr><td><code>grantRole(role, account)</code></td><td><code>DEFAULT_ADMIN_ROLE</code></td><td>Grants a role: operators, guardians and the recovery timelock.</td></tr>
+        <tr><td><code>renounceRole(role, account)</code></td><td>The account itself</td><td>OpenZeppelin <code>AccessControl</code>. The deployer gives up its admin role this way at hand-over.</td></tr>
+        <tr><td><code>hasRole</code>, <code>getRoleAdmin</code>, <code>paused</code>, <code>OPERATOR_ROLE</code>, <code>GUARDIAN_ROLE</code>, <code>RECOVERY_ROLE</code>, <code>DEFAULT_ADMIN_ROLE</code></td><td>Anyone (read-only)</td><td>The state of the roles and the pause.</td></tr>
+        <tr><td><code>supportsInterface(id)</code></td><td>Anyone (read-only)</td><td>ERC-165: <code>IDvPExecutor</code> and the <code>AccessControl</code> interfaces.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Error or event</th><th>When</th></tr></thead>
+      <tbody>
+        <tr><td><code>DvPSettled(securitiesIntentHash, seller, buyer, securityToken, cashToken, securityAmount, cashAmount, operator)</code></td><td>Once per settled trade. Each executed leg also emits <code>IntentExecuted</code> on its token, with this contract as the executor. In the gated form, who it names as the seller follows the order in which the operator passes the legs (<a href="#limits">What it does not do</a>).</td></tr>
+        <tr><td><code>DvPExecutor_ZeroAddress()</code></td><td>The constructor got a zero admin or guardian.</td></tr>
+        <tr><td><code>DvPExecutor_LegsDoNotMatch()</code></td><td>The legs do not describe one trade.</td></tr>
+        <tr><td><code>DvPExecutor_LegFailed(leg, reason)</code></td><td>A token refused a leg.</td></tr>
+        <tr><td><code>DvPExecutor_CashNotConserved(account, expected, actual)</code></td><td>ERC-3009 form: the executor or the seller does not end with the required balance.</td></tr>
+        <tr><td><code>Paused</code>, <code>Unpaused</code>, <code>RoleGranted</code>, <code>RoleRevoked</code></td><td>Inherited from OpenZeppelin.</td></tr>
+      </tbody>
+    </table>
   </div>
 </section>
 
@@ -318,11 +350,26 @@
   <div class="prose">
     <h2>Why it is built this way</h2>
     <ul class="plain">
-      <li><b>Both legs or neither.</b> There is no entry point that runs one leg alone, and an intent that states a payment can only be run by the executor it names. The <a href="IntentExecutor.html">IntentExecutor</a> refuses such intents outright.</li>
-      <li><b>The operator cannot redirect value.</b> It chooses which signed legs to pair, when to submit and which token addresses to pass. But in the gated form each signature covers the other party, both amounts and both tokens, and the mirror makes them agree; in the ERC-3009 form the nonce commits to the whole securities intent and the security token's address, and the payout goes to the intent's <code>from</code>. Each signature is valid only on its own token's domain. There is no on-chain list of tokens, so a party who signs a trade naming a counterfeit token loses to it.</li>
+      <li><b>Both legs or neither.</b> The executor has no entry point that runs one leg alone, and an intent that states a payment can be run by the executor it names and no other. The <a href="IntentExecutor.html">IntentExecutor</a> refuses such intents outright.</li>
+      <li><b>The operator cannot redirect value.</b> It chooses which signed legs to pair, when to submit and which token addresses to pass. But in the gated form each signature covers the other party, both amounts and both tokens, and the mirror makes them agree. In the ERC-3009 form the nonce commits to the whole securities intent and the security token's address, and the payout goes to the intent's <code>from</code>. Each signature is valid on its own token's domain alone.</li>
       <li><b>Cash first.</b> The legs revert together, so the order decides which failure is reported: a trade where both would fail reports the cash leg. In the ERC-3009 form the executor must hold the cash before it can pay the seller.</li>
-      <li><b>The tokens decide.</b> Each token stays the single source of truth for signatures, nonces, time windows, executor binding and policy. The executor adds only the check that the legs describe one trade, atomicity, and in the ERC-3009 form the balance checks.</li>
-      <li><b>No state, replaceable.</b> It stores its roles and pause flag only, and never keeps settlement funds. It is a plain contract; replacing it means deploying a new one and moving the tokens' <code>EXECUTOR_ROLE</code>.</li>
+      <li><b>The tokens decide.</b> Each token stays the single source of truth for its signature, nonce, time window, executor binding and policy. The executor adds the check that the legs describe one trade, atomicity, and in the ERC-3009 form the balance checks.</li>
+      <li><b>No state, replaceable.</b> It stores its roles and pause flag, and it does not keep settlement funds. It is a plain contract, and replacing it means deploying a different one and moving the tokens' <code>EXECUTOR_ROLE</code>.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="prose">
+    <h2>What it does not do</h2>
+    <ul class="plain">
+      <li><b>No matching, pricing, fees or partial fills.</b> Two parties agree a trade off-chain, and the executor settles exactly that trade, two legs and no more.</li>
+      <li><b>No list of tokens.</b> Nothing on-chain says which tokens are genuine. A party who signs a trade that names a counterfeit token loses to it.</li>
+      <li><b>ERC-3009 is a Draft, and its token is outside the hook.</b> The executor calls the form of <code>receiveWithAuthorization</code> that takes the signature as <code>bytes</code>, and that form has to exist on the token and chain it is used with. A blocklisted executor, buyer or seller, or a paused cash token, fails the whole trade.</li>
+      <li><b>It does not protect the parties' timing.</b> An operator can hold a signed trade back until the first deadline passes. The parties' controls are short deadlines and cancelling.</li>
+      <li><b>No way to tell the gated legs apart.</b> The mirror is symmetric, so an operator can pass the two legs the other way round: each intent still moves only what it signed, but the shares move first, a refused shares leg is reported as <code>CASH</code>, the return value is the buyer intent's hash, and <code>DvPSettled</code> names the buyer as seller and the cash token as the security token.</li>
+      <li><b>No sweep.</b> The executor has no function to move anything sent to it by mistake. A gated token's agent can still take its own token out with <code>forcedTransfer</code>.</li>
+      <li><b>No wallet display of the shares in the ERC-3009 form.</b> The buyer's wallet shows an opaque nonce, so the buyer relies on its own client to have computed it from the right intent.</li>
     </ul>
   </div>
 </section>
@@ -333,6 +380,7 @@
     <a class="card" href="IntentSettledUpgradeable.html"><span class="name">IntentSettledUpgradeable</span><p>The token side of each leg: signature, nonce, executor binding and <code>canExecute</code>.</p></a>
     <a class="card" href="IntentToken.html"><span class="name">IntentToken</span><p>The security token, and the form a gated cash token takes.</p></a>
     <a class="card" href="IntentExecutor.html"><span class="name">IntentExecutor</span><p>The executor for intents without a payment.</p></a>
+    <a class="card" href="SignedEntry.html"><span class="name">SignedEntry</span><p>Uses the same form of ERC-3009 nonce to tie a payment to one entry into a vault.</p></a>
     <a class="card" href="FundHoldersRule.html"><span class="name">FundHoldersRule</span><p>The fund-wide investor cap that applies to the securities leg.</p></a>
     <a class="card" href="../money.html"><span class="name">Where the money sits</span><p>Where cash and shares are at each step.</p></a>
   </div>
@@ -342,13 +390,13 @@
   <div class="prose">
     <h2>Source and tests</h2>
     <ul class="plain">
-      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/intents/DvPExecutor.sol"><code>contracts/intents/DvPExecutor.sol</code></a>, interfaces <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/interfaces/IDvPExecutor.sol"><code>IDvPExecutor.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/interfaces/IERC3009.sol"><code>IERC3009.sol</code></a></li>
-      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/intents/DvPExecutor.t.sol"><code>DvPExecutor.t.sol</code></a> (unit tests with mocked tokens; integration tests for both forms, the counterfeit token, fees, deadlines, reentry, and the fund cap across two classes) and <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/test/nodejs/dvp.test.ts"><code>test/nodejs/dvp.test.ts</code></a> (trades through the deployed stack). The signing helpers <code>signGatedTrade</code>, <code>sign3009Trade</code> and <code>dvpNonce</code> are in <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/test/nodejs/fixtures.ts"><code>test/nodejs/fixtures.ts</code></a>.</li>
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/intents/DvPExecutor.sol"><code>contracts/intents/DvPExecutor.sol</code></a>, interfaces <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/IDvPExecutor.sol"><code>IDvPExecutor.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/IERC3009.sol"><code>IERC3009.sol</code></a></li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/intents/DvPExecutor.t.sol"><code>DvPExecutor.t.sol</code></a> (unit tests with mocked tokens; integration tests for both forms, the counterfeit token, fees, deadlines, reentry, and the fund cap across two classes) and <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/dvp.test.ts"><code>test/nodejs/dvp.test.ts</code></a> (trades through the deployed stack). The signing helpers <code>signGatedTrade</code>, <code>sign3009Trade</code> and <code>dvpNonce</code> are in <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/fixtures.ts"><code>test/nodejs/fixtures.ts</code></a>.</li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>cd1e525</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>babef08</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

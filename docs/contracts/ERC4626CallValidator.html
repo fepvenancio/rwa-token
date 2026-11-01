@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ERC4626CallValidator · Gated Token Stack</title>
+<meta name="description" content="Accepts deposit, mint, withdraw and redeem on an outside vault when the receiver and owner are the calling account, and refuses everything else.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="../index.html">Gated Token Stack</a>
+  <a href="../index.html">Overview</a>
+  <a href="../index.html#contracts">Contracts</a>
+  <a href="../roles.html">Who can do what</a>
+  <a href="../movement.html">One movement</a>
+  <a href="../deployment.html">Deployment and governance</a>
+  <a href="../money.html">Where the money sits</a>
+  <a href="../review.html">Security review</a>
+</nav>
+<main class="page">
+
+<header class="top wrap-any">
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Portfolio</div>
+  <h1>ERC4626CallValidator</h1>
+  <p class="lede">Judges a vault call for a <a href="GuardedAccount.html">GuardedAccount</a>: <code>deposit</code>, <code>mint</code>, <code>withdraw</code> and <code>redeem</code>, when the receiver and the owner are the calling account. Money and shares come back to the account, and everything else is refused.</p>
+  <div class="facts">
+    <span class="fact"><b>contracts/portfolio/ERC4626CallValidator.sol</b></span>
+    <span class="fact">immutable, <b>no settings</b></span>
+    <span class="fact">attested as <b>VALIDATOR</b></span>
+  </div>
+</header>
+
+<section id="in-one-minute">
+  <div class="callout wrap-any">
+    <h3>In one minute</h3>
+    <p>This lets a <a href="GuardedAccount.html">GuardedAccount</a> run a strategy through an outside ERC-4626 vault without being able to send the shares or the money anywhere else. It has no settings: each permission names the vault, and this contract compares the receiver and the owner with the account making the call. With no settings there is one code hash, so one attestation covers every copy. At this commit no deployment profile deploys it, and <code>test_ItRunsAStrategyThroughAnOutsideVaultAndKeepsTheShares</code> shows it in use.</p>
+  </div>
+</section>
+
+<section id="how">
+  <div class="prose wrap-any">
+    <h2>What it accepts and refuses</h2>
+    <p><code>validate(account, target, data)</code> returns true or false. It ignores the target, and reads the selector first, then the length, then the arguments. A call too short to hold a selector is padded with zeros for the comparison, matches nothing and returns false.</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>The call data</th><th>Answer</th><th>Test</th></tr></thead>
+      <tbody>
+        <tr><td><code>deposit(assets, receiver)</code> or <code>mint(shares, receiver)</code>, 68 bytes, with <code>receiver</code> the account</td><td class="c ok">true</td><td><code>test_EntryToTheAccountPasses</code></td></tr>
+        <tr><td><code>withdraw(assets, receiver, owner)</code> or <code>redeem(shares, receiver, owner)</code>, 100 bytes, with <code>receiver</code> and <code>owner</code> both the account</td><td class="c ok">true</td><td><code>test_ExitToTheAccountFromTheAccountPasses</code></td></tr>
+        <tr><td>An entry to any other receiver</td><td class="c no">false</td><td><code>testFuzz_EntryToAnyoneElseIsRefused</code></td></tr>
+        <tr><td>An exit to any other receiver</td><td class="c no">false</td><td><code>testFuzz_ExitToAnyoneElseIsRefused</code></td></tr>
+        <tr><td>An exit from any other owner</td><td class="c no">false</td><td><code>testFuzz_ExitFromAnyoneElseIsRefused</code></td></tr>
+        <tr><td>Any other function, such as <code>transfer</code> or <code>approve</code></td><td class="c no">false</td><td><code>test_AnyOtherFunctionIsRefused</code></td></tr>
+        <tr><td>One of the four functions at any other length, including extra bytes after a valid call</td><td class="c no">false</td><td><code>test_AWrongLengthIsRefused</code></td></tr>
+        <tr><td>Too short to hold a selector, or empty</td><td class="c no">false, with no revert</td><td><code>test_AWrongLengthIsRefused</code></td></tr>
+        <tr><td>The right selector and length, with non-zero bits in the unused upper part of an address word</td><td class="c no">reverts</td><td>None at this commit</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose wrap-any">
+    <p>The last row is the one case that does not return false. The call reaches the decoder, which refuses a malformed address by reverting with no data, and <code>GuardedAccount.execute</code> reverts with that in place of <code>GuardedAccount_CallRefused</code>. Nothing runs either way.</p>
+  </div>
+</section>
+
+<section id="functions">
+  <div class="prose wrap-any"><h2>What it can do</h2></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>validate(account, target, data)</code></td><td>Anyone (read-only)</td><td>The answer above. It is pure: it reads nothing but its arguments, and has no constructor, storage, events or errors.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="why">
+  <div class="prose wrap-any">
+    <h2>Why it is built this way</h2>
+    <ul class="plain">
+      <li><b>The account is the only allowed receiver and owner.</b> So an allocator with this permission can move a position in and out of the vault, and neither the shares nor the money can leave the account through it.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="prose wrap-any">
+    <h2>What it does not do</h2>
+    <ul class="plain">
+      <li><b>It does not limit the amount.</b> A <code>deposit</code> also needs an allowance, which takes a separate <code>approve</code> permission, judged for example by an <a href="ERC20CallValidator.html">ERC20CallValidator</a> naming the vault.</li>
+      <li><b>It does not look at the target.</b> A permission names the contract. The validator reads parameters and has no view of whether that contract is an honest ERC-4626 vault, or whether it pays the receiver it was given.</li>
+      <li><b>It does not get money past a pause.</b> A pause on the vault stops <code>GuardedAccount.execute</code>, so a <code>withdraw</code> or <code>redeem</code> through this permission waits for the unpause.</li>
+      <li><b>It does not bring money to the portfolio.</b> The money returns to the account, and the portfolio's <code>deallocate</code> then takes it from there.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="connected">
+  <div class="prose wrap-any"><h2>Connected to</h2></div>
+  <div class="cards">
+    <a class="card" href="GuardedAccount.html"><span class="name">GuardedAccount</span><p>Calls it before each call a permission covers.</p></a>
+    <a class="card" href="ERC20CallValidator.html"><span class="name">ERC20CallValidator</span><p>The other validator, for the approval a deposit needs.</p></a>
+    <a class="card" href="PolicyRegistry.html"><span class="name">PolicyRegistry</span><p>Where its code hash must be attested as <code>VALIDATOR</code>.</p></a>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose wrap-any">
+    <h2>Source and tests</h2>
+    <ul class="plain">
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/portfolio/ERC4626CallValidator.sol"><code>contracts/portfolio/ERC4626CallValidator.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/ICallValidator.sol"><code>ICallValidator.sol</code></a></li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/portfolio/ERC4626CallValidator.t.sol"><code>ERC4626CallValidator.t.sol</code></a>, and through an account in <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/portfolio/GuardedAccount.t.sol"><code>GuardedAccount.t.sol</code></a></li>
+    </ul>
+  </div>
+</section>
+
+<footer>Describes the contracts at commit <code>babef08</code> on <code>main</code>.</footer>
+</main>
+</body>
+</html>

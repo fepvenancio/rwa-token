@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>FundHoldersRule · Gated Token Stack</title>
-<meta name="description" content="How FundHoldersRule caps the number of distinct investors across all share classes of one fund, who counts, when a new investor is admitted, and how it records joins and leaves in the Fund.">
+<meta name="description" content="How FundHoldersRule caps the number of distinct investors across all share classes of one fund, who counts, when a new investor is admitted, and how it records leaves and joins in the Fund.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
@@ -26,10 +26,10 @@
 <header class="top">
   <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Policy</div>
   <h1>FundHoldersRule</h1>
-  <p class="lede">The fund-wide investor cap. It lets a new investor into any class of a fund only while the fund has room, and tells the fund each time someone starts or stops holding a class.</p>
+  <p class="lede">The fund-wide investor cap. It lets a new investor into a class of a fund only while the fund has room, and tells the fund each time someone starts or stops holding a class.</p>
   <div class="facts">
     <span class="fact"><b>contracts/hooks/rules/FundHoldersRule.sol</b></span>
-    <span class="fact">immutable, <b>not a proxy</b></span>
+    <span class="fact">immutable, <b>not a proxy</b>, one per fund</span>
     <span class="fact">cap and exemptions set on the <b>Fund</b> by its owner</span>
     <span class="fact">attested as <b>RULE</b></span>
     <span class="fact">ruleId: <b>keccak256('FundHoldersRule.v1')</b></span>
@@ -39,8 +39,8 @@
 <section id="in-one-minute">
   <div class="callout">
     <h3>In one minute</h3>
-    <p>A fund may be allowed only so many investors, counted across all its share classes. In the deployment this rule is the last one listed on every class of the fund. Before a movement it asks the <a href="Fund.html">Fund</a> one question: would the receiver be a new investor, and if so, is there room? After the movement it tells the fund that someone now holds a class, or has stopped holding one.</p>
-    <p>The count and the cap live in the fund, not in the rule, so the rule can be replaced without losing the count. An investor already in the fund is never refused for the cap, whichever class it moves into, and the issuer's forced transfers are never capped.</p>
+    <p>A fund may be allowed only so many investors, counted across all its share classes. In the demo deployment this rule is the last one listed on every class of the fund. Before a movement it asks the <a href="Fund.html">Fund</a> one question: would the receiver be a new investor, and if so, is there room? After the movement it tells the fund that someone has stopped holding a class, or has started.</p>
+    <p>The count and the cap live in the fund, not in the rule, so the rule can be replaced without losing the count. An investor already in the fund is not refused for the cap, whichever class it moves into, and the issuer's forced transfers are not capped. A token that is not a registered class of the fund cannot move at all.</p>
   </div>
 </section>
 
@@ -108,7 +108,7 @@
         <text x="505" y="425" class="sm m">yes</text>
         <rect class="act" x="534" y="413" width="226" height="40" rx="6"/>
         <text x="546" y="429" class="mono sm">TRANSFER_OK</text>
-        <text x="546" y="445" class="sm m">net zero: one in, one out</text>
+        <text x="546" y="445" class="sm m">net zero: one out, one in</text>
         <line class="ln" x1="270" y1="458" x2="270" y2="480" marker-end="url(#fhr-arrow)"/>
         <text x="278" y="474" class="sm m">no</text>
 
@@ -117,46 +117,66 @@
         <text x="160" y="507" class="sm m">also for any new investor while the count is above the cap</text>
       </svg>
     </div>
-    <figcaption><b>Only a new investor is ever counted against the cap.</b> Step 2 lets through every move that cannot add an investor, and forced transfers, which can but are exempt, so trades between existing investors, exits and enforcement never meet the cap. Red boxes are refusals, which the token turns into <code>PolicyGated_TransferRejected(reason)</code>.</figcaption>
+    <figcaption><b>Only a new investor is counted against the cap.</b> Step 2 lets through every move that cannot add an investor, and forced transfers, which can but are exempt, so trades between existing investors, exits and enforcement do not meet the cap. Red boxes are refusals, which the token turns into <code>PolicyGated_TransferRejected(reason)</code>.</figcaption>
   </figure>
   <ol class="steps">
-    <li><div><b>Wrong fund or wrong rule: refuse everything.</b> A token that is not a registered class of the fund, or a rule that the fund has replaced, answers <code>NOT_FUND_CLASS</code> for every movement, zero amounts, burns and forced transfers included. So a retired rule never says yes in a pre-flight while its write would be refused, and a class cannot hold any balance before the fund records it.</div></li>
-    <li><div><b>Who is a new investor.</b> A receiver that holds no class of the fund and is not exempt, receiving a non-zero amount from someone else. The class token itself is never one: <code>Gated7540Vault</code> keeps the shares of pending redemptions at its own address.</div></li>
-    <li><div><b>Room, or a free slot.</b> Below the cap a new investor passes. At the cap it passes only if the sender leaves the fund in the same move: the sender is not the zero address, not the class itself, not exempt, holds no other class, and moves its whole balance. A sender who keeps another class stays an investor and frees nothing.</div></li>
+    <li><div><b>Wrong fund or wrong rule: refuse everything.</b> A token that is not a registered class of the fund, or a rule that the fund has replaced, answers <code>NOT_FUND_CLASS</code> for every movement, zero amounts, burns and forced transfers included. So a retired rule does not say yes in a pre-flight while its write would be refused, and a class cannot hold a balance before the fund records it.</div></li>
+    <li><div><b>Who is a new investor.</b> A receiver that holds no class of the fund and is not exempt, receiving a non-zero amount from someone else. The class token itself is not one: <code>Gated7540Vault</code> keeps the shares of pending redemptions at its own address.</div></li>
+    <li><div><b>Room, or a free slot.</b> Below the cap a new investor passes. At the cap it passes only by the net-zero case below.</div></li>
     <li><div><b>Above a lowered cap, nobody new.</b> When the owner lowers the cap below the count, no new investor is admitted, even by a move that would be net zero, until the count is back down. Existing investors can still trade among themselves and leave.</div></li>
   </ol>
 </section>
 
+<section id="net-zero">
+  <div class="prose">
+    <h2>The net-zero case at a full cap</h2>
+    <p>When the count equals the cap, a new investor is admitted if the sender stops being an investor in the same move, because one goes out and one comes in. All of these must hold: there is a sender, the sender is not the class itself, it is not exempt, this is the only class it holds, and the amount is its whole balance in that class.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>At a full cap, a move to a new investor where</th><th>Answer</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>the sender holds only this class and moves all of it</td><td class="ok"><code>TRANSFER_OK</code></td><td>one out, one in</td></tr>
+        <tr><td>the sender keeps part of its balance</td><td class="no"><code>MAX_HOLDERS</code></td><td>it stays an investor</td></tr>
+        <tr><td>the sender moves all of this class but holds another</td><td class="no"><code>MAX_HOLDERS</code></td><td>it stays an investor</td></tr>
+        <tr><td>the sender is exempt</td><td class="no"><code>MAX_HOLDERS</code></td><td>it was not counted, so it frees no slot</td></tr>
+        <tr><td>the sender is the class itself, as when the 7540 returns escrowed shares</td><td class="no"><code>MAX_HOLDERS</code></td><td>it was not counted</td></tr>
+        <tr><td>it is a mint</td><td class="no"><code>MAX_HOLDERS</code></td><td>there is no sender to free a slot</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
 <section id="kinds">
   <div class="prose">
-    <h2>What each kind of movement meets</h2>
-    <p>Every kind first meets the class check of step 1.</p>
+    <h2>What it does for each kind of movement</h2>
+    <p>Every kind first meets the class check of step 1, with <code>NOT_FUND_CLASS</code> for a token or rule that fails it.</p>
   </div>
   <div class="table-wrap">
     <table>
       <thead><tr><th>Kind</th><th>The cap</th><th>Recorded after the move</th></tr></thead>
       <tbody>
-        <tr><td><span class="k k-transfer">TRANSFER</span></td><td>applies to a new investor, net of a sender who leaves the fund</td><td>the receiver joins the class if it held none of it; the sender leaves it if it moved all of it</td></tr>
+        <tr><td><span class="k k-transfer">TRANSFER</span></td><td>applies to a new investor, net of a sender who leaves the fund</td><td>the sender leaves the class if it moved all of it; the receiver joins if it held none of it</td></tr>
         <tr><td><span class="k k-executed">EXECUTED</span></td><td>the same as a transfer</td><td>the same as a transfer</td></tr>
+        <tr><td><span class="k k-forced">FORCED</span></td><td class="ok">not applied: enforcement is exempt</td><td>both sides, so the count can end above the cap</td></tr>
         <tr><td><span class="k k-mint">MINT</span></td><td>applies to a new investor; a mint has no sender to free a slot</td><td>the receiver joins</td></tr>
-        <tr><td><span class="k k-burn">BURN</span></td><td class="ok">never: a burn has no receiver</td><td>the sender leaves if it burnt all of it</td></tr>
-        <tr><td><span class="k k-forced">FORCED</span></td><td class="ok">never: enforcement is exempt</td><td>both sides, so the count can end above the cap</td></tr>
+        <tr><td><span class="k k-burn">BURN</span></td><td class="ok">not applied: a burn has no receiver</td><td>the sender leaves if it burnt all of it</td></tr>
       </tbody>
     </table>
   </div>
   <div class="prose">
-    <p>A vault deposit is a <code>MINT</code> of shares, a 4626 redemption a <code>BURN</code>, and a 7540 redemption request a <code>TRANSFER</code> into the vault, which step 2 lets through because the receiver is the class itself. When the agent delivers a stranded 7540 deposit with <code>recoverClaimable</code>, that is an enforcement mint, so it is exempt from the cap and still counted. An integration test runs exactly that: a deposit fulfilled while the fund had room, then the fund filled through the other two classes, the claim refused with <code>MAX_HOLDERS</code>, and the agent's recovery taking the count above the cap.</p>
+    <p>A vault deposit is a <code>MINT</code> of shares, a 4626 redemption a <code>BURN</code>, and a 7540 redemption request a <code>TRANSFER</code> into the vault, which step 2 lets through because the receiver is the class itself. When the agent delivers a stranded 7540 deposit with <code>recoverClaimable</code>, that is an enforcement mint, so it is exempt from the cap and still counted. An integration test runs exactly that: another class fills the fund before a claim, the claim is refused, and the agent's recovery delivers the shares, counted.</p>
   </div>
 </section>
 
 <section id="after">
   <div class="prose">
     <h2>After the move: telling the fund</h2>
-    <p>The rule's <code>wantsAfter()</code> is true, so the hook calls its <code>after_</code> once the balances have moved, inside the token's guard against reentry.</p>
+    <p>The rule's <code>wantsAfter()</code> is true, so the hook calls its <code>after_</code> once the balances have moved, inside the token's guard against reentry. The state lives in the <a href="Fund.html"><code>Fund</code></a>: the rule keeps none. <code>after_</code> writes there, in this order: the sender leaves first, then the receiver joins.</p>
   </div>
   <figure>
     <div class="fig-scroll">
-      <svg class="d" viewBox="0 0 780 506" role="img" aria-label="After a movement. The class token moves the balances, then calls afterTransfer on the ComplianceHook, which accepts it only from the token named in the context. The hook calls after_ on FundHoldersRule. The rule asks the token for its current policyHook and requires it to be the caller. It stops if the amount is zero or the sender is the receiver. It calls join on the Fund if the receiver is not the zero address and held none of the class before, and leave if the sender is not the zero address and the move took its whole balance. The Fund accepts these only from its installed rule, only for a registered class, and ignores the class itself.">
+      <svg class="d" viewBox="0 0 780 506" role="img" aria-label="After a movement. The class token moves the balances, then calls afterTransfer on the ComplianceHook, which accepts it only from the token named in the context. The hook calls after_ on FundHoldersRule. The rule asks the token for its current policyHook and requires it to be the caller. It stops if the amount is zero or the sender is the receiver. It then calls leave on the Fund if the sender is not the zero address and the move took its whole balance, and after that join if the receiver is not the zero address and held none of the class before. The Fund accepts these only from its installed rule, only for a registered class, and ignores the class itself.">
         <defs>
           <marker id="fhr-arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
         </defs>
@@ -194,13 +214,13 @@
         <text x="503" y="305" class="sm m">or from = to</text>
 
         <line class="ln" x1="495" y1="336" x2="688" y2="336" marker-end="url(#fhr-arrow2)"/>
-        <text x="592" y="328" class="mono sm" text-anchor="middle">join(token, to)</text>
-        <text x="592" y="352" class="sm m" text-anchor="middle">if to ≠ 0 and it held none</text>
+        <text x="592" y="328" class="mono sm" text-anchor="middle">1. leave(token, from)</text>
+        <text x="592" y="352" class="sm m" text-anchor="middle">if from ≠ 0 and the move</text>
+        <text x="592" y="366" class="sm m" text-anchor="middle">took its whole balance</text>
 
-        <line class="ln" x1="495" y1="388" x2="688" y2="388" marker-end="url(#fhr-arrow2)"/>
-        <text x="592" y="380" class="mono sm" text-anchor="middle">leave(token, from)</text>
-        <text x="592" y="404" class="sm m" text-anchor="middle">if from ≠ 0 and the move</text>
-        <text x="592" y="418" class="sm m" text-anchor="middle">took its whole balance</text>
+        <line class="ln" x1="495" y1="396" x2="688" y2="396" marker-end="url(#fhr-arrow2)"/>
+        <text x="592" y="388" class="mono sm" text-anchor="middle">2. join(token, to)</text>
+        <text x="592" y="412" class="sm m" text-anchor="middle">if to ≠ 0 and it held none</text>
 
         <rect class="b2" x="560" y="440" width="210" height="58" rx="6"/>
         <text x="572" y="458" class="sm">caller is the installed rule</text>
@@ -208,31 +228,21 @@
         <text x="572" y="490" class="sm">the class itself is ignored</text>
       </svg>
     </div>
-    <figcaption><b>Two gates before the fund changes.</b> The rule accepts <code>after_</code> only from the hook the token currently has, and the fund accepts <code>join</code> and <code>leave</code> only from its installed rule and only for a registered class. A movement that changes nobody's holding of the class writes nothing.</figcaption>
+    <figcaption><b>Two gates before the fund changes, and the leave comes first.</b> The rule accepts <code>after_</code> only from the hook the token currently has, and the fund accepts <code>join</code> and <code>leave</code> only from its installed rule and only for a registered class. A movement that changes nobody's holding of the class writes nothing. Because the leave comes first, a net-zero move at a full fund does not show the count above the cap, even for a moment.</figcaption>
   </figure>
   <ol class="steps">
     <li><div><b>Nothing to record.</b> After the hook check, a zero amount or a move to oneself returns without touching the fund.</div></li>
-    <li><div><b>The zero-address guards.</b> <code>join</code> is called only when <code>to</code> is not the zero address, so a burn joins nobody, and only when the receiver's balance before the move was zero. <code>leave</code> is called only when <code>from</code> is not the zero address, so a mint leaves nobody, and only when the amount equals the sender's whole balance before the move. Both balances come from <code>extra</code>.</div></li>
+    <li><div><b>The sender leaves.</b> <code>leave</code> is called when <code>from</code> is not the zero address, so a mint leaves nobody, and the amount equals the sender's whole balance before the move.</div></li>
+    <li><div><b>The receiver joins.</b> <code>join</code> is called when <code>to</code> is not the zero address, so a burn joins nobody, and the receiver's balance before the move was zero. Both balances come from <code>extra</code>, which the token built before the balances moved.</div></li>
     <li><div><b>The fund's own checks.</b> <code>join</code> and <code>leave</code> revert unless the caller is the fund's installed rule (<code>Fund_OnlyRule</code>) and the token is a registered class (<code>Fund_NotAClass</code>); a revert there undoes the whole movement. A class joining itself, such as shares going into the 7540 escrow, is ignored, and a leave for it changes nothing.</div></li>
   </ol>
 </section>
 
-<section id="functions">
-  <div class="prose"><h2>What it can do</h2></div>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
-      <tbody>
-        <tr><td><code>check(ctx)</code></td><td>Anyone (read-only); the hook in practice</td><td>The decision above: <code>TRANSFER_OK</code>, <code>NOT_FUND_CLASS</code> or <code>MAX_HOLDERS</code>. It never reverts on a decision.</td></tr>
-        <tr><td><code>after_(ctx)</code></td><td>The hook currently installed on <code>ctx.token</code></td><td>Calls the fund's <code>join</code> and <code>leave</code> as described above. Reverts with <code>ComplianceRule_OnlyHook(caller)</code> for any other caller.</td></tr>
-        <tr><td><code>checkSend(token, account)</code>, <code>checkReceive(token, account)</code></td><td>Anyone (read-only)</td><td>Only the class check of step 1: <code>NOT_FUND_CLASS</code> or <code>TRANSFER_OK</code>. Never <code>MAX_HOLDERS</code>.</td></tr>
-        <tr><td><code>FUND()</code></td><td>Anyone (read-only)</td><td>The fund the rule reads and writes, fixed at construction. The constructor refuses the zero address (<code>FundHoldersRule_ZeroAddress</code>).</td></tr>
-        <tr><td><code>ruleId()</code>, <code>wantsAfter()</code>, <code>supportsInterface(id)</code></td><td>Anyone (read-only)</td><td><code>keccak256('FundHoldersRule.v1')</code>; true; ERC-165 for <code>IFundHoldersRule</code>, <code>IComplianceRule</code> and <code>IERC165</code>.</td></tr>
-      </tbody>
-    </table>
-  </div>
+<section id="account-checks">
   <div class="prose">
-    <p>The rule has no setter and no admin of its own. The cap, the exemptions, the classes and which rule is installed are all set on the <a href="Fund.html"><code>Fund</code></a> by its owner, which after deployment is the main timelock, so every change waits for its delay.</p>
+    <h2>The account questions answer the class check alone</h2>
+    <p>The token's <code>canSend(account)</code> and <code>canReceive(account)</code> come from ERC-7943, which keeps quantitative rules out of those two questions. A cap on investors depends on the movement, not on the account, so it belongs to <code>check</code> alone. <code>checkSend</code> and <code>checkReceive</code> answer <code>TRANSFER_OK</code> when the token is a class of the fund under this rule, and <code>NOT_FUND_CLASS</code> otherwise. They do not answer <code>MAX_HOLDERS</code>.</p>
+    <p>So at a full fund, <code>canReceive</code> is still true for a new investor, while a mint or a partial transfer to it is refused with <code>MAX_HOLDERS</code>. The pre-flight <code>canTransferWithReason</code> says <code>MAX_HOLDERS</code> too. The vaults' <code>maxDeposit</code> tests a mint, which does reach <code>check</code>, so it reads 0 for that investor, and <code>Gated7540Vault</code> refuses its deposit request up front.</p>
   </div>
 </section>
 
@@ -249,18 +259,42 @@
   </div>
 </section>
 
-<section id="account-checks">
+<section id="config">
   <div class="prose">
-    <h2>The account questions answer only the class check</h2>
-    <p>The token's <code>canSend(account)</code> and <code>canReceive(account)</code> come from ERC-7943, which keeps quantitative rules, such as balance checks and amount limits, out of those two questions. A cap on investors depends on the movement, not only on the account, so it belongs to <code>check</code> alone. <code>checkSend</code> and <code>checkReceive</code> therefore answer only whether the token is a class of the fund under this rule.</p>
-    <p>At a full fund, <code>canReceive</code> is still true for a new investor, while a mint or a partial transfer to it is refused with <code>MAX_HOLDERS</code>. The pre-flight <code>canTransferWithReason</code> says <code>MAX_HOLDERS</code> too. The vaults' <code>maxDeposit</code> tests a mint, which does reach <code>check</code>, so it reads 0 for that investor, and <code>Gated7540Vault</code> refuses its deposit request up front.</p>
+    <h2>Who configures it, and what happens before they do</h2>
+    <p>The rule has no setter and no admin of its own. The cap (<code>setHolderCap</code>), the exemptions (<code>setExempt</code>), the classes (<code>registerClass</code>) and which rule is installed (<code>setRule</code>) are all set on the <a href="Fund.html"><code>Fund</code></a> by its owner. The operations account owns the fund until the <code>FundOpen</code> module has set the rule and the cap and registered the first classes, and then hands it to the main timelock, so a later change waits for its delay.</p>
+    <p><b>Not configured: it fails closed.</b> The <code>Product</code> module does not touch a fund, so a class launches inert: until the fund has this rule installed and the class registered, every movement is refused with <code>NOT_FUND_CLASS</code>. A cap of 0 is not off either: it admits no new investor.</p>
+  </div>
+</section>
+
+<section id="order">
+  <div class="prose">
+    <h2>Where it sits, and who lists it</h2>
+    <p>The demo deployment (<code>full</code>, through <code>RULE_ORDER</code>) lists it last on all three of its products, the intent token and both vaults, which are three classes of the fund <code>main</code>. A receiver who cannot hold the token at all is therefore refused for that reason before the cap is consulted. No other profile in <code>ignition/profiles.ts</code> lists it. <code>assertUsable</code> throws when a module is built for a product that lists this rule without naming a fund, or names a fund without listing it.</p>
+    <p>Each fund has its own rule instance: the <code>Fund</code> module deploys the two together. The fund's address is an immutable, so it is part of the attested code hash, and the council reads the fund's code and owner before it attests the rule.</p>
   </div>
 </section>
 
 <section id="replacement">
   <div class="prose">
     <h2>Replacing the rule</h2>
-    <p>The rule holds no state, only the fund's address, so a replacement starts with the count and the masks as they are. The fund names one installed rule at a time, and this rule compares itself with it on every movement. While a class's rule list still names a rule the fund has replaced, that rule answers <code>NOT_FUND_CLASS</code> to everything, forced transfers included, and the class is closed. The change is therefore one main-timelock batch: <code>fund.setRule(newRule)</code> together with <code>hook.setRules</code> for every class. A second instance for the same fund has the same code hash, so it is already attested. <a href="Fund.html#rule-change">Fund</a> has the details, and <code>Fund.firstBrokenClass()</code> names any class whose list does not name the installed rule.</p>
+    <p>The rule holds no state, only the fund's address, so a replacement starts with the count and the masks as they are. The fund names one installed rule at a time, and this rule compares itself with it on every movement. While a class's rule list still names a rule the fund has replaced, that rule answers <code>NOT_FUND_CLASS</code> to everything, forced transfers included, and the class is closed. The change is therefore one main-timelock batch: <code>setRule</code> on the fund together with the hook's <code>setRules</code> for every class. A second instance for the same fund has the same code hash, so it is already attested. <code>Fund.firstBrokenClass()</code> names a class whose list does not name the installed rule.</p>
+  </div>
+</section>
+
+<section id="functions">
+  <div class="prose"><h2>What it can do</h2></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>check(ctx)</code></td><td>Anyone (read-only); the hook in practice</td><td>The decision above: <code>TRANSFER_OK</code>, <code>NOT_FUND_CLASS</code> or <code>MAX_HOLDERS</code>.</td></tr>
+        <tr><td><code>after_(ctx)</code></td><td>The hook currently installed on <code>ctx.token</code></td><td>Calls the fund's <code>leave</code> and then <code>join</code> as described above. Reverts with <code>ComplianceRule_OnlyHook(caller)</code> for any other caller.</td></tr>
+        <tr><td><code>checkSend(token, account)</code>, <code>checkReceive(token, account)</code></td><td>Anyone (read-only)</td><td>The class check of step 1 alone: <code>NOT_FUND_CLASS</code> or <code>TRANSFER_OK</code>.</td></tr>
+        <tr><td><code>FUND()</code></td><td>Anyone (read-only)</td><td>The fund the rule reads and writes, fixed at construction. The constructor refuses the zero address (<code>FundHoldersRule_ZeroAddress</code>).</td></tr>
+        <tr><td><code>ruleId()</code>, <code>wantsAfter()</code>, <code>supportsInterface(id)</code></td><td>Anyone (read-only)</td><td><code>keccak256('FundHoldersRule.v1')</code>; true; ERC-165 for <code>IFundHoldersRule</code>, <code>IComplianceRule</code> and <code>IERC165</code>.</td></tr>
+      </tbody>
+    </table>
   </div>
 </section>
 
@@ -268,13 +302,11 @@
   <div class="prose">
     <h2>Why it is built this way</h2>
     <ul class="plain">
-      <li><b>The investor count that matters is fund-wide.</b> One investor in three classes is one investor. Only a record shared by all the classes can see that, so the count lives in <code>Fund</code> and each class lists this one rule.</li>
-      <li><b>State in the fund, policy in the rule.</b> The rule can be replaced without losing the count, and the fund cannot be written by anything but the installed rule.</li>
+      <li><b>The investor count that matters is fund-wide.</b> One investor in three classes is one investor. A record shared by all the classes is what can see that, so the count lives in <code>Fund</code> and each class lists this one rule.</li>
+      <li><b>State in the fund, policy in the rule.</b> The rule can be replaced without losing the count. <a href="BaseRule.html"><code>BaseRule</code></a> accepts whichever hook a token names, which is safe for state kept per token and not for a count shared by tokens, so the fund adds its own gate: it takes writes from the installed rule, for registered classes.</li>
       <li><b>Fail closed on a mismatch.</b> A token that is not a class, or a rule other than the fund's installed one, refuses every movement rather than letting balances move uncounted. The pre-flight calls give the same answer as the write.</li>
-      <li><b>Never in the way of an exit or of enforcement.</b> Only a new investor meets the cap. Existing investors trade and leave freely, and the agent's forced transfers are exempt, though counted.</li>
-      <li><b>Few reads.</b> One <code>admission</code> call answers the usual case, and the fund keeps the rule, the count and the cap in one storage word. The sender is read only at a full fund. Balances come from the context, so the rule never asks the token for one.</li>
-      <li><b>Last in the list.</b> In every deployed list it comes after the credential rule, the minimum position, the holder restrictions and, on the intent token, the settlement window, so a receiver who cannot hold the token at all is refused for that reason before the cap is consulted.</li>
-      <li><b>One instance per fund.</b> The fund's address is an immutable, so it is part of the attested code hash. The council reads the fund's code and owner before it attests the rule.</li>
+      <li><b>Not in the way of an exit or of enforcement.</b> Only a new investor meets the cap. Existing investors trade and leave, and the agent's forced transfers are exempt, though counted.</li>
+      <li><b>Few reads.</b> One <code>admission</code> call answers the usual case, and the fund keeps the rule, the count and the cap in one storage word. The sender is read only at a full fund. Balances come from the context, so the rule does not ask the token for one.</li>
     </ul>
   </div>
 </section>
@@ -284,8 +316,11 @@
     <h2>What it does not cover</h2>
     <ul class="plain">
       <li><b>Investors are addresses.</b> One investor with two wallets counts twice, and an omnibus wallet counts once.</li>
-      <li><b>Dust can take a slot.</b> Any non-zero balance makes an investor. On a class whose minimum position is 0, a tiny transfer to an eligible address takes a slot for as long as it is held; the agent can take it back with <code>forcedTransfer</code>. The deployed lists put <code>MinPositionRule</code> before this rule for that reason, and it does nothing until a minimum is set.</li>
-      <li><b>A class whose list drops this rule is uncapped.</b> The hook accepts any list of attested rules. A class whose list does not name the fund's rule moves uncounted, and the fund's count goes stale. <code>Fund.isClassIntact</code> and <code>firstBrokenClass</code> report it; nothing prevents it.</li>
+      <li><b>Dust can take a slot.</b> A non-zero balance makes an investor. On a class with no minimum position set, a tiny transfer to an eligible address takes a slot for as long as it is held; the agent can take it back with <code>forcedTransfer</code>. The demo lists put <a href="MinPositionRule.html"><code>MinPositionRule</code></a> before this rule for that reason, and it does nothing until a minimum is set.</li>
+      <li><b>A class whose list drops this rule is uncapped.</b> The hook accepts any list of attested rules. A class whose list does not name the fund's rule moves uncounted, and the fund's count goes stale. <code>Fund.isClassIntact</code> and <code>firstBrokenClass</code> report it, and the post-deploy check asserts none is broken at hand-over; nothing prevents it afterwards.</li>
+      <li><b>It holds no place for an open 7540 request.</b> A full <code>requestRedeem</code> takes the investor out of the count while the shares wait in the escrow, and <code>requestDeposit</code> reserves nothing. If the fund fills up meanwhile, a reject that returns the shares, or a deposit claim, is refused with <code>MAX_HOLDERS</code>. The agent's recovery works, and delivering to an account that holds nothing puts the count above the cap until investors leave.</li>
+      <li><b>The cap is a ratchet.</b> Above a lowered cap no new investor is admitted, net-zero moves included, until the count comes back down.</li>
+      <li><b>Pre-flight of a two-class swap can miss.</b> When two legs of a trade move classes of one fund, each pre-flight reads the state before either has run, so a swap can pass and then fail on its second leg.</li>
     </ul>
   </div>
 </section>
@@ -294,9 +329,10 @@
   <div class="prose"><h2>Connected to</h2></div>
   <div class="cards">
     <a class="card" href="Fund.html"><span class="name">Fund</span><p>Where the classes, the count, the cap and each investor's classes are kept.</p></a>
-    <a class="card" href="ComplianceHook.html"><span class="name">ComplianceHook</span><p>Lists this rule last on every class, and calls its <code>after_</code>.</p></a>
+    <a class="card" href="ComplianceHook.html"><span class="name">ComplianceHook</span><p>Lists this rule last on every class in the demo, and calls its <code>after_</code>.</p></a>
+    <a class="card" href="BaseRule.html"><span class="name">BaseRule</span><p>The parent, with the hook check on <code>after_</code>.</p></a>
     <a class="card" href="MinPositionRule.html"><span class="name">MinPositionRule</span><p>Stops dust positions from taking investor slots, when a minimum is set.</p></a>
-    <a class="card" href="Gated7540Vault.html"><span class="name">Gated7540Vault</span><p>The class whose escrow is its own address, never counted.</p></a>
+    <a class="card" href="Gated7540Vault.html"><span class="name">Gated7540Vault</span><p>The class whose escrow is its own address, which is not counted.</p></a>
   </div>
 </section>
 
@@ -304,13 +340,13 @@
   <div class="prose">
     <h2>Source and tests</h2>
     <ul class="plain">
-      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/hooks/rules/FundHoldersRule.sol"><code>contracts/hooks/rules/FundHoldersRule.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/interfaces/IFundHoldersRule.sol"><code>IFundHoldersRule.sol</code></a>, reason codes in <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/interfaces/Errors.sol"><code>Errors.sol</code></a></li>
-      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/hooks/rules/FundHoldersRule.t.sol"><code>FundHoldersRule.t.sol</code></a> (every step of the check, the net-zero cases, <code>after_</code>, the gate against fake tokens and fake hooks, the account questions), <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/fund/FundIntegration.t.sol"><code>FundIntegration.t.sol</code></a> (three real classes: the cap with pre-flight parity, forced transfers, the 7540 escrow, a blocked claim, rule replacement), <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/fund/FundInvariant.t.sol"><code>FundInvariant.t.sol</code></a>, and <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/test/nodejs/fund.test.ts"><code>test/nodejs/fund.test.ts</code></a> (through the real deployment)</li>
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/hooks/rules/FundHoldersRule.sol"><code>contracts/hooks/rules/FundHoldersRule.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/IFundHoldersRule.sol"><code>IFundHoldersRule.sol</code></a>, reason codes in <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/Errors.sol"><code>Errors.sol</code></a></li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/hooks/rules/FundHoldersRule.t.sol"><code>FundHoldersRule.t.sol</code></a> (every step of the check, the net-zero cases, <code>after_</code>, the gate against fake tokens and fake hooks, the account questions), <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/fund/FundIntegration.t.sol"><code>FundIntegration.t.sol</code></a> (three real classes: the cap with pre-flight parity, no event showing the count above the cap, forced transfers, the 7540 escrow, a blocked claim, rule replacement), <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/fund/FundInvariant.t.sol"><code>FundInvariant.t.sol</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/test/halmos/FundHalmos.t.sol"><code>FundHalmos.t.sol</code></a>, and <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/fund.test.ts"><code>test/nodejs/fund.test.ts</code></a> (through the real deployment)</li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>cd1e525</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>babef08</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

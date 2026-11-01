@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GatedToken · Gated Token Stack</title>
+<meta name="description" content="The plain token template: the shared base with its own decimals and no signed transfers, how it differs from IntentToken, and when a product would choose it.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="../index.html">Gated Token Stack</a>
+  <a href="../index.html">Overview</a>
+  <a href="../index.html#contracts">Contracts</a>
+  <a href="../roles.html">Who can do what</a>
+  <a href="../movement.html">One movement</a>
+  <a href="../deployment.html">Deployment and governance</a>
+  <a href="../money.html">Where the money sits</a>
+  <a href="../review.html">Security review</a>
+</nav>
+<main class="page">
+
+<header class="top">
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Token</div>
+  <h1>GatedToken</h1>
+  <p class="lede">The plain gated token: the shared base with its own decimals, and no signed transfers. Holders move it with ordinary ERC-20 calls, and each movement still has to pass the policy hook.</p>
+  <div class="facts">
+    <span class="fact"><b>contracts/tokens/GatedToken.sol</b></span>
+    <span class="fact">upgradeable: <b>UUPS</b>, behind a <b>TokenProxy</b></span>
+    <span class="fact">admin: <b>the main timelock</b>, after hand-over</span>
+    <span class="fact">implementation attested as <b>IMPLEMENTATION</b></span>
+  </div>
+</header>
+
+<section id="in-one-minute">
+  <div class="callout wrap-any">
+    <h3>In one minute</h3>
+    <p>This is the simplest token in the stack. Everything it does comes from <a href="PolicyGatedERC20Upgradeable.html"><code>PolicyGatedERC20Upgradeable</code></a>: balances, roles, mint, burn, forced transfer, frozen amounts, pause, and one movement path that asks the policy hook about each movement. The contract itself adds a setup function, its decimals and the name of its template.</p>
+    <p>It suits a product whose holders send their own transactions: a bond or a note, a fund share class, or a cash token that a vault takes as its asset. Compared with <a href="IntentToken.html"><code>IntentToken</code></a> it has no signed intents, no executor role and nothing extra to operate. What it gives up is settlement by the issuer: signed transfers, settlement hours and delivery versus payment.</p>
+  </div>
+</section>
+
+<section id="how">
+  <div class="prose wrap-any">
+    <h2>What the token is made of</h2>
+    <p>The token's address is a <b>proxy</b>, which holds all the state and runs shared implementation code for every call. That code is the base plus this small contract.</p>
+  </div>
+  <ol class="steps wrap-any">
+    <li><div><b><a href="TokenProxy.html"><code>TokenProxy</code></a></b> is the proxy. <a href="ProxyDeployer.html"><code>ProxyDeployer</code></a> places it at an address that follows from the deployer, the symbol and the implementation, and sets it up in the same transaction.</div></li>
+    <li><div><b><code>initialize</code></b> takes the name and symbol, the decimals, the admin, the guardian, the registry, the hook and the initial rule list. The rest of the setup is the base's: it grants the admin and guardian roles, fixes the registry, checks and installs the hook, and installs the rules on it for this token.</div></li>
+    <li><div><b><code>decimals()</code></b> returns the value given at setup, kept in the token's own ERC-7201 namespace (<code>gated.storage.GatedToken</code>). No function changes it. For a cash token it is the precision of its ledger. Any <code>uint8</code> is accepted (<code>testFuzz_ItReportsTheDecimalsItWasGiven</code>), and the <code>Product</code> deployment module uses 18 when a product states none.</div></li>
+    <li><div><b><code>templateId()</code></b> returns <code>keccak256('GatedToken')</code>. An upgrade must target attested code that reports the same id, so a <code>GatedToken</code> cannot be moved onto another template's code (<code>test_WhenUpgradedToAnotherTemplate_ItReverts</code>).</div></li>
+  </ol>
+  <div class="prose wrap-any">
+    <p>On chain it is placed like any product: the operations account calls <code>ProxyDeployer</code>, configures the rules the product lists, grants <code>AGENT_ROLE</code>, <code>MINTER_ROLE</code> and <code>BURNER_ROLE</code> to their accounts, <code>UPGRADER_ROLE</code> to the main timelock and <code>RECOVERY_ROLE</code> to the recovery timelock, hands <code>DEFAULT_ADMIN_ROLE</code> to the main timelock, and renounces its own. The <code>token</code> profile in <code>ignition/profiles.ts</code> lists <a href="CredentialRule.html"><code>CredentialRule</code></a> and <a href="HolderRestrictionRule.html"><code>HolderRestrictionRule</code></a>; a product can list others. See <a href="../deployment.html">Deployment and governance</a>.</p>
+  </div>
+</section>
+
+<section id="choosing">
+  <div class="prose wrap-any">
+    <h2>GatedToken or IntentToken</h2>
+    <p>The two templates share the base, and take the same arguments in <code>initialize</code>. The enforcement tools, the pre-flights, <code>permit</code>, <code>multicall</code> and the upgrade check are the same in both. The difference is one mixin, <a href="IntentSettledUpgradeable.html"><code>IntentSettledUpgradeable</code></a>, and what follows from it.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th></th><th><code>GatedToken</code></th><th><code>IntentToken</code></th></tr></thead>
+      <tbody>
+        <tr><td>How a holder moves tokens</td><td>Sends <code>transfer</code>, or lets a spender use <code>transferFrom</code> after <code>approve</code> or a signed <code>permit</code></td><td>The same, or signs an intent that an executor submits, so the holder pays no gas</td></tr>
+        <tr><td>Movement kinds</td><td><span class="k k-transfer">TRANSFER</span> <span class="k k-mint">MINT</span> <span class="k k-burn">BURN</span> <span class="k k-forced">FORCED</span></td><td>Those, and <span class="k k-executed">EXECUTED</span></td></tr>
+        <tr><td>Signed-intent functions and <code>ITransferIntent</code></td><td>None (<code>test_ItOffersTheStandardsAndNoSignedIntents</code>)</td><td><code>executeTransfer</code>, <code>canExecute</code>, <code>cancelIntent</code> and the rest</td></tr>
+        <tr><td>Off-chain reference on a transfer</td><td>None</td><td><code>ref</code>, signed by the holder, in the event and the context</td></tr>
+        <tr><td>Settlement hours (<code>SettlementWindowRule</code>)</td><td>The rule judges <span class="k k-executed">EXECUTED</span> only, so it would judge nothing here. <code>Product</code> refuses to list it.</td><td>Can list it. It binds signed intents, not a plain <code>transfer</code>.</td></tr>
+        <tr><td>Signed-only movement (<code>ExecutedOnlyRule</code>)</td><td>It would refuse every plain transfer with no other route left. <code>Product</code> refuses to list it.</td><td>Can list it.</td></tr>
+        <tr><td>A leg of a <a href="DvPExecutor.html"><code>DvPExecutor</code></a> trade</td><td>No: the executor calls <code>executeTransfer</code> on each gated leg</td><td>Yes: either leg of <code>executeDvPGated</code>, the security leg of <code>executeDvP3009</code></td></tr>
+        <tr><td>Extra to run and review</td><td>Nothing</td><td><code>EXECUTOR_ROLE</code>, the executor contracts it names, their operator key, and the mixin's code</td></tr>
+        <tr><td><code>templateId()</code></td><td><code>keccak256('GatedToken')</code></td><td><code>keccak256('IntentToken')</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="two">
+    <div>
+      <h3>Choose GatedToken when</h3>
+      <ul class="plain wrap-any">
+        <li>Holders or their custodians send their own transactions and pay their own gas.</li>
+        <li>The issuer does not need to control when a transfer settles, or to tie each transfer to an off-chain message.</li>
+        <li>The token does not settle against another in one transaction through an executor.</li>
+        <li>You want the smallest code and the fewest parties to review. The tests place it as a corporate bond, a note with a supply cap, the share classes of a fund, and a cash token behind a vault.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Choose IntentToken when</h3>
+      <ul class="plain wrap-any">
+        <li>The issuer's settlement system runs transfers, and a holder authorises each with a signature.</li>
+        <li>Transfers must carry an off-chain reference, or run in settlement hours.</li>
+        <li>Every movement between holders has to be a signed intent (<code>ExecutedOnlyRule</code>).</li>
+        <li>The token has to settle against cash in delivery versus payment, or be the gated cash in one.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="prose wrap-any">
+    <p><b>The choice is made at launch.</b> The upgrade check refuses the other template's code, so a <code>GatedToken</code> does not gain signed transfers by upgrading to <code>IntentToken</code>. A token that later needs them is a second product, and moving holders across is outside these contracts.</p>
+  </div>
+</section>
+
+<section id="functions">
+  <div class="prose wrap-any"><h2>What it can do</h2></div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>constructor()</code></td><td>Runs once, when the implementation is deployed</td><td>Disables the initialiser on the implementation itself, so only a proxy can be set up (<code>test_TheImplementationCannotBeInitialised</code>).</td></tr>
+        <tr><td><code>initialize(name, symbol, decimals, admin, guardian, registry, hook, _initialRules)</code></td><td>Once per proxy; <code>ProxyDeployer</code> runs it in the transaction that creates the proxy</td><td>Sets the name (also the EIP-712 domain name), symbol and decimals, grants <code>DEFAULT_ADMIN_ROLE</code> to <code>admin</code> and <code>GUARDIAN_ROLE</code> to <code>guardian</code>, fixes the registry, installs the hook after checking it, and installs <code>_initialRules</code> on the hook for this token. An empty list installs none, and the hook then refuses every movement. Reverts with <code>PolicyGated_ZeroAddress</code>, <code>PolicyGated_NotAttested</code>, <code>PolicyGated_HookRegistryMismatch</code>, the hook's own refusals of a rule list (<code>ComplianceHook_NotAttested</code>, <code>ComplianceHook_TooManyRules</code>, <code>ComplianceHook_DuplicateRule</code>), or <code>InvalidInitialization</code> on a second call.</td></tr>
+        <tr><td><code>decimals()</code></td><td>Anyone (read-only)</td><td>The decimals given at setup.</td></tr>
+        <tr><td><code>templateId()</code></td><td>Anyone (read-only)</td><td>Returns <code>keccak256('GatedToken')</code>.</td></tr>
+        <tr><td>Everything else</td><td colspan="2">From <a href="PolicyGatedERC20Upgradeable.html#functions">the base</a>: transfers, mint, burn, forced transfer, frozen amounts, pause, pre-flights, hook, multicall, roles, upgrades, and its events and errors.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose wrap-any"><p class="small">The token takes no ether. It has no <code>receive</code> function and no payable function of its own, and <code>upgradeToAndCall</code> rejects value (<code>test_WhenEtherIsSent_ItReverts</code>, and the base's <code>ERC1967NonPayable</code>).</p></div>
+</section>
+
+<section id="why">
+  <div class="prose wrap-any">
+    <h2>Why it is built this way</h2>
+    <ul class="plain wrap-any">
+      <li><b>A template is a name and a setup function.</b> The behaviour lives in the base, so <code>GatedToken</code>, <code>IntentToken</code> and the vaults behave alike where they overlap, and a fix in the base reaches each template through its own attested upgrade.</li>
+      <li><b>Decimals are per token, not per template.</b> A cash token has to match its ledger's precision, and one implementation serves every product of a template. So the value is set at setup and kept in the proxy's storage.</li>
+      <li><b>A separate template, not a switch.</b> Leaving out the intent code means there is no executor role to guard on a token that has no use for one, and no flag in the base to get wrong.</li>
+      <li><b>Live with its policy from the start.</b> The rules are installed by <code>initialize</code> in the transaction that creates the proxy, and <code>ProxyDeployer</code> checks the result in that same transaction (<code>test_WhenPlaced_ItIsLiveWithItsPolicy</code>).</li>
+    </ul>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="prose wrap-any">
+    <h2>What it does not do</h2>
+    <ul class="plain wrap-any">
+      <li><b>No signed transfers.</b> A holder's <code>permit</code> signs an allowance, not a transfer. It names a spender, a value and a deadline, and the spender then chooses the receiver with <code>transferFrom</code>, which moves as a plain <span class="k k-transfer">TRANSFER</span> with no reference.</li>
+      <li><b>No control over when a transfer settles.</b> A holder who passes the rules can move whenever the token is not paused. The issuer's ways to stop movement are the pause, the rules and the enforcement tools.</li>
+      <li><b>The refusal of an unusable rule is off-chain.</b> <code>assertUsable</code> in <code>ignition/profiles.ts</code> stops a <code>GatedToken</code> product that lists <code>SettlementWindowRule</code> or <code>ExecutedOnlyRule</code>, when the module is built. On chain, <code>ComplianceHook.setRules</code> accepts any attested rule, so a timelock operation could still list one: the window rule would judge nothing, and <code>ExecutedOnlyRule</code> would refuse every plain transfer.</li>
+      <li><b>It adds no policy.</b> With no rules installed the hook refuses every movement. Everything else the base leaves out applies here too: see <a href="PolicyGatedERC20Upgradeable.html#limits">the base's limits</a>.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="connected">
+  <div class="prose wrap-any"><h2>Connected to</h2></div>
+  <div class="cards">
+    <a class="card" href="PolicyGatedERC20Upgradeable.html"><span class="name">PolicyGatedERC20Upgradeable</span><p>The base: balances, roles, enforcement and the movement path.</p></a>
+    <a class="card" href="IntentToken.html"><span class="name">IntentToken</span><p>The same base with signed transfers.</p></a>
+    <a class="card" href="ProxyDeployer.html"><span class="name">ProxyDeployer</span><p>Places the token and checks it came up as expected.</p></a>
+    <a class="card" href="TokenProxy.html"><span class="name">TokenProxy</span><p>The proxy at the token's address.</p></a>
+    <a class="card" href="ComplianceHook.html"><span class="name">ComplianceHook</span><p>Runs this token's rules on every movement.</p></a>
+    <a class="card" href="Gated4626Vault.html"><span class="name">Gated4626Vault</span><p>A vault can take a gated cash token as its asset.</p></a>
+    <a class="card" href="../deployment.html"><span class="name">Deployment and governance</span><p>How a product is placed, configured and handed over.</p></a>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose wrap-any">
+    <h2>Source and tests</h2>
+    <ul class="plain wrap-any">
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/tokens/GatedToken.sol"><code>contracts/tokens/GatedToken.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/ITemplated.sol"><code>ITemplated.sol</code></a></li>
+      <li>Deployment: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/ignition/profiles.ts"><code>ignition/profiles.ts</code></a> (<code>assertUsable</code>, the <code>token</code> profile), <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/ignition/modules/Product.ts"><code>ignition/modules/Product.ts</code></a></li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/tokens/GatedToken.t.sol"><code>GatedToken.t.sol</code></a> (the token with a real registry, hook and <code>ProxyDeployer</code> and a mock identity rule: setup, decimals, no intent entry point, enforcement, upgrades, no ether), <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/products.test.ts"><code>test/nodejs/products.test.ts</code></a> (the deployed <code>token</code> profile, a later product, a cash token behind a vault, fund classes), <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/legos.test.ts"><code>test/nodejs/legos.test.ts</code></a> (a supply cap at launch, unusable rule lists)</li>
+    </ul>
+  </div>
+</section>
+
+<footer>Describes the contracts at commit <code>babef08</code> on <code>main</code>.</footer>
+</main>
+</body>
+</html>

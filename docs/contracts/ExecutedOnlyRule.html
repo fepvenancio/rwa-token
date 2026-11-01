@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ExecutedOnlyRule · Gated Token Stack</title>
+<meta name="description" content="How ExecutedOnlyRule refuses a plain transfer, so that a holder moves tokens to another holder by a signed intent carried out by an executor, and why it is for an IntentToken.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="../index.html">Gated Token Stack</a>
+  <a href="../index.html">Overview</a>
+  <a href="../index.html#contracts">Contracts</a>
+  <a href="../roles.html">Who can do what</a>
+  <a href="../movement.html">One movement</a>
+  <a href="../deployment.html">Deployment and governance</a>
+  <a href="../money.html">Where the money sits</a>
+  <a href="../review.html">Security review</a>
+</nav>
+<main class="page">
+
+<header class="top">
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Policy</div>
+  <h1>ExecutedOnlyRule</h1>
+  <p class="lede">Turns off the plain transfer. On a token that lists it, a holder moves tokens to another holder by a signed intent that an executor carries out, and a call to <code>transfer</code> is refused.</p>
+  <div class="facts">
+    <span class="fact"><b>contracts/hooks/rules/ExecutedOnlyRule.sol</b></span>
+    <span class="fact">immutable, <b>not a proxy</b></span>
+    <span class="fact">no settings, <b>no storage</b></span>
+    <span class="fact">attested as <b>RULE</b></span>
+    <span class="fact">ruleId: <b>keccak256('ExecutedOnlyRule.v1')</b></span>
+  </div>
+</header>
+
+<section id="in-one-minute">
+  <div class="callout">
+    <h3>In one minute</h3>
+    <p>A plain token transfer says nothing about why it happened. Some products want each movement between holders tied to an instruction. On an <a href="IntentToken.html">IntentToken</a> a holder can sign an intent that names the receiver, the amount and a reference (<code>ref</code>, the hash of the issuer's message), and an executor submits it. This rule makes that the way a holder moves tokens: <code>transfer</code> and <code>transferFrom</code> revert with <code>TRANSFER_NOT_EXECUTED</code>. Mints, burns, the agent's forced moves and executed intents pass. It has no settings and keeps no data: listing it is the whole configuration.</p>
+  </div>
+</section>
+
+<section id="how">
+  <div class="prose">
+    <h2>How it decides</h2>
+    <p><code>check(ctx)</code> reads one field, the kind. A <code>TRANSFER</code> gets <code>TRANSFER_NOT_EXECUTED</code>, whatever the amount. Everything else gets <code>TRANSFER_OK</code>. It reads no balance, no role and no storage, and it does not look at the reference.</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Kind</th><th>What the rule does</th></tr></thead>
+      <tbody>
+        <tr><td><span class="k k-transfer">TRANSFER</span></td><td class="no"><code>TRANSFER_NOT_EXECUTED</code>, the one reason code, at any amount</td></tr>
+        <tr><td><span class="k k-executed">EXECUTED</span></td><td class="ok">passes</td></tr>
+        <tr><td><span class="k k-forced">FORCED</span></td><td class="ok">passes</td></tr>
+        <tr><td><span class="k k-mint">MINT</span></td><td class="ok">passes</td></tr>
+        <tr><td><span class="k k-burn">BURN</span></td><td class="ok">passes</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="holder">
+  <div class="prose">
+    <h2>What it means for a holder</h2>
+    <ul class="plain">
+      <li><b>The send button reverts.</b> <code>transfer</code> reverts with <code>PolicyGated_TransferRejected(TRANSFER_NOT_EXECUTED)</code>. So does <code>transferFrom</code>: <code>approve</code> and <code>permit</code> still set an allowance, but a spender cannot use it to move the tokens.</li>
+      <li><b>To move, the holder signs.</b> The holder signs a <code>TransferIntent</code> (EIP-712 typed data) and hands it to whoever runs the executor. An account holding the token's <code>EXECUTOR_ROLE</code> calls <code>executeTransfer</code>, in a deployment <a href="IntentExecutor.html"><code>IntentExecutor</code></a> or <a href="DvPExecutor.html"><code>DvPExecutor</code></a>. The other rules on the list still apply to that movement.</li>
+      <li><b>The holder depends on the executor.</b> The rule leaves no way for a holder to move tokens alone. An <code>IntentToken</code> has no holder burn either: <code>burn</code> needs <code>BURNER_ROLE</code>. If nobody submits the intent, nothing moves, and the intent lapses at its deadline.</li>
+      <li><b>Each such movement leaves its reference on chain.</b> <code>executeTransfer</code> emits <code>IntentExecuted(intentHash, from, to, amount, executor, ref)</code>.</li>
+      <li><b>Contracts are refused the same way.</b> A contract that moves this token with <code>transfer</code> or <code>transferFrom</code> makes a <code>TRANSFER</code>, so a vault could not take such a token as its asset.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="account">
+  <div class="prose">
+    <h2>The account questions and the pre-flights</h2>
+    <p><code>checkSend</code> and <code>checkReceive</code> answer <code>TRANSFER_OK</code> for every account: they are the <a href="BaseRule.html"><code>BaseRule</code></a> defaults, and the rule has no opinion about an account. So <code>canSend</code> and <code>canReceive</code> can read true while a plain transfer is refused.</p>
+    <p><code>canTransfer</code> and <code>canTransferWithReason</code> ask about a plain transfer, so between two holders they read false, the latter with <code>TRANSFER_NOT_EXECUTED</code>. The pre-flight for a signed intent is <code>canExecute</code>.</p>
+  </div>
+</section>
+
+<section id="config">
+  <div class="prose">
+    <h2>Who configures it, and where it sits</h2>
+    <p>Nobody: there is nothing to set, no zero to read, and no state before or after. It refuses plain transfers from the moment it is on a token's list and stops when it is taken off, which is the hook's <code>setRules</code> under the token's <code>DEFAULT_ADMIN_ROLE</code>.</p>
+    <p>The demo deployment does not list it, and neither does any other profile in <code>ignition/profiles.ts</code> at this commit, so it has no set position. A product asks for it by naming <code>executedOnlyRule</code> in its <code>rules</code>, and the <code>Core</code> module then deploys it. A test does this with an <code>IntentToken</code> listing <code>credentialRule</code> then <code>executedOnlyRule</code>, with an <code>IntentExecutor</code>.</p>
+  </div>
+</section>
+
+<section id="intent-token">
+  <div class="prose">
+    <h2>Why it is for an <code>IntentToken</code></h2>
+    <ul class="plain">
+      <li><b>It is the template with <code>EXECUTED</code>.</b> <code>executeTransfer</code> comes from <a href="IntentSettledUpgradeable.html"><code>IntentSettledUpgradeable</code></a>, which <code>IntentToken</code> inherits. On a <a href="GatedToken.html"><code>GatedToken</code></a>, nothing can make an <code>EXECUTED</code> movement, so holders could not move tokens to each other at all.</li>
+      <li><b>A vault's escrow is a plain transfer.</b> <a href="Gated7540Vault.html"><code>Gated7540Vault</code></a> moves shares into its escrow in <code>requestRedeem</code>, and back in <code>rejectRedeemRequest</code>, as a <code>TRANSFER</code>. On a vault's list this rule would refuse both, so no redemption could be requested.</li>
+    </ul>
+    <p><code>assertUsable</code> in <code>ignition/profiles.ts</code> throws when a module is built that lists it on anything but an <code>IntentToken</code>. That check is in the deployment tooling. On chain, the hook accepts any attested rule on any token.</p>
+  </div>
+</section>
+
+<section id="functions">
+  <div class="prose"><h2>What it can do</h2></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>check(ctx)</code></td><td>Anyone (read-only); the hook in practice</td><td><code>TRANSFER_NOT_EXECUTED</code> for a <code>TRANSFER</code>, otherwise <code>TRANSFER_OK</code>.</td></tr>
+        <tr><td><code>checkSend</code>, <code>checkReceive</code></td><td>Anyone (read-only)</td><td><code>TRANSFER_OK</code> for every account.</td></tr>
+        <tr><td><code>after_(ctx)</code></td><td>The hook of <code>ctx.token</code></td><td>The empty default. The hook does not call it, because <code>wantsAfter()</code> is false.</td></tr>
+        <tr><td><code>ruleId()</code>, <code>wantsAfter()</code>, <code>supportsInterface(id)</code></td><td>Anyone (read-only)</td><td><code>keccak256('ExecutedOnlyRule.v1')</code>; false; ERC-165 for <code>IComplianceRule</code> and <code>IERC165</code>, the <code>BaseRule</code> answer.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small"><code>IExecutedOnlyRule</code> declares nothing beyond <code>IComplianceRule</code>. The rule has no events and no errors of its own.</p>
+</section>
+
+<section id="why">
+  <div class="prose">
+    <h2>Why it is built this way</h2>
+    <ul class="plain">
+      <li><b>A rule, not a token feature.</b> Who may move and how is policy, so it sits on the token's list and comes off the same way, and the token base stays free of it.</li>
+      <li><b>Data stays off chain.</b> Originator and beneficiary data stay in the issuer's own message. The chain sees its hash, as <code>ref</code>.</li>
+      <li><b>Nothing to get wrong.</b> With no storage and no settings, the attested code is all there is, and one instance serves every token that lists it.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="prose">
+    <h2>What it does not do</h2>
+    <ul class="plain">
+      <li><b>It does not check the reference.</b> The rule does not read <code>ref</code>, and the intent's own checks do not require it to be non-zero or to match anything. The holder's signature covers it, and that is all. Tying a reference to a real message is for the issuer's executor and its systems off chain.</li>
+      <li><b>It does not cover every movement.</b> Forced moves, mints and burns pass and carry no reference. <code>IntentExecuted</code> is not emitted for them.</li>
+      <li><b>It does not choose the executor.</b> Whoever holds <code>EXECUTOR_ROLE</code> on the token can submit intents that name no executor. Those grants are the token's admin's to make.</li>
+      <li><b>It does not hold movements to hours.</b> That is <a href="SettlementWindowRule.html"><code>SettlementWindowRule</code></a>, which judges <code>EXECUTED</code> alone. Together the two would put a holder's movements inside the window; no profile lists them together at this commit.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="connected">
+  <div class="prose"><h2>Connected to</h2></div>
+  <div class="cards">
+    <a class="card" href="IntentToken.html"><span class="name">IntentToken</span><p>The template this rule is for.</p></a>
+    <a class="card" href="IntentSettledUpgradeable.html"><span class="name">IntentSettledUpgradeable</span><p>Where signed intents are checked and executed.</p></a>
+    <a class="card" href="IntentExecutor.html"><span class="name">IntentExecutor</span><p>Submits intents that state no consideration.</p></a>
+    <a class="card" href="DvPExecutor.html"><span class="name">DvPExecutor</span><p>Settles a trade from two signed legs.</p></a>
+    <a class="card" href="SettlementWindowRule.html"><span class="name">SettlementWindowRule</span><p>Holds executed movements to a token's hours.</p></a>
+    <a class="card" href="BaseRule.html"><span class="name">BaseRule</span><p>The parent this rule inherits its defaults from.</p></a>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose">
+    <h2>Source and tests</h2>
+    <ul class="plain">
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/hooks/rules/ExecutedOnlyRule.sol"><code>contracts/hooks/rules/ExecutedOnlyRule.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/IExecutedOnlyRule.sol"><code>IExecutedOnlyRule.sol</code></a>, reason codes in <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/Errors.sol"><code>Errors.sol</code></a></li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/hooks/rules/ExecutedOnlyRule.t.sol"><code>ExecutedOnlyRule.t.sol</code></a> (a plain transfer refused at any amount, every other kind passing, and on a real hook and <code>IntentToken</code>: the pre-flight agreeing, a signed intent moving, a forced move passing) and <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/legos.test.ts"><code>test/nodejs/legos.test.ts</code></a> (the rule through the modules, and the module refusing it on a plain token)</li>
+    </ul>
+  </div>
+</section>
+
+<footer>Describes the contracts at commit <code>babef08</code> on <code>main</code>.</footer>
+</main>
+</body>
+</html>

@@ -25,7 +25,7 @@
 
 <header class="top">
   <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Token</div>
-  <h1>IntentSettledUpgradeable</h1>
+  <h1 class="wrap-any">IntentSettledUpgradeable</h1>
   <p class="lede">Lets a holder authorise a transfer by signing a message instead of sending a transaction. An approved executor submits the signed message, and the token checks it, field by field, before the transfer goes through the same compliance checks as any other.</p>
   <div class="facts">
     <span class="fact"><b>contracts/mixins/IntentSettledUpgradeable.sol</b></span>
@@ -36,109 +36,109 @@
 </header>
 
 <section id="in-one-minute">
-  <div class="callout">
+  <div class="callout wrap-any">
     <h3>In one minute</h3>
-    <p>An <b>intent</b> is a transfer instruction the holder signs with their key: "send this amount to that account, before this deadline". Signing costs nothing and needs no transaction. The issuer's settlement system then submits it through an <b>executor</b>, a contract the token has authorised, at the time it chooses.</p>
-    <p>The token checks that the intent has not expired, has not been used or cancelled, is submitted by the executor it names, and carries the holder's valid signature. Then the transfer runs through the compliance hook like any other movement, labelled <span class="k k-executed">EXECUTED</span>. The executor cannot change a single field: any change breaks the signature. Until it runs, the holder can cancel it.</p>
+    <p>An <b>intent</b> is a transfer instruction the holder signs with their key: "send this amount to that account, between these times". Signing costs nothing and needs no transaction. The issuer's settlement system then submits it through an <b>executor</b>, an account the token has authorised, at the time it chooses.</p>
+    <p>The token checks that the intent is in date, has not been used or cancelled, is submitted by the executor it names, pays someone, and carries the holder's valid signature. Then the transfer runs through the policy hook like any other movement, labelled <span class="k k-executed">EXECUTED</span>. The executor cannot change a field: any change breaks the signature. Until it runs, the holder can cancel it.</p>
   </div>
 </section>
 
 <section id="how">
-  <div class="prose">
+  <div class="prose wrap-any">
     <h2>How an intent is settled</h2>
-    <p>Four parties take part. The holder signs. An operator key (an issuer or relayer key with <code>OPERATOR_ROLE</code> on the executor) submits. The executor contract holds the token's <code>EXECUTOR_ROLE</code> and calls the token. The token runs the checks and asks the hook.</p>
+    <p>In the deployment four parties take part. The holder signs. An operator key (an issuer or relayer key with <code>OPERATOR_ROLE</code> on the executor) submits. The executor contract holds the token's <code>EXECUTOR_ROLE</code> and calls the token. The token runs the checks and asks the hook.</p>
   </div>
   <figure>
     <div class="fig-scroll">
-      <svg class="d" viewBox="0 0 880 636" role="img" aria-label="Sequence of a signed intent. The holder signs the intent off-chain with EIP-712 and hands the intent and signature to the operator key. The operator may first ask the token canExecute, as a read-only call from the executor, and gets true or a reason code. The operator calls execute on the IntentExecutor, which checks its operator role, that it is not paused and that the intent states no consideration, then calls executeTransfer on the token. The token runs checks 1 to 6 and marks the nonce used, asks the hook beforeTransfer with kind EXECUTED, gets TRANSFER_OK, moves the balances, calls afterTransfer if the hook wants it, and returns the intent hash with the event IntentExecuted. The executor returns the intent hash to the operator.">
+      <svg class="d" viewBox="0 0 780 636" role="img" aria-label="Sequence of a signed intent. The holder signs the intent off-chain with EIP-712 and hands the intent and signature to the operator key. The operator may first ask the token canExecute, naming the executor, and gets true or a reason code. The operator calls execute on the IntentExecutor, which checks its operator role, that it is not paused and that the intent states no consideration, then calls executeTransfer on the token. The token runs its checks and marks the nonce used, asks the hook beforeTransfer with kind EXECUTED, gets TRANSFER_OK, moves the balances, calls afterTransfer if the hook wants it, and returns the intent hash with the event IntentExecuted. The executor returns the intent hash to the operator.">
         <defs>
           <marker id="is-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
         </defs>
 
-        <rect class="b" x="20" y="14" width="140" height="46" rx="8"/>
-        <text x="34" y="34" class="bold">Holder</text>
-        <text x="34" y="51" class="sm m">signer, no gas</text>
-        <rect class="b" x="200" y="14" width="140" height="46" rx="8"/>
-        <text x="214" y="34" class="bold">Operator key</text>
-        <text x="214" y="51" class="mono sm m">OPERATOR_ROLE</text>
-        <rect class="b" x="380" y="14" width="140" height="46" rx="8"/>
-        <text x="394" y="34" class="bold">IntentExecutor</text>
-        <text x="394" y="51" class="mono sm m">EXECUTOR_ROLE</text>
-        <rect class="b" x="560" y="14" width="140" height="46" rx="8"/>
-        <text x="574" y="34" class="bold">IntentToken</text>
-        <text x="574" y="51" class="sm m">this mixin</text>
-        <rect class="b" x="740" y="14" width="120" height="46" rx="8"/>
-        <text x="754" y="34" class="bold">Hook</text>
-        <text x="754" y="51" class="sm m">the token's rules</text>
+        <rect class="b" x="10" y="14" width="130" height="46" rx="8"/>
+        <text x="22" y="34" class="bold">Holder</text>
+        <text x="22" y="51" class="sm m">signer, no gas</text>
+        <rect class="b" x="165" y="14" width="130" height="46" rx="8"/>
+        <text x="177" y="34" class="bold">Operator key</text>
+        <text x="177" y="51" class="mono sm m">OPERATOR_ROLE</text>
+        <rect class="b" x="320" y="14" width="130" height="46" rx="8"/>
+        <text x="332" y="34" class="bold">IntentExecutor</text>
+        <text x="332" y="51" class="mono sm m">EXECUTOR_ROLE</text>
+        <rect class="b" x="475" y="14" width="130" height="46" rx="8"/>
+        <text x="487" y="34" class="bold">IntentToken</text>
+        <text x="487" y="51" class="sm m">this mixin</text>
+        <rect class="b" x="640" y="14" width="130" height="46" rx="8"/>
+        <text x="652" y="34" class="bold">Hook</text>
+        <text x="652" y="51" class="sm m">the token's rules</text>
 
-        <line class="life" x1="90" y1="60" x2="90" y2="620"/>
-        <line class="life" x1="270" y1="60" x2="270" y2="620"/>
-        <line class="life" x1="450" y1="60" x2="450" y2="620"/>
-        <line class="life" x1="630" y1="60" x2="630" y2="620"/>
-        <line class="life" x1="800" y1="60" x2="800" y2="620"/>
+        <line class="life" x1="75" y1="60" x2="75" y2="620"/>
+        <line class="life" x1="230" y1="60" x2="230" y2="620"/>
+        <line class="life" x1="385" y1="60" x2="385" y2="620"/>
+        <line class="life" x1="540" y1="60" x2="540" y2="620"/>
+        <line class="life" x1="705" y1="60" x2="705" y2="620"/>
 
-        <rect class="act" x="24" y="74" width="132" height="42" rx="6"/>
-        <text x="36" y="91">signs the intent</text>
-        <text x="36" y="108" class="sm m">EIP-712, off-chain</text>
+        <rect class="act" x="10" y="74" width="130" height="42" rx="6"/>
+        <text x="20" y="91" class="sm">signs the intent</text>
+        <text x="20" y="108" class="sm m">EIP-712, off-chain</text>
 
-        <line class="ln dash" x1="90" y1="142" x2="266" y2="142" marker-end="url(#is-arrow)"/>
-        <text x="102" y="134" class="sm">intent + signature</text>
+        <line class="ln dash" x1="75" y1="142" x2="226" y2="142" marker-end="url(#is-arrow)"/>
+        <text x="84" y="134" class="sm">intent + signature</text>
 
-        <line class="ln dash" x1="270" y1="184" x2="626" y2="184" marker-end="url(#is-arrow)"/>
-        <text x="284" y="176" class="sm">pre-flight: <tspan class="mono">canExecute</tspan></text>
-        <line class="ln dash" x1="630" y1="206" x2="274" y2="206" marker-end="url(#is-arrow)"/>
-        <text x="284" y="222" class="sm m">true, or the reason code</text>
+        <line class="ln dash" x1="230" y1="184" x2="536" y2="184" marker-end="url(#is-arrow)"/>
+        <text x="242" y="176" class="mono sm">canExecute(intent, sig, executor)</text>
+        <line class="ln dash" x1="540" y1="206" x2="234" y2="206" marker-end="url(#is-arrow)"/>
+        <text x="242" y="222" class="sm m">true, or the reason code</text>
 
-        <line class="ln" x1="270" y1="262" x2="446" y2="262" marker-end="url(#is-arrow)"/>
-        <text x="282" y="254" class="mono sm">execute(token, …)</text>
-        <rect class="b2" x="384" y="274" width="132" height="46" rx="6"/>
-        <text x="394" y="292" class="sm">role, not paused,</text>
-        <text x="394" y="309" class="sm">no consideration</text>
+        <line class="ln" x1="230" y1="262" x2="381" y2="262" marker-end="url(#is-arrow)"/>
+        <text x="240" y="254" class="mono sm">execute(token, …)</text>
+        <rect class="b2" x="320" y="274" width="130" height="46" rx="6"/>
+        <text x="330" y="292" class="sm">role, not paused,</text>
+        <text x="330" y="309" class="sm">no consideration</text>
 
-        <line class="ln" x1="450" y1="342" x2="626" y2="342" marker-end="url(#is-arrow)"/>
-        <text x="462" y="334" class="mono sm">executeTransfer(…)</text>
-        <rect class="b2" x="564" y="354" width="132" height="62" rx="6"/>
-        <text x="574" y="372" class="sm">checks 1 to 6</text>
-        <text x="574" y="389" class="sm">(next figure), then</text>
-        <text x="574" y="406" class="sm">nonce marked used</text>
+        <line class="ln" x1="385" y1="342" x2="536" y2="342" marker-end="url(#is-arrow)"/>
+        <text x="394" y="334" class="mono sm">executeTransfer(…)</text>
+        <rect class="b2" x="470" y="354" width="140" height="62" rx="6"/>
+        <text x="480" y="372" class="sm">the checks in the</text>
+        <text x="480" y="389" class="sm">next figure, then</text>
+        <text x="480" y="406" class="sm">nonce marked used</text>
 
-        <line class="ln" x1="630" y1="440" x2="796" y2="440" marker-end="url(#is-arrow)"/>
-        <text x="640" y="432" class="mono sm">beforeTransfer(ctx)</text>
-        <text x="640" y="455" class="sm m">kind EXECUTED</text>
-        <line class="ln dash" x1="800" y1="474" x2="634" y2="474" marker-end="url(#is-arrow)"/>
-        <text x="680" y="490" class="mono sm">TRANSFER_OK</text>
+        <line class="ln" x1="540" y1="440" x2="701" y2="440" marker-end="url(#is-arrow)"/>
+        <text x="550" y="432" class="mono sm">beforeTransfer(ctx)</text>
+        <text x="550" y="455" class="sm m">kind EXECUTED</text>
+        <line class="ln dash" x1="705" y1="474" x2="544" y2="474" marker-end="url(#is-arrow)"/>
+        <text x="600" y="490" class="mono sm">TRANSFER_OK</text>
 
-        <rect class="b2" x="564" y="500" width="132" height="30" rx="6"/>
-        <text x="574" y="520" class="sm">balances move</text>
+        <rect class="b2" x="470" y="500" width="140" height="30" rx="6"/>
+        <text x="480" y="520" class="sm">balances move</text>
 
-        <line class="ln" x1="630" y1="550" x2="796" y2="550" marker-end="url(#is-arrow)"/>
-        <text x="640" y="542" class="mono sm">afterTransfer(ctx)</text>
+        <line class="ln" x1="540" y1="550" x2="701" y2="550" marker-end="url(#is-arrow)"/>
+        <text x="550" y="542" class="mono sm">afterTransfer(ctx)</text>
 
-        <line class="ln dash" x1="630" y1="580" x2="454" y2="580" marker-end="url(#is-arrow)"/>
-        <text x="462" y="572" class="sm">hash, IntentExecuted</text>
-        <line class="ln dash" x1="450" y1="606" x2="274" y2="606" marker-end="url(#is-arrow)"/>
-        <text x="282" y="598" class="sm">intent hash</text>
+        <line class="ln dash" x1="540" y1="580" x2="389" y2="580" marker-end="url(#is-arrow)"/>
+        <text x="394" y="572" class="sm">hash, IntentExecuted</text>
+        <line class="ln dash" x1="385" y1="606" x2="234" y2="606" marker-end="url(#is-arrow)"/>
+        <text x="240" y="598" class="sm">intent hash</text>
       </svg>
     </div>
-    <figcaption><b>The holder signs once; the token checks everything.</b> Dashed lines are off-chain hand-overs, read-only calls and returns. <code>afterTransfer</code> runs only if the hook asks for it. The executor passes the intent on unchanged; its own check is that the intent states no payment, which it could not enforce.</figcaption>
+    <figcaption class="wrap-any"><b>The holder signs once; the token checks everything.</b> Dashed lines are off-chain hand-overs, read-only calls and returns. <code>afterTransfer</code> runs if the hook asks for it. The executor passes the intent on unchanged; its own check is that the intent states no payment, which it could not enforce.</figcaption>
   </figure>
-  <ol class="steps">
+  <ol class="steps wrap-any">
     <li><div><b>Sign.</b> The holder's wallet signs the intent as EIP-712 typed data, structured data the wallet can show field by field. <code>intentHash(intent)</code> returns the digest the token expects.</div></li>
-    <li><div><b>Optional pre-flight.</b> <code>canExecute(intent, sig)</code> runs the same checks without writing. It treats its caller as the executor, so the operator asks it as a read-only call from the executor's address.</div></li>
+    <li><div><b>Optional pre-flight.</b> <code>canExecute(intent, sig, executor)</code> runs the same checks without writing, as they would run from the account it names, whoever asks.</div></li>
     <li><div><b>Submit.</b> The operator calls <code>execute(token, intent, sig)</code> on the <a href="IntentExecutor.html"><code>IntentExecutor</code></a>. It checks its own <code>OPERATOR_ROLE</code> and pause, refuses an intent that states a consideration (<code>IntentExecutor_ConsiderationNotSupported</code>), and calls <code>executeTransfer</code>.</div></li>
-    <li><div><b>Check and move.</b> The token runs the checks below, marks the nonce used, and moves the tokens as <span class="k k-executed">EXECUTED</span> through the base's single movement path, where the pause, the unfrozen balance and the hook decide.</div></li>
+    <li><div><b>Check and move.</b> The token runs the checks below, marks the nonce used, and moves the tokens as <span class="k k-executed">EXECUTED</span> through the base's one movement path, where the pause, the unfrozen balance and the hook decide.</div></li>
     <li><div><b>Record.</b> The token emits <code>IntentExecuted(intentHash, from, to, amount, executor, ref)</code>, where <code>executor</code> is the account that called the token, and returns the intent hash.</div></li>
   </ol>
 </section>
 
 <section id="order">
-  <div class="prose">
+  <div class="prose wrap-any">
     <h2>The checks, in order</h2>
-    <p><code>executeTransfer</code> and <code>canExecute</code> run the same checks in the same order. The first one that fails decides the answer. The tests pin the order pair by pair, and a fuzz test checks that <code>canExecute</code> returns exactly the reason <code>executeTransfer</code> reverts with, or success when it succeeds.</p>
+    <p><code>executeTransfer</code> and <code>canExecute</code> run the same checks in the same order, and the first one that fails decides the answer. The tests pin most of the order pair by pair (<code>IntentSettledUnit_CheckOrder</code>); the deadline against the nonce and the place of <code>ZERO_RECEIVER</code> have no such test. <code>test_WhenAnyIntentIsChecked_CanExecuteAgreesWithExecuteTransfer</code> fuzzes that <code>canExecute</code> returns the reason <code>executeTransfer</code> reverts with, or success when it succeeds.</p>
   </div>
   <figure>
     <div class="fig-scroll">
-      <svg class="d" viewBox="0 0 780 726" role="img" aria-label="The checks of executeTransfer in order. 0: the caller must hold EXECUTOR_ROLE, or AccessControlUnauthorizedAccount. 1: after the deadline gives INTENT_EXPIRED. 2: a used or cancelled nonce gives NONCE_USED. 3: a stated consideration with no executor named gives CONSIDERATION_NEEDS_EXECUTOR. 4: a named executor that is not the caller gives WRONG_EXECUTOR. 5: before validAfter gives INTENT_NOT_YET_VALID. 6: a signature that is not valid for from gives BAD_SIGNATURE. 7: the nonce is marked used. 8: the tokens move as EXECUTED through the pause, unfrozen balance and hook checks, which can give PAUSED, a balance error or a rule's reason. Then IntentExecuted is emitted and the intent hash returned.">
+      <svg class="d" viewBox="0 0 780 792" role="img" aria-label="The checks of executeTransfer in order. 0: the caller must hold EXECUTOR_ROLE, or AccessControlUnauthorizedAccount. 1: after the deadline gives INTENT_EXPIRED. 2: a used or cancelled nonce gives NONCE_USED. 3: a stated consideration with no executor named gives CONSIDERATION_NEEDS_EXECUTOR. 4: a named executor that is not the caller gives WRONG_EXECUTOR. 5: before validAfter gives INTENT_NOT_YET_VALID. 6: a zero receiver gives ZERO_RECEIVER. 7: a signature that is not valid for from gives BAD_SIGNATURE. 8: the nonce is marked used. 9: the tokens move as EXECUTED through _moveAs and _move, with the pause, unfrozen balance and hook checks, which can give PAUSED, a balance error or a rule's reason. Then IntentExecuted is emitted and the intent hash returned.">
         <defs>
           <marker id="is-arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
           <marker id="is-arrow-rej" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="rej"/></marker>
@@ -153,7 +153,7 @@
         <line class="ln-rej" x1="480" y1="96" x2="516" y2="96" marker-end="url(#is-arrow-rej)"/>
         <text x="488" y="88" class="sm m">no</text>
         <rect class="rejbox" x="520" y="78" width="240" height="36" rx="6"/>
-        <text x="532" y="101" class="mono sm rej">AccessControlUnauthorizedAccount</text>
+        <text x="530" y="101" class="mono sm rej">AccessControlUnauthorizedAccount</text>
         <line class="ln" x1="260" y1="118" x2="260" y2="138" marker-end="url(#is-arrow2)"/>
 
         <rect class="b" x="40" y="140" width="440" height="44" rx="8"/>
@@ -161,7 +161,7 @@
         <line class="ln-rej" x1="480" y1="162" x2="516" y2="162" marker-end="url(#is-arrow-rej)"/>
         <text x="486" y="154" class="sm m">yes</text>
         <rect class="rejbox" x="520" y="144" width="240" height="36" rx="6"/>
-        <text x="532" y="167" class="mono sm rej">INTENT_EXPIRED</text>
+        <text x="530" y="167" class="mono sm rej">INTENT_EXPIRED</text>
         <line class="ln" x1="260" y1="184" x2="260" y2="204" marker-end="url(#is-arrow2)"/>
 
         <rect class="b" x="40" y="206" width="440" height="44" rx="8"/>
@@ -169,7 +169,7 @@
         <line class="ln-rej" x1="480" y1="228" x2="516" y2="228" marker-end="url(#is-arrow-rej)"/>
         <text x="486" y="220" class="sm m">yes</text>
         <rect class="rejbox" x="520" y="210" width="240" height="36" rx="6"/>
-        <text x="532" y="233" class="mono sm rej">NONCE_USED</text>
+        <text x="530" y="233" class="mono sm rej">NONCE_USED</text>
         <line class="ln" x1="260" y1="250" x2="260" y2="270" marker-end="url(#is-arrow2)"/>
 
         <rect class="b" x="40" y="272" width="440" height="44" rx="8"/>
@@ -177,7 +177,7 @@
         <line class="ln-rej" x1="480" y1="294" x2="516" y2="294" marker-end="url(#is-arrow-rej)"/>
         <text x="486" y="286" class="sm m">yes</text>
         <rect class="rejbox" x="520" y="276" width="240" height="36" rx="6"/>
-        <text x="532" y="299" class="mono sm rej">CONSIDERATION_NEEDS_EXECUTOR</text>
+        <text x="530" y="299" class="mono sm rej">CONSIDERATION_NEEDS_EXECUTOR</text>
         <line class="ln" x1="260" y1="316" x2="260" y2="336" marker-end="url(#is-arrow2)"/>
 
         <rect class="b" x="40" y="338" width="440" height="44" rx="8"/>
@@ -185,7 +185,7 @@
         <line class="ln-rej" x1="480" y1="360" x2="516" y2="360" marker-end="url(#is-arrow-rej)"/>
         <text x="486" y="352" class="sm m">yes</text>
         <rect class="rejbox" x="520" y="342" width="240" height="36" rx="6"/>
-        <text x="532" y="365" class="mono sm rej">WRONG_EXECUTOR</text>
+        <text x="530" y="365" class="mono sm rej">WRONG_EXECUTOR</text>
         <line class="ln" x1="260" y1="382" x2="260" y2="402" marker-end="url(#is-arrow2)"/>
 
         <rect class="b" x="40" y="404" width="440" height="44" rx="8"/>
@@ -193,47 +193,55 @@
         <line class="ln-rej" x1="480" y1="426" x2="516" y2="426" marker-end="url(#is-arrow-rej)"/>
         <text x="486" y="418" class="sm m">yes</text>
         <rect class="rejbox" x="520" y="408" width="240" height="36" rx="6"/>
-        <text x="532" y="431" class="mono sm rej">INTENT_NOT_YET_VALID</text>
+        <text x="530" y="431" class="mono sm rej">INTENT_NOT_YET_VALID</text>
         <line class="ln" x1="260" y1="448" x2="260" y2="468" marker-end="url(#is-arrow2)"/>
 
         <rect class="b" x="40" y="470" width="440" height="44" rx="8"/>
-        <text x="60" y="497">6. Is the signature not valid for <tspan class="mono">from</tspan>?</text>
+        <text x="60" y="497">6. Does it pay the zero address?</text>
         <line class="ln-rej" x1="480" y1="492" x2="516" y2="492" marker-end="url(#is-arrow-rej)"/>
         <text x="486" y="484" class="sm m">yes</text>
         <rect class="rejbox" x="520" y="474" width="240" height="36" rx="6"/>
-        <text x="532" y="497" class="mono sm rej">BAD_SIGNATURE</text>
+        <text x="530" y="497" class="mono sm rej">ZERO_RECEIVER</text>
         <line class="ln" x1="260" y1="514" x2="260" y2="534" marker-end="url(#is-arrow2)"/>
 
-        <rect class="b2" x="40" y="536" width="440" height="40" rx="8"/>
-        <text x="60" y="561">7. Mark the nonce used</text>
-        <line class="ln" x1="260" y1="576" x2="260" y2="594" marker-end="url(#is-arrow2)"/>
+        <rect class="b" x="40" y="536" width="440" height="44" rx="8"/>
+        <text x="60" y="563">7. Is the signature not valid for <tspan class="mono">from</tspan>?</text>
+        <line class="ln-rej" x1="480" y1="558" x2="516" y2="558" marker-end="url(#is-arrow-rej)"/>
+        <text x="486" y="550" class="sm m">yes</text>
+        <rect class="rejbox" x="520" y="540" width="240" height="36" rx="6"/>
+        <text x="530" y="563" class="mono sm rej">BAD_SIGNATURE</text>
+        <line class="ln" x1="260" y1="580" x2="260" y2="600" marker-end="url(#is-arrow2)"/>
 
-        <rect class="b" x="40" y="596" width="440" height="56" rx="8"/>
-        <text x="60" y="619">8. Move as <tspan class="mono">EXECUTED</tspan> through <tspan class="mono">_update</tspan></text>
-        <text x="76" y="640" class="sm m">pause, then the unfrozen balance, then the hook</text>
-        <line class="ln-rej" x1="480" y1="624" x2="516" y2="624" marker-end="url(#is-arrow-rej)"/>
-        <text x="486" y="616" class="sm m">no</text>
-        <rect class="rejbox" x="520" y="600" width="240" height="50" rx="6"/>
-        <text x="532" y="620" class="mono sm rej">PAUSED or a rule's reason,</text>
-        <text x="532" y="638" class="sm rej">or a balance error</text>
-        <line class="ln" x1="260" y1="652" x2="260" y2="670" marker-end="url(#is-arrow2)"/>
+        <rect class="b2" x="40" y="602" width="440" height="40" rx="8"/>
+        <text x="60" y="627">8. Mark the nonce used</text>
+        <line class="ln" x1="260" y1="642" x2="260" y2="660" marker-end="url(#is-arrow2)"/>
 
-        <rect class="act" x="40" y="672" width="440" height="40" rx="8"/>
-        <text x="60" y="697" class="bold">Emit IntentExecuted, return the intent hash</text>
+        <rect class="b" x="40" y="662" width="440" height="56" rx="8"/>
+        <text x="60" y="685">9. Move as <tspan class="mono">EXECUTED</tspan> through <tspan class="mono">_moveAs</tspan> and <tspan class="mono">_move</tspan></text>
+        <text x="76" y="706" class="sm m">pause, then the unfrozen balance, then the hook</text>
+        <line class="ln-rej" x1="480" y1="690" x2="516" y2="690" marker-end="url(#is-arrow-rej)"/>
+        <text x="486" y="682" class="sm m">no</text>
+        <rect class="rejbox" x="520" y="666" width="240" height="50" rx="6"/>
+        <text x="530" y="686" class="sm rej"><tspan class="mono">PAUSED</tspan> or a rule's reason,</text>
+        <text x="530" y="704" class="sm rej">or a balance error</text>
+        <line class="ln" x1="260" y1="718" x2="260" y2="736" marker-end="url(#is-arrow2)"/>
+
+        <rect class="act" x="40" y="738" width="440" height="40" rx="8"/>
+        <text x="60" y="763" class="bold">Emit IntentExecuted, return the intent hash</text>
       </svg>
     </div>
-    <figcaption><b>Message checks first, then the policy.</b> Checks 1 to 6, and the pause and hook in step 8, revert with <code>PolicyGated_TransferRejected(reason)</code> carrying the code in the red box. <code>canExecute</code> returns the same codes without reverting; it skips step 0 and writes nothing in step 7.</figcaption>
+    <figcaption class="wrap-any"><b>Message checks first, then the policy.</b> Checks 1 to 7, and the pause and the hook in step 9, revert with <code>PolicyGated_TransferRejected(reason)</code> carrying the code in the red box. <code>canExecute</code> returns the same codes without reverting. At step 0 it answers <code>NOT_EXECUTOR</code> when the account it names lacks the role, and at step 8 it writes nothing.</figcaption>
   </figure>
-  <ul class="plain">
-    <li><b>Times are inclusive.</b> The intent can run at the exact second of <code>deadline</code> and at the exact second of <code>validAfter</code>. An intent whose <code>validAfter</code> is later than its <code>deadline</code> can never run.</li>
-    <li><b>Step 8 is the ordinary movement path.</b> An amount within the balance but above the unfrozen part reverts with <code>ERC7943InsufficientUnfrozenBalance</code>, an amount above the balance with <code>ERC20InsufficientBalance</code>; <code>canExecute</code> answers <code>INSUFFICIENT_UNFROZEN</code> for both. A zero <code>to</code> reverts with OpenZeppelin's <code>ERC20InvalidReceiver</code> before the pause, frozen and hook checks, which <code>canExecute</code> does not reproduce: it returns whatever those checks say.</li>
-    <li><b>Any revert keeps the nonce.</b> Marking the nonce in step 7 is undone with everything else when a later step fails. An intent refused because the settlement window is closed can be submitted again once it opens, until its deadline.</li>
-    <li><b>What <code>canExecute</code> cannot see</b>: whether its caller holds <code>EXECUTOR_ROLE</code>, and the executor contract's own checks (its role, its pause, its refusal of a stated consideration).</li>
+  <ul class="plain wrap-any">
+    <li><b>The role comes first in both.</b> A caller without the role gets the access error whatever else is wrong (<code>test_WhenTheCallerLacksTheRole_TheRoleCheckComesFirst</code>), and <code>canExecute</code> says <code>NOT_EXECUTOR</code> before it looks at anything else (<code>test_TheRoleIsCheckedBeforeEverythingElseAsInTheCall</code>).</li>
+    <li><b>Times are inclusive.</b> The intent can run at the exact second of <code>deadline</code> and at the exact second of <code>validAfter</code> (<code>test_WhenDeadlineIsNow_ItExecutes</code>, <code>test_WhenValidAfterIsNow_ItExecutes</code>). An intent whose <code>validAfter</code> is later than its <code>deadline</code> does not run at any time (<code>test_WhenTheWindowIsEmpty_ItNeverExecutes</code>).</li>
+    <li><b>Step 9 is the ordinary movement path.</b> An amount within the balance but above the unfrozen part reverts with <code>ERC7943InsufficientUnfrozenBalance</code>, an amount above the balance with <code>ERC20InsufficientBalance</code>. <code>canExecute</code> answers <code>INSUFFICIENT_UNFROZEN</code> for both (<code>test_WhenTheSenderIsFrozen_TheIntentFailsAndPreflightAgrees</code>, <code>test_WhenTheAmountExceedsTheBalance_TheIntentRevertsWithTheBaseErrorAndPreflightAgrees</code>). It makes no <code>canTransfer</code>-style exception for a balance shortfall.</li>
+    <li><b>A revert keeps the nonce.</b> Marking the nonce in step 8 is undone with everything else when step 9 fails (<code>test_WhenHookRejects_ItRevertsAndKeepsTheNonceUnused</code>). An intent refused because the settlement window is closed can be submitted again once it opens, until its deadline.</li>
   </ul>
 </section>
 
 <section id="intent">
-  <div class="prose">
+  <div class="prose wrap-any">
     <h2>What the holder signs</h2>
     <p>A <code>TransferIntent</code> has ten fields, all fixed-size, signed as EIP-712 typed data with this type string (<code>TRANSFER_INTENT_TYPEHASH</code> is its <code>keccak256</code>):</p>
   </div>
@@ -244,70 +252,71 @@
       <tbody>
         <tr><td><code>from</code></td><td>The holder: the signer and the sender of the tokens.</td></tr>
         <tr><td><code>to</code></td><td>The receiver.</td></tr>
-        <tr><td><code>amount</code></td><td>The number of tokens to move.</td></tr>
+        <tr><td><code>amount</code></td><td>The number of tokens to move. An intent moves this amount or nothing.</td></tr>
         <tr><td><code>nonce</code></td><td>32 random bytes the signer chooses. Each value works once for that signer.</td></tr>
         <tr><td><code>deadline</code></td><td>The last second at which the intent can run.</td></tr>
-        <tr><td><code>ref</code></td><td>A 32-byte reference to an off-chain message, such as the hash of an ISO 20022 message id. It appears in the <code>IntentExecuted</code> event and in the context the rules receive. None of the deployed rules reads it.</td></tr>
-        <tr><td><code>executor</code></td><td>The only account allowed to submit it. Zero means any holder of <code>EXECUTOR_ROLE</code>.</td></tr>
+        <tr><td><code>ref</code></td><td>A 32-byte reference to an off-chain message, such as the hash of an ISO 20022 message id. It appears in the <code>IntentExecuted</code> event and in the context the rules receive. None of the shipped rules reads it, and the token does not check that it is unique.</td></tr>
+        <tr><td><code>executor</code></td><td>The one account allowed to submit it. Zero means any holder of <code>EXECUTOR_ROLE</code>.</td></tr>
         <tr><td><code>validAfter</code></td><td>The first second at which the intent can run. Zero means no lower bound.</td></tr>
-        <tr><td><code>considerationToken</code>, <code>considerationAmount</code></td><td>What the signer is to receive in return for this leg. They are signed, so nobody can change them, but the token never checks the payment itself: only the executor the intent names can enforce it.</td></tr>
+        <tr><td><code>considerationToken</code>, <code>considerationAmount</code></td><td>What the signer is to receive in return for this leg. They are signed, so nobody can change them. The token does not check the payment itself: the executor the intent names is the one that can enforce it.</td></tr>
       </tbody>
     </table>
   </div>
-  <div class="prose">
-    <p><b>The domain</b> ties a signature to one token on one chain: name is the token's name, version is <code>"1"</code>, then the chain id and the token's address (the proxy). It is the same domain as ERC-2612 <code>permit</code> on the same token, and the token reports it through <code>eip712Domain()</code> (ERC-5267). A signature made for another chain or another token fails with <code>BAD_SIGNATURE</code>.</p>
+  <div class="prose wrap-any">
+    <p><b>The domain</b> ties a signature to one token on one chain: name is the token's name, version is <code>"1"</code>, then the chain id and the token's address (the proxy). It is the same domain as ERC-2612 <code>permit</code> on the same token, and the token reports it through <code>eip712Domain()</code> (ERC-5267). A signature made for another chain or another token fails with <code>BAD_SIGNATURE</code> (<code>test_WhenSignedForAnotherChain_ItRevertsWithBadSignature</code>, <code>test_WhenSignedForAnotherToken_ItRevertsWithBadSignature</code>).</p>
   </div>
 </section>
 
 <section id="nonces">
-  <div class="prose">
+  <div class="prose wrap-any">
     <h2>Nonces and cancelling</h2>
-    <p>A <b>nonce</b> here is a random 32-byte value that makes each intent unique, in the style of ERC-3009. The token keeps one used-or-not flag per signer and nonce, nothing else. Because nonces are random rather than counted, the signer needs nothing from the chain to sign, can sign many intents at once, and the executor can run them in any order.</p>
-    <ul class="plain">
-      <li>Executing an intent marks its nonce used, so the same intent can never run twice (<code>NONCE_USED</code>).</li>
-      <li><code>cancelIntent(nonce)</code> marks one of the caller's own nonces used, so no intent signed with it can run. It needs no other field, works while the token is paused, and emits <code>IntentCancelled(signer, nonce)</code>. Cancelling a nonce that is already used reverts with <code>PolicyGated_TransferRejected(NONCE_USED)</code>. One account cancelling a value has no effect on another signer's nonce of the same value.</li>
-      <li>A cancel and an execution race: whichever transaction is mined first wins. There is no way to cancel after execution.</li>
+    <p>A <b>nonce</b> here is a random 32-byte value that makes each intent unique, in the style of ERC-3009. The token keeps one used-or-not flag per signer and nonce, and nothing else. Because nonces are random rather than counted, the signer needs nothing from the chain to sign, can sign many intents at once, and the executor can run them in any order.</p>
+    <ul class="plain wrap-any">
+      <li>Executing an intent marks its nonce used, so the same intent does not run twice (<code>NONCE_USED</code>; <code>check_executedIntentCannotReplay</code>).</li>
+      <li><code>cancelIntent(nonce)</code> marks one of the caller's own nonces used, so no intent that account signed with it can run. It needs no other field, works while the token is paused, and emits <code>IntentCancelled(from, nonce)</code>. Cancelling a nonce that is already used reverts with <code>PolicyGated_TransferRejected(NONCE_USED)</code>. An account that cancels a value has no effect on another signer's nonce of the same value (<code>test_WhenAnotherAccountCancels_ItDoesNotAffectTheSigner</code>).</li>
+      <li>A cancel and an execution race: whichever transaction is mined first wins. A used nonce stays used, and nothing undoes an execution.</li>
       <li><code>nonceUsed(signer, nonce)</code> tells whether a nonce is spent. These nonces are separate from the counter <code>nonces(owner)</code> that <code>permit</code> uses.</li>
     </ul>
   </div>
 </section>
 
 <section id="executor">
-  <div class="prose">
+  <div class="prose wrap-any">
     <h2>Naming an executor, and stating a payment</h2>
-    <p>Several contracts may hold <code>EXECUTOR_ROLE</code> on one token. In the deployment that is the <a href="IntentExecutor.html"><code>IntentExecutor</code></a>, which forwards intents one by one or in batches, and the <a href="DvPExecutor.html"><code>DvPExecutor</code></a>, which settles a security leg against a cash leg in one transaction. Two fields let the holder control which one runs the intent:</p>
+    <p>Several accounts may hold <code>EXECUTOR_ROLE</code> on one token. A product names which get it. The two executor contracts are the <a href="IntentExecutor.html"><code>IntentExecutor</code></a>, which forwards intents one by one or in batches, and the <a href="DvPExecutor.html"><code>DvPExecutor</code></a>, which settles a share trade against cash in one transaction. Two fields let the holder control which one runs the intent:</p>
   </div>
   <div class="table-wrap">
     <table class="tight">
       <thead><tr><th><code>executor</code></th><th>Consideration (token or amount)</th><th>Result</th></tr></thead>
       <tbody>
         <tr><td>zero</td><td>none</td><td class="ok">Any <code>EXECUTOR_ROLE</code> holder may run it.</td></tr>
-        <tr><td>zero</td><td>stated</td><td class="no">Never runs: <code>CONSIDERATION_NEEDS_EXECUTOR</code>.</td></tr>
-        <tr><td>an address</td><td>none or stated</td><td>Runs only when that address calls the token; any other caller gets <code>WRONG_EXECUTOR</code>.</td></tr>
+        <tr><td>zero</td><td>stated</td><td class="no">Refused from every caller: <code>CONSIDERATION_NEEDS_EXECUTOR</code>.</td></tr>
+        <tr><td>an address</td><td>none or stated</td><td>Runs when that address calls the token and holds the role. Any other role holder gets <code>WRONG_EXECUTOR</code>.</td></tr>
       </tbody>
     </table>
   </div>
-  <div class="prose">
-    <p>The token reads the consideration fields only for that check. It moves one token and cannot see a second leg, so it cannot tell whether the payment happened. An intent that states a payment therefore has to name the executor that will enforce it; otherwise any executor could run it and deliver the tokens without the payment. The <code>IntentExecutor</code> moves one token too, so it refuses every intent that states a consideration, whoever the intent names. The <code>DvPExecutor</code> is the one that checks the two legs describe one trade and runs them together, so the delivery and the payment happen in the same transaction or not at all.</p>
+  <div class="prose wrap-any">
+    <p>The token reads the consideration fields for that check and for nothing else, and they never reach the hook (<code>test_WhenConsiderationIsSetWithAnExecutor_ItExecutesAndTheHookSeesNoConsideration</code>). It moves one token and cannot see a second leg, so it cannot tell whether the payment happened. An intent that states a payment therefore has to name the executor that will enforce it; otherwise any executor could run it and deliver the tokens without the payment.</p>
+    <p>The <code>IntentExecutor</code> moves one token too, so it refuses every intent that states a consideration, whoever the intent names, with <code>IntentExecutor_ConsiderationNotSupported(index)</code>. The <code>DvPExecutor</code> checks that the two legs describe one trade and runs them together, so the delivery and the payment happen in the same transaction or not at all. An intent that states a payment and names some other account gets exactly what that account's code does, which is why a signer should check which contract the <code>executor</code> field names.</p>
   </div>
 </section>
 
 <section id="signature">
-  <div class="prose">
+  <div class="prose wrap-any">
     <h2>Signature checks</h2>
     <p>The token uses OpenZeppelin's <code>SignatureChecker</code>, which chooses the method by whether <code>from</code> has code:</p>
-    <ul class="plain">
-      <li><b>No code (an ordinary key):</b> the 65-byte signature is recovered with ECDSA. Only the low-<code>s</code> form is accepted, so a valid signature cannot be rewritten into a second valid one.</li>
+    <ul class="plain wrap-any">
+      <li><b>No code (an ordinary key):</b> the 65-byte signature is recovered with ECDSA. The low-<code>s</code> form is the one accepted, so a valid signature cannot be rewritten into a second valid one (<code>test_WhenSignatureIsMalleatedToHighS_ItRevertsWithBadSignature</code>).</li>
       <li><b>Code (a contract wallet):</b> the token asks the wallet with ERC-1271 <code>isValidSignature(hash, signature)</code>. That also covers an ordinary key with an EIP-7702 delegation, which has code; its wallet code must answer ERC-1271, or its intents fail with <code>BAD_SIGNATURE</code>.</li>
     </ul>
-    <p>Any change to any field, by the executor or anyone else, changes the digest and fails the check.</p>
+    <p>A change to any field, by the executor or anyone else, changes the digest and fails the check (<code>test_WhenTheExecutorAltersTheIntent_ItRevertsWithBadSignature</code>).</p>
   </div>
 </section>
 
 <section id="executed">
-  <div class="prose">
+  <div class="prose wrap-any">
     <h2>What the rules see</h2>
-    <p>The mixin moves the tokens with the base's <code>_moveAs(from, to, amount, EXECUTED, ref, deadline)</code>, which announces the kind for the single movement path. The hook receives:</p>
+    <p>The mixin moves the tokens with the base's <code>_moveAs(from, to, amount, EXECUTED, ref, deadline)</code>, which passes the kind to the one movement path. The hook receives:</p>
   </div>
   <div class="table-wrap">
     <table class="tight">
@@ -315,73 +324,101 @@
       <tbody>
         <tr><td><code>kind</code></td><td><span class="k k-executed">EXECUTED</span></td></tr>
         <tr><td><code>from</code>, <code>to</code>, <code>amount</code></td><td>From the intent.</td></tr>
-        <tr><td><code>operator</code></td><td>The account that called <code>executeTransfer</code>: the executor contract, not the holder.</td></tr>
-        <tr><td><code>extra</code></td><td><code>abi.encode(fromBalance, toBalance, ref, deadline)</code>: the two balances before the move, then the intent's reference and deadline. Rules that read only the balances decode the first two words.</td></tr>
+        <tr><td><code>operator</code></td><td>The account that called <code>executeTransfer</code>: the executor, not the holder. In <code>canExecute</code>, the account it names (<code>test_TheRulesSeeTheNamedAccountAsTheOperator</code>).</td></tr>
+        <tr><td><code>extra</code></td><td><code>abi.encode(fromBalance, toBalance, ref, deadline)</code>: the two balances before the move, then the intent's reference and deadline. Rules that read the balances decode the first two words.</td></tr>
       </tbody>
     </table>
   </div>
-  <div class="prose">
-    <p>The consideration fields never reach the hook. Among the deployed rules, the <a href="SettlementWindowRule.html">settlement window rule</a> judges only this kind: an executed intent passes only inside the token's daily window, on its enabled weekdays.</p>
+  <div class="prose wrap-any">
+    <p>Among the shipped rules, <a href="SettlementWindowRule.html"><code>SettlementWindowRule</code></a> judges this kind and no other: an executed intent passes inside the token's daily window, on its enabled weekdays. <a href="ExecutedOnlyRule.html"><code>ExecutedOnlyRule</code></a> looks at the same field from the other side: it refuses a plain transfer, so that movements between holders go through signed intents.</p>
   </div>
 </section>
 
 <section id="functions">
-  <div class="prose"><h2>What it can do</h2></div>
+  <div class="prose wrap-any"><h2>What it can do</h2></div>
   <div class="table-wrap">
     <table class="tight">
-      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th><th>Reverts</th></tr></thead>
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
       <tbody>
-        <tr><td><code>executeTransfer(intent, sig)</code></td><td><code>EXECUTOR_ROLE</code></td><td>Runs the checks, marks the nonce used, moves the tokens as <span class="k k-executed">EXECUTED</span>, emits <code>IntentExecuted</code>, returns the intent hash.</td><td><code>AccessControlUnauthorizedAccount</code>, <code>PolicyGated_TransferRejected(reason)</code>, the balance errors, <code>ERC20InvalidReceiver</code></td></tr>
-        <tr><td><code>canExecute(intent, sig)</code></td><td>Anyone (read-only); the caller is taken as the executor</td><td>Returns <code>(ok, reason)</code> for the same checks in the same order.</td><td></td></tr>
-        <tr><td><code>cancelIntent(nonce)</code></td><td>Anyone, for their own nonces</td><td>Marks the nonce used. Emits <code>IntentCancelled</code>.</td><td><code>PolicyGated_TransferRejected(NONCE_USED)</code></td></tr>
-        <tr><td><code>intentHash(intent)</code></td><td>Anyone (read-only)</td><td>The EIP-712 digest the holder signs.</td><td></td></tr>
-        <tr><td><code>nonceUsed(signer, nonce)</code></td><td>Anyone (read-only)</td><td>Whether the nonce is used or cancelled.</td><td></td></tr>
-        <tr><td><code>EXECUTOR_ROLE()</code>, <code>TRANSFER_INTENT_TYPEHASH()</code></td><td>Anyone (read-only)</td><td>The role id and the type hash.</td><td></td></tr>
-        <tr><td><code>supportsInterface(id)</code></td><td>Anyone (read-only)</td><td>Adds <code>ITransferIntent</code> to what the base reports.</td><td></td></tr>
+        <tr><td><code>executeTransfer(intent, sig)</code></td><td><code>EXECUTOR_ROLE</code></td><td>Runs the checks, marks the nonce used, moves the tokens as <span class="k k-executed">EXECUTED</span>, emits <code>IntentExecuted</code>, returns the intent hash.</td></tr>
+        <tr><td><code>canExecute(intent, sig, executor)</code></td><td>Anyone (read-only)</td><td>Returns <code>(ok, reason)</code> for the same checks in the same order, as they would run from <code>executor</code>. The answer does not depend on who asks (<code>test_TheAnswerDoesNotDependOnWhoAsks</code>).</td></tr>
+        <tr><td><code>cancelIntent(nonce)</code></td><td>Anyone, for their own nonces</td><td>Marks the nonce used. Emits <code>IntentCancelled</code>.</td></tr>
+        <tr><td><code>intentHash(intent)</code></td><td>Anyone (read-only)</td><td>The EIP-712 digest the holder signs.</td></tr>
+        <tr><td><code>nonceUsed(signer, nonce)</code></td><td>Anyone (read-only)</td><td>Whether the nonce is used or cancelled.</td></tr>
+        <tr><td><code>EXECUTOR_ROLE()</code>, <code>TRANSFER_INTENT_TYPEHASH()</code></td><td>Anyone (read-only)</td><td>The role id and the type hash.</td></tr>
+        <tr><td><code>supportsInterface(interfaceId)</code></td><td>Anyone (read-only)</td><td>Adds <code>ITransferIntent</code> to what the base reports.</td></tr>
       </tbody>
     </table>
   </div>
-  <div class="prose"><p class="small"><code>EXECUTOR_ROLE</code> is granted and revoked by <code>DEFAULT_ADMIN_ROLE</code>, the main timelock, like every role on the token.</p></div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Event or error</th><th>When</th></tr></thead>
+      <tbody>
+        <tr><td><code>IntentExecuted(intentHash, from, to, amount, executor, ref)</code></td><td>After the balances have moved and the hook's <code>afterTransfer</code> has run.</td></tr>
+        <tr><td><code>IntentCancelled(from, nonce)</code></td><td>A signer cancels a nonce.</td></tr>
+        <tr><td><code>PolicyGated_TransferRejected(reason)</code></td><td>Any check above that carries a reason code: <code>INTENT_EXPIRED</code>, <code>NONCE_USED</code>, <code>CONSIDERATION_NEEDS_EXECUTOR</code>, <code>WRONG_EXECUTOR</code>, <code>INTENT_NOT_YET_VALID</code>, <code>ZERO_RECEIVER</code>, <code>BAD_SIGNATURE</code>, <code>PAUSED</code>, or a rule's reason. <code>NOT_EXECUTOR</code> is <code>canExecute</code>'s answer; the write reverts with the access error instead.</td></tr>
+        <tr><td><code>AccessControlUnauthorizedAccount</code></td><td><code>executeTransfer</code> from an account without the role.</td></tr>
+        <tr><td><code>ERC7943InsufficientUnfrozenBalance</code>, <code>ERC20InsufficientBalance</code></td><td>The amount does not fit, as in any movement.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose wrap-any"><p class="small"><code>EXECUTOR_ROLE</code> is granted and revoked by <code>DEFAULT_ADMIN_ROLE</code>, the main timelock after hand-over, like every role on the token. Everything else on the token comes from <a href="PolicyGatedERC20Upgradeable.html#functions">the base</a>.</p></div>
 </section>
 
 <section id="why">
-  <div class="prose">
+  <div class="prose wrap-any">
     <h2>Why it is built this way</h2>
-    <ul class="plain">
+    <ul class="plain wrap-any">
       <li><b>The holder keeps the keys; the issuer keeps the timing.</b> The holder authorises once, off-chain, and pays no gas. Settlement happens when the executor runs the intent, not when it is signed.</li>
-      <li><b>The executor can only run it or not.</b> Every field is inside the signed digest, so there is nothing an executor can adjust.</li>
-      <li><b>Message checks live in the mixin, policy lives in the hook.</b> Deadline, nonce, executor, payment field, start time and signature are facts about the signed message, not decisions about who may hold the token, so they are not rules. Once the message is sound, the movement takes the same path as every other and the same rules decide.</li>
-      <li><b>Binding stops a leg from running alone.</b> An intent written for a delivery-versus-payment trade names the DvP executor, so no other executor can deliver its tokens without the cash leg.</li>
-      <li><b>Pre-flight never lies.</b> <code>canExecute</code> reuses the private check function and the base's checks, so its answer is the reason <code>executeTransfer</code> would revert with.</li>
-      <li><b>No state beyond nonces.</b> The mixin stores only the used-nonce flags, in its own ERC-7201 namespace (<code>gated.storage.IntentSettled</code>). Executors hold no intents and no nonces, so replacing an executor loses nothing.</li>
+      <li><b>The executor can run it or not.</b> Every field is inside the signed digest, so there is nothing an executor can adjust.</li>
+      <li><b>Message checks live in the mixin, policy lives in the hook.</b> Deadline, nonce, executor, payment field, start time, receiver and signature are facts about the signed message, not decisions about who may hold the token, so they are not rules. Once the message is sound, the movement takes the same path as every other and the same rules decide.</li>
+      <li><b>Binding stops a leg from running alone.</b> An intent written for a delivery-versus-payment trade names the DvP executor, so no other executor can deliver its tokens without the cash leg (<code>check_intentNamingAnotherExecutorNeverExecutes</code>).</li>
+      <li><b>The pre-flight names the caller.</b> <code>canExecute</code> takes the account that would call, so a relayer or a monitor can ask from any address and get the answer for that executor. It reuses the private check function and the base's checks.</li>
+      <li><b>No state beyond nonces.</b> The mixin stores the used-nonce flags and nothing else, in its own ERC-7201 namespace (<code>gated.storage.IntentSettled</code>). Executors hold no intents and no nonces, so there are none to move when one is replaced. An intent that names the replaced executor does not run from its successor (<code>WRONG_EXECUTOR</code>), so its holder signs a fresh one; an intent that names no executor can run from the successor.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="prose wrap-any">
+    <h2>What it does not do</h2>
+    <ul class="plain wrap-any">
+      <li><b>It does not enforce a stated payment.</b> It hashes the consideration fields into the digest and rejects them without a named executor. Whether the payment happens is up to the executor's code.</li>
+      <li><b>It is not the only way to move the token.</b> A holder can still use <code>transfer</code>, and a window rule that judges <span class="k k-executed">EXECUTED</span> does not bind it, unless the token also lists <code>ExecutedOnlyRule</code>.</li>
+      <li><b>Signing reserves nothing.</b> The token does not know an intent exists until it is submitted. The balance can change meanwhile, and the intent then fails on the amount or the rules.</li>
+      <li><b>It does not limit when within its dates an intent runs.</b> The executor chooses the moment and the order. A short <code>deadline</code> is the holder's control, and cancelling takes a transaction from the signer (for a contract wallet, the wallet's own call).</li>
+      <li><b><code>canExecute</code> does not see the executor contract.</b> It answers for the token alone: not the executor's <code>OPERATOR_ROLE</code>, its pause, or its refusal of a stated consideration.</li>
+      <li><b><code>canExecute</code> answers for the latest block,</b> and a write lands in the next one, so at a deadline or a <code>validAfter</code> they can differ by one second (<code>test/nodejs/time.test.ts</code>). A contract wallet's ERC-1271 answer can also change between the two.</li>
+      <li><b>It does not limit who holds the role.</b> <code>EXECUTOR_ROLE</code> can be granted to any account by the token's admin. The post-deploy check confirms that the executors a product names hold it and that none of the deployment's wallets does. It does not ask about an executor the product does not name.</li>
     </ul>
   </div>
 </section>
 
 <section id="connected">
-  <div class="prose"><h2>Connected to</h2></div>
+  <div class="prose wrap-any"><h2>Connected to</h2></div>
   <div class="cards">
-    <a class="card" href="PolicyGatedERC20Upgradeable.html"><span class="name">PolicyGatedERC20Upgradeable</span><p>The base whose single movement path settles every intent.</p></a>
+    <a class="card" href="PolicyGatedERC20Upgradeable.html"><span class="name">PolicyGatedERC20Upgradeable</span><p>The base whose one movement path settles every intent.</p></a>
     <a class="card" href="IntentToken.html"><span class="name">IntentToken</span><p>The template that includes this mixin.</p></a>
     <a class="card" href="IntentExecutor.html"><span class="name">IntentExecutor</span><p>Submits intents one by one or in atomic batches, and refuses stated payments.</p></a>
-    <a class="card" href="DvPExecutor.html"><span class="name">DvPExecutor</span><p>Settles a security intent against its payment in one transaction.</p></a>
+    <a class="card" href="DvPExecutor.html"><span class="name">DvPExecutor</span><p>Settles a share trade against its payment in one transaction.</p></a>
     <a class="card" href="SettlementWindowRule.html"><span class="name">SettlementWindowRule</span><p>The rule that limits executed intents to settlement hours.</p></a>
+    <a class="card" href="ExecutedOnlyRule.html"><span class="name">ExecutedOnlyRule</span><p>The rule that makes signed intents the way holders move a token.</p></a>
     <a class="card" href="../movement.html"><span class="name">One movement</span><p>The full path of a movement through the token and its rules.</p></a>
   </div>
 </section>
 
 <section id="source">
-  <div class="prose">
+  <div class="prose wrap-any">
     <h2>Source and tests</h2>
-    <ul class="plain">
-      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/mixins/IntentSettledUpgradeable.sol"><code>contracts/mixins/IntentSettledUpgradeable.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/interfaces/ITransferIntent.sol"><code>ITransferIntent.sol</code></a></li>
-      <li>Unit tests: <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/mixins/IntentSettledUpgradeable.t.sol"><code>IntentSettledUpgradeable.t.sol</code></a> (replay, expiry, wrong chain or token, high-<code>s</code> malleability, ERC-1271 wallets, executor binding, start time, consideration, the check order, cancelling, and <code>canExecute</code> parity)</li>
-      <li>Integration: <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/tokens/IntentToken.t.sol"><code>IntentToken.t.sol</code></a> (real registry and hook), <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/test/nodejs/intents.test.ts"><code>test/nodejs/intents.test.ts</code></a> (a real wallet's <code>signTypedData</code> settling through the executor), and the Halmos proofs in <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/test/halmos/IntentTokenHalmos.t.sol"><code>IntentTokenHalmos.t.sol</code></a> (no replay, a cancelled nonce never runs, a bound intent never runs from another caller, a stated payment with no executor never runs)</li>
+    <ul class="plain wrap-any">
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/mixins/IntentSettledUpgradeable.sol"><code>contracts/mixins/IntentSettledUpgradeable.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/ITransferIntent.sol"><code>ITransferIntent.sol</code></a></li>
+      <li>Unit tests: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/mixins/IntentSettledUpgradeable.t.sol"><code>IntentSettledUpgradeable.t.sol</code></a> (replay, expiry, wrong chain or token, high-<code>s</code> malleability, ERC-1271 wallets, executor binding, start time, consideration, the check order, cancelling, and <code>canExecute</code> parity)</li>
+      <li>Integration: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/tokens/IntentToken.t.sol"><code>IntentToken.t.sol</code></a> (real registry and hook), <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/intents.test.ts"><code>test/nodejs/intents.test.ts</code></a> (a real wallet's <code>signTypedData</code> settling through the executor), <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/time.test.ts"><code>test/nodejs/time.test.ts</code></a> (inclusive times), and the Halmos properties in <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/test/halmos/IntentTokenHalmos.t.sol"><code>IntentTokenHalmos.t.sol</code></a>: <code>check_executedIntentCannotReplay</code>, <code>check_cancelledNonceNeverExecutes</code>, <code>check_intentNamingAnotherExecutorNeverExecutes</code>, <code>check_considerationWithoutExecutorNeverExecutes</code></li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>cd1e525</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>babef08</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>
