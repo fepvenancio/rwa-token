@@ -131,7 +131,10 @@ contract NavDesk is INavDesk {
   ) external {
     _onlyRole(_DEFAULT_ADMIN_ROLE);
     if (_feeModel != address(0)) {
+      // View interfaces, compiled to STATICCALL: nothing re-enters before the writes below.
+      // aderyn-ignore-next-line(reentrancy-state-change)
       IPolicyRegistry _registry = IPolicyRegistry(IPolicyGated(VAULT).registry());
+      // aderyn-ignore-next-line(reentrancy-state-change)
       if (!_registry.isAttested(_feeModel, IPolicyRegistry.AttestKind.FEE_MODEL)) {
         revert NavDesk_FeeModelRefused(_feeModel);
       }
@@ -139,6 +142,7 @@ contract NavDesk is INavDesk {
         // Zero means no mark yet, not a balance.
         // slither-disable-next-line incorrect-equality
         if (mark == 0) {
+          // aderyn-ignore-next-line(reentrancy-state-change)
           mark = IERC4626(VAULT).convertToAssets(_PRICE_SCALE);
           markMovedAt = block.timestamp;
         }
@@ -259,8 +263,11 @@ contract NavDesk is INavDesk {
     // aderyn-ignore-next-line(reentrancy-state-change)
     if (_adopted || _old.VAULT() != VAULT || _old.proposal().period != 0) revert NavDesk_CannotAdopt();
     _adopted = true;
+    // aderyn-ignore-next-line(reentrancy-state-change)
     lastCutoff = _old.lastCutoff();
+    // aderyn-ignore-next-line(reentrancy-state-change)
     mark = _old.mark();
+    // aderyn-ignore-next-line(reentrancy-state-change)
     markMovedAt = _old.markMovedAt();
     lastFeeAt = _old.lastFeeAt();
     emit DeskAdopted(_oldDesk);
