@@ -5,7 +5,7 @@ pragma solidity ^0.8.28;
  * @title Quals
  * @notice Qualification bits shared by `ICredentialRegistry` records and `ICredentialRule` policies. The registry never
  *         interprets them: an attester sets the bits it vouches for, and each token's policy says which bits it needs.
- *         Bits 0 to 7 are named here, bits 8 to 15 are reserved for later shared meanings, and bits 16 to 31 are free
+ *         Bits 0 to 9 are named here, bits 10 to 15 are reserved for later shared meanings, and bits 16 to 31 are free
  *         for a deployment's own use
  * @dev What a bit means in law is for the attester and its counsel to define, and an issuer should have the wording
  *      reviewed before relying on it. The names are conveniences, not legal categories
@@ -29,5 +29,9 @@ library Quals {
   uint32 internal constant CUSTOMER = 1 << 6;
   /// @notice Infrastructure: a vault, escrow, treasury or other address that holds tokens for the system
   uint32 internal constant INFRA = 1 << 7;
+  /// @notice A US person, for an offering that restricts or targets them
+  uint32 internal constant US_PERSON = 1 << 8;
+  /// @notice A person in the European Economic Area, for an offering that restricts or targets them
+  uint32 internal constant EEA = 1 << 9;
 }
 // solhint-enable private-vars-leading-underscore

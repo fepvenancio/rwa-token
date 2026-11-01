@@ -89,8 +89,8 @@ abstract contract Gated4626VaultPortfolioTest is Test {
     );
     _rule.setPolicy(address(_vault), Quals.KYC, 0, 0, 1);
     _vault.grantRole(_ALLOCATOR_ROLE, _allocator);
-    _creds.set(_alice, uint64(block.timestamp + 3650 days), Quals.KYC, 756);
-    _creds.set(_bob, uint64(block.timestamp + 3650 days), Quals.KYC, 756);
+    _creds.set(_alice, uint64(block.timestamp + 3650 days), Quals.KYC);
+    _creds.set(_bob, uint64(block.timestamp + 3650 days), Quals.KYC);
 
     address[2] memory _accounts = [_alice, _bob];
     for (uint256 _i; _i < 2; ++_i) {

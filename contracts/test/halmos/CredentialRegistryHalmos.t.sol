@@ -43,11 +43,11 @@ contract CredentialRegistryHalmos is Test {
     uint256 _later
   ) external {
     vm.assume(_validUntil > block.timestamp);
-    _registry.set(_subject, _validUntil, Quals.KYC, 756);
+    _registry.set(_subject, _validUntil, Quals.KYC);
     vm.assume(_later >= block.timestamp && _later <= type(uint64).max);
     vm.warp(_later);
 
-    (ICredentialRegistry.Status _status,,,) = _registry.profileOf(_subject);
+    (ICredentialRegistry.Status _status,,) = _registry.profileOf(_subject);
     if (_later <= _validUntil) assert(_status == ICredentialRegistry.Status.ACTIVE);
     else assert(_status == ICredentialRegistry.Status.LAPSED);
   }
@@ -60,13 +60,13 @@ contract CredentialRegistryHalmos is Test {
   ) external {
     _registry.blockSubject(_subject);
     vm.assume(_validUntil > block.timestamp);
-    _registry.set(_subject, _validUntil, _quals, 756);
-    (ICredentialRegistry.Status _afterSet,,,) = _registry.profileOf(_subject);
+    _registry.set(_subject, _validUntil, _quals);
+    (ICredentialRegistry.Status _afterSet,,) = _registry.profileOf(_subject);
     assert(_afterSet == ICredentialRegistry.Status.BLOCKED);
 
     vm.assume(_status >= 1 && _status <= 3);
     _registry.setStatus(_subject, ICredentialRegistry.Status(_status));
-    (ICredentialRegistry.Status _afterStatus,,,) = _registry.profileOf(_subject);
+    (ICredentialRegistry.Status _afterStatus,,) = _registry.profileOf(_subject);
     assert(_afterStatus == ICredentialRegistry.Status.BLOCKED);
   }
 
@@ -110,7 +110,7 @@ contract CredentialRegistryHalmos is Test {
     uint64 _issuedAt
   ) internal view returns (ICredentialRegistry.Credential memory _c) {
     _c = ICredentialRegistry.Credential({
-      subject: _subject, validUntil: _validUntil, quals: Quals.KYC, country: 756, issuedAt: _issuedAt, attester: 1
+      subject: _subject, validUntil: _validUntil, quals: Quals.KYC, issuedAt: _issuedAt, attester: 1
     });
   }
 
@@ -120,7 +120,7 @@ contract CredentialRegistryHalmos is Test {
     uint8 _status
   ) external {
     vm.assume(_validUntil > block.timestamp);
-    _registry.set(_subject, _validUntil, Quals.KYC, 756);
+    _registry.set(_subject, _validUntil, Quals.KYC);
     uint64 _first = _registry.recordOf(_subject).issuedAt;
     vm.warp(block.timestamp + 1 hours);
 

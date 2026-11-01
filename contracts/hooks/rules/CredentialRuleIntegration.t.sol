@@ -50,7 +50,7 @@ contract CredentialRuleIntegrationTest is IntentTokenIntegrationTest {
     uint256 _validFor
   ) internal {
     vm.prank(_kyc);
-    _creds.set(_who, uint64(block.timestamp + _validFor), _quals, 756);
+    _creds.set(_who, uint64(block.timestamp + _validFor), _quals);
   }
 
   function _transferWithParity(

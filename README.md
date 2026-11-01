@@ -26,14 +26,22 @@ Gated4626Vault (ERC-4626, gated max*, decimals offset 6), Gated7540Vault (ERC-75
 ComplianceHook (one per deployment, immutable) ──► per token, an ordered list of ≤16 attested IComplianceRule (first
                                                  rejection wins); a token installs its own list when it is initialised
 CredentialRegistry (one per deployment)          who vouched for an address, what it is, until when, and its standing
-CredentialRule, MinPositionRule, HolderRestrictionRule, SettlementWindowRule   hook-agnostic, shared across
-                                                 tokens; per-token config authorised live by the token's own roles
+CredentialRule, MinPositionRule, HolderRestrictionRule, SettlementWindowRule, SupplyCapRule, ExecutedOnlyRule
+                                                 hook-agnostic, shared across tokens; per-token config authorised live by
+                                                 the token's own roles
 Fund (one per fund, owned by the timelock)       its classes, investor count and per-investor class mask
 FundHoldersRule (one per fund)                   the rule in every class's hook that feeds the fund and enforces its cap
-PolicyRegistry (one per deployment, immutable)  codehash allowlist: HOOK / RULE / IMPLEMENTATION
+PolicyRegistry (one per deployment, immutable)  codehash allowlist: HOOK / RULE / IMPLEMENTATION / PORTFOLIO /
+                                                 ADAPTER / VALIDATOR / FEE_MODEL
 IntentExecutor (immutable)                       replaceable, role-gated submitter: execute + atomic executeBatch; refuses
                                                  an intent that states a consideration (it cannot enforce a payment)
 DvPExecutor (immutable)                          role-gated: settles a share trade against cash, both legs or neither
+SignedEntry (immutable)                          enters a vault on one signature, a relayer paying the gas
+Portfolio (one per vault, immutable)             where the vault's money may go: idle, or adapters within caps
+GuardedAccount, ERC4626Adapter                   the adapters: a custodian's account with default-deny calls, an outside vault
+NavDesk (one per 7540 vault, immutable)          a reported value becomes a price two people approved, on a schedule
+FeeModel (immutable)                             one view: the fee on a gross value, with a high-water mark and a hurdle
+Distributor (one per token, immutable)           pays holders from an approved, funded Merkle root
 ```
 
 | Path | Contents |
@@ -44,10 +52,12 @@ DvPExecutor (immutable)                          role-gated: settles a share tra
 | `contracts/identity/` | `CredentialRegistry` |
 | `contracts/deploy/` | `ProxyDeployer`, `TokenProxy` |
 | `contracts/mixins/`, `contracts/tokens/` | `IntentSettledUpgradeable`, `GatedToken`, `IntentToken` |
-| `contracts/hooks/` | `ComplianceHook`, `BaseRule`, `rules/` `CredentialRule`, `MinPositionRule`, `HolderRestrictionRule`, `SettlementWindowRule`, `FundHoldersRule` (in the recommended order) |
+| `contracts/hooks/` | `ComplianceHook`, `BaseRule`, `rules/` `CredentialRule`, `MinPositionRule`, `HolderRestrictionRule`, `SettlementWindowRule`, `FundHoldersRule` (in the recommended order), `SupplyCapRule`, `ExecutedOnlyRule` |
 | `contracts/fund/` | `Fund` |
-| `contracts/portfolio/` | `Portfolio`, `ERC4626Adapter`: where one vault's money may go. No vault plugs one in yet |
-| `contracts/intents/` | `IntentExecutor`, `DvPExecutor` |
+| `contracts/portfolio/` | `Portfolio`, `ERC4626Adapter`, `GuardedAccount`, `ERC20CallValidator`, `ERC4626CallValidator`: where one vault's money may go |
+| `contracts/nav/` | `NavDesk`, `FeeModel`: a 7540's price and the fee on it |
+| `contracts/distribution/` | `Distributor`: dividends and coupons |
+| `contracts/intents/` | `IntentExecutor`, `DvPExecutor`, `SignedEntry` |
 | `contracts/vaults/` | `Gated4626Vault`, `Gated7540Vault` |
 | `contracts/test/` | Test helpers and mocks, interface-freeze and contract-size guards, Halmos properties |
 
@@ -78,13 +88,14 @@ can change its own.
 | `ATTESTER_ROLE` (registry) | security council | none | attest / revoke codehashes |
 | `GUARDIAN_ROLE` (credential registry) | multisig | none | block an address or kill an attester, and nothing else; the main or recovery timelock undoes it |
 | attester (credential registry) | KYC provider, an account in the registry (≤ 64) | none | write a credential for an address within the qualification bits it may assert, or sign one that anyone submits; it can overwrite only an empty address, a record it wrote, or a killed attester's, and change the status only of records it wrote. The compromise limits are on the [`CredentialRegistry` page](docs/contracts/CredentialRegistry.html#compromise) |
-| token `DEFAULT_ADMIN_ROLE` → rules | timelock | ≥ 24 hours | set a token's credential policy, its minimum position and its exemptions and its settlement window |
+| token `DEFAULT_ADMIN_ROLE` → rules | timelock | ≥ 24 hours | set a token's credential policy, its minimum position and its exemptions, its settlement window and its supply cap |
 | `ProxyDeployer` owner | operations account | none | place a new product, only over an attested implementation. It touches nothing that exists |
 | `Fund` owner | timelock | ≥ 24 hours | register a class, set the fund's rule and investor cap, exempt an account. Only the installed rule records which classes an account holds |
 | token `AGENT_ROLE` → rules | issuer | none | set or clear per-holder lockups, freeze or unfreeze a holder (`HolderRestrictionRule`) |
 | `ALLOCATOR_ROLE` (on a vault, asked by its `Portfolio` and `GuardedAccount`s) | fund manager | none | send money to an installed adapter within caps, bring it back, choose the liquidity adapter |
 | `SETTLER_ROLE` (7540 vault) | a `NavDesk` | none | close and settle periods; take a request back once its period has closed |
 | `REPORTER_ROLE`, `CHECKER_ROLE` (on a vault, asked by its `NavDesk`) | fund administration; risk or the depositary | none | propose a price; accept or cancel one. Never the same account |
+| `DISTRIBUTION_MAKER_ROLE`, `CHECKER_ROLE` (on a token, asked by its `Distributor`) | corporate actions; a second function | none | propose a distribution; approve one and pull its funding. Never the same account |
 
 - **Attested code only.** Hooks, rules and implementations are installed only if their runtime codehash is attested.
   Attestation is checked at install time; revoking it later does not silently change a live token.
@@ -137,7 +148,9 @@ can change its own.
 
 One core per issuer, then one product at a time, so an issuer runs many products on one set of timelocks, one guardian, one
 hook and one credential registry, and a client is verified once. Someone who wants one product alone deploys the core and
-that product, with the same code. `ignition/profiles.ts` names the combinations: `full`, `token`, `vault4626`, `vault7540`.
+that product, with the same code. `ignition/profiles.ts` names the combinations: `token`, `vault4626`, `vault7540` (a fund with one custodian and a desk),
+`managed-fund` (custodians, a mandate and fees, no on-chain yield), `vault4626-invest` (an instant vault investing through a
+portfolio), and `full`, which keeps a plain settler account so that a test can price at will.
 `PROFILE` chooses one for `hardhat ignition deploy`, and `PRODUCT` one of its products; `full` and its first product are the
 defaults. Each module takes the addresses the earlier ones produced as parameters. `test/nodejs/fixtures.ts` runs this
 exact sequence on the local network, playing the council and the KYC attester, and ends with the post-deploy checks below.
@@ -152,7 +165,7 @@ exact sequence on the local network, playing the council and the KYC attester, a
    - `ProxyDeployer` (owner = deployer until `CoreHandover`, registry = the `PolicyRegistry`);
    - and only what the profile's products use:
      - the `CredentialRegistry` (admin = deployer until `CoreHandover`, guardian = the guardian multisig) and the `CredentialRule` that reads it;
-     - each other listed rule: `MinPositionRule`, `HolderRestrictionRule`, `SettlementWindowRule`;
+     - each other listed rule: `MinPositionRule`, `HolderRestrictionRule`, `SettlementWindowRule`, `SupplyCapRule`, `ExecutedOnlyRule`;
      - one implementation per template, shared by every product of that template;
      - `IntentExecutor` and `DvPExecutor` (neither is attested).
 
@@ -196,8 +209,14 @@ exact sequence on the local network, playing the council and the KYC attester, a
    (`FUND()`): the rule's codehash covers the fund's address, not the fund's code. Check the fund's runtime code against the
    manifest's `Fund` entry, filling its `immutableSlots` (the registry address) as for the rules, and that its `owner()` is the
    operations account. `Fund` itself is not attested.
-5. **`Product`** (the operations account), once per product. The first and the fiftieth follow this same path, and none waits
-   for a timelock, because a launch only adds a proxy over attested code:
+5. **`Legos`, then `Product`** (the operations account), once per product. The first and the fiftieth follow this same path,
+   and none waits for a timelock, because a launch only adds a proxy over attested code. A product with a desk, a portfolio or
+   fees first runs `Legos`, which builds them against `ProxyDeployer.predict(symbol, implementation)`, because each names its
+   vault: the `NavDesk`, the `Portfolio`, a `GuardedAccount` and `ERC20CallValidator` per custodian, an `ERC4626Adapter` per
+   outside vault, and the `FeeModel` (parameters `vault`, `asset`, `feeRecipient`, `custodianAccount` for a desk with no
+   portfolio, `custodian_<key>`, `target_<key>`). The council then attests them: the portfolio as `PORTFOLIO`, each account and
+   adapter as `ADAPTER`, each validator as `VALIDATOR`, the fee model as `FEE_MODEL`. The desk is not attested: it acts by the
+   role `Product` grants it. `Product` takes their addresses as parameters and does this:
    - `ProxyDeployer.deploy(symbol, implementation, initData, hook, expectedRules)`. The init data carries the
      token's rule list, which the token installs on the shared hook itself. `deploy` first refuses an implementation
      that its registry has not attested as `IMPLEMENTATION`. It initialises in the same transaction, then checks that the
@@ -207,12 +226,14 @@ exact sequence on the local network, playing the council and the KYC attester, a
      call waits for it, so a token that fails its checks grants nothing;
    - configure what the product lists: its credential policy ("`KYC` from attester 0" unless the profile states another; until
      a token has its policy its rule admits no receiver), its settlement window, its minimum position (parameter
-     `minPosition`; 0, the default, switches the rule off). A product that lists the fund rule names its fund, and takes that
+     `minPosition`; 0, the default, switches the rule off), its supply cap (parameter `supplyCap`; none admits no mint), and
+     its legos: the portfolio's adapters, caps and permissions, and the desk's or the vault's plugs. A product that lists the fund rule names its fund, and takes that
      fund's rule as the parameter `fundHoldersRule`, but never touches the fund, so a launch cannot fail on one. Nothing is set
      for the escrow: the 7540 vault is the token itself, which neither the fund rule nor the minimum counts;
    - grant roles: AGENT to the issuer's account, **UPGRADER to the timelock only**, RECOVERY to the recovery timelock; MINTER and
      BURNER on a `GatedToken` or `IntentToken`; EXECUTOR on an `IntentToken` to the executors the product names; SETTLER on a
-     7540 vault to its `NavDesk`, and REPORTER and CHECKER to two different accounts;
+     7540 vault to its `NavDesk`, and REPORTER and CHECKER to two different accounts; ALLOCATOR on a vault with a portfolio to
+     the fund manager;
    - hand over: DEFAULT_ADMIN_ROLE to the timelock, and the operations account renounces it.
 6. **`FundOpen`** (the operations account), once per fund, after its first classes are placed (parameters `fundContract`,
    `fundHoldersRule`, `holderCap`, `timelock` and a `class_<key>` for each class): install the rule, set the cap, register the
@@ -245,6 +266,12 @@ exact sequence on the local network, playing the council and the KYC attester, a
    - each fund's owner is the timelock, its rule is the attested `FundHoldersRule` whose `FUND()` is that fund, its cap is the
      intended one, its classes are the ones it opened with, in order, and every class is intact (`firstBrokenClass()` is the
      zero address);
+   - a product's legos name it and are wired as its profile says: the desk alone holds `SETTLER_ROLE`, the portfolio and the
+     fee model are plugged in and attested, the adapters are the listed ones, each attested, and the reporter, the checker and
+     the allocator are different accounts;
+   - `MINTER_ROLE`, `BURNER_ROLE`, `AGENT_ROLE` and a desk-less fund's `SETTLER_ROLE` sit with a Safe of at least 2 signers,
+     unless the profile's `singleSigners` names the role, for example for an MPC custody wallet whose policy engine does the same
+     job. The demo profiles name all four, so a real deployment has to state its own;
    - `getMinDelay() ≥ 24 hours` on both timelocks.
 
    The recovery timelock's proposer and executor is the governance multisig. A compromised governance multisig is
@@ -292,7 +319,7 @@ pip install --require-hashes -r ci/requirements.txt   # slither + halmos with ev
 ```
 
 ```bash
-npm run test:halmos   # symbolic properties: nonce/signature, frozen-balance, intent executor-binding, minimum-position, credential registry, fund and DvP paths
+npm run test:halmos   # symbolic properties: nonce/signature, frozen-balance, intent executor-binding, minimum-position, credential registry, fund, portfolio caps and DvP paths
 ```
 
 ```bash

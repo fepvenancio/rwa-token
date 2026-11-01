@@ -62,5 +62,9 @@ library Reasons {
   bytes32 internal constant NOT_EXECUTOR = keccak256('NOT_EXECUTOR');
   /// @notice The intent pays the zero address
   bytes32 internal constant ZERO_RECEIVER = keccak256('ZERO_RECEIVER');
+  /// @notice A mint would take the supply above the token's cap
+  bytes32 internal constant ABOVE_SUPPLY_CAP = keccak256('ABOVE_SUPPLY_CAP');
+  /// @notice The token's movements between holders must be signed intents, and this one is a plain transfer
+  bytes32 internal constant TRANSFER_NOT_EXECUTED = keccak256('TRANSFER_NOT_EXECUTED');
 }
 // solhint-enable private-vars-leading-underscore

@@ -63,9 +63,7 @@ contract CredentialRuleUnitTest is Helpers {
     uint8 _attester
   ) internal {
     vm.mockCall(
-      _registry,
-      abi.encodeCall(ICredentialRegistry.profileOf, (_who)),
-      abi.encode(_status, _quals, uint16(0), _attester)
+      _registry, abi.encodeCall(ICredentialRegistry.profileOf, (_who)), abi.encode(_status, _quals, _attester)
     );
   }
 

@@ -32,16 +32,18 @@ In scope, all under `contracts/` (`.t.sol` files and `contracts/test/` are test 
 | Base | `base/PolicyGatedERC20Upgradeable` |
 | Templates | `tokens/GatedToken`, `tokens/IntentToken`, `vaults/Gated4626Vault`, `vaults/Gated7540Vault` |
 | Mixin | `mixins/IntentSettledUpgradeable` |
-| Policy | `hooks/ComplianceHook` (one per deployment, shared by every token), `hooks/BaseRule`, `hooks/rules/{Credential,MinPosition,HolderRestriction,SettlementWindow,FundHolders}Rule` |
+| Policy | `hooks/ComplianceHook` (one per deployment, shared by every token), `hooks/BaseRule`, `hooks/rules/{Credential,MinPosition,HolderRestriction,SettlementWindow,FundHolders,SupplyCap,ExecutedOnly}Rule` |
 | Credentials | `identity/CredentialRegistry` (immutable, not a proxy, not attested; the `CredentialRule` codehash covers its address, not its code) |
 | Fund | `fund/Fund` (not a proxy, not attested; the `FundHoldersRule` codehash covers its address, not its code) |
 | Governance | `governance/PolicyRegistry`, `governance/GovernanceTimelock` (the main timelock: OZ `TimelockController` plus a revoke-`CANCELLER_ROLE`-only `RECOVERY_ROLE`) |
-| Settlement | `intents/IntentExecutor`, `intents/DvPExecutor` (neither is a proxy, and neither is attested: each token authorises an executor by granting it `EXECUTOR_ROLE`) |
+| Settlement | `intents/IntentExecutor`, `intents/DvPExecutor` (neither is a proxy, and neither is attested: each token authorises an executor by granting it `EXECUTOR_ROLE`), `intents/SignedEntry` (immutable, no roles: a vault judges it as any other payer) |
 | Deployment | `deploy/ProxyDeployer`, `deploy/TokenProxy` |
-| Portfolio | `portfolio/Portfolio`, `portfolio/ERC4626Adapter` (immutable, attested as `PORTFOLIO` and `ADAPTER`; no vault plugs one in yet) |
+| Portfolio | `portfolio/Portfolio`, `portfolio/ERC4626Adapter`, `portfolio/GuardedAccount` (immutable, attested as `PORTFOLIO` and `ADAPTER`), `portfolio/ERC20CallValidator`, `portfolio/ERC4626CallValidator` (attested as `VALIDATOR`) |
+| Pricing | `nav/NavDesk` (immutable, not attested: it acts by the `SETTLER_ROLE` it holds), `nav/FeeModel` (immutable, attested as `FEE_MODEL`) |
+| Distribution | `distribution/Distributor` (immutable, one per token, not attested: it holds its own funding and asks the token for roles) |
 | Interfaces | `interfaces/*` (frozen; ERC-165 ids, event topics and reason codes pinned by `contracts/test/InterfaceFreeze.t.sol`; the owner has reopened them on instruction, most recently 2026-10-23 to 24 for the review items, 2026-10-27 for `IProxyDeployer` and 2026-10-30 for the portfolio lego and a renamed `Quals` bit, and they are frozen again) |
 
-Also in scope: `ignition/modules/{Core,CoreHandover,Fund,Product,FundOpen,roles}.ts` and `ignition/profiles.ts`, which carry
+Also in scope: `ignition/modules/{Core,CoreHandover,Fund,Legos,Product,FundOpen,roles}.ts` and `ignition/profiles.ts`, which carry
 the deployment order, role grants, the hand-over to the timelock and each product's rule list.
 
 Out of scope: OpenZeppelin 5.6.1 (`@openzeppelin/contracts`, `-upgradeable`; `TimelockController` is used unmodified for the recovery timelock and as the base of `GovernanceTimelock`),
@@ -257,6 +259,22 @@ Further limits recorded during review:
   of a basis point of 100m shares at 12 decimals. A controller whose whole request rounds to nothing keeps a claimable
   amount that buys nothing; `recoverClaimable` clears it.
 
+- **A credential holds no country.** A record has qualification bits, a validity and a standing. A jurisdiction group is a
+  bit (`Quals.US_PERSON`, `Quals.EEA`), which a token's `requireAny` and `forbidAny` already read, so an offering restriction
+  needs no rule, and the attester publishes only what a policy needs. Whether an address with a credential is still personal
+  data is for counsel.
+- **A supply cap limits a stolen minter key, and only that.** `SupplyCapRule` judges `MINT`, so the agent's enforcement mint
+  (`FORCED`) is exempt, and the timelock can raise the cap. On a token with no cap set it admits no mint. It is on tokens only,
+  because it would refuse the mint a vault's `maxDeposit` probes with. Pinned by `SupplyCapRule.t.sol`.
+- **What the hand-over check asks of a Safe.** It reads `getThreshold()` and wants at least 2. It does not read who the
+  signers are, and a demo profile names every sensitive role as an exception, so a real deployment must state its own.
+  A desk-less fund's settler sets any price alone: that is the `full` profile, for tests, and the check refuses it elsewhere
+  unless the profile names it. Pinned by `test/nodejs/legos.test.ts`.
+- **A distribution's root is a claim.** The contract proves a holder is in a tree two people approved, not that the tree is
+  right: a wrong record date or a wrong amount is paid as approved, up to the funded total, and a claim above what is left
+  is refused (`Distributor_OverFunding`). A holder who may not receive cannot claim, so the money waits for them until the
+  expiry and then returns to the funder. Nothing pays a holder automatically, so a holder who never claims gets nothing.
+  `Distributor.t.sol` pins each.
 - **What a `Portfolio` trusts.** It sends money only to adapters attested as `ADAPTER` for this portfolio and this asset,
   and each risk's caps bound how much. An adapter's codehash covers its target's address and not the target's behaviour,
   so a bad target can lose what was allocated to it. The council reads the target before attesting, and that review is the
@@ -299,6 +317,7 @@ Inline suppressions (each carries its reason on the line above, in the source):
 | `Fund` `positionsOf` | `uninitialized-local` | The class count and the entries written start at zero by design |
 | `HolderRestrictionRule` `setLockup` | `uninitialized-local` | The stored unlock time starts at zero, the value of a cleared lockup |
 | `Gated7540Vault` `settlePeriod` | `reentrancy-no-eth`, `boolean-cst`, `arbitrary-send-erc20` | The book is written before the burn and `_net` writes no state: what Slither reads as a write is the storage pointer. A boolean mapping key is not a misused constant. The settler names the cash account, and only one that approved the vault can be pulled from; the role belongs to a `NavDesk`, and `SETTLER_ROLE` is timelock-granted |
+| `Distributor.approve` | `arbitrary-send-erc20` | It pulls from the funder a maker named and a different checker approved, and only an account that approved this contract can be pulled from |
 | `NavDesk` | `incorrect-equality`, `unused-return`, `uninitialized-local` | Zero means nothing on the table, nothing accepted or no mark yet, not a balance. The unclaimed shares say nothing about whether a period is stuck. A proposal is filled in a field at a time |
 | `ERC4626CallValidator` | `unused-state` | Slither does not see a constant used as a slice's bound |
 | `SignedEntry` | `arbitrary-send-erc20`, `arbitrary-send-erc20-permit`, `reentrancy-events`, `unused-return` | The investor signed the entry naming these assets, checked first. What it bought is known only after the vault's call, and the nonce was spent before it. A 7540 request returns the aggregated id, 0, which says nothing |
@@ -338,9 +357,10 @@ Inline acknowledgements (reason on the line above each `aderyn-ignore`):
 | `contract-locks-ether` (high) | `GatedToken`, `IntentToken`, `Gated4626Vault`, `Gated7540Vault`, `TokenProxy` | False positive: no path accepts ETH. There is no `receive` or payable function, `upgradeToAndCall` with empty data rejects value (`ERC1967NonPayable`), and with data the value is delegated into a non-payable function | `GatedTokenIntegrationTest::test_WhenEtherIsSent_ItReverts`, `IntentTokenIntegration_Ether`, `Gated4626VaultUnit_Ether`, `Gated7540VaultUnit_Ether` |
 | `reentrancy-state-change` (high) | `HolderRestrictionRule`, `MinPositionRule`, `SettlementWindowRule`, `CredentialRule.setPolicy` and `_checkSender`, `Fund.registerClass`, `Fund.setRule`, `Portfolio.writeOffAdapter` | False positive: the token, the hook, the fund or the registry is called through view interfaces, which compile to STATICCALL, so nothing it does can change any state | `*Unit_TokenCallsAreStatic` for the rules, `FundHoldersRuleUnit_TokenAndFundCallsAreStatic` and `FundUnit_CallsAreStatic` for the fund layer, `test_AnAdapterThatWritesDuringARead_MakesTheCallRevert` for the portfolio: a callee whose reads write makes the entry point revert, while a quiet callee succeeds (control) |
 | `arbitrary-transfer-from` (high) | `Gated7540Vault.requestDeposit` | Same as Slither's `arbitrary-send-erc20` (§4 above) | Fuzzed victim-owner test; removing the guard fails 2 tests |
+| `arbitrary-transfer-from` (high) | `Distributor.approve` | Same as Slither's `arbitrary-send-erc20` (§4 above) | `Distributor.t.sol::test_ItPullsTheFundingAndEmits`, `test_TheMakerCannotApproveItsOwn` |
 | `abi-encode-packed-hash-collision` (high) | `ProxyDeployer._initCodeHash` | False positive: only the second operand varies; the first is fixed creation code | Fuzzed `predict` formula test; off-chain CREATE2 test |
 | `storage-array-memory-edit` (high) | `SettlementWindowRule.check`, `isOpen` | False positive: a read-only copy of a storage struct into memory | Window tests |
-| `reentrancy-state-change` | `Gated7540Vault.initialize` (the asset's `decimals()`), `NavDesk.adopt` (the old desk's views) | View interfaces, compiled to STATICCALL | |
+| `reentrancy-state-change` | `Gated7540Vault.initialize` (the asset's `decimals()`), `NavDesk.adopt` (the old desk's views), `NavDesk.setFeeModel`, `Distributor.claim`, `SupplyCapRule.setSupplyCap` | View interfaces, compiled to STATICCALL | |
 | `reentrancy-state-change` | `Gated4626Vault` `setPortfolio`, `setFeeModel`, `collectFees` | View interfaces on attested components, compiled to STATICCALL | |
 | `require-revert-in-loop` | `GuardedAccount.execute` | All or nothing, by design: a batch that moves money must not half-run | `test_AllOrNothing` |
 | `unsafe-erc20-operation` | `ERC20CallValidator.validate` | It only reads the selectors and moves no tokens | |
@@ -409,6 +429,9 @@ Each row is a bug deliberately planted, the tests that caught it, then the file 
 | `SignedEntry` (2026-11-01) | each window end, the nonce, the signature, the minimum at its boundary, a minimum on a request, the investor as receiver and controller, the permit tolerance, the cash nonce's binding, cancelling | 20 of 20 caught |
 | `GuardedAccount`, validators, `FeeModel`, the 4626 with a `Portfolio` (2026-11-01) | each role and refusal in the account; each validator's boundary; each cap, branch and clock in the fee model and each place a desk or vault keeps its result; every plug check, the rate limit, the outage stop, exit-only, the liquidity limit, the money paths | 106 run. Of the 8 alive, 2 were code that did nothing, now removed; 5 were missing tests, now written; 1 is equivalent, `<` and `<=` at exactly the hurdle both charge nothing. Rerun on those lines: 8 of 8 |
 | `NavDesk` (2026-11-01) | each role, each time boundary at both sides, the table and stuck checks, each setting's bound and attestation, `adopt`'s checks, what the hash covers, the portfolio left out of the value, a stale price, the move count | 49 of 49 caught, 3 of them added with the review's age check and the cut-off event |
+| `SupplyCapRule`, `ExecutedOnlyRule`, `Distributor` (2026-11-01) | the cap judging every kind, refusing at the cap, reverting when lowered below the supply, set by anyone or not stored; the wrong kind refused, or none; each role, value, window end and refusal in the distributor, a proof or a leaf that means less, claims not counted or above the funding, a sweep early, unapproved, twice or to the caller. 34 mutants, including the credential type without its bits, all caught | |
+| Ignition legos and the hand-over check (2026-11-01) | each grant and plug in `Product` dropped (settler, reporter, checker, allocator, the desk's portfolio and fee model, the 4626's fee model, the caps, the permission, the supply cap); a 7540's portfolio refusing reported money, a desk with no cash account, a validator naming the wrong account; each clause of the hand-over check; each refusal in `assertUsable`. 33 mutants, all caught | |
+| Halmos, `Portfolio.allocate` (2026-11-01) | the absolute cap dropped, the relative cap dropped, a second risk not checked | the symbolic property fails on each |
 
 ## 6. Toolchain supply chain
 

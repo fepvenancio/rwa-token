@@ -37,9 +37,8 @@ contract CredentialRegistry is AccessControl, EIP712, ICredentialRegistry, IIden
   bytes32 public constant RECOVERY_ROLE = keccak256('RECOVERY_ROLE');
 
   /// @inheritdoc ICredentialRegistry
-  bytes32 public constant CREDENTIAL_TYPEHASH = keccak256(
-    'Credential(address subject,uint64 validUntil,uint32 quals,uint16 country,uint64 issuedAt,uint8 attester)'
-  );
+  bytes32 public constant CREDENTIAL_TYPEHASH =
+    keccak256('Credential(address subject,uint64 validUntil,uint32 quals,uint64 issuedAt,uint8 attester)');
 
   /// @inheritdoc ICredentialRegistry
   uint256 public constant MAX_ATTESTERS = 64;
@@ -143,9 +142,7 @@ contract CredentialRegistry is AccessControl, EIP712, ICredentialRegistry, IIden
     uint64 _stored = _records[_credential.subject].issuedAt;
     if (_credential.issuedAt <= _stored) revert CredentialRegistry_StaleCredential(_credential.issuedAt, _stored);
 
-    _write(
-      _id, _credential.subject, _credential.validUntil, _credential.quals, _credential.country, _credential.issuedAt
-    );
+    _write(_id, _credential.subject, _credential.validUntil, _credential.quals, _credential.issuedAt);
   }
 
   /// @inheritdoc ICredentialRegistry
@@ -164,12 +161,11 @@ contract CredentialRegistry is AccessControl, EIP712, ICredentialRegistry, IIden
   function set(
     address _subject,
     uint64 _validUntil,
-    uint32 _quals,
-    uint16 _country
+    uint32 _quals
   ) external {
     uint256 _slot = _attesterSlot[_msgSender()];
     if (_slot == 0) revert CredentialRegistry_NotAnAttester(_msgSender());
-    _write(uint8(_slot - 1), _subject, _validUntil, _quals, _country, block.timestamp.toUint64());
+    _write(uint8(_slot - 1), _subject, _validUntil, _quals, block.timestamp.toUint64());
   }
 
   /// @inheritdoc ICredentialRegistry
@@ -249,7 +245,7 @@ contract CredentialRegistry is AccessControl, EIP712, ICredentialRegistry, IIden
   function isVerified(
     address _user
   ) external view returns (bool _verified) {
-    (Status _status,,,) = profileOf(_user);
+    (Status _status,,) = profileOf(_user);
     // Compares an enum standing with a constant, not a balance.
     // slither-disable-next-line incorrect-equality
     _verified = _status == Status.ACTIVE;
@@ -290,7 +286,6 @@ contract CredentialRegistry is AccessControl, EIP712, ICredentialRegistry, IIden
           _credential.subject,
           _credential.validUntil,
           _credential.quals,
-          _credential.country,
           _credential.issuedAt,
           _credential.attester
         )
@@ -301,10 +296,9 @@ contract CredentialRegistry is AccessControl, EIP712, ICredentialRegistry, IIden
   /// @inheritdoc ICredentialRegistry
   function profileOf(
     address _subject
-  ) public view returns (Status _status, uint32 _quals, uint16 _country, uint8 _attester) {
+  ) public view returns (Status _status, uint32 _quals, uint8 _attester) {
     Record memory _record = _records[_subject];
     _quals = _record.quals;
-    _country = _record.country;
     _attester = _record.attester;
 
     // The equalities compare enum standings with constants, not balances. The one on time is a strict `>`, by design:
@@ -340,7 +334,6 @@ contract CredentialRegistry is AccessControl, EIP712, ICredentialRegistry, IIden
    * @param _subject The address
    * @param _validUntil Unix seconds
    * @param _quals The qualification bits
-   * @param _country The country code
    * @param _issuedAt When the record was issued
    */
   function _write(
@@ -348,7 +341,6 @@ contract CredentialRegistry is AccessControl, EIP712, ICredentialRegistry, IIden
     address _subject,
     uint64 _validUntil,
     uint32 _quals,
-    uint16 _country,
     uint64 _issuedAt
   ) internal {
     if (_subject == address(0)) revert CredentialRegistry_ZeroAddress();
@@ -366,12 +358,11 @@ contract CredentialRegistry is AccessControl, EIP712, ICredentialRegistry, IIden
       validUntil: _validUntil,
       status: Status.ACTIVE,
       quals: _quals,
-      country: _country,
       attester: _id,
       issuedAt: _issuedAt,
       guardianBlock: _existing.guardianBlock
     });
-    emit CredentialSet(_subject, _id, _validUntil, _quals, _country, _issuedAt);
+    emit CredentialSet(_subject, _id, _validUntil, _quals, _issuedAt);
   }
 
   /**
