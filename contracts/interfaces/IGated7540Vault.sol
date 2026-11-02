@@ -278,6 +278,16 @@ interface IGated7540Vault {
   function SETTLER_ROLE() external view returns (bytes32 _role);
 
   /**
+   * @notice The contract that holds the settlement and recovery functions, which this vault hands them to
+   * @dev An immutable of the implementation, created by its constructor, so the implementation's attested codehash pins it
+   *      and each implementation has its own. Reached directly it does nothing: nobody holds a role on it
+   * @return _logic The second contract
+   */
+  // getter of an UPPER_SNAKE immutable
+  // solhint-disable-next-line style-guide-casing
+  function SETTLEMENT_LOGIC() external view returns (address _logic);
+
+  /**
    * @notice Where dealing stands
    * @return _open The open period; the first is 1
    * @return _settled The last settled period; 0 before the first settlement. A closed period is `_settled + 1` when that

@@ -30,7 +30,7 @@ In scope, all under `contracts/` (`.t.sol` files and `contracts/test/` are test 
 | Area | Contracts |
 |---|---|
 | Base | `base/PolicyGatedERC20Upgradeable` |
-| Templates | `tokens/GatedToken`, `tokens/IntentToken`, `vaults/Gated4626Vault`, `vaults/Gated7540Vault` |
+| Templates | `tokens/GatedToken`, `tokens/IntentToken`, `vaults/Gated4626Vault`, `vaults/Gated7540Vault`, with `vaults/Gated7540Common` and `vaults/Gated7540Settlement` (created by the implementation's constructor; its codehash pins the address, and the post-deploy check compares the code with the release) |
 | Mixin | `mixins/IntentSettledUpgradeable` |
 | Policy | `hooks/ComplianceHook` (one per deployment, shared by every token), `hooks/BaseRule`, `hooks/rules/{Credential,MinPosition,HolderRestriction,SettlementWindow,FundHolders,SupplyCap,ExecutedOnly}Rule` |
 | Credentials | `identity/CredentialRegistry` (immutable, not a proxy, not attested; the `CredentialRule` codehash covers its address, not its code) |
@@ -351,7 +351,7 @@ Inline suppressions (each carries its reason on the line above, in the source):
 | `CredentialRule` `_sendReason`, `_receiveReason` | `unused-return` | Only the standing decides for a sender; the bits and the attester matter for a receiver |
 | `Fund` `positionsOf` | `uninitialized-local` | The class count and the entries written start at zero by design |
 | `HolderRestrictionRule` `setLockup` | `uninitialized-local` | The stored unlock time starts at zero, the value of a cleared lockup |
-| `Gated7540Vault` `settlePeriod` | `reentrancy-no-eth`, `boolean-cst`, `arbitrary-send-erc20` | The book is written before the burn and `_net` writes no state: what Slither reads as a write is the storage pointer. A boolean mapping key is not a misused constant. The settler names the cash account, and only one that approved the vault can be pulled from; the role belongs to a `NavDesk`, and `SETTLER_ROLE` is timelock-granted |
+| `Gated7540Settlement` `settlePeriod` | `reentrancy-no-eth`, `boolean-cst`, `arbitrary-send-erc20` | The book is written before the burn and `_net` writes no state: what Slither reads as a write is the storage pointer. A boolean mapping key is not a misused constant. The settler names the cash account, and only one that approved the vault can be pulled from; the role belongs to a `NavDesk`, and `SETTLER_ROLE` is timelock-granted |
 | `Distributor.approve` | `arbitrary-send-erc20` | It pulls from the funder a maker named and a different checker approved, and only an account that approved this contract can be pulled from |
 | `NavDesk` | `incorrect-equality`, `unused-return`, `uninitialized-local` | Zero means nothing on the table, nothing accepted or no mark yet, not a balance. The unclaimed shares say nothing about whether a period is stuck, and the supply nothing about which period is closed. A proposal is filled in a field at a time |
 | `ERC4626CallValidator` | `unused-state` | Slither does not see a constant used as a slice's bound |
