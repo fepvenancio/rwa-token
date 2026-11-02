@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>TokenProxy · Gated Token Stack</title>
-<meta name="description" content="How TokenProxy, the proxy every token is, gets created without setup data, set up in the same transaction, and upgraded only through the token's own checks.">
+<meta name="description" content="TokenProxy, the contract each token is: OpenZeppelin's ERC-1967 proxy with one override, so that the token's address does not depend on its settings.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
@@ -24,13 +24,13 @@
 <main class="page">
 
 <header class="top">
-  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Deployment</div>
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Governance and deployment</div>
   <h1>TokenProxy</h1>
-  <p class="lede">The contract every token actually is. It holds the token's balances and settings at a fixed address, and runs the token's code from a separate implementation contract. It is OpenZeppelin's standard proxy with a single setting changed.</p>
+  <p class="lede">The contract each token actually is. It holds the token's balances and settings at a fixed address, and runs the token's code from a separate implementation contract. It is OpenZeppelin's standard proxy with a single setting changed.</p>
   <div class="facts">
     <span class="fact"><b>contracts/deploy/TokenProxy.sol</b></span>
     <span class="fact">upgradeable proxy: <b>OpenZeppelin ERC1967Proxy</b></span>
-    <span class="fact">no admin of its own: upgrades need the token's <b>UPGRADER_ROLE</b> (the main timelock)</span>
+    <span class="fact">no admin of its own: upgrades need the token's <b>UPGRADER_ROLE</b></span>
     <span class="fact">not attested: its implementation is</span>
   </div>
 </header>
@@ -38,18 +38,18 @@
 <section id="in-one-minute">
   <div class="callout">
     <h3>In one minute</h3>
-    <p>A proxy is a small contract with a permanent address that keeps the data and borrows its behaviour from another contract, the implementation. Holders, wallets and explorers only ever deal with the proxy's address. Upgrading a token means pointing its proxy at new code; the balances stay where they are. OpenZeppelin's proxy normally insists on being set up in the same step that creates it. TokenProxy relaxes that one rule, because the <a href="ProxyDeployer.html">ProxyDeployer</a> needs to create it first and set it up a moment later, still inside the same transaction, so that the token's address does not depend on its settings. No one can act in between.</p>
+    <p>A proxy is a small contract with a permanent address that keeps the data and borrows its behaviour from another contract, the implementation. Holders, wallets and explorers deal with the proxy's address. Upgrading a token means pointing its proxy at other code; the balances stay where they are. OpenZeppelin's proxy normally insists on being set up in the same step that creates it. TokenProxy relaxes that one rule, because the <a href="ProxyDeployer.html">ProxyDeployer</a> needs to create it first and set it up a moment later, still inside the same transaction, so that the token's address does not depend on its settings. No one can act in between.</p>
   </div>
 </section>
 
 <section id="how">
   <div class="prose">
     <h2>How it works</h2>
-    <p>The proxy has no token logic. On every call it runs the implementation's code with a <code>delegatecall</code>: the code executes as if it were the proxy's own, reading and writing the proxy's storage. The only thing the proxy itself stores is the implementation's address, in the standard ERC-1967 slot <code>0x3608…2bbc</code>, which anyone can read with <code>eth_getStorageAt</code>.</p>
+    <p>The proxy has no token logic. On each call it runs the implementation's code with a <code>delegatecall</code>: the code executes as if it were the proxy's own, reading and writing the proxy's storage. The one thing the proxy code itself deals with is the implementation's address, in the standard ERC-1967 slot <code>0x3608…2bbc</code>, which anyone can read with <code>eth_getStorageAt</code>.</p>
   </div>
   <figure>
     <div class="fig-scroll">
-      <svg class="d" viewBox="0 0 780 396" role="img" aria-label="Inside one transaction, ProxyDeployer creates the TokenProxy with CREATE2 and empty setup data, so the proxy only stores the implementation address. ProxyDeployer then calls it with the setup data; the proxy delegatecalls initialize on the implementation, which sets admin, guardian, registry and hook in the proxy's storage and installs the rules. ProxyDeployer then checks the registry, hook, rule list and symbol. Every later call goes to the proxy, which delegatecalls the implementation so the code runs on the proxy's storage.">
+      <svg class="d" viewBox="0 0 780 396" role="img" aria-label="Inside one transaction, ProxyDeployer creates the TokenProxy with CREATE2 and empty setup data, so the proxy stores the implementation address and runs nothing. ProxyDeployer then calls it with the setup data; the proxy delegatecalls initialize on the implementation, which sets admin, guardian, registry and hook in the proxy's storage and installs the rules. ProxyDeployer then checks the registry, hook, rule list and symbol. Each later call goes to the proxy, which delegatecalls the implementation so the code runs on the proxy's storage.">
         <defs>
           <marker id="tp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
         </defs>
@@ -86,51 +86,34 @@
         <line class="ln" x1="120" y1="272" x2="386" y2="272" marker-end="url(#tp-arrow)"/>
         <text x="134" y="264" class="sm">checks registry, hook, rule list, symbol</text>
 
-        <text x="20" y="314" class="sm bold">Every later call</text>
+        <text x="20" y="314" class="sm bold">Each later call</text>
         <line class="ln" x1="20" y1="336" x2="386" y2="336" marker-end="url(#tp-arrow)"/>
         <text x="140" y="328" class="mono sm">transfer, mint, upgradeToAndCall, …</text>
         <line class="ln dash" x1="390" y1="364" x2="661" y2="364" marker-end="url(#tp-arrow)"/>
         <text x="400" y="356" class="sm">delegatecall: code runs on proxy storage</text>
       </svg>
     </div>
-    <figcaption><b>Created empty, set up in the same transaction.</b> The proxy exists without its settings only between two calls that ProxyDeployer makes back to back inside one transaction. If the setup or any later check fails, the whole transaction reverts and no proxy is left at the address.</figcaption>
+    <figcaption><b>Created empty, set up in the same transaction.</b> The proxy exists without its settings only between two steps that ProxyDeployer takes back to back inside one transaction. If the setup or a later check fails, the whole transaction reverts and no proxy is left at the address.</figcaption>
   </figure>
   <ol class="steps">
-    <li><div><b>Create.</b> ProxyDeployer creates the proxy with CREATE2 and the arguments <code>(implementation, "")</code>. The constructor stores the implementation in the ERC-1967 slot and, because the data is empty, calls nothing. The implementation must have code (<code>ERC1967InvalidImplementation</code>).</div></li>
-    <li><div><b>Set up.</b> ProxyDeployer calls the new proxy with the token's <code>initialize</code> call data. The proxy runs it through the implementation, and the token comes up with its admin, guardian, registry, hook and rule list.</div></li>
+    <li><div><b>Create.</b> ProxyDeployer creates the proxy with CREATE2 and the arguments <code>(implementation, "")</code>. The constructor stores the implementation in the ERC-1967 slot and, because the data is empty, calls nothing. The implementation must have code (<code>ERC1967InvalidImplementation</code>), though through ProxyDeployer an address with no code has already failed the attestation check.</div></li>
+    <li><div><b>Set up.</b> ProxyDeployer calls the proxy with the token's <code>initialize</code> call data. The proxy runs it through the implementation, and the token comes up with its admin, guardian, registry, hook and rule list.</div></li>
     <li><div><b>Check.</b> ProxyDeployer reads the token back and reverts unless it came up as the call expected (<a href="ProxyDeployer.html">ProxyDeployer</a>).</div></li>
-    <li><div><b>Serve.</b> From then on every call to the token's address is forwarded to the current implementation.</div></li>
+    <li><div><b>Serve.</b> From then on, calls to the token's address are forwarded to the current implementation.</div></li>
   </ol>
-</section>
-
-<section id="functions">
-  <div class="prose">
-    <h2>What it can do</h2>
-    <p>The proxy has a constructor and a forwarding fallback, nothing else. The upgrade function lives in the implementation, as UUPS prescribes.</p>
-  </div>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th><th>Reverts</th></tr></thead>
-      <tbody>
-        <tr><td><code>constructor(implementation, data)</code></td><td>Whoever deploys it. The system's tokens are created only by <code>ProxyDeployer</code>, always with empty data</td><td>Stores the implementation. Runs <code>data</code> through it if non-empty; with empty data runs nothing, which is the one change from OpenZeppelin.</td><td><code>ERC1967InvalidImplementation</code> if the implementation has no code</td></tr>
-        <tr><td>Any other call (fallback)</td><td>Anyone</td><td>Forwards the call to the implementation with <code>delegatecall</code>. The token's own role and policy checks decide.</td><td>Whatever the implementation reverts with</td></tr>
-        <tr><td><code>upgradeToAndCall(newImpl, data)</code></td><td><code>UPGRADER_ROLE</code> on the token (the main timelock)</td><td>Not in the proxy: the implementation's UUPS code, reached through the fallback. Points the proxy at new code after the checks below.</td><td>See the upgrade diagram</td></tr>
-      </tbody>
-    </table>
-  </div>
 </section>
 
 <section id="override">
   <div class="prose">
     <h2>The one override, and why it is safe here</h2>
-    <p>OpenZeppelin's <code>ERC1967Proxy</code> reverts with <code>ERC1967ProxyUninitialized</code> when it is created with empty setup data, because a proxy left without its settings could be set up by whoever calls it first. Its documentation offers a hook to allow it, <code>_unsafeAllowUninitialized()</code>. <code>TokenProxy</code> overrides that hook to return <code>true</code>, and changes nothing else.</p>
-    <p>The reason is the token's address. CREATE2 derives the address from the deployer's address, a salt and the creation code with its arguments. ProxyDeployer uses the hash of the symbol as the salt and passes only the implementation as an argument. If the setup data went into the creation code too, the address would change with every admin, guardian, hook or rule in it. With empty data, the address depends on the symbol and the implementation alone, so it can be published and watched before the token exists.</p>
+    <p>OpenZeppelin's <code>ERC1967Proxy</code> reverts with <code>ERC1967ProxyUninitialized</code> when it is created with empty setup data, because a proxy left without its settings could be set up by whoever calls it first. It offers a function to allow it, <code>_unsafeAllowUninitialized()</code>. <code>TokenProxy</code> overrides that function to return <code>true</code>, and changes nothing else.</p>
+    <p>The reason is the token's address. CREATE2 derives the address from the deployer's address, a salt and the creation code with its arguments. ProxyDeployer uses the hash of the symbol as the salt and passes the implementation as the one non-empty argument. If the setup data went into the creation code too, the address would change with each admin, guardian, hook or rule in it. With empty data, the address depends on the deployer, the symbol and the implementation, so it can be published and watched before the token exists.</p>
     <p>It is safe because of how ProxyDeployer uses it:</p>
     <ul class="plain">
-      <li><b>No gap.</b> ProxyDeployer creates the proxy and calls it with the setup data in the same function. Nothing else can run in between, so nobody can set the token up first.</li>
-      <li><b>No leftovers.</b> If the setup or a later check fails, the whole call reverts and the proxy is never created.</li>
+      <li><b>No gap.</b> ProxyDeployer creates the proxy and calls it with the setup data in the same function, and the constructor calls out to nothing. So nobody can set the token up first.</li>
+      <li><b>No leftovers.</b> If the setup or a later check fails, the whole call reverts and no contract stays at the address.</li>
       <li><b>No other proxy counts.</b> A <code>TokenProxy</code> deployed any other way sits at a different address, because CREATE2 addresses include the deployer's own address, and none of ProxyDeployer's checks ran on it. It is not one of this system's tokens.</li>
-      <li><b>The code behind it cannot be set up directly.</b> Each token implementation calls <code>_disableInitializers()</code> in its constructor, so the implementation contract itself can never be initialised; only proxies running it can.</li>
+      <li><b>The code behind it cannot be set up directly.</b> Each of the four token templates calls <code>_disableInitializers()</code> in its constructor, so the implementation contract itself cannot be initialised; proxies running it can.</li>
     </ul>
   </div>
 </section>
@@ -142,14 +125,14 @@
   </div>
   <figure>
     <div class="fig-scroll">
-      <svg class="d" viewBox="0 0 780 470" role="img" aria-label="An upgrade, step by step. The caller calls upgradeToAndCall on the token. If it does not hold UPGRADER_ROLE, it reverts with AccessControlUnauthorizedAccount. If the new implementation is not attested as IMPLEMENTATION, it reverts with PolicyGated_NotAttested. If its templateId differs from the token's, it reverts with Templated_WrongTemplate. If it is not UUPS code for the ERC-1967 slot, OpenZeppelin reverts. Otherwise the slot is written, Upgraded is emitted and the optional data runs. The address and balances stay; the code is new.">
+      <svg class="d" viewBox="0 0 780 470" role="img" aria-label="An upgrade, step by step. The caller calls upgradeToAndCall on the token. If it does not hold UPGRADER_ROLE, it reverts with AccessControlUnauthorizedAccount. If the new implementation is not attested as IMPLEMENTATION, it reverts with PolicyGated_NotAttested. If its templateId differs from the token's, it reverts with Templated_WrongTemplate. If it is not UUPS code for the ERC-1967 slot, OpenZeppelin reverts. Otherwise the slot is written, Upgraded is emitted and the optional data runs. The address and balances stay; the code changes.">
         <defs>
           <marker id="tp-arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
           <marker id="tp-arrow-rej" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="rej"/></marker>
         </defs>
         <rect class="act" x="40" y="14" width="440" height="50" rx="8"/>
         <text x="60" y="35" class="bold">A call to the token's address</text>
-        <text x="60" y="53" class="mono sm m">upgradeToAndCall(newImpl, data)</text>
+        <text x="60" y="53" class="mono sm m">upgradeToAndCall(newImplementation, data)</text>
         <line class="ln" x1="260" y1="64" x2="260" y2="86" marker-end="url(#tp-arrow2)"/>
 
         <rect class="b" x="40" y="88" width="440" height="44" rx="8"/>
@@ -161,7 +144,7 @@
         <line class="ln" x1="260" y1="132" x2="260" y2="154" marker-end="url(#tp-arrow2)"/>
 
         <rect class="b" x="40" y="156" width="440" height="50" rx="8"/>
-        <text x="60" y="177">2. Does the token's registry attest newImpl</text>
+        <text x="60" y="177">2. Does the token's registry attest the new code</text>
         <text x="60" y="195">   as <tspan class="mono sm">IMPLEMENTATION</tspan>?</text>
         <line class="ln-rej" x1="480" y1="181" x2="530" y2="181" marker-end="url(#tp-arrow-rej)"/>
         <text x="492" y="173" class="sm m">no</text>
@@ -170,7 +153,7 @@
         <line class="ln" x1="260" y1="206" x2="260" y2="228" marker-end="url(#tp-arrow2)"/>
 
         <rect class="b" x="40" y="230" width="440" height="44" rx="8"/>
-        <text x="60" y="257">3. Does newImpl report this token's templateId?</text>
+        <text x="60" y="257">3. Does it report this token's templateId?</text>
         <line class="ln-rej" x1="480" y1="252" x2="530" y2="252" marker-end="url(#tp-arrow-rej)"/>
         <text x="492" y="244" class="sm m">no</text>
         <rect class="rejbox" x="534" y="234" width="234" height="36" rx="6"/>
@@ -178,7 +161,7 @@
         <line class="ln" x1="260" y1="274" x2="260" y2="296" marker-end="url(#tp-arrow2)"/>
 
         <rect class="b" x="40" y="298" width="440" height="50" rx="8"/>
-        <text x="60" y="319">4. OpenZeppelin: is newImpl UUPS code for</text>
+        <text x="60" y="319">4. OpenZeppelin: is it UUPS code for</text>
         <text x="60" y="337">   the ERC-1967 slot?</text>
         <line class="ln-rej" x1="480" y1="323" x2="530" y2="323" marker-end="url(#tp-arrow-rej)"/>
         <text x="492" y="315" class="sm m">no</text>
@@ -191,18 +174,35 @@
         <line class="ln" x1="260" y1="412" x2="260" y2="424" marker-end="url(#tp-arrow2)"/>
 
         <rect class="act" x="40" y="426" width="440" height="36" rx="8"/>
-        <text x="60" y="449" class="bold">Same address, same balances, new code</text>
+        <text x="60" y="449" class="bold">Same address, same balances, different code</text>
       </svg>
     </div>
-    <figcaption><b>Three checks of the token's own, then OpenZeppelin's.</b> Steps 1 to 3 are <code>_authorizeUpgrade</code> in the token base; step 4 and the write are OpenZeppelin's UUPS code, which also reverts with <code>ERC1967InvalidImplementation</code> when <code>newImpl</code> has no <code>proxiableUUID</code>. A new implementation that reports no template id is refused at step 3.</figcaption>
+    <figcaption><b>Three checks of the token's own, then OpenZeppelin's.</b> Steps 1 to 3 are <code>_authorizeUpgrade</code> in the token base; step 4 and the write are OpenZeppelin's UUPS code, which also reverts with <code>ERC1967InvalidImplementation</code> when the new code has no <code>proxiableUUID</code>. A new implementation that reports no template id is refused at step 3, with no typed error. OpenZeppelin's <code>onlyProxy</code> check runs before step 1 and reverts with <code>UUPSUnauthorizedCallContext</code> if the call does not come through an active proxy.</figcaption>
   </figure>
-  <div class="prose">
+  <div class="prose wrap-any">
     <ul class="plain">
-      <li><b>Who.</b> <code>UPGRADER_ROLE</code> is held by the main timelock and nobody else, so every upgrade is scheduled, waits out the delay, and can be cancelled by the guardian before it runs. The recovery timelock cannot upgrade.</li>
-      <li><b>What.</b> Only an implementation the security council attested. Every deployment of an implementation has its own code hash, so each one needs its own attestation, even when built from identical source.</li>
-      <li><b>Which template.</b> An attested vault implementation cannot be put under an intent token, or the reverse: each template reports its own <code>templateId()</code> and the token compares it with its own.</li>
-      <li><b>Ether.</b> No token function accepts ether, and <code>upgradeToAndCall</code>, the one payable entry point, refuses it too: with empty data OpenZeppelin reverts with <code>ERC1967NonPayable</code>, and with data the delegated call is not payable.</li>
+      <li><b>Who.</b> <code>Product</code> grants <code>UPGRADER_ROLE</code> to the main timelock and to no one else, and the post-deploy check asserts it among the accounts the stack knows. So as deployed, an upgrade is scheduled, waits out the delay, and can be cancelled by the guardian before it runs. The recovery timelock cannot upgrade.</li>
+      <li><b>What.</b> An implementation the security council attested. Each deployment of an implementation has its own code hash, so each one needs its own attestation, even when built from identical source.</li>
+      <li><b>Which template.</b> An attested vault implementation is refused under an intent token, and the reverse: each template reports its own <code>templateId()</code> and the token compares it with its own.</li>
+      <li><b>Ether.</b> <code>upgradeToAndCall</code> is the one payable function behind the proxy, and it refuses ether too: with empty data OpenZeppelin reverts with <code>ERC1967NonPayable</code>, and with data the delegated call lands in a function that is not payable (<code>test_WhenTheUpgraderAttachesEther_TheUpgradeReverts</code>).</li>
     </ul>
+  </div>
+</section>
+
+<section id="functions">
+  <div class="prose">
+    <h2>What it can do</h2>
+    <p>The proxy has a constructor and a forwarding fallback, nothing else. The upgrade function lives in the implementation, as UUPS prescribes. Its one internal function is the override.</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>constructor(implementation, data)</code></td><td>Whoever deploys it. <code>ProxyDeployer</code> passes empty data</td><td>Stores the implementation and emits <code>Upgraded</code>. Runs <code>data</code> through the implementation if non-empty; with empty data runs nothing, which is the one change from OpenZeppelin. Reverts with <code>ERC1967InvalidImplementation</code> if the implementation has no code.</td></tr>
+        <tr><td>Any other call (fallback)</td><td>Anyone</td><td>Forwards the call to the implementation with <code>delegatecall</code>. The token's own role and policy checks decide, and its reverts come back to the caller.</td></tr>
+        <tr><td><code>upgradeToAndCall(newImplementation, data)</code></td><td>The token's <code>UPGRADER_ROLE</code></td><td>Not in the proxy: the implementation's UUPS code, reached through the fallback. Points the proxy at other code after the checks above.</td></tr>
+      </tbody>
+    </table>
   </div>
 </section>
 
@@ -210,10 +210,22 @@
   <div class="prose">
     <h2>Why it is built this way</h2>
     <ul class="plain">
-      <li><b>OpenZeppelin's proxy, one documented override.</b> Nothing about forwarding or storage layout is new code; the only change is the one OpenZeppelin provides a hook for.</li>
+      <li><b>OpenZeppelin's proxy, one documented override.</b> Nothing about forwarding or storage layout is written here; the one change is the function OpenZeppelin provides for it.</li>
       <li><b>A predictable address.</b> The council can compute each token's address from the symbol and the implementation before deployment, and the deployment can be compared with it (<a href="../deployment.html">Deployment and governance</a>).</li>
-      <li><b>UUPS, so the proxy holds no power.</b> The proxy has no admin to secure. Who may upgrade, and to what, is decided by the token's roles and the registry, the same way as everything else about the token.</li>
-      <li><b>The token's data never moves.</b> An upgrade replaces code only. The token's balances, roles, frozen amounts and settings stay in the proxy's storage at the same address.</li>
+      <li><b>UUPS, so the proxy holds no power.</b> The proxy has no admin to secure. Who may upgrade, and to what, is decided by the token's roles and the registry, the same way as other things about the token.</li>
+      <li><b>The token's data does not move.</b> An upgrade replaces code. The token's balances, roles, frozen amounts and settings stay in the proxy's storage at the same address.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="prose">
+    <h2>What it does not do</h2>
+    <ul class="plain">
+      <li><b>The override is not limited to ProxyDeployer.</b> Anyone can deploy a <code>TokenProxy</code> with empty data, and that proxy sits open until someone initialises it. It is safe here because such a proxy is not one of this system's tokens. Holders and integrators should take addresses from the issuer's list.</li>
+      <li><b>It checks nothing itself.</b> The proxy has no view on what it forwards. The checks are in the implementation, so the gate on the implementation is what protects a token: the attestation, the template check and <code>UPGRADER_ROLE</code>.</li>
+      <li><b>An upgrade can run code.</b> The <code>data</code> in <code>upgradeToAndCall</code> runs through the new implementation on the token's storage. The attestation covers that implementation's code, not the data of a particular call; that is for whoever reviews the timelock operation.</li>
+      <li><b>It is not attested.</b> Gates check the implementation behind it, not the proxy. Its creation code is built into <code>ProxyDeployer</code>, and an address computed with <code>predict</code> depends on it.</li>
     </ul>
   </div>
 </section>
@@ -221,10 +233,10 @@
 <section id="connected">
   <div class="prose"><h2>Connected to</h2></div>
   <div class="cards">
-    <a class="card" href="ProxyDeployer.html"><span class="name">ProxyDeployer</span><p>Creates every TokenProxy and sets it up in the same transaction.</p></a>
+    <a class="card" href="ProxyDeployer.html"><span class="name">ProxyDeployer</span><p>Creates each system token's proxy and sets it up in the same transaction.</p></a>
     <a class="card" href="PolicyGatedERC20Upgradeable.html"><span class="name">PolicyGatedERC20Upgradeable</span><p>The token code behind the proxy, with the upgrade check.</p></a>
     <a class="card" href="PolicyRegistry.html"><span class="name">PolicyRegistry</span><p>Attests the implementations a proxy may run.</p></a>
-    <a class="card" href="GovernanceTimelock.html"><span class="name">GovernanceTimelock</span><p>The only holder of <code>UPGRADER_ROLE</code>.</p></a>
+    <a class="card" href="GovernanceTimelock.html"><span class="name">GovernanceTimelock</span><p>The holder of <code>UPGRADER_ROLE</code> as deployed.</p></a>
   </div>
 </section>
 
@@ -232,13 +244,13 @@
   <div class="prose">
     <h2>Source and tests</h2>
     <ul class="plain">
-      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/deploy/TokenProxy.sol"><code>contracts/deploy/TokenProxy.sol</code></a>. It has no interface of its own.</li>
-      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/deploy/TokenProxy.t.sol"><code>TokenProxy.t.sol</code></a> (empty and non-empty setup data), <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/deploy/ProxyDeployer.t.sol"><code>ProxyDeployer.t.sol</code></a>, the upgrade tests in <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/base/PolicyGatedERC20Upgradeable.t.sol"><code>PolicyGatedERC20Upgradeable.t.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/tokens/IntentToken.t.sol"><code>IntentToken.t.sol</code></a> (template refusal, state kept, ether refused), <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/test/nodejs/governance.test.ts"><code>test/nodejs/governance.test.ts</code></a> (upgrades through the real timelock) and <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/test/nodejs/deployment.test.ts"><code>deployment.test.ts</code></a> (each token at the address computed off-chain)</li>
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/deploy/TokenProxy.sol"><code>contracts/deploy/TokenProxy.sol</code></a>. It has no interface of its own.</li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/deploy/TokenProxy.t.sol"><code>TokenProxy.t.sol</code></a> (empty and non-empty setup data), <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/deploy/ProxyDeployer.t.sol"><code>ProxyDeployer.t.sol</code></a>, the upgrade tests in <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/base/PolicyGatedERC20Upgradeable.t.sol"><code>PolicyGatedERC20Upgradeable.t.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/tokens/IntentToken.t.sol"><code>IntentToken.t.sol</code></a> (template refusal, state kept, ether refused), <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/governance.test.ts"><code>test/nodejs/governance.test.ts</code></a> (upgrades through the real timelock) and <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/deployment.test.ts"><code>deployment.test.ts</code></a> (each token at the address computed off-chain)</li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>cd1e525</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>babef08</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

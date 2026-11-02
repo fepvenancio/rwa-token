@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SignedEntry · Gated Token Stack</title>
+<meta name="description" content="How SignedEntry lets an investor enter a vault on signed messages while a relayer pays the gas, and what a relayer can and cannot do with the signatures it holds.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="../index.html">Gated Token Stack</a>
+  <a href="../index.html">Overview</a>
+  <a href="../index.html#contracts">Contracts</a>
+  <a href="../roles.html">Who can do what</a>
+  <a href="../movement.html">One movement</a>
+  <a href="../deployment.html">Deployment and governance</a>
+  <a href="../money.html">Where the money sits</a>
+  <a href="../review.html">Security review</a>
+</nav>
+<main class="page">
+
+<header class="top">
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Settlement and distribution</div>
+  <h1>SignedEntry</h1>
+  <p class="lede">Lets an investor with its own wallet enter a vault without sending a transaction: the investor signs, and a relayer submits and pays the gas. The vault sees an ordinary third-party payer, and its policy decides whether to accept it.</p>
+  <div class="facts">
+    <span class="fact"><b>contracts/intents/SignedEntry.sol</b></span>
+    <span class="fact">immutable, <b>not a proxy</b></span>
+    <span class="fact"><b>no roles</b>, no owner: anyone can submit an entry</span>
+    <span class="fact">not attested, and no deployment module</span>
+  </div>
+</header>
+
+<section id="in-one-minute">
+  <div class="callout">
+    <h3>In one minute</h3>
+    <p>Entering a vault normally takes the investor's own transactions, and the network fee (gas) that goes with them. With this contract the investor signs instead, and someone else, a relayer, submits what was signed and pays the gas. The short description is "one signature", because the investor sends no transaction. There are in fact two signed messages: the entry, which says where, how much, the least it accepts and when; and the cash, which lets this contract pull the money. In one transaction the contract checks the entry, pulls the cash and pays the vault. On a 4626 vault the shares go to the investor there and then. On a 7540 vault a request is filed with the investor as its controller. A relayer can delay what it holds, but it cannot change it. No vault has code for this: the contract is one more payer, it needs a credential on the vault's policy, it has no roles, and an entry whose flag matches a genuine vault leaves no money in it. Leaving a vault needs no such contract.</p>
+  </div>
+</section>
+
+<section id="how">
+  <div class="prose">
+    <h2>How an entry runs</h2>
+    <p>The investor signs off-chain and hands both signatures to a relayer. The relayer needs no role, no credential and no asset. It calls <code>enterWithPermit</code> or <code>enterWith3009</code>, depending on the form of the cash signature.</p>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 780 660" role="img" aria-label="The investor signs two messages off-chain, the entry and the cash, and gives them to a relayer. The relayer calls enterWithPermit or enterWith3009 on SignedEntry. SignedEntry checks the deadline, validAfter, the nonce, that a request names no minimum and the investor's signature, otherwise it reverts, and then spends the nonce. It reads the asset from the vault. It pulls the cash from the investor through the cash token, by permit and transferFrom, or by receiveWithAuthorization. It approves the vault for the assets and calls deposit with the investor as receiver, or requestDeposit with the investor as controller and itself as owner. The vault judges the investor and this payer and takes the cash, or reverts. On a 4626 the shares are minted to the investor, and SignedEntry reverts if they are fewer than minShares. On a 7540 there are no shares yet, only a request under the investor. SignedEntry reverts if the vault left any of its allowance unspent, and then emits EntryExecuted.">
+        <defs>
+          <marker id="se-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+          <marker id="se-arrow-mint" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="t-mint"/></marker>
+        </defs>
+        <rect class="b" x="6" y="14" width="104" height="44" rx="8"/>
+        <text x="16" y="33" class="bold">Investor</text>
+        <text x="16" y="50" class="sm m">signs twice</text>
+        <rect class="b" x="126" y="14" width="104" height="44" rx="8"/>
+        <text x="136" y="33" class="bold">Relayer</text>
+        <text x="136" y="50" class="sm m">pays the gas</text>
+        <rect class="act" x="270" y="14" width="130" height="44" rx="8"/>
+        <text x="282" y="33" class="bold">SignedEntry</text>
+        <text x="282" y="50" class="sm m">this contract</text>
+        <rect class="b" x="458" y="14" width="124" height="44" rx="8"/>
+        <text x="468" y="33" class="bold">Cash token</text>
+        <text x="468" y="50" class="sm m">the vault's asset</text>
+        <rect class="b" x="620" y="14" width="150" height="44" rx="8"/>
+        <text x="632" y="33" class="bold">Vault</text>
+        <text x="632" y="50" class="sm m">a 4626 or a 7540</text>
+        <line class="life" x1="58" y1="58" x2="58" y2="632"/>
+        <line class="life" x1="178" y1="58" x2="178" y2="632"/>
+        <line class="life" x1="335" y1="58" x2="335" y2="632"/>
+        <line class="life" x1="520" y1="58" x2="520" y2="632"/>
+        <line class="life" x1="695" y1="58" x2="695" y2="632"/>
+
+        <line class="ln dash" x1="58" y1="90" x2="174" y2="90" marker-end="url(#se-arrow)"/>
+        <text x="62" y="82" class="sm">the entry signature</text>
+        <text x="62" y="104" class="sm">the cash signature</text>
+
+        <line class="ln" x1="178" y1="140" x2="331" y2="140" marker-end="url(#se-arrow)"/>
+        <text x="184" y="132" class="mono sm">enterWithPermit</text>
+        <text x="184" y="154" class="mono sm">or enterWith3009</text>
+
+        <rect class="b2" x="240" y="166" width="190" height="110" rx="6"/>
+        <text x="250" y="184" class="sm bold">Checks the entry, in order:</text>
+        <text x="250" y="200" class="sm">deadline, then validAfter</text>
+        <text x="250" y="216" class="sm">nonce, minimum on a request</text>
+        <text x="250" y="232" class="sm">the investor's signature</text>
+        <text x="250" y="248" class="sm rej">else it reverts</text>
+        <text x="250" y="266" class="sm bold">then: nonce spent</text>
+
+        <line class="ln" x1="335" y1="298" x2="691" y2="298" marker-end="url(#se-arrow)"/>
+        <text x="342" y="290" class="mono sm">asset()</text>
+
+        <line class="ln" x1="335" y1="340" x2="516" y2="340" marker-end="url(#se-arrow)"/>
+        <text x="340" y="332" class="mono sm">permit, then transferFrom</text>
+        <text x="340" y="354" class="mono sm">or receiveWithAuthorization</text>
+
+        <line class="ln" x1="58" y1="378" x2="331" y2="378" marker-end="url(#se-arrow)"/>
+        <text x="66" y="370" class="sm bold">cash: the assets, to this contract</text>
+
+        <line class="ln" x1="335" y1="426" x2="691" y2="426" marker-end="url(#se-arrow)"/>
+        <text x="342" y="402" class="sm m">approves the vault for the assets, then calls</text>
+        <text x="342" y="418" class="mono sm">deposit(assets, investor)</text>
+        <text x="342" y="442" class="mono sm">or requestDeposit(assets, investor, itself)</text>
+
+        <rect class="b2" x="600" y="452" width="176" height="76" rx="6"/>
+        <text x="610" y="470" class="sm bold">The vault judges:</text>
+        <text x="610" y="486" class="sm">the investor and this payer</text>
+        <text x="610" y="502" class="sm">then takes the cash</text>
+        <text x="610" y="518" class="sm rej">else it reverts</text>
+
+        <line class="ln c-mint" x1="695" y1="554" x2="62" y2="554" marker-end="url(#se-arrow-mint)"/>
+        <text x="80" y="546" class="sm bold t-mint">On a 4626: shares, to the investor (kind MINT)</text>
+        <text x="80" y="570" class="sm m">On a 7540: no shares yet, a request under the investor as controller</text>
+
+        <rect class="act" x="240" y="586" width="300" height="62" rx="6"/>
+        <text x="250" y="604" class="sm">On a 4626: at least minShares, else it reverts</text>
+        <text x="250" y="622" class="sm">The allowance spent, else it reverts</text>
+        <text x="250" y="640" class="mono sm">emit EntryExecuted</text>
+      </svg>
+    </div>
+    <figcaption><b>One transaction, in this order.</b> A revert at any step undoes all of it, the spent nonce included, so a refused entry can be submitted again until its deadline. One failure is tolerated on purpose: a <code>permit</code> that fails is ignored, and the pull that follows then needs an allowance already in place. On an entry whose flag matches a genuine vault, neither the entry's cash nor an allowance to the vault stays in the contract (<code>test_ItHoldsNothingAfterwards</code>). A vault that leaves any of its allowance unspent makes the entry revert with <code>SignedEntry_CashNotTaken(left)</code>, so nothing stays. A counterfeit that does not pull does it, and so does a 7540 entered with the wrong flag when someone has named this contract the controller of a settled request (below).</figcaption>
+  </figure>
+</section>
+
+<section id="signatures">
+  <div class="prose">
+    <h2>The two signatures</h2>
+    <p>The entry and the cash are separate messages because they are addressed to separate contracts. The entry states what the investor wants, and this contract reads it. The cash token does not read an entry: to let this contract take the investor's money, it needs a message in its own format.</p>
+    <h3>First: the entry</h3>
+    <p>An EIP-712 typed message, shown to the investor field by field. Its domain is name <code>SignedEntry</code>, version <code>1</code>, the chain id and this contract's address, so a signature for one deployment or chain does not work on another. <code>entryHash(entry)</code> returns the hash that is signed. A contract wallet can sign it too, through ERC-1271 (<code>test_AContractWalletSigns</code>).</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Field</th><th>What it says</th></tr></thead>
+      <tbody>
+        <tr><td><code>investor</code></td><td>Who pays, and who receives the shares or controls the request. It is one account: an entry has no separate receiver.</td></tr>
+        <tr><td><code>vault</code></td><td>The vault. The asset is not signed: the contract asks the vault for it when the entry runs.</td></tr>
+        <tr><td><code>assets</code></td><td>The amount to pay.</td></tr>
+        <tr><td><code>minShares</code></td><td>The least the investor accepts on a 4626. On a 7540 it must be zero.</td></tr>
+        <tr><td><code>asynchronous</code></td><td>True for a 7540, where the entry files a request. False for a 4626, where it deposits.</td></tr>
+        <tr><td><code>nonce</code></td><td>A random value the investor chooses, usable once per investor.</td></tr>
+        <tr><td><code>validAfter</code>, <code>deadline</code></td><td>The window, inclusive at both ends. A <code>validAfter</code> of zero means no lower bound.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <h3>Second: the cash</h3>
+    <p>The investor picks one of two forms, depending on what the vault's asset supports. Both are signed on the cash token's own domain. With an asset that has neither, the investor has to <code>approve</code> this contract beforehand, which is a transaction.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="fixed">
+      <thead><tr><th></th><th>ERC-2612</th><th>ERC-3009</th></tr></thead>
+      <tbody>
+        <tr><td>The token's function</td><td><code>permit</code></td><td><code>receiveWithAuthorization</code>, in the form that takes the signature as <code>bytes</code>. The ERC-3009 draft itself specifies <code>v</code>, <code>r</code>, <code>s</code>, and a token with only that form cannot use this entry point</td></tr>
+        <tr><td>Entry point</td><td><code>enterWithPermit(entry, entrySig, v, r, s)</code></td><td><code>enterWith3009(entry, entrySig, cashSig)</code></td></tr>
+        <tr><td>What it does</td><td>Sets an allowance, then the contract calls <code>transferFrom</code></td><td>Moves the money to its payee, who must be the caller</td></tr>
+        <tr><td>What the investor signs</td><td>The investor as owner, this contract as spender, the entry's <code>assets</code> as value, the entry's <code>deadline</code>, and the token's next permit nonce</td><td>The investor as <code>from</code>, this contract as <code>to</code>, the entry's <code>assets</code> as value, its <code>validAfter</code> and <code>deadline</code> as the window, and <code>cashNonce(entry)</code> as the nonce</td></tr>
+        <tr><td>Tied to this entry?</td><td>No. It sets an allowance that a different entry of the same investor can spend</td><td>Yes. The nonce is derived from the entry, so the token refuses it for any other</td></tr>
+        <tr><td>If it is already used</td><td>A <code>permit</code> someone else submitted first does not stop the entry: only the allowance matters</td><td>The token refuses the used nonce. The payee is this contract, so nobody can submit it except through an entry</td></tr>
+        <tr><td>Window</td><td>The entry's window, inclusive at both ends (<code>test_AtTheDeadline_ItPasses</code>)</td><td>ERC-3009 excludes both ends, so the token refuses the authorization in the second of the entry's <code>deadline</code>, and in the second of a non-zero <code>validAfter</code></td></tr>
+        <tr><td>Contract wallets</td><td>An OpenZeppelin <code>permit</code> accepts a plain key's signature alone, so a contract wallet approves this contract beforehand and the failed <code>permit</code> is ignored</td><td>The <code>bytes</code> signature form lets the token check ERC-1271, on a token that implements it</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <p><b><code>cashNonce(entry)</code></b> returns <code>keccak256(abi.encode(address(this), entryHash(entry)))</code>. The contract computes the same value when it calls the token, so a signature over any other nonce does not verify and the token reverts (<code>test_AnAuthorizationForAnotherEntryIsRefused</code>). The authorization pays for this entry and no other. <code>test/nodejs/products.test.ts</code> signs both messages from a wallet with <code>signTypedData</code>, reading the nonce from <code>cashNonce</code>, and a relayer that holds no asset submits them.</p>
+  </div>
+</section>
+
+<section id="vaults">
+  <div class="prose"><h2>On a 4626 and on a 7540</h2></div>
+  <div class="two">
+    <div class="prose">
+      <h3>A 4626: a deposit</h3>
+      <p>With <code>asynchronous</code> false, the contract calls <code>deposit(assets, investor)</code>. The shares are minted to the investor at the vault's price in that block, and the call returns how many.</p>
+      <p>Then it compares: fewer than <code>minShares</code> reverts with <code>SignedEntry_TooFewShares(minShares, shares)</code>, nothing moves and the nonce stays unused (<code>test_FewerSharesThanAcceptedIsRefusedAndNothingMoves</code>). Exactly <code>minShares</code> passes. A <code>minShares</code> of zero is allowed and sets no floor.</p>
+    </div>
+    <div class="prose">
+      <h3>A 7540: a request</h3>
+      <p>With <code>asynchronous</code> true, the contract calls <code>requestDeposit(assets, investor, itself)</code>: the investor is the controller, and this contract is the owner that pays. The call returns zero shares (<code>test_OnARequestItFilesUnderTheInvestorAsController</code>). The request joins the period open at that moment.</p>
+      <p><b>A signed minimum is refused</b> with <code>SignedEntry_MinimumOnARequest</code>, before the signature is checked. A request has no price yet, so a minimum could not be honoured, and the contract will not appear to promise one. The investor's protection is the period's approved price.</p>
+      <p>The investor claims the shares once the period has settled, in a transaction of its own or through an operator it approved with <code>setOperator</code>. This contract does not claim. If the vault rejects the request, <code>rejectDepositRequest</code> pays the assets to the controller, the investor, and not to this contract.</p>
+    </div>
+  </div>
+  <div class="prose">
+    <p>The <code>asynchronous</code> flag has to match the vault. True on a 4626 reverts, because a 4626 has no <code>requestDeposit</code>. False on a 7540 calls the two-argument <code>deposit</code>, which is a claim in the caller's own name, and this contract files its requests in the investor's, so that normally reverts too and nothing moves. If someone has named this contract as the controller of a settled request, that claim would succeed and take no cash, so the entry reverts with <code>SignedEntry_CashNotTaken(left)</code>, the allowance the vault left unspent, and nothing moves (<code>test_WhenTheVaultDoesNotTakeTheCash_NothingHappens</code>). It reads the allowance and not a balance, because anyone can send this contract a balance.</p>
+  </div>
+</section>
+
+<section id="payer">
+  <div class="prose">
+    <h2>An ordinary third-party payer</h2>
+    <p>No vault has code for this contract. When it calls <code>deposit</code> or <code>requestDeposit</code>, the vault sees a payer that is not the receiver or controller, and it applies the rule it applies to every such payer: the payer must pass a zero-amount probe of the vault's policy, or the call reverts with <code>GatedVault_ThirdPartyNotEligible(account, reason)</code> (<a href="GatedVaultBase.html">GatedVaultBase</a>).</p>
+    <ul class="plain">
+      <li><b>So it needs a credential on each vault's policy.</b> Without one the vault refuses it (<code>test_WithoutACredential_TheVaultRefusesIt</code>). Anyone can deploy an instance, and each instance is judged by its address. If the asset is itself a gated token, this contract holds it for the length of the call, so it needs to pass the asset's policy as well.</li>
+      <li><b>The investor is judged too.</b> On a 4626 an investor the policy refuses has a <code>maxDeposit</code> of zero, the call reverts with <code>ERC4626ExceededMaxDeposit</code>, and the investor keeps its cash (<code>test_AnInvestorThePolicyRefusesIsRefused</code>). On a 7540 it reverts with <code>Gated7540Vault_ControllerNotEligible(reason)</code>.</li>
+      <li><b>The vault's other conditions apply as on any deposit</b>: its pause, its minimum position, and on a 7540 a controller with a request in an earlier unsettled period waits (<code>Gated7540Vault_EarlierRequestUnsettled</code>).</li>
+    </ul>
+  </div>
+</section>
+
+<section id="relayer">
+  <div class="prose">
+    <h2>What a relayer can and cannot do with a signature it holds</h2>
+    <p>The relayer is trusted with nothing but timing. An entry does not name its relayer, so all of this also holds for anyone who sees the signatures, for instance in the queue of pending transactions.</p>
+  </div>
+  <div class="prose"><h3>Delay it: yes</h3></div>
+  <div class="table-wrap">
+    <table class="fixed">
+      <thead><tr><th>It tries to</th><th>What happens</th></tr></thead>
+      <tbody>
+        <tr><td>Hold the entry back</td><td><b>It can.</b> Nothing forces it to submit, and the entry stays valid until <code>deadline</code>. On a 4626 the price in the block it lands is what counts, down to <code>minShares</code>. On a 7540 the request joins whichever period is open then.</td></tr>
+        <tr><td>Not submit at all</td><td><b>It can.</b> The entry lapses at its deadline, and nothing has moved.</td></tr>
+        <tr><td>Beat a cancellation</td><td><b>It can.</b> <code>cancelEntry</code> is an ordinary transaction from the investor. An entry that lands first executes.</td></tr>
+        <tr><td>Submit outside the window</td><td><b>Refused.</b> <code>SignedEntry_Expired</code> after the deadline (<code>test_AfterTheDeadline_ItReverts</code>), <code>SignedEntry_NotYetValid</code> before <code>validAfter</code> (<code>test_BeforeItIsValid_ItReverts</code>).</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose"><h3>Front-run it: harmless to the entry</h3><p>Front-running means seeing a transaction before it is included and getting another one in ahead of it.</p></div>
+  <div class="table-wrap">
+    <table class="fixed">
+      <thead><tr><th>Someone tries to</th><th>What happens</th></tr></thead>
+      <tbody>
+        <tr><td>Copy the signatures and submit first</td><td>The entry runs exactly as signed and the investor gets what it signed for. The slower transaction reverts with <code>SignedEntry_NonceUsed</code> and its sender loses the gas (<code>test_AReplayIsRefused</code>).</td></tr>
+        <tr><td>Submit the <code>permit</code> directly to the cash token first</td><td>The entry still runs, on the allowance the permit set (<code>test_APermitSomeoneElseSubmittedFirstDoesNotStopIt</code>).</td></tr>
+        <tr><td>Spend the nonce to block the entry</td><td><b>Refused.</b> The nonce is written after the investor's signature passes, and a later failure undoes the write (<code>test_FewerSharesThanAcceptedIsRefusedAndNothingMoves</code>). <code>cancelEntry</code> writes under its caller's address, so someone else cancelling does nothing to the investor's nonce (<code>testFuzz_SomeoneElseCancellingDoesNothing</code>).</td></tr>
+        <tr><td>Move a 4626's price just ahead of the entry</td><td><code>minShares</code> is the protection: below it, <code>SignedEntry_TooFewShares</code> and nothing moves. With <code>minShares</code> at zero there is no protection. A failed entry costs the investor nothing, but a price moved on purpose can keep it from landing.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose"><h3>Change it: no</h3></div>
+  <div class="table-wrap">
+    <table class="fixed">
+      <thead><tr><th>It tries to</th><th>What happens</th></tr></thead>
+      <tbody>
+        <tr><td>Change a field: the vault, the amount, the minimum, the window, the flag</td><td><b>Refused.</b> The hash differs, so the signature does not match: <code>SignedEntry_BadSignature</code> (<code>test_AnEntryChangedAfterSigningIsRefused</code>), unless the changed field trips an earlier check first (a deadline already past, a <code>validAfter</code> still to come, a minimum on a request).</td></tr>
+        <tr><td>Send the shares or the request elsewhere</td><td><b>No way to.</b> The one account named is <code>investor</code>, which is the signer, the payer and the receiver or controller.</td></tr>
+        <tr><td>Submit it twice</td><td><b>Refused.</b> <code>SignedEntry_NonceUsed</code> (<code>test_AReplayIsRefused</code>).</td></tr>
+        <tr><td>Use an authorization with another entry</td><td><b>Refused.</b> The token rejects the nonce (<code>test_AnAuthorizationForAnotherEntryIsRefused</code>).</td></tr>
+        <tr><td>Pull the investor's cash with no entry</td><td><b>No way to.</b> The contract's one pull comes after the entry's checks, for the signed amount, even when the investor has given it a larger allowance.</td></tr>
+        <tr><td>Take a cut</td><td><b>No way to.</b> The contract pays its caller nothing, and the whole amount goes to the vault (<code>test_ItHoldsNothingAfterwards</code>). How a relayer is paid is outside this contract.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <p>What a relayer does choose is how the cash arrives, because the entry does not cover the cash arguments:</p>
+    <ul class="plain">
+      <li><b>A different <code>v</code>, <code>r</code>, <code>s</code>.</b> The failed permit is ignored, and the entry then needs an allowance already in place, or it reverts with the cash token's own error, <code>ERC20InsufficientAllowance</code> on an OpenZeppelin token (<code>test_WithNoPermitAndNoAllowance_ItReverts</code>).</li>
+      <li><b>A permit left unspent.</b> A permit is not bound to an entry, so an allowance left standing can pay for another entry of the same investor. That other entry still has to be one the investor signed.</li>
+      <li><b>The other route.</b> An entry signed with an authorization can run on a standing allowance through <code>enterWithPermit</code>. The amount and everything else stay as signed, and the authorization then stays unspent and useless, because its entry's nonce is gone.</li>
+    </ul>
+  </div>
+  <div class="note">A relayer can hold an entry back, so a short <code>deadline</code> is the investor's control, and on a 4626 so is a <code>minShares</code> above zero.</div>
+</section>
+
+<section id="exits">
+  <div class="prose">
+    <h2>Exits need no such contract</h2>
+    <p>The vault's share token already has what a relayed exit takes: ERC-2612 <code>permit</code>, and <code>multicall</code>, which runs several of the token's own functions in one transaction with the sender preserved. A holder signs one message, the share token's <code>permit</code>, naming the relayer as spender for the shares. The relayer calls <code>multicall</code> on the vault with two calls:</p>
+  </div>
+  <pre>vault.multicall([
+  permit(holder, relayer, shares, deadline, v, r, s),
+  redeem(shares, holder, holder)            <span class="cm">// a 4626: the cash reaches the holder in this transaction</span>
+])
+
+vault.multicall([
+  permit(holder, relayer, shares, deadline, v, r, s),
+  requestRedeem(shares, holder, holder)     <span class="cm">// a 7540: files a redemption request under the holder</span>
+])</pre>
+  <div class="prose">
+    <p>The relayer needs no credential, because the vault judges the receiver of the cash or the controller and not the caller (<code>test_ARelayerRedeemsOnAHoldersSignatureAndTheCashGoesToTheHolder</code>, <code>test_ARelayerFilesARedemptionOnAHoldersSignature</code>). On a 7540 the holder later claims the cash with <code>redeem(shares, receiver, controller)</code>, which takes the controller or an operator it approved.</p>
+    <p>If someone submits the permit first, the <code>multicall</code> reverts on the spent permit nonce. The relayer then sends the <code>redeem</code> or <code>requestRedeem</code> alone, because the allowance is in place.</p>
+  </div>
+  <div class="note"><b>This route asks more trust than an entry.</b> A share <code>permit</code> is an allowance to the relayer. It says how many shares and the last moment it can be submitted, and it does not say what happens to them. Once submitted, the allowance has no end date: it stands until it is spent or the holder resets it. In the calls above it is the relayer who names the holder. It could name another account as receiver or controller, or use <code>transferFrom</code>, and the cash or the shares would go there, as long as that account passes the token's policy (a receiver or controller that does not reverts with <code>GatedVault_ThirdPartyNotEligible(account, reason)</code>). An exit through a relayer needs a relayer the holder trusts with those shares.</div>
+</section>
+
+<section id="functions">
+  <div class="prose"><h2>What it can do</h2></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>enterWithPermit(entry, entrySig, v, r, s)</code></td><td>Anyone</td><td>Checks the entry, tries the permit (a failure is ignored), pulls the cash by <code>transferFrom</code> and pays the vault. Returns the shares received, zero for a request.</td></tr>
+        <tr><td><code>enterWith3009(entry, entrySig, cashSig)</code></td><td>Anyone</td><td>Checks the entry, pulls the cash by <code>receiveWithAuthorization</code> with <code>cashNonce(entry)</code>, and pays the vault. Returns the shares received, zero for a request.</td></tr>
+        <tr><td><code>cancelEntry(nonce)</code></td><td>Anyone, for their own nonces</td><td>Marks the nonce used under the caller's address, so an entry signed with it cannot execute. It does not revert if the nonce was already used. It touches neither an allowance nor an authorization on the cash token.</td></tr>
+        <tr><td><code>entryHash(entry)</code></td><td>Anyone (read-only)</td><td>The EIP-712 hash the investor signs.</td></tr>
+        <tr><td><code>cashNonce(entry)</code></td><td>Anyone (read-only)</td><td>The nonce an ERC-3009 authorization for this entry must carry.</td></tr>
+        <tr><td><code>nonceUsed(investor, nonce)</code></td><td>Anyone (read-only)</td><td>Whether a nonce was used or cancelled.</td></tr>
+        <tr><td><code>eip712Domain()</code></td><td>Anyone (read-only)</td><td>OpenZeppelin <code>EIP712</code>: the domain fields, for a wallet to read. The domain does not change, so <code>EIP712DomainChanged</code> does not fire.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Error or event</th><th>When</th></tr></thead>
+      <tbody>
+        <tr><td><code>EntryExecuted(entryHash, investor, vault, assets, shares)</code></td><td>An entry ran. <code>shares</code> is zero for a request.</td></tr>
+        <tr><td><code>EntryCancelled(investor, nonce)</code></td><td>Someone called <code>cancelEntry</code>, under their own address.</td></tr>
+        <tr><td><code>SignedEntry_Expired()</code></td><td>After the deadline.</td></tr>
+        <tr><td><code>SignedEntry_NotYetValid()</code></td><td>Before <code>validAfter</code>.</td></tr>
+        <tr><td><code>SignedEntry_NonceUsed()</code></td><td>The nonce was used or cancelled.</td></tr>
+        <tr><td><code>SignedEntry_MinimumOnARequest()</code></td><td>A request names a minimum.</td></tr>
+        <tr><td><code>SignedEntry_BadSignature()</code></td><td>The entry's signature is not the investor's.</td></tr>
+        <tr><td><code>SignedEntry_CashNotTaken(left)</code></td><td>The vault left <code>left</code> of its allowance unspent.</td></tr>
+        <tr><td><code>SignedEntry_TooFewShares(minShares, shares)</code></td><td>A deposit bought fewer shares than the investor accepted.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small">The checks run in the order of the table, from <code>SignedEntry_Expired</code> to <code>SignedEntry_BadSignature</code>, before any cash moves. The errors of the cash token and the vault arrive unwrapped, apart from a failed <code>permit</code>, which is ignored.</p>
+</section>
+
+<section id="why">
+  <div class="prose">
+    <h2>Why it is built this way</h2>
+    <ul class="plain">
+      <li><b>No vault changes.</b> A vault already has a rule for third-party payers. Making this contract one of them keeps every policy decision in the vault's own rule list, and an issuer who does not want it gives it no credential.</li>
+      <li><b>No roles.</b> The investor's signature carries all the authority, so there is nothing for an owner or an operator to do. The relayer is whoever submits.</li>
+      <li><b>A failed permit is tolerated.</b> A signed permit sits in public while it waits, and anyone can submit it directly. If that made the entry fail, anyone could stop an entry for the price of one transaction.</li>
+      <li><b>The authorization's nonce comes from the entry.</b> It is the same device as the <a href="DvPExecutor.html">DvPExecutor</a>'s nonce, and it makes the authorization useless for anything but this entry.</li>
+      <li><b>The nonce is spent before any call that can change state.</b> A vault or a token that calls back into this contract during the entry cannot repeat it, so the contract has no reentrancy guard.</li>
+      <li><b>It refuses a minimum on a request</b> rather than accept one it could not honour.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="prose">
+    <h2>What it does not do</h2>
+    <ul class="plain">
+      <li><b>No list of vaults.</b> The investor signs a vault address, and the contract trusts what that vault reports. The asset is read from the vault when the entry runs. An investor who signs an entry for a counterfeit vault loses what its cash signature, or a standing allowance to this contract, lets that vault take, up to the signed amount.</li>
+      <li><b>A permit is not bound to one entry</b>, and permits run in order. An ERC-2612 permit carries the token's next sequential nonce, so a second permit does not work until the first is spent; its failure is ignored, and the entry then reverts for lack of allowance. An allowance, once set, stands until it is spent or the investor resets it on the cash token.</li>
+      <li><b>A minimum protects on a 4626 only.</b> On a 7540 the investor files without knowing the price, and relies on the period's approved price.</li>
+      <li><b>Cancelling takes a transaction</b>, so it needs gas, and it can lose the race with the relayer. It does not revoke an allowance.</li>
+      <li><b>No claims.</b> A 7540's shares take a later call by the investor or its operator.</li>
+      <li><b>No payment to the relayer</b>, and no way to name one.</li>
+      <li><b>No deployment.</b> Nothing in <code>ignition/modules</code> deploys it and no profile names it. An issuer that wants it deploys an instance and has it credentialed on each vault.</li>
+      <li><b>No sweep.</b> It has no function to move tokens sent to it by mistake. A gated token's agent can still take its own token out with <code>forcedTransfer</code>.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="connected">
+  <div class="prose"><h2>Connected to</h2></div>
+  <div class="cards">
+    <a class="card" href="GatedVaultBase.html"><span class="name">GatedVaultBase</span><p>The third-party check this contract has to pass as a payer.</p></a>
+    <a class="card" href="Gated4626Vault.html"><span class="name">Gated4626Vault</span><p>Where an entry is a deposit, and <code>minShares</code> applies.</p></a>
+    <a class="card" href="Gated7540Vault.html"><span class="name">Gated7540Vault</span><p>Where an entry is a request under the investor.</p></a>
+    <a class="card" href="NavDesk.html"><span class="name">NavDesk</span><p>Approves the price that protects a 7540 request.</p></a>
+    <a class="card" href="CredentialRule.html"><span class="name">CredentialRule</span><p>The usual reason a vault accepts or refuses this contract and the investor.</p></a>
+    <a class="card" href="PolicyGatedERC20Upgradeable.html"><span class="name">PolicyGatedERC20Upgradeable</span><p>Gives a share token the <code>permit</code> and the <code>multicall</code> that a relayed exit uses.</p></a>
+    <a class="card" href="DvPExecutor.html"><span class="name">DvPExecutor</span><p>Ties an ERC-3009 payment to one signed instruction in the same way.</p></a>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose">
+    <h2>Source and tests</h2>
+    <ul class="plain">
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/intents/SignedEntry.sol"><code>contracts/intents/SignedEntry.sol</code></a>, interfaces <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/ISignedEntry.sol"><code>ISignedEntry.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/IERC3009.sol"><code>IERC3009.sol</code></a></li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/intents/SignedEntry.t.sol"><code>SignedEntry.t.sol</code></a> (both cash forms on real vaults, the window ends, replay, cancelling, the minimum, a contract wallet, the third-party check, and the two relayed exits) and <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/products.test.ts"><code>test/nodejs/products.test.ts</code></a> (a wallet signs both messages and a relayer submits them, on a deployed vault)</li>
+    </ul>
+  </div>
+</section>
+
+<footer>Describes the contracts at commit <code>babef08</code> on <code>main</code>.</footer>
+</main>
+</body>
+</html>

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>IntentToken · Gated Token Stack</title>
-<meta name="description" content="What the plain gated token template adds to the base and the intent mixin, and how the deployment places it with its five rules.">
+<meta name="description" content="The gated token with signed transfers: what the template adds to the base and the intent mixin, how a product places it, and when a product would choose it.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
@@ -26,269 +26,241 @@
 <header class="top">
   <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Token</div>
   <h1>IntentToken</h1>
-  <p class="lede">The plain gated token: an ERC-20 whose every movement passes the compliance hook, and whose holders can also settle by signed intent. It adds almost nothing of its own: a setup function and the name of its template.</p>
+  <p class="lede">The gated token with signed transfers: an ERC-20 whose movements pass the policy hook, and whose holders can also sign a transfer for an approved executor to settle. It adds almost nothing of its own: a setup function, its decimals and the name of its template.</p>
   <div class="facts">
     <span class="fact"><b>contracts/tokens/IntentToken.sol</b></span>
     <span class="fact">upgradeable: <b>UUPS</b>, behind a <b>TokenProxy</b></span>
-    <span class="fact">admin: <b>the main timelock</b></span>
+    <span class="fact">admin: <b>the main timelock</b>, after hand-over</span>
     <span class="fact">implementation attested as <b>IMPLEMENTATION</b></span>
   </div>
 </header>
 
 <section id="in-one-minute">
-  <div class="callout">
+  <div class="callout wrap-any">
     <h3>In one minute</h3>
-    <p>This is the template for a permissioned token that changes hands between verified holders. Everything it does comes from two shared pieces: the base, which keeps balances and roles, gives the issuer its enforcement tools and asks the compliance hook about every movement, and the intent mixin, which lets a holder sign a transfer that an approved executor settles later.</p>
-    <p>The deployment creates one, called "Intent Token" with the symbol <code>INT</code> unless the deployment parameters say otherwise. It is placed through <code>ProxyDeployer</code> with five rules in a fixed order, configured, given its roles, and then handed to the main timelock, so every later change goes through governance and its delay.</p>
+    <p>This is the template for a permissioned token whose transfers the issuer can settle: a holder signs, an approved executor submits, and the rules decide. Of the stack's templates it is the one that can be a leg of a delivery-versus-payment trade. Everything it does comes from two shared pieces: <a href="PolicyGatedERC20Upgradeable.html">the base</a>, which keeps balances and roles, gives the issuer its enforcement tools and asks the policy hook about each movement, and <a href="IntentSettledUpgradeable.html">the intent mixin</a>, which adds signed transfers.</p>
+    <p>A holder can also use a plain <code>transfer</code>, unless the product lists <code>ExecutedOnlyRule</code>. If a product needs none of this, <a href="GatedToken.html"><code>GatedToken</code></a> is the same base without the mixin.</p>
   </div>
 </section>
 
 <section id="how">
-  <div class="prose">
+  <div class="prose wrap-any">
     <h2>What the token is made of</h2>
-    <p>The token's address is a <b>proxy</b>: a small contract that holds all the state (balances, roles, frozen amounts, used intent nonces) and runs the shared implementation code for every call. That code is three layers on top of OpenZeppelin. Every movement, whatever its kind, asks the one shared <b>hook</b>, which runs this token's rules in order and stops at the first refusal.</p>
+    <p>The token's address is a <b>proxy</b>: a small contract that holds all the state (balances, roles, frozen amounts, used intent nonces) and runs the shared implementation code for every call. That code is three layers on top of OpenZeppelin. Each movement, whatever its kind, asks the one shared <b>hook</b>, which runs this token's rules in order and stops at the first refusal.</p>
   </div>
   <figure>
     <div class="fig-scroll">
-      <svg class="d" viewBox="0 0 880 460" role="img" aria-label="The token's structure. A TokenProxy at the token's address holds the state and delegates every call to the IntentToken implementation, which the council attested. The implementation has four layers: IntentToken with initialize and templateId; IntentSettledUpgradeable with executeTransfer, canExecute and cancelIntent; PolicyGatedERC20Upgradeable with _update, mint, burn, forcedTransfer and pause; and the OpenZeppelin parents. The base layer calls the shared ComplianceHook with beforeTransfer and gets a reason code back. The hook runs this token's five rules in order: CredentialRule, MinPositionRule, HolderRestrictionRule, SettlementWindowRule and FundHoldersRule.">
+      <svg class="d" viewBox="0 0 780 460" role="img" aria-label="The token's structure. A TokenProxy at the token's address holds the state and delegates every call to the IntentToken implementation, which the council attested. The implementation has four layers: IntentToken with initialize, decimals and templateId; IntentSettledUpgradeable with executeTransfer, canExecute and cancelIntent; PolicyGatedERC20Upgradeable with _move, mint, burn, forcedTransfer and pause; and the OpenZeppelin parents. The base layer calls the shared ComplianceHook with beforeTransfer and gets a reason code back. In the demo stack the hook runs five rules for this token, in order: CredentialRule, MinPositionRule, HolderRestrictionRule, SettlementWindowRule and FundHoldersRule.">
         <defs>
           <marker id="it-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
         </defs>
 
-        <rect class="act" x="20" y="14" width="380" height="50" rx="8"/>
-        <text x="36" y="35" class="bold">TokenProxy, at the token's address</text>
-        <text x="36" y="53" class="sm m">holds balances, roles, frozen amounts, used nonces</text>
-        <line class="ln" x1="210" y1="64" x2="210" y2="94" marker-end="url(#it-arrow)"/>
-        <text x="220" y="84" class="sm m">delegates every call</text>
+        <rect class="act" x="14" y="14" width="336" height="50" rx="8"/>
+        <text x="28" y="35" class="bold">TokenProxy, at the token's address</text>
+        <text x="28" y="53" class="sm m">balances, roles, frozen amounts, used nonces</text>
+        <line class="ln" x1="182" y1="64" x2="182" y2="94" marker-end="url(#it-arrow)"/>
+        <text x="192" y="84" class="sm m">delegates every call</text>
 
-        <rect class="frame" x="20" y="96" width="380" height="350" rx="10"/>
-        <text x="36" y="118" class="bold">IntentToken implementation (attested)</text>
+        <rect class="frame" x="14" y="96" width="336" height="350" rx="10"/>
+        <text x="28" y="118" class="bold">IntentToken implementation (attested)</text>
 
-        <rect class="b" x="36" y="130" width="348" height="54" rx="6"/>
-        <text x="50" y="151" class="bold">IntentToken</text>
-        <text x="50" y="171" class="mono sm">initialize, templateId</text>
+        <rect class="b" x="28" y="130" width="308" height="54" rx="6"/>
+        <text x="40" y="151" class="bold">IntentToken</text>
+        <text x="40" y="171" class="mono sm">initialize, decimals, templateId</text>
 
-        <rect class="b" x="36" y="194" width="348" height="54" rx="6"/>
-        <text x="50" y="215" class="bold">IntentSettledUpgradeable</text>
-        <text x="50" y="235" class="mono sm">executeTransfer, canExecute, cancelIntent</text>
+        <rect class="b" x="28" y="194" width="308" height="54" rx="6"/>
+        <text x="40" y="215" class="bold">IntentSettledUpgradeable</text>
+        <text x="40" y="235" class="mono sm">executeTransfer, canExecute, cancelIntent</text>
 
-        <rect class="b" x="36" y="258" width="348" height="54" rx="6"/>
-        <text x="50" y="279" class="bold">PolicyGatedERC20Upgradeable</text>
-        <text x="50" y="299" class="mono sm">_update, mint, burn, forcedTransfer, pause</text>
+        <rect class="b" x="28" y="258" width="308" height="54" rx="6"/>
+        <text x="40" y="279" class="bold">PolicyGatedERC20Upgradeable</text>
+        <text x="40" y="299" class="mono sm">_move, mint, burn, forcedTransfer, pause</text>
 
-        <rect class="b2" x="36" y="322" width="348" height="110" rx="6"/>
-        <text x="50" y="343" class="bold">OpenZeppelin v5 parents</text>
-        <text x="50" y="363" class="mono sm">ERC20Permit, AccessControl,</text>
-        <text x="50" y="380" class="mono sm">Pausable, Multicall, UUPSUpgradeable,</text>
-        <text x="50" y="397" class="mono sm">ReentrancyGuardTransient</text>
+        <rect class="b2" x="28" y="322" width="308" height="110" rx="6"/>
+        <text x="40" y="343" class="bold">OpenZeppelin v5 parents</text>
+        <text x="40" y="363" class="mono sm">ERC20Permit, AccessControl,</text>
+        <text x="40" y="380" class="mono sm">Pausable, Multicall, UUPSUpgradeable,</text>
+        <text x="40" y="397" class="mono sm">ReentrancyGuardTransient</text>
 
-        <line class="ln" x1="384" y1="278" x2="516" y2="278" marker-end="url(#it-arrow)"/>
-        <text x="410" y="270" class="mono sm">beforeTransfer</text>
-        <line class="ln dash" x1="520" y1="300" x2="388" y2="300" marker-end="url(#it-arrow)"/>
-        <text x="410" y="318" class="sm m">reason code</text>
+        <line class="ln" x1="336" y1="278" x2="470" y2="278" marker-end="url(#it-arrow)"/>
+        <text x="358" y="270" class="mono sm">beforeTransfer</text>
+        <line class="ln dash" x1="474" y1="300" x2="340" y2="300" marker-end="url(#it-arrow)"/>
+        <text x="358" y="318" class="sm m">reason code</text>
 
-        <rect class="b" x="520" y="96" width="340" height="350" rx="10"/>
-        <text x="536" y="118" class="bold">ComplianceHook (shared)</text>
-        <text x="536" y="136" class="sm m">this token's rules, in order; first refusal wins</text>
+        <rect class="b" x="474" y="96" width="294" height="350" rx="10"/>
+        <text x="488" y="118" class="bold">ComplianceHook (shared)</text>
+        <text x="488" y="136" class="sm m">its rules in order; first refusal wins</text>
 
-        <rect class="b2" x="536" y="148" width="308" height="52" rx="6"/>
-        <text x="548" y="169" class="mono">1  CredentialRule</text>
-        <text x="548" y="188" class="sm m">who may send and who may receive</text>
+        <rect class="b2" x="488" y="148" width="266" height="52" rx="6"/>
+        <text x="500" y="169" class="mono">1  CredentialRule</text>
+        <text x="500" y="188" class="sm m">who may send and who may receive</text>
 
-        <rect class="b2" x="536" y="206" width="308" height="52" rx="6"/>
-        <text x="548" y="227" class="mono">2  MinPositionRule</text>
-        <text x="548" y="246" class="sm m">no balance left below the minimum</text>
+        <rect class="b2" x="488" y="206" width="266" height="52" rx="6"/>
+        <text x="500" y="227" class="mono">2  MinPositionRule</text>
+        <text x="500" y="246" class="sm m">no balance left below the minimum</text>
 
-        <rect class="b2" x="536" y="264" width="308" height="52" rx="6"/>
-        <text x="548" y="285" class="mono">3  HolderRestrictionRule</text>
-        <text x="548" y="304" class="sm m">lockups and address freezes per holder</text>
+        <rect class="b2" x="488" y="264" width="266" height="52" rx="6"/>
+        <text x="500" y="285" class="mono">3  HolderRestrictionRule</text>
+        <text x="500" y="304" class="sm m">lockups and address freezes</text>
 
-        <rect class="b2" x="536" y="322" width="308" height="52" rx="6"/>
-        <text x="548" y="343" class="mono">4  SettlementWindowRule</text>
-        <text x="548" y="362" class="sm m">signed intents only inside the window</text>
+        <rect class="b2" x="488" y="322" width="266" height="52" rx="6"/>
+        <text x="500" y="343" class="mono">4  SettlementWindowRule</text>
+        <text x="500" y="362" class="sm m">signed intents inside the window</text>
 
-        <rect class="b2" x="536" y="380" width="308" height="52" rx="6"/>
-        <text x="548" y="401" class="mono">5  FundHoldersRule</text>
-        <text x="548" y="420" class="sm m">the investor cap shared by the fund</text>
+        <rect class="b2" x="488" y="380" width="266" height="52" rx="6"/>
+        <text x="500" y="401" class="mono">5  FundHoldersRule</text>
+        <text x="500" y="420" class="sm m">the investor cap of a fund</text>
       </svg>
     </div>
-    <figcaption><b>One proxy, three layers of code, five rules.</b> The proxy is the token; the implementation is shared code behind it. The hook is shared by every token of the deployment and keeps a separate ordered list for each. If the hook asks for it, the base also calls <code>afterTransfer</code> after the balances move.</figcaption>
+    <figcaption class="wrap-any"><b>One proxy, three layers of code, one rule list.</b> The proxy is the token; the implementation is shared code behind it. The hook is shared by every token of the deployment and keeps a separate ordered list for each. The list shown is the demo stack's; each product states its own. If the hook asks for it, the base also calls <code>afterTransfer</code> after the balances move.</figcaption>
   </figure>
-  <ol class="steps">
-    <li><div><b><a href="TokenProxy.html"><code>TokenProxy</code></a></b> is OpenZeppelin's ERC-1967 proxy. Its address follows from <code>ProxyDeployer</code>'s address, the symbol and the implementation, so it is known before deployment. Changing the code behind it is a governance upgrade.</div></li>
-    <li><div><b><code>IntentToken</code></b> itself adds only <code>initialize</code> and <code>templateId</code>, and a constructor that locks the implementation so only proxies can be set up.</div></li>
+  <ol class="steps wrap-any">
+    <li><div><b><a href="TokenProxy.html"><code>TokenProxy</code></a></b> is the proxy. Its address follows from <code>ProxyDeployer</code>'s address, the symbol and the implementation, so it is known before the token exists. Changing the code behind it is a governance upgrade.</div></li>
+    <li><div><b><code>IntentToken</code></b> itself adds <code>initialize</code>, <code>decimals</code> and <code>templateId</code>, and a constructor that locks the implementation so that only proxies can be set up. The decimals are fixed at setup, in the token's own ERC-7201 namespace (<code>gated.storage.IntentToken</code>), and an upgrade keeps them (<code>test_AnUpgradeKeepsTheDecimals</code>). For a cash token they are the precision of its ledger; the <code>Product</code> deployment module uses 18 when a product states none.</div></li>
     <li><div><b><a href="IntentSettledUpgradeable.html"><code>IntentSettledUpgradeable</code></a></b> adds signed intents, settled by an executor as <span class="k k-executed">EXECUTED</span>.</div></li>
-    <li><div><b><a href="PolicyGatedERC20Upgradeable.html"><code>PolicyGatedERC20Upgradeable</code></a></b> adds everything else: ERC-20, roles, mint, burn, forced transfer, frozen amounts, pause, permit, multicall, upgrades, and the single movement path that asks the hook.</div></li>
+    <li><div><b><a href="PolicyGatedERC20Upgradeable.html"><code>PolicyGatedERC20Upgradeable</code></a></b> adds everything else: ERC-20, roles, mint, burn, forced transfer, frozen amounts, pause, permit, multicall, upgrades, and the one movement path that asks the hook.</div></li>
   </ol>
 </section>
 
-<section id="functions">
-  <div class="prose"><h2>What it can do</h2></div>
-  <div class="table-wrap">
-    <table class="tight">
-      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th><th>Reverts</th></tr></thead>
-      <tbody>
-        <tr><td><code>constructor()</code></td><td>Runs once, when the implementation is deployed</td><td>Disables the initialiser on the implementation itself, so only a proxy can be set up.</td><td></td></tr>
-        <tr><td><code>initialize(name, symbol, admin, guardian, registry, hook, initialRules)</code></td><td>Once per proxy; <code>ProxyDeployer</code> calls it in the transaction that creates the proxy</td><td>Sets the name (also the EIP-712 domain name) and symbol, grants <code>DEFAULT_ADMIN_ROLE</code> to <code>admin</code> and <code>GUARDIAN_ROLE</code> to <code>guardian</code>, fixes the registry, installs the hook after checking it, and installs <code>initialRules</code> on the hook for this token. An empty list installs none, and the hook then refuses every movement.</td><td><code>PolicyGated_ZeroAddress</code>, <code>PolicyGated_NotAttested</code>, <code>PolicyGated_HookRegistryMismatch</code>, the hook's own refusals (an unattested rule, more than 16 rules, two rules of one type), <code>InvalidInitialization</code> on a second call</td></tr>
-        <tr><td><code>templateId()</code></td><td>Anyone (read-only)</td><td>Returns <code>keccak256("IntentToken")</code>. An upgrade must target code that reports the same id.</td><td></td></tr>
-        <tr><td>Everything else</td><td colspan="3">From the base (<a href="PolicyGatedERC20Upgradeable.html#functions">transfers, mint, burn, forced transfer, freeze, pause, pre-flights, hook, upgrades</a>) and the mixin (<a href="IntentSettledUpgradeable.html#functions">signed intents</a>).</td></tr>
-      </tbody>
-    </table>
-  </div>
-  <div class="prose"><p class="small">No function of the token accepts ether. The only payable entry point is the upgrade function, and it reverts when value is sent.</p></div>
-</section>
-
 <section id="rules">
-  <div class="prose">
-    <h2>Its rules, in order</h2>
-    <p>The deployment fixes each token's list in <code>RULE_ORDER</code> (<code>ignition/modules/roles.ts</code>). For the intent token it is five rules. The credential check comes first, and the minimum position right after it, so that when a minimum is set the rules that follow judge real positions rather than dust. The settlement window is in this list only: the vaults have no executed intents to time. The fund's cap comes last.</p>
+  <div class="prose wrap-any">
+    <h2>Its rules</h2>
+    <p>Each product states its rule list, and the token installs the list on the hook when it is set up. The table shows the list the demo stack uses (<code>RULE_ORDER</code> in <code>ignition/modules/roles.ts</code>, the <code>full</code> profile). The credential check comes first, and the minimum position right after it, so that when a minimum is set the rules that follow judge real positions rather than dust. The fund's cap comes last. A product can list fewer, and can add <a href="SupplyCapRule.html"><code>SupplyCapRule</code></a> or <a href="ExecutedOnlyRule.html"><code>ExecutedOnlyRule</code></a>.</p>
   </div>
   <div class="table-wrap">
     <table class="tight">
-      <thead><tr><th>#</th><th>Rule</th><th>What it checks on this token</th><th>How the deployment sets it up</th></tr></thead>
+      <thead><tr><th>#</th><th>Rule</th><th>What it checks on this token</th><th>How a product sets it up</th></tr></thead>
       <tbody>
-        <tr><td>1</td><td><a href="CredentialRule.html"><code>CredentialRule</code></a></td><td>The receiver holds an active credential that this token's policy accepts (not checked on a burn). The sender must be known to the credential registry and not blocked, except on a mint, a forced transfer or a burner's burn.</td><td><code>setPolicy(token, KYC, 0, 0, 1)</code>: every receiver needs the KYC qualification from attester 0.</td></tr>
-        <tr><td>2</td><td><a href="MinPositionRule.html"><code>MinPositionRule</code></a></td><td>A movement may not leave the sender or the receiver holding more than zero and less than the token's minimum position. Forced transfers, a burner's burn and accounts the token's admin lists are exempt.</td><td><code>setMinPosition(token, intentMinPosition)</code>, 0 by default, which switches the rule off.</td></tr>
-        <tr><td>3</td><td><a href="HolderRestrictionRule.html"><code>HolderRestrictionRule</code></a></td><td>Per-holder lockups and address freezes.</td><td>Nothing at deployment; the agent sets them holder by holder.</td></tr>
-        <tr><td>4</td><td><a href="SettlementWindowRule.html"><code>SettlementWindowRule</code></a></td><td>An executed intent passes only inside a daily UTC window, on enabled weekdays. Other kinds are not judged.</td><td><code>setWindow(token, windowOpen, windowClose, windowDays)</code> from the deployment parameters.</td></tr>
-        <tr><td>5</td><td><a href="FundHoldersRule.html"><code>FundHoldersRule</code></a></td><td>The cap on distinct investors across all classes of the <a href="Fund.html"><code>Fund</code></a>.</td><td>The fund registers the token as its first class, before the two vaults.</td></tr>
+        <tr><td>1</td><td><a href="CredentialRule.html"><code>CredentialRule</code></a></td><td>The receiver holds an active credential that this token's policy accepts (not asked on a burn). The sender must be known to the credential registry and not blocked, except on a mint, a forced transfer or a burner's burn.</td><td><code>setPolicy(token, requireAll, requireAny, forbidAny, attesters)</code>. Unless the product states a policy: the KYC qualification from attester 0.</td></tr>
+        <tr><td>2</td><td><a href="MinPositionRule.html"><code>MinPositionRule</code></a></td><td>A movement may not leave the sender or the receiver holding more than zero and less than the token's minimum position. Forced transfers, a burner's burn and accounts the token's admin lists are exempt.</td><td><code>setMinPosition(token, minPosition)</code>, 0 unless a parameter says otherwise, which switches the rule off.</td></tr>
+        <tr><td>3</td><td><a href="HolderRestrictionRule.html"><code>HolderRestrictionRule</code></a></td><td>Per-holder lockups and address freezes.</td><td>Nothing at launch. The agent sets them holder by holder (<code>setLockup</code>, <code>setFrozen</code>).</td></tr>
+        <tr><td>4</td><td><a href="SettlementWindowRule.html"><code>SettlementWindowRule</code></a></td><td>An executed intent passes inside a daily UTC window, on enabled weekdays. Other kinds are not judged.</td><td><code>setWindow(token, windowOpen, windowClose, windowDays)</code> from the deployment parameters.</td></tr>
+        <tr><td>5</td><td><a href="FundHoldersRule.html"><code>FundHoldersRule</code></a></td><td>The cap on distinct investors across the classes of a <a href="Fund.html"><code>Fund</code></a>.</td><td>The fund registers the token as a class (<code>registerClass</code>), in <code>FundOpen</code> or a later timelock operation.</td></tr>
       </tbody>
     </table>
   </div>
-  <div class="prose">
-    <p>The first four rules keep their settings per token and accept a change only from an account that holds the right role on this token: <code>DEFAULT_ADMIN_ROLE</code> for policy settings, <code>AGENT_ROLE</code> for a holder's lockup or freeze. The investor cap is a setting of the <code>Fund</code>, which the main timelock owns. Until the credential policy is set, the credential rule admits no receiver; until the fund registers the token, the fund rule refuses every movement. So no balance can exist before the token is configured.</p>
+  <div class="prose wrap-any">
+    <p>Until the credential policy is set, the credential rule refuses every receiver except the token's own address. Until a fund registers the token, the fund rule refuses every movement with <code>NOT_FUND_CLASS</code>. <code>Product</code> grants the minter's role after the configuration, so the settings are in place before anyone can mint.</p>
   </div>
 </section>
 
 <section id="deployment">
-  <div class="prose">
-    <h2>Who deploys it</h2>
-    <p>Two Ignition modules build the deployment. <code>Components</code> deploys the shared pieces, including one <code>IntentToken</code> implementation; the security council then attests the rules, the hook and the implementations; then <code>Activate</code> creates and sets up the token itself. While <code>Activate</code> runs, the deployer account is the token's admin; at the end it gives that up.</p>
+  <div class="prose wrap-any">
+    <h2>Who places it</h2>
+    <p>The <code>Core</code> module deploys one <code>IntentToken</code> implementation for the issuer, and the security council attests it. Each product is then one run of the <code>Product</code> module by the operations account, which owns <code>ProxyDeployer</code>, so a launch has no timelock wait.</p>
   </div>
-  <figure>
-    <div class="fig-scroll">
-      <svg class="d" viewBox="0 0 880 400" role="img" aria-label="The Activate stages for the intent token. 1, Place: the deployer calls ProxyDeployer.deploy, which creates the proxy at the address of the symbol INT, initialises it with the deployer as admin, the guardian, the registry and the hook, installs the five rules on the hook and reads them back. 2, Configure: the credential policy KYC from attester 0, the settlement window and days, the minimum position at 0 by default, and the fund registers the token as class 1. 3, Grant roles: minter, burner and agent keys; EXECUTOR_ROLE to the IntentExecutor and the DvPExecutor only; UPGRADER_ROLE to the main timelock; RECOVERY_ROLE to the recovery timelock. Role grants wait for the class registration. 4, Hand over, after configuration and role grants: DEFAULT_ADMIN_ROLE to the main timelock and the deployer renounces. ProxyDeployer ownership moves to the main timelock once every token is placed, and Fund ownership once the classes are registered; neither waits for the role grants.">
-        <defs>
-          <marker id="it-arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
-        </defs>
-
-        <rect class="act" x="14" y="100" width="220" height="200" rx="8"/>
-        <text x="28" y="126" class="bold">1. Place</text>
-        <text x="28" y="150" class="mono sm">ProxyDeployer.deploy</text>
-        <text x="28" y="170" class="sm">proxy at the address of the</text>
-        <text x="28" y="187" class="sm">symbol INT; initialize sets</text>
-        <text x="28" y="204" class="sm">the deployer as admin, the</text>
-        <text x="28" y="221" class="sm">guardian, registry and hook,</text>
-        <text x="28" y="238" class="sm">and installs the five rules</text>
-        <text x="28" y="255" class="sm">on the hook; ProxyDeployer</text>
-        <text x="28" y="272" class="sm">reads them back</text>
-
-        <line class="ln" x1="234" y1="200" x2="266" y2="200"/>
-        <line class="ln" x1="266" y1="99" x2="266" y2="300"/>
-        <line class="ln" x1="266" y1="99" x2="296" y2="99" marker-end="url(#it-arrow2)"/>
-        <line class="ln" x1="266" y1="300" x2="296" y2="300" marker-end="url(#it-arrow2)"/>
-
-        <rect class="b" x="300" y="14" width="280" height="160" rx="8"/>
-        <text x="314" y="40" class="bold">2. Configure</text>
-        <text x="314" y="64" class="sm">credential policy: KYC from attester 0</text>
-        <text x="314" y="82" class="sm">settlement window: hours and weekdays</text>
-        <text x="314" y="100" class="sm">minimum position: 0 by default, off</text>
-        <text x="314" y="118" class="sm">fund: rule and cap set, then this token</text>
-        <text x="314" y="136" class="sm">registered as class 1, then the vaults</text>
-
-        <line class="ln" x1="440" y1="174" x2="440" y2="210" marker-end="url(#it-arrow2)"/>
-        <text x="450" y="197" class="sm m">registrations first</text>
-
-        <rect class="b" x="300" y="214" width="280" height="172" rx="8"/>
-        <text x="314" y="240" class="bold">3. Grant roles</text>
-        <text x="314" y="262" class="mono sm">MINTER, BURNER, AGENT:</text>
-        <text x="314" y="280" class="sm">the minter, burner and agent keys</text>
-        <text x="314" y="300" class="mono sm">EXECUTOR:</text>
-        <text x="314" y="318" class="sm">the IntentExecutor and DvPExecutor only</text>
-        <text x="314" y="338" class="sm"><tspan class="mono">UPGRADER</tspan>: the main timelock</text>
-        <text x="314" y="358" class="sm"><tspan class="mono">RECOVERY</tspan>: the recovery timelock</text>
-
-        <line class="ln" x1="580" y1="94" x2="612" y2="94"/>
-        <line class="ln" x1="580" y1="300" x2="612" y2="300"/>
-        <line class="ln" x1="612" y1="94" x2="612" y2="300"/>
-        <line class="ln" x1="612" y1="170" x2="642" y2="170" marker-end="url(#it-arrow2)"/>
-
-        <rect class="act" x="646" y="120" width="220" height="100" rx="8"/>
-        <text x="660" y="146" class="bold">4. Hand over</text>
-        <text x="660" y="170" class="sm"><tspan class="mono">DEFAULT_ADMIN_ROLE</tspan> to</text>
-        <text x="660" y="187" class="sm">the main timelock; the</text>
-        <text x="660" y="204" class="sm">deployer renounces its own</text>
-      </svg>
-    </div>
-    <figcaption><b>Placed, configured, staffed, handed over.</b> Configuration and role grants wait until every token of the deployment is placed, so a token that fails <code>ProxyDeployer</code>'s checks leaves no roles anywhere. Role grants also wait for the fund's class registrations, and the admin hand-over waits for both. ProxyDeployer's ownership moves once every token is placed, and the Fund's once the classes are registered; neither waits for the role grants.</figcaption>
-  </figure>
-  <ol class="steps">
-    <li><div><b>Place.</b> The deployer calls <code>ProxyDeployer.deploy(symbol, implementation, initData, hook, rules)</code>, where <code>initData</code> is the <code>initialize</code> call with the token's name and symbol, the deployer as admin, the guardian, the registry, the shared hook and the rule list from <code>RULE_ORDER.intent</code>. <code>ProxyDeployer</code> refuses an implementation the council has not attested, and finishes only if the token names its registry, uses the given hook, and the hook holds exactly those rules in that order. See <a href="ProxyDeployer.html"><code>ProxyDeployer</code></a>.</div></li>
-    <li><div><b>Configure.</b> While the deployer is still the token's admin, it sets the credential policy, the settlement window and the minimum position, and the fund registers the token as a class.</div></li>
-    <li><div><b>Grant roles.</b> The intent token is the only token in the deployment with a minter and a burner. Its <code>EXECUTOR_ROLE</code> goes to the two executor contracts and to no one else, so every signed intent is submitted through one of them. The guardian already holds <code>GUARDIAN_ROLE</code> from <code>initialize</code>.</div></li>
-    <li><div><b>Hand over.</b> The main timelock receives <code>DEFAULT_ADMIN_ROLE</code> and the deployer renounces its own. From then on, a new token, a change to the rule list, a role change or an upgrade is a timelock operation.</div></li>
+  <ol class="steps wrap-any">
+    <li><div><b>Place.</b> <code>ProxyDeployer.deploy(symbol, implementation, initData, hook, expectedRules)</code>, where <code>initData</code> is the <code>initialize</code> call with the operations account as admin. <code>ProxyDeployer</code> refuses an implementation the council has not attested, and reverts unless the token names its registry, uses the given hook, the hook holds exactly those rules in that order, and the symbol matches. See <a href="ProxyDeployer.html"><code>ProxyDeployer</code></a>.</div></li>
+    <li><div><b>Configure.</b> While the operations account is the token's admin, it sets the policy, the minimum, the supply cap and the window, each if the product lists that rule.</div></li>
+    <li><div><b>Grant roles.</b> See the table below. <code>EXECUTOR_ROLE</code> goes to the executors the product names, and to no one else in the module.</div></li>
+    <li><div><b>Hand over.</b> The main timelock receives <code>DEFAULT_ADMIN_ROLE</code> and the operations account renounces its own. From then on, a change to the rule list, a role change or an upgrade is a timelock operation.</div></li>
   </ol>
-  <div class="prose">
-    <p>Outside these modules, the KYC attester has to issue a credential to every holder before anyone can receive the token.</p>
+  <div class="prose wrap-any">
+    <p>Outside this module, the KYC attester has to issue a credential to each holder before anyone can receive the token. In the demo stack the token is called "Intent Token" with the symbol <code>INT</code>. See <a href="../deployment.html">Deployment and governance</a>.</p>
   </div>
 </section>
 
 <section id="roles">
-  <div class="prose"><h2>Who holds what after deployment</h2></div>
+  <div class="prose wrap-any"><h2>Who holds what after hand-over</h2></div>
   <div class="table-wrap">
     <table class="tight">
       <thead><tr><th>Role</th><th>Holder</th><th>Used for</th></tr></thead>
       <tbody>
         <tr><td><code>DEFAULT_ADMIN_ROLE</code></td><td>Main timelock</td><td>Every role grant, the hook, the rule list and the rules' policy settings, unpausing</td></tr>
-        <tr><td><code>GUARDIAN_ROLE</code></td><td>Guardian multisig</td><td>Pausing, with no delay</td></tr>
-        <tr><td><code>RECOVERY_ROLE</code></td><td>Recovery timelock</td><td>Unpausing and removing the guardian, only</td></tr>
+        <tr><td><code>GUARDIAN_ROLE</code></td><td>Guardian multisig, from <code>initialize</code></td><td>Pausing, with no delay</td></tr>
+        <tr><td><code>RECOVERY_ROLE</code></td><td>Recovery timelock</td><td>Exactly unpausing and revoking <code>GUARDIAN_ROLE</code></td></tr>
         <tr><td><code>UPGRADER_ROLE</code></td><td>Main timelock</td><td>Upgrades to attested code of this template</td></tr>
-        <tr><td><code>MINTER_ROLE</code></td><td>The minter key</td><td><code>mint</code></td></tr>
-        <tr><td><code>BURNER_ROLE</code></td><td>The burner key</td><td><code>burn</code>, which may take frozen tokens</td></tr>
-        <tr><td><code>AGENT_ROLE</code></td><td>The agent key</td><td>Forced transfers, frozen amounts, holder lockups and freezes</td></tr>
-        <tr><td><code>EXECUTOR_ROLE</code></td><td><code>IntentExecutor</code> and <code>DvPExecutor</code></td><td>Settling signed intents</td></tr>
+        <tr><td><code>MINTER_ROLE</code></td><td>The minter account</td><td><code>mint</code></td></tr>
+        <tr><td><code>BURNER_ROLE</code></td><td>The burner account</td><td><code>burn</code>, which may take frozen tokens</td></tr>
+        <tr><td><code>AGENT_ROLE</code></td><td>The agent account</td><td>Forced transfers, frozen amounts, holder lockups and freezes</td></tr>
+        <tr><td><code>EXECUTOR_ROLE</code></td><td>The executors the product names: <code>IntentExecutor</code>, <code>DvPExecutor</code> or both</td><td>Settling signed intents</td></tr>
       </tbody>
     </table>
   </div>
+  <div class="prose wrap-any"><p>The post-deploy check, off-chain, confirms the named executors hold <code>EXECUTOR_ROLE</code> and that none of the deployment's wallets does, so that a signed intent is submitted through one of them. It does not ask about an executor the product does not name.</p></div>
+</section>
+
+<section id="choosing">
+  <div class="prose wrap-any">
+    <h2>When a product chooses it</h2>
+    <ul class="plain wrap-any">
+      <li>The issuer's settlement system runs transfers, and a holder authorises each with a signature and pays no gas.</li>
+      <li>Transfers must carry an off-chain reference (<code>ref</code>), or run in settlement hours. <code>SettlementWindowRule</code> judges <span class="k k-executed">EXECUTED</span> movements, so it has nothing to judge on another template.</li>
+      <li>Every movement between holders has to be a signed intent: list <code>ExecutedOnlyRule</code> and name an executor, as the "Signed Note" in <code>test/nodejs/legos.test.ts</code> does.</li>
+      <li>The token has to settle against cash through the <a href="DvPExecutor.html"><code>DvPExecutor</code></a>. It calls <code>executeTransfer</code> on each gated leg, and <code>IntentToken</code> is the template that has that function.</li>
+    </ul>
+    <p>The cost is more to run and review: <code>EXECUTOR_ROLE</code>, the executor contracts and their operator key, and the mixin's code. A product with none of the needs above should use <a href="GatedToken.html#choosing"><code>GatedToken</code></a>, where the comparison is set out side by side. The choice is made at launch: an upgrade must keep the template.</p>
+  </div>
+</section>
+
+<section id="functions">
+  <div class="prose wrap-any"><h2>What it can do</h2></div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>constructor()</code></td><td>Runs once, when the implementation is deployed</td><td>Disables the initialiser on the implementation itself, so only a proxy can be set up.</td></tr>
+        <tr><td><code>initialize(name, symbol, decimals, admin, guardian, registry, hook, _initialRules)</code></td><td>Once per proxy; <code>ProxyDeployer</code> runs it in the transaction that creates the proxy</td><td>Sets the name (also the EIP-712 domain name), symbol and decimals, grants <code>DEFAULT_ADMIN_ROLE</code> to <code>admin</code> and <code>GUARDIAN_ROLE</code> to <code>guardian</code>, fixes the registry, installs the hook after checking it, and installs <code>_initialRules</code> on the hook for this token. An empty list installs none, and the hook then refuses every movement (<code>test_WhenTheHookIsDeployedWithoutRules_EveryMovementIsRejected</code>). Reverts with <code>PolicyGated_ZeroAddress</code>, <code>PolicyGated_NotAttested</code>, <code>PolicyGated_HookRegistryMismatch</code>, the hook's own refusals of a rule list (<code>ComplianceHook_NotAttested</code>, <code>ComplianceHook_TooManyRules</code>, <code>ComplianceHook_DuplicateRule</code>), or <code>InvalidInitialization</code> on a second call.</td></tr>
+        <tr><td><code>decimals()</code></td><td>Anyone (read-only)</td><td>The decimals given at setup.</td></tr>
+        <tr><td><code>templateId()</code></td><td>Anyone (read-only)</td><td>Returns <code>keccak256('IntentToken')</code>. An upgrade must target code that reports the same id.</td></tr>
+        <tr><td>Everything else</td><td colspan="2">From <a href="PolicyGatedERC20Upgradeable.html#functions">the base</a> (transfers, mint, burn, forced transfer, frozen amounts, pause, pre-flights, hook, multicall, roles, upgrades, and their events and errors) and <a href="IntentSettledUpgradeable.html#functions">the mixin</a> (signed intents).</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose wrap-any"><p class="small">The token takes no ether. Its one payable function is <code>upgradeToAndCall</code>, and that reverts when value is sent (<code>test_WhenTheUpgraderAttachesEther_TheUpgradeReverts</code>).</p></div>
 </section>
 
 <section id="why">
-  <div class="prose">
+  <div class="prose wrap-any">
     <h2>Why it is built this way</h2>
-    <ul class="plain">
-      <li><b>A template is a name and a setup function.</b> All behaviour lives in the shared base and the mixin, so every template behaves the same where they overlap, and a fix in the base reaches every template through its own reviewed upgrade.</li>
-      <li><b>The template id keeps a token on its own code.</b> An attestation says the code has been reviewed; <code>templateId()</code> says what it is for. An upgrade of this token to an attested vault implementation is refused with <code>Templated_WrongTemplate</code>.</li>
-      <li><b>Live with its policy from the first block.</b> The rules are installed by <code>initialize</code> in the transaction that creates the proxy, and <code>ProxyDeployer</code> checks the result in that same transaction, so there is no moment when the token exists without its rules.</li>
-      <li><b>Each implementation deployment needs its own attestation.</b> UUPS code records its own address, so two deployments of the same source have different code hashes, and the council attests each one it allows.</li>
+    <ul class="plain wrap-any">
+      <li><b>A template is a name and a setup function.</b> The behaviour lives in the shared base and the mixin, so each template behaves the same where they overlap, and a fix in the base reaches each template through its own attested upgrade.</li>
+      <li><b>The template id keeps a token on its own code.</b> An attestation says the code has been reviewed; <code>templateId()</code> says what it is for. An upgrade of this token to an attested vault implementation is refused with <code>Templated_WrongTemplate</code> (<code>test_WhenUpgradedToAVaultImplementationThatIsAttested_ItIsRefused</code>).</li>
+      <li><b>Live with its policy from the start.</b> The rules are installed by <code>initialize</code> in the transaction that creates the proxy, and <code>ProxyDeployer</code> checks the result in that same transaction (<code>test_WhenDeployed_ThePolicyIsAlreadyInstalled</code>), so no call finds the token without its rules.</li>
+      <li><b>Each implementation deployment needs its own attestation.</b> UUPS code records its own address, so two deployments of the same source have different code hashes, and the council attests each one it allows (<code>test_WhenAnImplementationIsRedeployed_ItNeedsItsOwnAttestation</code>).</li>
+    </ul>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="prose wrap-any">
+    <h2>What it does not do</h2>
+    <ul class="plain wrap-any">
+      <li><b>A window does not bind a plain transfer.</b> <code>SettlementWindowRule</code> judges <span class="k k-executed">EXECUTED</span> movements only. On a token that lists it without <code>ExecutedOnlyRule</code>, as the demo stack's list does, a holder who passes the other rules can use <code>transfer</code> outside the window.</li>
+      <li><b>Signed-only needs a working executor.</b> With <code>ExecutedOnlyRule</code> listed, holders can move only through an account that holds <code>EXECUTOR_ROLE</code>. If none does, or the executor is paused, movement between holders stops; mints, burns and forced moves still pass that rule.</li>
+      <li><b>It cannot change template or decimals.</b> The upgrade check refuses other templates, and no function sets the decimals after setup.</li>
+      <li><b>It adds no policy.</b> With no rules installed the hook refuses every movement. Everything else the base and the mixin leave out applies here too: see <a href="PolicyGatedERC20Upgradeable.html#limits">the base's limits</a> and <a href="IntentSettledUpgradeable.html#limits">the mixin's limits</a>.</li>
     </ul>
   </div>
 </section>
 
 <section id="connected">
-  <div class="prose"><h2>Connected to</h2></div>
+  <div class="prose wrap-any"><h2>Connected to</h2></div>
   <div class="cards">
     <a class="card" href="PolicyGatedERC20Upgradeable.html"><span class="name">PolicyGatedERC20Upgradeable</span><p>The base: balances, roles, enforcement and the movement path.</p></a>
     <a class="card" href="IntentSettledUpgradeable.html"><span class="name">IntentSettledUpgradeable</span><p>The mixin for signed intents.</p></a>
-    <a class="card" href="ProxyDeployer.html"><span class="name">ProxyDeployer</span><p>Places the token and checks it came up as reviewed.</p></a>
+    <a class="card" href="GatedToken.html"><span class="name">GatedToken</span><p>The same base without signed transfers.</p></a>
+    <a class="card" href="IntentExecutor.html"><span class="name">IntentExecutor</span><p>Submits signed intents that state no payment.</p></a>
+    <a class="card" href="DvPExecutor.html"><span class="name">DvPExecutor</span><p>Settles a share trade against its cash in one transaction.</p></a>
+    <a class="card" href="ProxyDeployer.html"><span class="name">ProxyDeployer</span><p>Places the token and checks it came up as expected.</p></a>
     <a class="card" href="TokenProxy.html"><span class="name">TokenProxy</span><p>The proxy at the token's address.</p></a>
-    <a class="card" href="ComplianceHook.html"><span class="name">ComplianceHook</span><p>Runs the token's five rules on every movement.</p></a>
-    <a class="card" href="Fund.html"><span class="name">Fund</span><p>Counts investors across the token and the two vaults.</p></a>
-    <a class="card" href="../deployment.html"><span class="name">Deployment and governance</span><p>The two deployment stages and the council step between them.</p></a>
+    <a class="card" href="ComplianceHook.html"><span class="name">ComplianceHook</span><p>Runs the token's rules on every movement.</p></a>
+    <a class="card" href="../deployment.html"><span class="name">Deployment and governance</span><p>How a product is placed, configured and handed over.</p></a>
   </div>
 </section>
 
 <section id="source">
-  <div class="prose">
+  <div class="prose wrap-any">
     <h2>Source and tests</h2>
-    <ul class="plain">
-      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/tokens/IntentToken.sol"><code>contracts/tokens/IntentToken.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/interfaces/ITemplated.sol"><code>ITemplated.sol</code></a></li>
-      <li>Deployment: <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/ignition/modules/roles.ts"><code>ignition/modules/roles.ts</code></a> (<code>TOKENS</code>, <code>RULE_ORDER</code>), <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/ignition/modules/Components.ts"><code>Components.ts</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/ignition/modules/Activate.ts"><code>Activate.ts</code></a></li>
-      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/tokens/IntentToken.t.sol"><code>IntentToken.t.sol</code></a> (the token with a real registry, hook and <code>ProxyDeployer</code>: the policy installed at deploy, enforcement, intents, reentrancy, upgrades refused across templates, no ether), and <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/test/nodejs/deployment.test.ts"><code>test/nodejs/deployment.test.ts</code></a> (the full deployment: each token's rule list in order, the minimum off, exactly two executors on the intent token)</li>
+    <ul class="plain wrap-any">
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/tokens/IntentToken.sol"><code>contracts/tokens/IntentToken.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/ITemplated.sol"><code>ITemplated.sol</code></a></li>
+      <li>Deployment: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/ignition/modules/roles.ts"><code>ignition/modules/roles.ts</code></a> (<code>TOKENS</code>, <code>RULE_ORDER</code>), <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/ignition/profiles.ts"><code>ignition/profiles.ts</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/ignition/modules/Core.ts"><code>ignition/modules/Core.ts</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/ignition/modules/Product.ts"><code>ignition/modules/Product.ts</code></a></li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/tokens/IntentToken.t.sol"><code>IntentToken.t.sol</code></a> (the token with a real registry, hook and <code>ProxyDeployer</code> and a mock identity rule: the policy installed at deploy, decimals, enforcement, intents, reentrancy, upgrades refused across templates, no ether), <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/deployment.test.ts"><code>test/nodejs/deployment.test.ts</code></a> (the full deployment: each token's rule list in order, the minimum off) and <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/legos.test.ts"><code>test/nodejs/legos.test.ts</code></a> (a token that moves by signed intent alone)</li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>cd1e525</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>babef08</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

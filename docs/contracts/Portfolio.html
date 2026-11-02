@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Portfolio · Gated Token Stack</title>
+<meta name="description" content="Where one vault's money may go: the idle money it holds, installed adapters under caps on their allocation, the vault itself, and an attested successor by a timelock operation.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="../index.html">Gated Token Stack</a>
+  <a href="../index.html">Overview</a>
+  <a href="../index.html#contracts">Contracts</a>
+  <a href="../roles.html">Who can do what</a>
+  <a href="../movement.html">One movement</a>
+  <a href="../deployment.html">Deployment and governance</a>
+  <a href="../money.html">Where the money sits</a>
+  <a href="../review.html">Security review</a>
+</nav>
+<main class="page">
+
+<header class="top wrap-any">
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Portfolio</div>
+  <h1>Portfolio</h1>
+  <p class="lede">Holds one vault's working money and limits where it can go: to an installed adapter, under caps on its allocation, to the vault, or to an attested successor by a timelock operation. None of its functions pays any other address.</p>
+  <div class="facts">
+    <span class="fact"><b>contracts/portfolio/Portfolio.sol</b></span>
+    <span class="fact">immutable, <b>not a proxy</b></span>
+    <span class="fact">attested as <b>PORTFOLIO</b></span>
+    <span class="fact"><b>one per vault</b>, one asset</span>
+    <span class="fact">no role table: it <b>asks the vault</b></span>
+    <span class="fact">at most <b>8</b> adapters</span>
+  </div>
+</header>
+
+<section id="in-one-minute">
+  <div class="callout wrap-any">
+    <h3>In one minute</h3>
+    <p>A vault that invests keeps its working money here rather than in the vault. A Portfolio serves one vault and holds one asset, both fixed when it is deployed. The money sitting in it is called idle. An account with the vault's <code>ALLOCATOR_ROLE</code> can send idle money to an adapter, a small attested contract that connects to one place money can go, such as an on-chain vault or a custodian. The timelock decides which adapters are installed and what the caps are. The allocator moves money within those limits. The guardian can bring money back and lower caps. The Portfolio keeps no list of roles: at each call it asks the vault who holds what. It also tells the vault and the <a href="NavDesk.html">NavDesk</a> what the on-chain part of the money is worth.</p>
+  </div>
+</section>
+
+<section id="where">
+  <div class="prose wrap-any">
+    <h2>Where the money can go</h2>
+    <p>The contract makes two kinds of payment, to an installed adapter and to a successor, and it gives the vault one allowance. An adapter's way back names no receiver, and both shipped adapters pay the portfolio.</p>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 780 476" role="img" aria-label="Where one vault's money can go. The vault sends deposits and net inflow to the portfolio, and takes money back through its allowance, after calling raise on a 4626. The portfolio sends idle money by allocate to an installed adapter, under caps on its allocation, and gets it back by deallocate. An ERC4626Adapter is priced: it deposits into and withdraws from an outside ERC-4626 vault. A GuardedAccount is reported: it makes permitted calls that can reach a custodian or a strategy, which sends money back by its own decision. A timelock operation can move the idle money to a successor portfolio by migrateTo. No function of the portfolio pays any other address.">
+        <defs>
+          <marker id="pf-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+          <marker id="pf-arrow-rej" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="rej"/></marker>
+        </defs>
+
+        <rect class="b" x="240" y="14" width="280" height="50" rx="8"/>
+        <text x="380" y="35" text-anchor="middle" class="bold">The vault</text>
+        <text x="380" y="53" text-anchor="middle" class="sm m">holds an unlimited allowance of the asset</text>
+
+        <line class="ln" x1="320" y1="64" x2="320" y2="128" marker-end="url(#pf-arrow)"/>
+        <text x="312" y="92" text-anchor="end" class="sm">deposits (4626)</text>
+        <text x="312" y="108" text-anchor="end" class="sm">net inflow (7540)</text>
+        <line class="ln" x1="440" y1="130" x2="440" y2="66" marker-end="url(#pf-arrow)"/>
+        <text x="448" y="92" class="sm"><tspan class="mono sm">raise</tspan>, then a pull (4626)</text>
+        <text x="448" y="108" class="sm">a pull at settlement (7540)</text>
+
+        <rect class="act" x="200" y="130" width="360" height="90" rx="8"/>
+        <text x="380" y="160" text-anchor="middle" class="bold">Portfolio: the idle money</text>
+        <text x="380" y="180" text-anchor="middle" class="sm m">one vault, one asset, both fixed at deployment</text>
+        <text x="380" y="198" text-anchor="middle" class="sm m">asks the vault who holds which role at each call</text>
+
+        <rect class="rejbox" x="14" y="140" width="146" height="70" rx="6"/>
+        <text x="87" y="170" text-anchor="middle" class="sm rej">Any other address:</text>
+        <text x="87" y="188" text-anchor="middle" class="sm rej">no function pays it</text>
+        <line class="ln-rej" x1="200" y1="175" x2="164" y2="175" marker-end="url(#pf-arrow-rej)"/>
+
+        <line class="ln" x1="560" y1="175" x2="638" y2="175" marker-end="url(#pf-arrow)"/>
+        <text x="598" y="166" text-anchor="middle" class="mono sm">migrateTo</text>
+        <text x="598" y="192" text-anchor="middle" class="sm m">timelock</text>
+        <rect class="b2 dash" x="640" y="140" width="126" height="70" rx="8"/>
+        <text x="703" y="170" text-anchor="middle">Successor</text>
+        <text x="703" y="188" text-anchor="middle">portfolio</text>
+
+        <rect class="frame" x="60" y="254" width="660" height="108" rx="10"/>
+        <text x="72" y="276" class="sm bold">Within caps</text>
+
+        <line class="ln" x1="212" y1="220" x2="212" y2="288" marker-end="url(#pf-arrow)"/>
+        <text x="204" y="242" text-anchor="end" class="mono sm">allocate</text>
+        <line class="ln" x1="262" y1="290" x2="262" y2="222" marker-end="url(#pf-arrow)"/>
+        <text x="270" y="242" class="mono sm">deallocate, raise</text>
+        <line class="ln" x1="475" y1="220" x2="475" y2="288" marker-end="url(#pf-arrow)"/>
+        <text x="467" y="242" text-anchor="end" class="mono sm">allocate</text>
+        <line class="ln" x1="540" y1="290" x2="540" y2="222" marker-end="url(#pf-arrow)"/>
+        <text x="548" y="242" class="mono sm">deallocate</text>
+
+        <rect class="b" x="90" y="290" width="270" height="56" rx="8"/>
+        <text x="225" y="313" text-anchor="middle" class="mono bold">ERC4626Adapter</text>
+        <text x="225" y="333" text-anchor="middle" class="sm m">priced: its value is read on-chain</text>
+        <rect class="b" x="420" y="290" width="270" height="56" rx="8"/>
+        <text x="555" y="313" text-anchor="middle" class="mono bold">GuardedAccount</text>
+        <text x="555" y="333" text-anchor="middle" class="sm m">reported: its value is in a report</text>
+
+        <line class="ln" x1="170" y1="346" x2="170" y2="410" marker-end="url(#pf-arrow)"/>
+        <text x="162" y="392" text-anchor="end" class="mono sm">deposit</text>
+        <line class="ln" x1="280" y1="412" x2="280" y2="348" marker-end="url(#pf-arrow)"/>
+        <text x="288" y="392" class="mono sm">withdraw</text>
+        <line class="ln" x1="480" y1="346" x2="480" y2="410" marker-end="url(#pf-arrow)"/>
+        <text x="472" y="385" text-anchor="end" class="mono sm">execute</text>
+        <text x="472" y="400" text-anchor="end" class="sm m">permitted calls</text>
+        <line class="ln dash" x1="620" y1="412" x2="620" y2="348" marker-end="url(#pf-arrow)"/>
+        <text x="628" y="385" class="sm">sends it back,</text>
+        <text x="628" y="400" class="sm m">its own decision</text>
+
+        <rect class="b2" x="90" y="412" width="270" height="50" rx="8"/>
+        <text x="225" y="442" text-anchor="middle">An outside ERC-4626 vault</text>
+        <rect class="b2" x="420" y="412" width="270" height="50" rx="8"/>
+        <text x="555" y="442" text-anchor="middle">A custodian or a strategy</text>
+      </svg>
+    </div>
+    <figcaption class="wrap-any"><b>Three ways out of the idle money.</b> An installed adapter, under caps on its allocation, the vault through its allowance, and a successor by a timelock operation. The allowance has no limit, so the vault's own code decides what it pulls. On a 4626, <code>collectFees</code> uses it to pay the fee recipient straight from idle money. The dashed arrow is outside any contract: a custodian returns money because it chooses to.</figcaption>
+  </figure>
+  <ol class="steps wrap-any">
+    <li><div><b>In.</b> On a <a href="Gated4626Vault.html">4626</a> with a portfolio plugged, each deposit passes through the vault to the portfolio. On a <a href="Gated7540Vault.html">7540</a>, <code>settlePeriod</code> sends a period's net inflow to the cash account it is given, and a <a href="NavDesk.html">NavDesk</a> with a portfolio names the portfolio as that account.</div></li>
+    <li><div><b>To an adapter.</b> <code>allocate</code> sends idle money to an installed adapter. To be installed, an adapter must be attested as <code>ADAPTER</code> in the registry the vault names, and must serve this portfolio and this asset.</div></li>
+    <li><div><b>Back from an adapter.</b> <code>deallocate</code> asks the adapter for an amount and names no receiver. <a href="ERC4626Adapter.html">ERC4626Adapter</a> has the target pay the portfolio, and <a href="GuardedAccount.html">GuardedAccount</a> pays the portfolio from its own balance.</div></li>
+    <li><div><b>To the vault.</b> The constructor approves the vault for an unlimited amount of the asset. A 4626 withdrawal calls <code>raise(assets)</code> and then pulls. A 7540 does not call <code>raise</code>: a net outflow at settlement is pulled from the cash account (<code>test_NetOutflowIsPulledFromThePortfolio</code>), so idle money has to cover it or the settlement reverts, and the allocator brings money back beforehand.</div></li>
+    <li><div><b>To a successor.</b> <code>migrateTo</code>, <a href="#migrate">described below</a>.</div></li>
+  </ol>
+</section>
+
+<section id="how">
+  <div class="prose wrap-any">
+    <h2>Sending money out and bringing it back</h2>
+    <p><code>allocate(_adapter, _assets, _minAdded)</code> runs these steps. A failure at any step undoes the whole call.</p>
+  </div>
+  <ol class="steps wrap-any">
+    <li><div><b>Who and when.</b> The caller must hold the vault's <code>ALLOCATOR_ROLE</code> (<code>Portfolio_Unauthorized</code>), and the vault must not be paused (<code>Portfolio_VaultPaused</code>). The adapter must be installed (<code>Portfolio_UnknownAdapter</code>) and the amount above zero (<code>Portfolio_ZeroAmount</code>).</div></li>
+    <li><div><b>The starting point.</b> It reads the vault's <code>totalAssets()</code> for the relative caps, then takes its reentrancy guard. A priced adapter must be readable (<code>Portfolio_StalePrice</code>), and its <code>value()</code> is noted.</div></li>
+    <li><div><b>The money moves.</b> The assets go to the adapter, and the adapter's <code>allocate(assets)</code> puts them to work.</div></li>
+    <li><div><b>What counts.</b> For a priced adapter, which must still be readable, it is the change in <code>value()</code> across the call, so a fee taken on the way in does not count (<code>test_APricedAdapterThatTakesAFeeCountsWhatItIsWorth</code>). For a reported adapter it is the assets sent. Below <code>_minAdded</code> the call reverts with <code>Portfolio_ShortAllocation</code>. That floor is the allocator's own protection: it chooses what it sends, and the target decides what comes back.</div></li>
+    <li><div><b>The caps.</b> <code>moves</code> goes up by one, and the amount is added to the adapter's <code>allocationOf</code> and to every risk the adapter names. If any risk passes a cap the call reverts with <code>Portfolio_CapExceeded(id, allocation, limit)</code>. It emits <code>Allocated(adapter, assets, allocated)</code>.</div></li>
+  </ol>
+  <div class="prose wrap-any">
+    <p><code>deallocate(adapter, assets)</code> can be called by the allocator or the guardian, paused or not. The adapter must deliver at least <code>assets</code>, measured by the portfolio's own balance (<code>Portfolio_ShortReturn</code>). The allocation falls by the change in <code>value()</code> when a priced adapter can be read before and after, and otherwise by <code>assets</code>. It stops at zero, so taking out a gain leaves nothing against the cap (<code>test_AGainNeverTakesTheAllocationBelowZero</code>). Caps are not checked on the way back, so it works above a lowered cap. <code>moves</code> goes up by one and it emits <code>Deallocated(adapter, assets, deallocated)</code>.</p>
+    <p><code>raise(assets)</code> can be called by the vault alone. If idle money covers <code>assets</code> it returns and nothing moves. Otherwise it draws the shortfall from the <code>liquidityAdapter</code> the allocator chose with <code>setLiquidityAdapter</code>, by the same steps as <code>deallocate</code>, or reverts with <code>Portfolio_NoLiquidityAdapter</code> if none is set. It pays nothing to the vault: the vault then pulls through its allowance (<code>test_RaisingDrawsOnARealTargetAndTheVaultPulls</code>). The 4626 is the vault that calls it. Neither the 7540 nor the desk calls <code>raise</code>, so behind a 7540 the liquidity adapter changes only what <code>liquidAssets()</code> says.</p>
+  </div>
+</section>
+
+<section id="caps">
+  <div class="prose wrap-any">
+    <h2>Caps</h2>
+    <p>An adapter names the risks it counts against through <code>riskIds()</code>, at least one (<code>Portfolio_NoRiskIds</code>). A risk is a <code>bytes32</code> id with three numbers, which <code>riskOf(id)</code> returns as a <code>Risk</code>: <code>allocation</code>, <code>absoluteCap</code> and <code>relativeCapBps</code>. Several adapters can name one id, so one cap can cover several positions at one custodian while each adapter also has its own. Every risk an adapter names must have room, or the move fails whole (<code>test_TheSharedCapStopsAnAdapterWhoseOwnCapHasRoom</code>).</p>
+    <ul class="plain">
+      <li><b>Absolute cap.</b> The most assets allowed under the id. Zero allows none, and a risk nobody has set caps for is at zero (<code>test_AnIdWithNoCapAllowsNothing</code>).</li>
+      <li><b>Relative cap.</b> The most allowed as a share of the vault's <code>totalAssets()</code>, in basis points. 10,000 means no limit. On a 4626 that total is the counted value, and on a 7540 it is the indicative value at the last settlement.</li>
+      <li><b>When they are checked.</b> On <code>allocate</code> and on <code>addAdapter</code>, and at no other time. An exit, or a fall in the vault's total, can leave a risk above its relative cap, and lowering a cap leaves what is allocated where it is (<code>test_ItWorksAboveALoweredCap</code>). A risk above its cap also refuses the installation of another adapter that names it, even an empty one.</li>
+      <li><b>What the allocation measures.</b> What went in, less what came out. It does not follow the market: a loss keeps its place against the cap (<code>test_ALossShowsAtOnceAndKeepsItsPlaceAgainstTheCap</code>), and a position that has grown can be worth more than its cap.</li>
+      <li><b>Who sets them.</b> <code>setCaps(id, absoluteCap, relativeCapBps)</code>. The vault's <code>DEFAULT_ADMIN_ROLE</code> sets any value. <code>GUARDIAN_ROLE</code> can only lower them: neither number may rise. Anyone else gets <code>Portfolio_Unauthorized</code>. A relative cap above 10,000 reverts with <code>Portfolio_InvalidCap</code> for any caller, before the role check. From the admin, an absolute cap that does not fit in 120 bits reverts with <code>SafeCastOverflowedUintDowncast</code>. It emits <code>CapsSet(id, absoluteCap, relativeCapBps)</code>.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="priced-and-reported">
+  <div class="prose wrap-any">
+    <h2>Priced adapters and reported adapters</h2>
+    <p>An adapter says which kind it is through <code>reported()</code>. A priced adapter's value can be read on-chain in the same call. A reported adapter's money can sit off-chain, so its value reaches the chain as a figure in a report.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="fixed">
+      <thead><tr><th></th><th>Priced</th><th>Reported</th></tr></thead>
+      <tbody>
+        <tr><td><code>reported()</code> says</td><td>false</td><td>true</td></tr>
+        <tr><td>Shipped example</td><td><a href="ERC4626Adapter.html">ERC4626Adapter</a></td><td><a href="GuardedAccount.html">GuardedAccount</a></td></tr>
+        <tr><td>Where its value comes from</td><td>Its <code>value()</code></td><td>The report a <a href="NavDesk.html">NavDesk</a> reporter proposes and a checker accepts</td></tr>
+        <tr><td>In <code>pricedValue()</code></td><td>Yes</td><td>No</td></tr>
+        <tr><td>In <code>priceFresh()</code></td><td>Yes: an unreadable one makes it false</td><td>No</td></tr>
+        <tr><td>Allocation grows by</td><td>The change in <code>value()</code> across the call</td><td>The assets sent</td></tr>
+        <tr><td>Allocation at installation</td><td>Its <code>value()</code> at that moment, which must fit the caps (<code>test_APositionItAlreadyHoldsCountsAgainstItsCapsAtOnce</code>). If unreadable, <code>Portfolio_StalePrice</code></td><td>Zero, whatever it holds (<code>test_AReportedAdapterStartsAtZeroWhateverItHolds</code>)</td></tr>
+        <tr><td>Portfolio it can join</td><td>Either</td><td>One whose <code>ACCEPTS_REPORTED</code> is true, or <code>Portfolio_ReportedNotAccepted</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose wrap-any">
+    <p><b>Why the 4626 refuses reported adapters.</b> A 4626 deals at once, at the price it can read in that block. A custodian's position changes off-chain and shows up only when someone reports it. Between reports the price would be out of date, and whoever learned of a loss first could redeem at the stale price, at the expense of the holders who stay. A <a href="Gated7540Vault.html">7540</a> does not have that exposure in the same way, because it deals at one approved price after requests have closed.</p>
+    <p>Three separate checks hold this line. <code>Gated4626Vault.setPortfolio</code> reverts with <code>Gated4626Vault_PortfolioRefused</code> when the portfolio's <code>ACCEPTS_REPORTED</code> is true (<code>test_APortfolioThatAcceptsReportedAdaptersIsRefused</code>). A portfolio with it false refuses a reported adapter in <code>addAdapter</code>. And the constructor of <code>GuardedAccount</code> reverts with <code>GuardedAccount_ReportedNotAccepted</code>. The <code>Legos</code> deployment module sets <code>ACCEPTS_REPORTED</code> true behind a 7540 and false behind a 4626. Refusing them also makes <code>pricedValue()</code> and <code>priceFresh()</code> cheaper, because those reads then skip asking each adapter which kind it is (<code>test_RefusingReportedAdaptersMakesTheReadsCheaper</code>).</p>
+  </div>
+</section>
+
+<section id="reads">
+  <div class="prose wrap-any">
+    <h2>What the vault and the desk read</h2>
+  </div>
+  <div class="table-wrap">
+    <table class="fixed">
+      <thead><tr><th>Read</th><th>What it says</th><th>Who acts on it</th></tr></thead>
+      <tbody>
+        <tr><td><code>pricedValue()</code></td><td>Idle money plus the <code>value()</code> of every priced adapter. Reported adapters are not in it. An adapter that cannot be read counts as zero, which is not a loss, so read <code>priceFresh()</code> too. In the middle of a move the money is in neither place or in both, so it reverts with <code>ReentrancyGuardReentrantCall</code> (<code>test_NothingCanReadThePriceDuringAnAllocation</code>, <code>test_NothingCanReadThePriceDuringADeallocation</code>).</td><td>A 4626's <code>totalAssets()</code>. <code>NavDesk.propose</code>, which adds it to the reported figure. A 4626's <code>setPortfolio</code>, which reverts with <code>Gated4626Vault_PortfolioNotEmpty</code> until the portfolio being replaced reads zero and has no adapter on its list.</td></tr>
+        <tr><td><code>priceFresh()</code></td><td>True when every priced adapter's <code>fresh()</code> is true and the money has not gone to a successor.</td><td>False stops a 4626's deposits and withdrawals, and the last counted value stands (<code>test_DuringATargetOutageThePriceHoldsAndDealingStops</code>). <code>NavDesk.propose</code> reverts with <code>NavDesk_PriceNotFresh</code>.</td></tr>
+        <tr><td><code>liquidAssets()</code></td><td>Idle money plus what the liquidity adapter's <code>liquid()</code> says it can return at that moment.</td><td>A 4626's <code>maxRedeem</code> and <code>maxWithdraw</code> are limited by it (<code>test_WithNoLiquidityAdapter_ExitIsLimitedToIdleMoney</code>).</td></tr>
+        <tr><td><code>moves()</code></td><td>A count that goes up by one on each <code>allocate</code>, each <code>deallocate</code> and each <code>raise</code> that draws on the adapter. A valuation taken before a move is out of date once it changes.</td><td><code>NavDesk.propose</code> takes the count the report was struck against and reverts with <code>NavDesk_MovesChanged</code> if it differs. A report struck before a move is refused, so money crossing between reported and on-chain does not count twice (<code>test_AMoveAfterTheValuationCannotCountTwice</code>).</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="write-off">
+  <div class="prose wrap-any">
+    <h2>Taking an adapter off, and what a write-off means</h2>
+    <p>There are two ways off the list. Both clear the adapter's allocation from every risk it names, and clear <code>liquidityAdapter</code> if it was that adapter.</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th></th><th>Removing</th><th>Writing off</th></tr></thead>
+      <tbody>
+        <tr><td>Function</td><td><code>removeAdapter(adapter)</code></td><td><code>writeOffAdapter(adapter)</code></td></tr>
+        <tr><td>What it says</td><td>This adapter is empty</td><td>This adapter comes off with whatever it holds</td></tr>
+        <tr><td>A priced adapter qualifies</td><td>When it can be read and is worth exactly zero. A position that lost everything comes off this way (<code>test_AnAdapterThatLostEverythingComesOffAndItsAllocationClears</code>)</td><td>While it cannot be read. A readable one reverts with <code>Portfolio_StillPriced</code></td></tr>
+        <tr><td>A reported adapter qualifies</td><td>When its balance of the asset and its allocation are both zero</td><td>At any time</td></tr>
+        <tr><td>Otherwise</td><td><code>Portfolio_NotEmpty</code>, including during an outage, so <code>removeAdapter</code> cannot orphan a position in an outage (<code>test_AnOutageCannotOrphanAPosition</code>). Nor can <code>setPortfolio</code>, which refuses while an adapter is on the list</td><td><code>Portfolio_StillPriced</code></td></tr>
+        <tr><td>Sets <code>writtenOff</code></td><td>No (<code>test_RemovingAnEmptyAdapterIsNotAWriteOff</code>)</td><td>Yes, for good (<code>test_AWriteOffIsRememberedForGood</code>)</td></tr>
+        <tr><td>Emits</td><td><code>AdapterRemoved(adapter)</code></td><td><code>AdapterWrittenOff(_adapter, _allocationCleared)</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose wrap-any">
+    <p>What follows a write-off:</p>
+    <ul class="plain">
+      <li><b>On a priced adapter, the loss counts.</b> Its value leaves <code>pricedValue()</code> and <code>priceFresh()</code> stops asking about it, so a price stopped by that adapter can be read again, with the loss in it (<code>test_AWriteOffCountsTheLossOnAPricedAdapter</code>).</li>
+      <li><b>On a reported adapter, <code>pricedValue()</code> does not change</b> (<code>test_AWriteOffLeavesTheValueAloneOnAReportedAdapter</code>). Its value was only ever in the report, so the report has to say what is left.</li>
+      <li><b>The adapter keeps what it holds.</b> <code>deallocate</code> reverts with <code>Portfolio_UnknownAdapter</code> until it is added back.</li>
+      <li><b>A 4626 becomes exit-only for good.</b> <code>exitOnly()</code> reads true, <code>maxDeposit</code> and <code>maxMint</code> read 0 (<code>test_AfterAWriteOffTheVaultIsExitOnly</code>), and holders can still redeem (<code>test_TheLossCountsAndHoldersExit</code>), unless the priced value is at or below <code>feesOwed</code> (<code>test_AReadOfNothingIsNotWrittenDownAndDealingStops</code>, <code>test_AValueBelowTheFeesOwedIsAlsoAReadOfNothing</code>). A successor portfolio starts with <code>writtenOff</code> false, so <code>setPortfolio</code> copies the answer into the vault before it replaces the portfolio (<code>test_AReplacementKeepsTheExitOnlyState</code>).</li>
+      <li><b>A 7540 does not read <code>writtenOff</code>, and neither does the desk.</b> Dealing continues at whatever price the reporter and the checker approve.</li>
+      <li><b>It can be added back, and the flag stays.</b> <code>addAdapter</code> works again if the adapter is still attested. A priced position comes back at its value, against its caps, so it cannot return outside them (<code>test_AddingAPositionBackCannotTakeExposurePastTheCap</code>). A reported one comes back at zero, so the caps cannot see what a custodian still holds, and the timelock has to set them knowing that.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="migrate">
+  <div class="prose wrap-any">
+    <h2>Moving to a successor</h2>
+    <p><code>migrateTo(successor)</code> sends all the idle money to another portfolio. It needs the vault's <code>DEFAULT_ADMIN_ROLE</code>, no adapter still installed (<code>Portfolio_AdaptersInstalled</code>), a successor attested as <code>PORTFOLIO</code> in the vault's registry (<code>Portfolio_NotAttested</code>), and one that names the same vault (<code>Portfolio_WrongVault</code>) and the same asset (<code>Portfolio_WrongAsset</code>). It emits <code>Migrated(successor, assets)</code>. From then on <code>priceFresh()</code> reads false for good, so if the batch is split a 4626 holds its price and stops dealing, and a desk can propose no price (<code>test_AfterMigratingItNeverGivesAPriceAgain</code>, <code>test_InTheGapThePriceHoldsAndDealingStops</code>, <code>test_AfterAMigrationNoPriceIsProposed</code>). It can run again, to send on what arrived since (<code>test_MigratingAgainSendsOnWhatArrivedSince</code>).</p>
+    <p>So before it can run, money at each adapter has to come back, or the adapter has to be written off. It moves the money, marks the portfolio, and does nothing else. The vault learns of the successor through its own plug: <code>Gated4626Vault.setPortfolio</code> or <code>NavDesk.setSettings</code>. The interface expects a timelock batch to run both together. <code>migrateTo</code> does not compare <code>ACCEPTS_REPORTED</code> between the two portfolios; the 4626's <code>setPortfolio</code> makes its own check. The allowance to the vault stays behind on the emptied portfolio, with nothing left for it to pull.</p>
+  </div>
+</section>
+
+<section id="who">
+  <div class="prose wrap-any">
+    <h2>Who can do what, asked at call time</h2>
+    <p>The contract has no role table. Each gate calls <code>hasRole</code> on the vault for the caller at that moment, so a revoked role stops working at once and a granted one works at once (<code>test_ARevokedRoleStopsWorkingAtOnce</code>, <code>test_ANewlyGrantedRoleWorksAtOnce</code>). The registry is asked for the same way, through the vault's <code>registry()</code>. All the roles are the vault's. <code>ALLOCATOR_ROLE</code> is given with the vault's <code>grantRole</code> by its admin.</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Who</th><th>What they can do here</th></tr></thead>
+      <tbody>
+        <tr><td>The vault's <code>DEFAULT_ADMIN_ROLE</code>: the timelock after the hand-over, and the operations account while the <code>Product</code> module runs</td><td><code>addAdapter</code>, <code>removeAdapter</code>, <code>writeOffAdapter</code>, <code>migrateTo</code>, and <code>setCaps</code> to any value</td></tr>
+        <tr><td>The vault's <code>ALLOCATOR_ROLE</code></td><td><code>allocate</code>, <code>deallocate</code>, <code>setLiquidityAdapter</code></td></tr>
+        <tr><td>The vault's <code>GUARDIAN_ROLE</code></td><td><code>deallocate</code>, and <code>setCaps</code> where neither number rises</td></tr>
+        <tr><td>The vault itself</td><td><code>raise</code>, and pulling idle money through its allowance</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose wrap-any">
+    <h3>What a pause stops</h3>
+    <p>A pause on the vault stops money going out to work and lets it come back.</p>
+  </div>
+  <div class="two wrap-any">
+    <div>
+      <h3>Stopped while the vault is paused</h3>
+      <ul class="plain">
+        <li><code>allocate</code>, with <code>Portfolio_VaultPaused</code> after the role check (<code>test_AnAllocationRevertsAndNothingMoves</code>, <code>test_AStrangerStillGetsTheRoleError</code>).</li>
+        <li><code>GuardedAccount.execute</code>, with <code>GuardedAccount_VaultPaused</code>.</li>
+        <li>The vault's own dealing: a 4626's <code>maxRedeem</code> and <code>maxWithdraw</code> read 0, so a withdrawal reverts before it draws on <code>raise</code>, and a 7540's <code>settlePeriod</code> reverts. A 4626's <code>collectFees</code> reverts too, so the allowance pays no fee recipient.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Not stopped</h3>
+      <ul class="plain">
+        <li><code>deallocate</code>, by the allocator or the guardian (<code>test_TheGuardianAndTheAllocatorStillBringMoneyBack</code>).</li>
+        <li><code>setCaps</code> (<code>test_TheGuardianStillLowersACap</code>) and <code>setLiquidityAdapter</code>.</li>
+        <li>The admin's <code>addAdapter</code>, <code>removeAdapter</code>, <code>writeOffAdapter</code> and <code>migrateTo</code>.</li>
+        <li>Money already at a target or a custodian. The pause is on this vault and does not reach them, and money a custodian holds comes back off-chain.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="stolen-key">
+  <div class="prose wrap-any">
+    <h2>What a stolen allocator key could do</h2>
+    <p>The hand-over check pins the allocator to one named account, different from the desk's reporter and checker. It does not ask for a multisig, so a single key is a case to plan for.</p>
+  </div>
+  <div class="two wrap-any">
+    <div>
+      <h3>It could</h3>
+      <ul class="plain">
+        <li>Send idle money to any installed adapter, with <code>_minAdded</code> at zero, at whatever price or fee the target gives. On a reported adapter the caps count what is sent. On a priced adapter they count the change in <code>value()</code>, so a target that takes a fee or gives a bad price can take more than the cap.</li>
+        <li>Pull positions back with <code>deallocate</code>, paying any exit fee the target charges.</li>
+        <li>On a <a href="GuardedAccount.html">GuardedAccount</a>, run any call its permissions allow, such as sending what the account holds to the custodian its validator names.</li>
+        <li>Clear the liquidity adapter with <code>setLiquidityAdapter</code> and allocate the idle money. A 4626's holders are then limited to what is left idle until the money comes back (<code>test_WithNoLiquidityAdapter_ExitIsLimitedToIdleMoney</code>).</li>
+        <li>Delay a price: each move changes <code>moves</code>, and <code>NavDesk.propose</code> reverts unless the report's count matches.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>It could not</h3>
+      <ul class="plain">
+        <li>Install an adapter, raise a cap, set a permission or start a migration. Those need the vault's <code>DEFAULT_ADMIN_ROLE</code>.</li>
+        <li>Name its own address in <code>allocate</code> or <code>deallocate</code>. The first takes an installed adapter, and the second has no receiver.</li>
+        <li>Reach an address of its choosing through a <code>GuardedAccount</code>, unless a permission the timelock set allows that address.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="prose wrap-any">
+    <p><b>What limits it.</b> The caps limit how far <code>allocate</code> can take the allocation under each risk, and on a priced adapter the allocation leaves out what a fee or a bad price took on the way in. The list of adapters and the permissions bound where it can go. The response has no delay on the guardian's side: <code>pause()</code> on the vault stops <code>allocate</code> and <code>execute</code>, <code>deallocate</code> brings back what is at an adapter, <code>setCaps</code> lowers the caps, and <code>revokePermission</code> removes a permission. The guardian cannot revoke the role itself. The role's admin is the vault's <code>DEFAULT_ADMIN_ROLE</code>, so removal goes through the timelock and its delay, and takes effect on the next call. During a pause a stolen key can still call <code>deallocate</code> and <code>setLiquidityAdapter</code>. Neither sends money out of the portfolio.</p>
+  </div>
+</section>
+
+<section id="functions">
+  <div class="prose wrap-any"><h2>What it can do</h2></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>addAdapter(adapter)</code></td><td>The vault's <code>DEFAULT_ADMIN_ROLE</code></td><td>Installs an adapter, in this order of checks: attested as <code>ADAPTER</code> (<code>Portfolio_NotAttested</code>), serves this portfolio (<code>Portfolio_WrongPortfolio</code>) and asset (<code>Portfolio_WrongAsset</code>), kind accepted (<code>Portfolio_ReportedNotAccepted</code>), names a risk (<code>Portfolio_NoRiskIds</code>), room on the list of <code>MAX_ADAPTERS</code> (<code>Portfolio_TooManyAdapters</code>), not there already (<code>Portfolio_AdapterExists</code>), readable if priced (<code>Portfolio_StalePrice</code>), within caps (<code>Portfolio_CapExceeded</code>). Emits <code>AdapterAdded(adapter, allocation)</code>.</td></tr>
+        <tr><td><code>removeAdapter(adapter)</code></td><td>The vault's <code>DEFAULT_ADMIN_ROLE</code></td><td>Takes an empty adapter off. <code>Portfolio_UnknownAdapter</code> if it is not installed, <code>Portfolio_NotEmpty</code> if it is not empty. Emits <code>AdapterRemoved</code>.</td></tr>
+        <tr><td><code>writeOffAdapter(adapter)</code></td><td>The vault's <code>DEFAULT_ADMIN_ROLE</code></td><td>Takes an adapter off with whatever it holds and sets <code>writtenOff</code>. <code>Portfolio_UnknownAdapter</code> if it is not installed, <code>Portfolio_StillPriced</code> on a readable priced adapter. Emits <code>AdapterWrittenOff</code>.</td></tr>
+        <tr><td><code>setCaps(id, absoluteCap, relativeCapBps)</code></td><td>The vault's <code>DEFAULT_ADMIN_ROLE</code>, or its <code>GUARDIAN_ROLE</code> to lower</td><td>Sets a risk's caps. Emits <code>CapsSet</code>.</td></tr>
+        <tr><td><code>allocate(_adapter, _assets, _minAdded)</code></td><td>The vault's <code>ALLOCATOR_ROLE</code>, not while paused</td><td>Sends idle money to an installed adapter, if what it adds to the allocation fits the caps. Emits <code>Allocated</code>.</td></tr>
+        <tr><td><code>deallocate(adapter, assets)</code></td><td>The vault's <code>ALLOCATOR_ROLE</code> or <code>GUARDIAN_ROLE</code></td><td>Brings money back from an installed adapter. Emits <code>Deallocated</code>.</td></tr>
+        <tr><td><code>setLiquidityAdapter(adapter)</code></td><td>The vault's <code>ALLOCATOR_ROLE</code></td><td>Chooses the installed adapter <code>raise</code> draws on, or zero for none. Emits <code>LiquidityAdapterSet(adapter)</code>.</td></tr>
+        <tr><td><code>raise(assets)</code></td><td>The vault</td><td>Makes sure idle money covers an amount, drawing the shortfall from the liquidity adapter.</td></tr>
+        <tr><td><code>migrateTo(successor)</code></td><td>The vault's <code>DEFAULT_ADMIN_ROLE</code></td><td>Moves the idle money to an attested successor for the same vault and asset. Emits <code>Migrated</code>.</td></tr>
+        <tr><td><code>pricedValue()</code>, <code>priceFresh()</code>, <code>liquidAssets()</code>, <code>moves()</code></td><td>Anyone (read-only)</td><td>See <a href="#reads">What the vault and the desk read</a>.</td></tr>
+        <tr><td><code>adapters()</code>, <code>allocationOf(adapter)</code>, <code>riskOf(id)</code>, <code>liquidityAdapter()</code>, <code>writtenOff()</code></td><td>Anyone (read-only)</td><td>The installed adapters, what one has outstanding against its caps, a risk's allocation and caps, the adapter <code>raise</code> draws on, and whether this portfolio has ever written one off.</td></tr>
+        <tr><td><code>ALLOCATOR_ROLE()</code>, <code>MAX_ADAPTERS()</code>, <code>VAULT()</code>, <code>ASSET()</code>, <code>ACCEPTS_REPORTED()</code></td><td>Anyone (read-only)</td><td>The role id held on the vault, the limit of 8 adapters, and the three settings fixed at construction.</td></tr>
+        <tr><td>The constructor</td><td>The deployer</td><td>Takes <code>(_vault, _asset, _acceptsReported)</code> and reverts with <code>Portfolio_ZeroAddress</code> on a zero vault or asset. Gives the vault its allowance.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="why">
+  <div class="prose wrap-any">
+    <h2>Why it is built this way</h2>
+    <ul class="plain">
+      <li><b>One portfolio per vault.</b> With one vault there is no ledger between vaults to get wrong.</li>
+      <li><b>Immutable and attested.</b> The vault, the asset and <code>ACCEPTS_REPORTED</code> are immutables, so the attested code hash covers them.</li>
+      <li><b>It asks the vault for roles and the registry.</b> Revoking a role on the vault is enough, with no second list to keep in step. It also means a portfolio can be built before its vault exists: the <code>Legos</code> module names the address <code>ProxyDeployer.predict</code> gives.</li>
+      <li><b>A priced allocation is the change in value.</b> It counts what the position gained, not what the allocator sent, so a fee on the way in does not sit against the cap as if it were exposure.</li>
+      <li><b>A priced position counts at installation.</b> Otherwise a position written off during an outage could come back with nothing against its caps.</li>
+      <li><b>The price reverts mid-move.</b> <code>allocate</code> reads <code>totalAssets()</code> before taking its guard for this reason: a vault's total asks this portfolio, which gives no price in the middle of a move.</li>
+      <li><b>The guardian only reduces risk here.</b> It can bring money back and lower caps. Sending money out and raising caps are outside its reach.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="prose wrap-any">
+    <h2>What it does not do</h2>
+    <ul class="plain">
+      <li><b>It does not vouch for a target.</b> An adapter's code hash covers its target's address and not the target's behaviour, so a bad target can lose what was allocated to it. Attesting is the council's decision, and the contract cannot check what it reviewed. Nothing else controls the target itself.</li>
+      <li><b>It does not cap what it sends to a priced adapter.</b> <code>allocate</code> compares the change in <code>value()</code> with the caps and not <code>_assets</code>, so with <code>_minAdded</code> at zero a target that keeps a fee on the way in can take more than the cap. The fee is not counted, so how far past the cap depends on the fee, and a large enough fee takes all the idle money.</li>
+      <li><b>During an outage it can read zero.</b> That is not a loss, so read <code>priceFresh()</code> too. A 4626's <code>setPortfolio</code> refuses while an adapter is on the list, so a replacement cannot leave a position behind (<code>test_APortfolioWithAnAdapterOnItsListCannotBeReplaced</code>).</li>
+      <li><b>It does not limit the vault.</b> The allowance is unlimited, so an upgrade of the vault could take the idle money. That takes a timelock operation and an implementation the council has attested, and the delay makes it public.</li>
+      <li><b>It does not know what a custodian holds.</b> For a reported adapter, <code>allocationOf</code> is what was sent less what came back. It is not a valuation, and a report is a claim the contract cannot check.</li>
+      <li><b>It does not re-check attestation.</b> The registry is asked at installation. Revoking an attestation leaves an installed adapter in place until the timelock takes it off.</li>
+      <li><b>It does not limit how often money moves.</b> Caps limit the allocation under a risk. There is no daily limit on <code>allocate</code> or <code>deallocate</code>.</li>
+      <li><b>It relies on its adapters' reads not reverting.</b> A failed read that an adapter catches is an outage. If an adapter's <code>fresh()</code> and <code>value()</code> both reverted, then <code>priceFresh()</code>, <code>pricedValue()</code>, <code>deallocate</code>, <code>removeAdapter</code> and <code>writeOffAdapter</code> would revert with them, so that adapter could not be taken off, and on a 4626 on this portfolio <code>totalAssets()</code>, deposits, withdrawals and <code>setPortfolio</code> would revert too. <a href="ERC4626Adapter.html">ERC4626Adapter</a> turns any failed read into an outage (<code>test_WhenTheTargetHasNoCodeThePriceHoldsAndItCanBeWrittenOff</code>), and any other adapter has to do the same.</li>
+      <li><b>It moves one token.</b> No function moves anything but <code>ASSET</code>, so another token sent here stays here. It has no <code>receive</code> function, so a plain send of ether reverts.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="connected">
+  <div class="prose wrap-any"><h2>Connected to</h2></div>
+  <div class="cards">
+    <a class="card" href="Gated4626Vault.html"><span class="name">Gated4626Vault</span><p>Forwards deposits here, calls <code>raise</code> on withdrawals, and counts its price from <code>pricedValue()</code>.</p></a>
+    <a class="card" href="Gated7540Vault.html"><span class="name">Gated7540Vault</span><p>Sends net inflow here at settlement and pulls net outflow through its allowance.</p></a>
+    <a class="card" href="NavDesk.html"><span class="name">NavDesk</span><p>Names this portfolio as the cash account and adds its on-chain value to the reported one.</p></a>
+    <a class="card" href="ERC4626Adapter.html"><span class="name">ERC4626Adapter</span><p>The priced adapter: a position in one on-chain vault.</p></a>
+    <a class="card" href="GuardedAccount.html"><span class="name">GuardedAccount</span><p>The reported adapter: a custodian or a strategy, by permission.</p></a>
+    <a class="card" href="PolicyRegistry.html"><span class="name">PolicyRegistry</span><p>Where adapters and successors must be attested, as the vault names it.</p></a>
+    <a class="card" href="../money.html"><span class="name">Where the money sits</span><p>The whole path of the money across the stack.</p></a>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose wrap-any">
+    <h2>Source and tests</h2>
+    <ul class="plain">
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/portfolio/Portfolio.sol"><code>contracts/portfolio/Portfolio.sol</code></a>, interfaces <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/IPortfolio.sol"><code>IPortfolio.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/IAdapter.sol"><code>IAdapter.sol</code></a></li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/portfolio/Portfolio.t.sol"><code>Portfolio.t.sol</code></a> (unit tests with a mock vault and mock adapters, and integration tests against a real 4626 and a real target, among them <code>test_NothingLeavesExceptAlongTheListedPaths</code>), <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/vaults/Gated4626VaultPortfolio.t.sol"><code>Gated4626VaultPortfolio.t.sol</code></a> (the 4626 with a portfolio plugged), <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/nav/NavDesk.t.sol"><code>NavDesk.t.sol</code></a> (<code>NavDesk_WithAPortfolio</code>), <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/legos.test.ts"><code>test/nodejs/legos.test.ts</code></a> (the deployed profiles)</li>
+      <li>Symbolic: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/test/halmos/PortfolioHalmos.t.sol"><code>PortfolioHalmos.t.sol</code></a> (<code>check_anAllocationNeverPassesACap</code>)</li>
+    </ul>
+  </div>
+</section>
+
+<footer>Describes the contracts at commit <code>babef08</code> on <code>main</code>.</footer>
+</main>
+</body>
+</html>

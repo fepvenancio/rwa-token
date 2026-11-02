@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ERC4626Adapter · Gated Token Stack</title>
+<meta name="description" content="How a Portfolio holds a position in one on-chain ERC-4626 vault as an ordinary depositor, priced from that vault without a report.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="../index.html">Gated Token Stack</a>
+  <a href="../index.html">Overview</a>
+  <a href="../index.html#contracts">Contracts</a>
+  <a href="../roles.html">Who can do what</a>
+  <a href="../movement.html">One movement</a>
+  <a href="../deployment.html">Deployment and governance</a>
+  <a href="../money.html">Where the money sits</a>
+  <a href="../review.html">Security review</a>
+</nav>
+<main class="page">
+
+<header class="top wrap-any">
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Portfolio</div>
+  <h1>ERC4626Adapter</h1>
+  <p class="lede">Holds a <a href="Portfolio.html">Portfolio</a>'s position in one on-chain ERC-4626 vault, as an ordinary depositor. Its value is read from that vault, so the portfolio can count it without a report.</p>
+  <div class="facts">
+    <span class="fact"><b>contracts/portfolio/ERC4626Adapter.sol</b></span>
+    <span class="fact">immutable, <b>not a proxy</b></span>
+    <span class="fact">attested as <b>ADAPTER</b></span>
+    <span class="fact"><b>priced</b>: <b>reported()</b> is false</span>
+    <span class="fact">no roles, <b>one caller</b> for money</span>
+  </div>
+</header>
+
+<section id="in-one-minute">
+  <div class="callout wrap-any">
+    <h3>In one minute</h3>
+    <p>A portfolio does not talk to outside vaults itself. An outside ERC-4626 vault held as a priced position is called the target, and the portfolio reaches it through one of these. When the portfolio sends money, the adapter deposits it into the target and keeps the shares. When the portfolio asks for money back, the adapter withdraws and the target pays the portfolio directly. The adapter has no owner and no settings that change: the portfolio, the target and the risk ids are fixed at deployment, so the attested code hash covers them. That hash covers the target's address and not how the target behaves, so the contract leaves the target's behaviour to the council's decision to attest.</p>
+  </div>
+</section>
+
+<section id="how">
+  <div class="prose wrap-any">
+    <h2>How it works</h2>
+  </div>
+  <ol class="steps wrap-any">
+    <li><div><b>Money in: <code>allocate(assets)</code>.</b> The portfolio has just sent <code>assets</code> to the adapter. The adapter approves the target for exactly that amount with <code>forceApprove</code>, then calls <code>deposit(assets, address(this))</code>. The shares stay with the adapter, and a standard target leaves no allowance behind (<code>test_AllocatingDepositsWhatItWasSentAndLeavesNoAllowance</code>).</div></li>
+    <li><div><b>Money out: <code>deallocate(assets)</code>.</b> The adapter calls <code>withdraw(assets, PORTFOLIO, address(this))</code>. The target burns the adapter's shares and pays the portfolio, and the function takes no receiver (<code>test_DeallocatingPaysOnlyThePortfolio</code>). The portfolio measures what arrived, and reverts with <code>Portfolio_ShortReturn</code> if it is short.</div></li>
+    <li><div><b>Its worth: <code>value()</code>.</b> What the shares it holds would redeem for at the target's own price: <code>previewRedeem(balanceOf(address(this)))</code> on the target.</div></li>
+    <li><div><b>Its risks: <code>riskIds()</code>.</b> Always <code>RISK_ID</code>, which is <code>keccak256(abi.encode('ERC4626Adapter', target))</code>, so it follows the target. Also <code>SHARED_RISK_ID</code> if that is not zero, for a <a href="Portfolio.html#caps">cap</a> shared with other adapters.</div></li>
+  </ol>
+  <div class="prose wrap-any">
+    <p>What <code>value()</code>, <code>fresh()</code> and <code>liquid()</code> say depends on how the target answers. A failed read is treated as no answer, not as a loss: <code>fresh()</code> goes false, which stops dealing on a 4626 and stops a price being proposed at the desk.</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>The target</th><th>Its value</th><th>Fresh</th><th>Liquid</th></tr></thead>
+      <tbody>
+        <tr><td>Answers normally</td><td>The <code>previewRedeem</code> of its shares</td><td>true</td><td>The target's <code>maxWithdraw</code> for the adapter</td></tr>
+        <tr><td>Answers, and reports no liquidity</td><td>As above</td><td>true (<code>test_LiquidReadsTheTargetsLimit</code>)</td><td>0</td></tr>
+        <tr><td>Reverts on the read</td><td>0</td><td>false (<code>test_AFailedReadIsZeroAndNotFresh</code>)</td><td>0</td></tr>
+        <tr><td>Has no code, or answers with less than one word</td><td>0</td><td>false (<code>test_ATargetWithNoCodeIsZeroAndNotFresh</code>, <code>test_ATargetThatReturnsTooLittleIsZeroAndNotFresh</code>)</td><td>0</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="functions">
+  <div class="prose wrap-any"><h2>What it can do</h2></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>allocate(assets)</code></td><td>The portfolio, or <code>ERC4626Adapter_OnlyPortfolio</code></td><td>Deposits into the target what it was sent.</td></tr>
+        <tr><td><code>deallocate(assets)</code></td><td>The portfolio, or <code>ERC4626Adapter_OnlyPortfolio</code></td><td>Withdraws from the target, paid to the portfolio.</td></tr>
+        <tr><td><code>value()</code>, <code>fresh()</code>, <code>liquid()</code></td><td>Anyone (read-only)</td><td>What the position is worth, whether that could be read, and what could be returned at that moment.</td></tr>
+        <tr><td><code>riskIds()</code>, <code>asset()</code>, <code>reported()</code></td><td>Anyone (read-only)</td><td>The risks it counts against, the target's asset, and false for <code>reported()</code>.</td></tr>
+        <tr><td><code>PORTFOLIO()</code>, <code>TARGET()</code>, <code>RISK_ID()</code>, <code>SHARED_RISK_ID()</code></td><td>Anyone (read-only)</td><td>The settings fixed at construction.</td></tr>
+        <tr><td>The constructor</td><td>The deployer</td><td>Takes <code>(_portfolio, _target, _sharedRiskId)</code>, reverts with <code>ERC4626Adapter_ZeroAddress</code> on a zero portfolio or target, and asks the target for its <code>asset()</code>.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose wrap-any"><p>It emits no events of its own. The portfolio's <code>Allocated</code> and <code>Deallocated</code> record each move.</p></div>
+</section>
+
+<section id="why">
+  <div class="prose wrap-any">
+    <h2>Why it is built this way</h2>
+    <ul class="plain">
+      <li><b>Every setting is an immutable.</b> Change the portfolio, the target or the shared risk and the code hash changes, so the council's attestation covers exactly this position (<code>test_TheCodehashCoversTheSettings</code>).</li>
+      <li><b>An exact approval for each deposit.</b> A standard target pulls what it was approved for, so it holds no standing allowance between moves.</li>
+      <li><b>A failed read is not a loss.</b> Marking a position to zero because a target is briefly unreachable would let someone buy cheap. Holding the last price and stopping dealing does not.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="prose wrap-any">
+    <h2>What it does not do</h2>
+    <ul class="plain">
+      <li><b>It does not judge the target's price.</b> <code>fresh()</code> means the reads succeeded, not that the number is right. A target that answers with a wrong price reads as fresh. On a 4626 a rate limit bounds how fast a gain can count, and a loss counts at once.</li>
+      <li><b>It does not cover the target's behaviour.</b> The code hash fixes the target's address. A target that can be upgraded can change after the review.</li>
+      <li><b>It does not check what a deposit returned.</b> The adapter reads nothing back from the shares it receives. The portfolio's <code>_minAdded</code> is the floor, and the allocator chooses it.</li>
+      <li><b>It does not promise <code>liquid()</code>.</b> That is what the target's <code>maxWithdraw</code> says. If the target delivers less, the <code>withdraw</code> or the portfolio's check reverts.</li>
+      <li><b>It does not move anything else.</b> No function moves a balance of the asset held by the adapter itself, and <code>value()</code> does not count one, so the asset sent straight to it stays there. Target shares sent to it do count in <code>value()</code>. It has no function to claim rewards or move other tokens.</li>
+      <li><b>It does not look at a pause.</b> The portfolio's <code>allocate</code> does that, and the adapter's <code>deallocate</code> runs whenever the portfolio asks.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="connected">
+  <div class="prose wrap-any"><h2>Connected to</h2></div>
+  <div class="cards">
+    <a class="card" href="Portfolio.html"><span class="name">Portfolio</span><p>The one contract that moves money through it, and that counts its value.</p></a>
+    <a class="card" href="Gated4626Vault.html"><span class="name">Gated4626Vault</span><p>An instant vault can invest only through priced adapters such as this.</p></a>
+    <a class="card" href="PolicyRegistry.html"><span class="name">PolicyRegistry</span><p>Where its code hash must be attested as <code>ADAPTER</code>.</p></a>
+    <a class="card" href="GuardedAccount.html"><span class="name">GuardedAccount</span><p>The other adapter: reported, for money that can sit off-chain.</p></a>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose wrap-any">
+    <h2>Source and tests</h2>
+    <ul class="plain">
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/portfolio/ERC4626Adapter.sol"><code>contracts/portfolio/ERC4626Adapter.sol</code></a>, interfaces <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/IERC4626Adapter.sol"><code>IERC4626Adapter.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/IAdapter.sol"><code>IAdapter.sol</code></a></li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/portfolio/ERC4626Adapter.t.sol"><code>ERC4626Adapter.t.sol</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/portfolio/Portfolio.t.sol"><code>Portfolio.t.sol</code></a> (<code>PortfolioIntegrationTest</code>, with a real target), <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/vaults/Gated4626VaultPortfolio.t.sol"><code>Gated4626VaultPortfolio.t.sol</code></a>, and <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/legos.test.ts"><code>test/nodejs/legos.test.ts</code></a></li>
+    </ul>
+  </div>
+</section>
+
+<footer>Describes the contracts at commit <code>babef08</code> on <code>main</code>.</footer>
+</main>
+</body>
+</html>

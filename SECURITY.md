@@ -294,12 +294,14 @@ Further limits recorded during review:
   nothing is one too: there is nothing to redeem until money comes back. A low read that is not
   nothing counts at once, and recovers at `maxRate`. A count that finds the value fallen by more than half closes deposits
   for good, as a write-off does, and the views say so before that count, so a glitch nobody counts closes nothing. A read of
-  nothing is not counted, so it closes nothing and `exitOnly()` reads false through it. A fall of
-  half or less leaves deposits open at that price, and several smaller falls do not add up: the council reads each target
-  before it attests. During a read of nothing a donor can make it a low read, with one unit more than the fees
+  nothing is not counted, so it closes nothing and `exitOnly()` reads false through it. A fall of half or less leaves
+  deposits open at that price, and falls with a count between them do not add up: the council reads each target before it
+  attests. During a read of nothing a donor can make it a low read, with one unit more than the fees
   owed, which writes the price down: a holder's 1,000 reads as 1, and stays there a year after the target gets its money back
-  unless the timelock raises `maxRate`. It needs a target that reads nothing or very little while it is still fresh. The donor
-  gains nothing, because deposits close at that count. New money after a close needs a new vault. Pinned by
+  unless the timelock raises `maxRate`. It needs a target that reads nothing or very little while it is still fresh. The vault
+  takes no deposit at that price, because deposits close at that count. A donation of half the counted value or more does
+  not close them: in a run, 500 donated and 100,000 deposited took the holder's 1,000 to about 505 once the target had
+  recovered, and left the depositor about 495 ahead. New money after a close needs a new vault. Pinned by
   `test_AReadOfNothingIsNotWrittenDownAndDealingStops`, `test_AValueBelowTheFeesOwedIsAlsoAReadOfNothing` and
   `Gated4626VaultPortfolio_LargeFall`.
 - **With no shares nothing is anyone's.** A price struck on what is left would sit far above a mark at par, and the next count or period would charge a performance fee on the next investor's principal. So a 4626 counts zero and a desk proposes a value of zero, whatever is reported or sits in the portfolio, the next investor buys at par, and the mark restarts at par. What is left goes to them: on a 4626 under the limit, on a desk in the next price. A desk does not refuse to propose, because a stranger's donation could then stop the period. Shares left behind are not this case. A count before the entry moves the mark to the price after what it actually charged, so a charge that rounds to nothing moves it to the whole price, and the next investor is not charged a performance fee on what they pay in, to within a few raw units: that costs the fee recipient, and not the investor. A mark never starts below par, because below par a dust share would have the next investor buy above the mark, so a fund plugging a model after a loss pays no performance fee on the way back to par. Pinned by `NavDesk.t.sol::NavDesk_NoShares`, `test_WhenTheLastHolderLeavesDustTheNextInvestorPaysNoFeeOnPrincipal`, `testFuzz_WithNoSharesAnythingLeftStillStrikesAtPar`, `testFuzz_DustSharesDoNotChargeTheNextInvestorOnPrincipal`, `testFuzz_DustSharesAfterALossDoNotChargeTheNextInvestorOnPrincipal` and `test_AFirstPlugBelowParStartsTheMarkAtPar`.

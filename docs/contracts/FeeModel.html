@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FeeModel · Gated Token Stack</title>
+<meta name="description" content="How FeeModel works out a fund's management and performance fee from rates fixed at deployment, with the formulas, worked numbers, hard and soft hurdles, and why it does not revert.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="../index.html">Gated Token Stack</a>
+  <a href="../index.html">Overview</a>
+  <a href="../index.html#contracts">Contracts</a>
+  <a href="../roles.html">Who can do what</a>
+  <a href="../movement.html">One movement</a>
+  <a href="../deployment.html">Deployment and governance</a>
+  <a href="../money.html">Where the money sits</a>
+  <a href="../review.html">Security review</a>
+</nav>
+<main class="page">
+
+<header class="top">
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Vaults</div>
+  <h1>FeeModel</h1>
+  <p class="lede wrap-any">Works out a fund's fee. The rates are fixed when it is deployed, it remembers nothing, and whoever asks supplies the value, the share count, the high-water mark and the clocks.</p>
+  <div class="facts">
+    <span class="fact"><b>contracts/nav/FeeModel.sol</b></span>
+    <span class="fact">immutable, <b>no storage</b>, one view</span>
+    <span class="fact">attested as <b>FEE_MODEL</b></span>
+    <span class="fact">asked by a <b>NavDesk</b> or a <b>Gated4626Vault</b></span>
+  </div>
+</header>
+
+<section id="in-one-minute">
+  <div class="callout wrap-any">
+    <h3>In one minute</h3>
+    <p>A fund charges two kinds of fee: a management fee for the time that has passed, and a performance fee on gains above a high-water mark, which starts at the vault's price and moves up each time a performance fee is charged. This contract is the arithmetic. One function, <code>quote</code>, takes the numbers and returns the fee, the mark after that fee, and whether the mark moved.</p>
+    <p>It stores nothing. The rates and the recipient are immutables, which sit in its code, so the security council's attestation of the code hash covers them. Changing the fees means deploying another model, attesting it, and swapping through the timelock. It does not pay anyone: a <a href="NavDesk.html">NavDesk</a> or a <a href="Gated4626Vault.html">Gated4626Vault</a> calls it, keeps the mark and the clocks, and moves the money.</p>
+  </div>
+</section>
+
+<section id="how">
+  <div class="prose wrap-any">
+    <h2>The formula</h2>
+    <p><code>quote(_gross, _supply, _mark, _markAge, _feeAge)</code> returns <code>(_fee, _newMark, _markMoved)</code>. The mark and the price are in assets per 1e18 share units. The ages are in seconds. A year is 365 days. Every step rounds down. The code runs in this order:</p>
+  </div>
+  <div class="code-block">
+    <div class="code-label">quote, with the leading underscores dropped</div>
+    <pre>if supply == 0, or supply, gross or mark is above type(uint128).max:
+    return (0, mark, false)
+
+fee     = gross × MANAGEMENT_BPS × min(feeAge, 20 years) / (10,000 × 1 year)
+price   = (gross - fee) × 1e18 / supply
+hurdled = mark + mark × HURDLE_BPS × min(markAge, 20 years) / (10,000 × 1 year)
+
+if price &lt;= hurdled:
+    return (fee, mark, false)
+
+hard hurdle:  charged = (price - hurdled) × PERFORMANCE_BPS / 10,000
+soft hurdle:  charged = min((price - mark) × PERFORMANCE_BPS / 10,000, price - hurdled)
+
+if charged == 0:
+    return (fee, mark, false)
+
+paid    = charged × supply / 1e18
+fee     = fee + paid
+newMark = price - paid × 1e18 / supply
+return (fee, newMark, true)</pre>
+  </div>
+  <div class="prose wrap-any">
+    <h3>What the two callers pass</h3>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Input</th><th><code>NavDesk</code>, for a 7540</th><th><code>Gated4626Vault</code>, with a portfolio</th></tr></thead>
+      <tbody>
+        <tr><td><code>_gross</code></td><td>The reported value plus <code>pricedValue()</code></td><td>The counted value: the priced value net of fees owed, up to the rate limit</td></tr>
+        <tr><td><code>_supply</code></td><td><code>totalSupply()</code> plus the unclaimed shares</td><td><code>totalSupply()</code></td></tr>
+        <tr><td><code>_mark</code></td><td>Its <code>mark</code></td><td>Its mark</td></tr>
+        <tr><td><code>_markAge</code></td><td>Seconds since <code>markMovedAt</code></td><td>Seconds since its <code>markMovedAt</code></td></tr>
+        <tr><td><code>_feeAge</code></td><td>Seconds since <code>lastFeeAt</code></td><td>Seconds since its <code>lastFeeAt</code></td></tr>
+        <tr><td>When it asks</td><td>At <code>propose</code>; the result is frozen until the proposal executes or is cancelled</td><td>At each accrual</td></tr>
+        <tr><td>How the fee is paid</td><td>In <code>settlePeriod</code>, when the proposal executes</td><td>Added to <code>feesOwed</code>; <code>collectFees()</code> pays it from idle money</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="numbers">
+  <div class="prose wrap-any">
+    <h2>Worked numbers</h2>
+    <p>These figures come from running the code's integer arithmetic, and each row with a test name matches what that test asserts in <code>FeeModel.t.sol</code>. Both tables use an asset and a share with 18 decimals, 1,000 shares and a mark of 1.00 (<code>_mark</code> is 1e18), written in whole units.</p>
+    <h3>Hard against soft</h3>
+    <p>A 20% performance rate, a 10% yearly hurdle, one year since the mark moved, and no management fee, so the hurdle has reached 1.10.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Gross</th><th>Price</th><th>Hard: fee</th><th>Hard: mark after</th><th>Soft: fee</th><th>Soft: mark after</th><th>Note</th></tr></thead>
+      <tbody>
+        <tr><td>900</td><td>0.90</td><td>0</td><td>1.00, stays</td><td>0</td><td>1.00, stays</td><td>Below the mark</td></tr>
+        <tr><td>1,000</td><td>1.00</td><td>0</td><td>1.00, stays</td><td>0</td><td>1.00, stays</td><td>At the mark, below the hurdle</td></tr>
+        <tr><td>1,100</td><td>1.10</td><td>0</td><td>1.00, stays</td><td>0</td><td>1.00, stays</td><td>Exactly at the hurdle: <code>test_AtTheHurdleThereIsNone</code></td></tr>
+        <tr><td>1,110</td><td>1.11</td><td>2</td><td>1.108</td><td>10</td><td>1.10</td><td><code>test_JustAboveAHardOrSoftHurdle_TheyDiffer</code>, <code>test_TheMarkNeverLandsBelowTheHurdle</code></td></tr>
+        <tr><td>1,125</td><td>1.125</td><td>5</td><td>1.12</td><td>25</td><td>1.10</td><td>The soft catch-up ends: its fee is 20% of the whole gain</td></tr>
+        <tr><td>1,210</td><td>1.21</td><td>22</td><td>1.188</td><td>42</td><td>1.168</td><td>Hard: <code>test_AHardHurdleChargesOnlyWhatIsAboveIt</code></td></tr>
+        <tr><td>1,500</td><td>1.50</td><td>80</td><td>1.42</td><td>100</td><td>1.40</td><td>Soft: <code>test_ASoftHurdleCatchesUpToTheRateOnTheWholeGain</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose wrap-any">
+    <h3>Management fee, and the two together</h3>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Terms</th><th>Gross</th><th><code>_feeAge</code></th><th>Fee</th><th>Mark after</th><th>Test</th></tr></thead>
+      <tbody>
+        <tr><td>2% management</td><td>1,000</td><td>1 year</td><td>20</td><td>1.00, stays</td><td><code>test_ItIsTheGrossTimesTheRateTimesTheAge</code></td></tr>
+        <tr><td>2% management</td><td>1,000</td><td>half a year</td><td>10</td><td>1.00, stays</td><td><code>test_ForHalfAYearItIsHalf</code></td></tr>
+        <tr><td>5% management</td><td>1,000</td><td>20 or 200 years</td><td>1,000</td><td>1.00, stays</td><td><code>test_TheAgeIsCappedAtTheWholeValueAtTheCeiling</code></td></tr>
+        <tr><td>20% performance, no hurdle</td><td>1,100</td><td>0</td><td>20</td><td>1.08</td><td><code>test_AboveTheMarkItChargesTheRateOnTheGainAndMovesTheMark</code></td></tr>
+        <tr><td>2% management, 20% performance, no hurdle</td><td>1,200</td><td>1 year</td><td>59.2 (24 + 35.2)</td><td>1.1408</td><td><code>test_ThePerformanceFeeAddsToTheManagementFee</code></td></tr>
+        <tr><td>2% management, 20% performance, no hurdle</td><td>1,020</td><td>1 year</td><td>20.4</td><td>1.00, stays</td><td><code>test_ThePriceIsMeasuredAfterTheManagementFee</code></td></tr>
+        <tr><td>5% management, 50% performance, and no shares</td><td>1,000</td><td>1 year</td><td>0</td><td>1.00, stays</td><td><code>test_WithNoSharesThereIsNoFeeAndTheMarkStaysEvenWithValuePresent</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="hurdles">
+  <div class="prose wrap-any">
+    <h2>Hard and soft hurdles</h2>
+    <p>A hurdle is a return the investors keep before any performance fee. Here it is <code>hurdled</code> in the formula: the mark plus simple yearly growth since the mark last moved. Below it nobody pays a performance fee and the mark stays. <code>SOFT_HURDLE</code> decides what happens above it.</p>
+    <ul class="plain">
+      <li><b>Hard hurdle.</b> The performance rate applies to what is above the hurdle and to nothing below it.</li>
+      <li><b>Soft hurdle, with a full catch-up.</b> Above the hurdle the manager first takes everything until it holds the performance rate of the whole gain since the mark, then shares at that rate. In the table above and the figure below, investors stay at 1.10 while the price goes from 1.10 to 1.125.</li>
+    </ul>
+    <p>On either kind, the mark moves to the price after what is actually paid, which is not below <code>hurdled</code> (<code>testFuzz_OnceAFeeIsChargedTheMarkIsNotBelowTheHurdle</code>), and net value does not fall as gross rises, apart from rounding (<code>testFuzz_NetValueNeverFallsAsGrossRises</code> allows 1,000 of the smallest unit for it).</p>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 780 372" role="img" aria-label="A line chart of what the investor keeps per share against the price after the management fee, for a mark of 1.00, a hurdled price of 1.10 and a 20 percent performance rate. Up to 1.10 both hurdles keep the whole price. Above it, a hard hurdle rises at 80 percent of the price, reaching 1.26 at a price of 1.30. A soft hurdle stays flat at 1.10 until the price reaches 1.125, then rises at 80 percent of the price, reaching 1.24 at a price of 1.30. A dotted line shows the price with no performance fee, reaching 1.30.">
+        <line class="tick" x1="90" y1="30" x2="90" y2="300"/>
+        <line class="tick" x1="90" y1="300" x2="640" y2="300"/>
+
+        <line class="tick" x1="84" y1="300" x2="90" y2="300"/>
+        <line class="tick" x1="84" y1="210" x2="90" y2="210"/>
+        <line class="tick" x1="84" y1="120" x2="90" y2="120"/>
+        <line class="tick" x1="84" y1="30" x2="90" y2="30"/>
+        <text x="80" y="304" text-anchor="end" class="sm m">1.00</text>
+        <text x="80" y="214" text-anchor="end" class="sm m">1.10</text>
+        <text x="80" y="124" text-anchor="end" class="sm m">1.20</text>
+        <text x="80" y="34" text-anchor="end" class="sm m">1.30</text>
+
+        <line class="tick" x1="90" y1="300" x2="90" y2="306"/>
+        <line class="tick" x1="273.33" y1="300" x2="273.33" y2="306"/>
+        <line class="tick" x1="319.17" y1="300" x2="319.17" y2="306"/>
+        <line class="tick" x1="456.67" y1="300" x2="456.67" y2="306"/>
+        <line class="tick" x1="640" y1="300" x2="640" y2="306"/>
+        <text x="90" y="320" text-anchor="middle" class="sm m">1.00</text>
+        <text x="273.33" y="320" text-anchor="middle" class="sm m">1.10</text>
+        <text x="319.17" y="320" text-anchor="middle" class="sm m">1.125</text>
+        <text x="456.67" y="320" text-anchor="middle" class="sm m">1.20</text>
+        <text x="640" y="320" text-anchor="middle" class="sm m">1.30</text>
+        <text x="90" y="336" text-anchor="middle" class="sm m">mark</text>
+        <text x="290" y="336" text-anchor="end" class="sm m">hurdled</text>
+        <text x="300" y="336" class="sm m">catch-up ends</text>
+        <text x="365" y="360" text-anchor="middle" class="sm">Price after the management fee</text>
+        <text x="30" y="165" text-anchor="middle" class="sm" transform="rotate(-90 30 165)">What the investor keeps per share</text>
+
+        <line class="life" x1="273.33" y1="210" x2="273.33" y2="300"/>
+        <line class="life" x1="319.17" y1="210" x2="319.17" y2="300"/>
+        <line class="life" x1="273.33" y1="210" x2="640" y2="30"/>
+        <line class="ln" x1="90" y1="300" x2="273.33" y2="210"/>
+        <line class="ln" x1="273.33" y1="210" x2="640" y2="66"/>
+        <polyline class="ln dash" points="273.33,210 319.17,210 640,84"/>
+
+        <text x="648" y="34" class="sm m">no performance fee</text>
+        <text x="648" y="70" class="sm bold">hard hurdle</text>
+        <text x="648" y="88" class="sm bold">soft hurdle</text>
+        <text x="330" y="236" class="sm">Catch-up: from 1.10 to 1.125 the investor stays at 1.10</text>
+      </svg>
+    </div>
+    <figcaption class="wrap-any"><b>What each hurdle leaves the investor.</b> A mark of 1.00, a hurdle that has reached 1.10 and a 20% performance rate. The solid line is the hard hurdle, the dashed line the soft hurdle. They run parallel above 1.125, the soft hurdle 0.02 lower, because by then its fee covers the whole gain from 1.00 and the hard hurdle's fee covers the gain from 1.10.</figcaption>
+  </figure>
+</section>
+
+<section id="slicing">
+  <div class="prose wrap-any">
+    <h2>Why slicing a gain does not clear a hurdle</h2>
+    <p>The hurdle's clock, <code>_markAge</code>, runs from when the mark last moved, and the mark moves only when <code>charged</code> is above zero. A quote that finds the price at or below the hurdle changes nothing, so the next quote is measured from the same mark over a longer age. Asking more often does not restart the clock.</p>
+    <p>The example is a 10% yearly hurdle and a 20% performance rate. The price sits at 1.00 for eleven months and reaches 1.09 in the twelfth.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Quote at</th><th>Price</th><th>Age of the mark</th><th><code>hurdled</code></th><th>Performance fee</th></tr></thead>
+      <tbody>
+        <tr><td>Month 1</td><td>1.00</td><td>1 month</td><td>1.0083</td><td>0</td></tr>
+        <tr><td>Month 11</td><td>1.00</td><td>11 months</td><td>1.0917</td><td>0</td></tr>
+        <tr><td>Month 12</td><td>1.09</td><td>12 months</td><td>1.10</td><td>0</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose wrap-any">
+    <p>A hurdle measured over the last month alone would compare 1.09 with 1.0083 and charge 16.33 on 1,000 shares with a hard hurdle, or 18 with a soft one. Over the whole time since the mark moved, the return is 9% against a 10% hurdle, so nothing is due. <code>testFuzz_ASteadyReturnBelowTheHurdlePaysNothingHoweverItIsSplit</code> pins the same thing for a steady 9% split into up to 200 quotes.</p>
+    <p>This depends on the caller. The model does not keep the clock, so the caller must restart it only when the mark moved. <code>NavDesk</code> and <code>Gated4626Vault</code> do that. With no shares <code>Gated4626Vault</code> does not ask the model. <code>NavDesk</code> does, and gets no fee and the mark it passed, because <code>quote</code> returns early on a <code>_supply</code> of zero. Each restarts the clock and starts the mark at par.</p>
+  </div>
+</section>
+
+<section id="caps">
+  <div class="prose wrap-any">
+    <h2>The caps, and why it does not revert</h2>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Rate</th><th>Ceiling</th><th>In words</th></tr></thead>
+      <tbody>
+        <tr><td><code>MANAGEMENT_BPS</code></td><td>500</td><td>5% a year</td></tr>
+        <tr><td><code>PERFORMANCE_BPS</code></td><td>5,000</td><td>50% of the gain</td></tr>
+        <tr><td><code>HURDLE_BPS</code></td><td>5,000</td><td>50% a year, simple</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose wrap-any">
+    <p>The constructor enforces these with <code>FeeModel_RateTooHigh</code>. It reverts with <code>FeeModel_ZeroRecipient</code> on a zero <code>RECIPIENT</code>, even with no rate, because a swap to this model must still pay what the last one left owed (<code>test_NobodyToPayIsRefused</code>).</p>
+    <p>After that, <code>quote</code> does not revert (<code>testFuzz_ItNeverRevertsAndAFeeNeverExceedsTheGross</code>, fuzzed over the full range of every input at the ceiling rates). A revert here would stop a price from being proposed on a desk, or stop a 4626 vault counting its value. The reasons it holds:</p>
+    <ul class="plain">
+      <li><b>Ages are capped at 20 years.</b> At the 5% ceiling that is exactly the whole gross value, so the management fee cannot exceed the gross and <code>gross - fee</code> cannot go below zero. Time beyond the cap is not charged. The hurdle's age has the same cap.</li>
+      <li><b>A figure too large to be real gets no fee.</b> A <code>_gross</code>, <code>_supply</code> or <code>_mark</code> above <code>type(uint128).max</code> returns no fee and an unchanged mark, as does a <code>_supply</code> of zero (<code>test_AFigureTooLargeToBeRealGetsNoFee</code>, <code>test_AtTheLargestRealFiguresItDoesNotRevert</code>).</li>
+      <li><b>It compares before it subtracts.</b> <code>price - hurdled</code> and <code>price - mark</code> run only once the price is above <code>hurdled</code>, which is at least the mark, and <code>charged</code> is at most <code>price - hurdled</code>.</li>
+      <li><b>The fee does not exceed the gross.</b> The performance fee is at most what the price after the management fee is worth across all shares. The products go through OpenZeppelin's <code>Math.mulDiv</code>, which keeps the full precision of the intermediate value.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="functions">
+  <div class="prose wrap-any"><h2>What it can do</h2></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><span class="wrap-any"><code>quote(_gross, _supply, _mark, _markAge, _feeAge)</code></span></td><td>Anyone (read-only)</td><td>Returns <code>_fee</code> in assets, <code>_newMark</code>, and <code>_markMoved</code>, which tells the caller to restart the mark's clock.</td></tr>
+        <tr><td><code>RECIPIENT()</code></td><td>Anyone (read-only)</td><td>Who is paid. The model pays nobody itself: the caller reads this and sends the money.</td></tr>
+        <tr><td><code>MANAGEMENT_BPS()</code>, <code>PERFORMANCE_BPS()</code>, <code>HURDLE_BPS()</code>, <code>SOFT_HURDLE()</code></td><td>Anyone (read-only)</td><td>The terms, fixed at construction.</td></tr>
+        <tr><td><span class="wrap-any"><code>constructor(_recipient, _managementBps, _performanceBps, _hurdleBps, _softHurdle)</code></span></td><td>Whoever deploys it</td><td>Sets the terms. Reverts with <code>FeeModel_RateTooHigh</code> or <code>FeeModel_ZeroRecipient</code>. Nothing uses a model until it is attested as <code>FEE_MODEL</code> and plugged in.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="why">
+  <div class="prose wrap-any">
+    <h2>Why it is built this way</h2>
+    <ul class="plain">
+      <li><b>No storage.</b> The rates and the recipient are in the code, so one attested code hash covers one set of terms. Terms cannot change behind the attestation, and a change of terms goes through a deployment, an attestation and a timelock swap.</li>
+      <li><b>The caller keeps the state.</b> Replacing a model does not lose the mark or the clocks, because the model never held them (<code>test_ASwapKeepsTheMarkAndTheClocks</code> in <code>NavDesk.t.sol</code>).</li>
+      <li><b>The performance fee is measured after the management fee.</b> A gain that only covers the management fee does not count as a gain (<code>test_ThePriceIsMeasuredAfterTheManagementFee</code>).</li>
+      <li><b>It does not revert.</b> A fee calculation should not be able to stop a fund from dealing. A figure too large to be real charges nothing, and an age above 20 years is charged as 20 years.</li>
+    </ul>
+    <p>In a deployment, <code>Legos</code> deploys a model with the terms of the product's profile, the council attests it, and <code>Product</code> plugs it in. The <code>managed-fund</code> profile uses 100, 1,000 and 300 basis points with a hard hurdle, and <code>vault4626-invest</code> uses 50, 1,000 and 0.</p>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="prose wrap-any">
+    <h2>What it does not do</h2>
+    <ul class="plain">
+      <li><b>It trusts its inputs.</b> The gross value, the share count, the mark and the ages are what the caller says. On a desk the gross value rests on a report, so a wrong report gives a wrong fee.</li>
+      <li><b>It has one mark for the whole vault.</b> There is no high-water mark per investor and no equalisation. Investors who came in at different prices pay the same fee per share.</li>
+      <li><b>It does not compound.</b> The management fee and the hurdle are simple, in proportion to the time.</li>
+      <li><b>It does not raise an alarm.</b> A figure above <code>type(uint128).max</code> or an age above 20 years gets a smaller fee or none, with no error.</li>
+      <li><b>It does not move the mark without a charge.</b> With a performance rate of zero, or a <code>charged</code> that rounds to zero, the mark and its clock stay where they are (<code>test_WithARateOfZeroTheMarkDoesNotMove</code>). A <code>charged</code> above zero can still round to no fee in assets, because the fee adds <code>charged × supply / 1e18</code>. Then no performance fee is owed, the price has not fallen, and the mark moves to the whole price and its clock restarts (<code>test_WhenTheChargeRoundsToNoFeeTheMarkIsThePrice</code>). On a dust position the next investor buys at or below that price, so a mark left below it would be charged on their principal. A gain sliced into calls too small to pay a whole unit therefore pays nothing. That costs the fee recipient a rounding error per call: under 3 raw units while the supply is under 1e18 share units, and about one price unit, supply / 1e18 raw units, above that.</li>
+      <li><b>It does not pay.</b> On a 4626, <code>collectFees()</code> pays what idle money allows, so holders can leave ahead of fees owed, and a model replaced with fees still owed pays them to the replacement's recipient unless a timelock batch collects first. On a desk, the fee is paid when the proposal executes. A cancelled proposal pays nothing, and the desk's clocks stay where they were, so the next proposal quotes that time again.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="connected">
+  <div class="prose wrap-any"><h2>Connected to</h2></div>
+  <div class="cards">
+    <a class="card" href="NavDesk.html"><span class="name">NavDesk</span><p>Quotes it at each proposal and freezes the result for a 7540 vault.</p></a>
+    <a class="card" href="Gated4626Vault.html"><span class="name">Gated4626Vault</span><p>Quotes it on the counted value and keeps what it owes in <code>feesOwed</code>.</p></a>
+    <a class="card" href="PolicyRegistry.html"><span class="name">PolicyRegistry</span><p>Where the council attests its code hash as <code>FEE_MODEL</code>.</p></a>
+    <a class="card" href="../money.html"><span class="name">Where the money sits</span><p>Follows the money through a settlement.</p></a>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose wrap-any">
+    <h2>Source and tests</h2>
+    <ul class="plain">
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/nav/FeeModel.sol"><code>contracts/nav/FeeModel.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/IFeeModel.sol"><code>IFeeModel.sol</code></a></li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/nav/FeeModel.t.sol"><code>FeeModel.t.sol</code></a> (the arithmetic and its properties), the fee tests in <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/nav/NavDesk.t.sol"><code>NavDesk.t.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/vaults/Gated4626VaultPortfolio.t.sol">Gated4626VaultPortfolio.t.sol</a> (what each caller keeps and pays), and <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/legos.test.ts"><code>test/nodejs/legos.test.ts</code></a> (a deployed model)</li>
+    </ul>
+  </div>
+</section>
+
+<footer>Describes the contracts at commit <code>babef08</code> on <code>main</code>.</footer>
+</main>
+</body>
+</html>

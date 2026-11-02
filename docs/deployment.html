@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Deployment and governance · Gated Token Stack</title>
-<meta name="description" content="How the system goes live in two Ignition stages with a council review between them, how its policy changes later through the timelock, and the order to follow in an incident.">
+<meta name="description" content="How an issuer deploys one core and then each product through Ignition modules, what the post-deploy check asserts and who runs it, how policy changes later through the timelock, and the order to follow in an incident.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
@@ -26,11 +26,12 @@
 <header class="top">
   <div class="crumbs"><a href="index.html">Overview</a> / Governance</div>
   <h1>Deployment and governance</h1>
-  <p class="lede">The system goes live in two scripted stages with a security review between them, and ends with every admin power in the hands of a timelock. After that, every change to the code, the hook, the rule lists, the policy parameters or the roles takes the same public, delayed path, and an incident follows a fixed order: stop, enforce, resume.</p>
+  <p class="lede">An issuer deploys one core, then each product on top of it. The core goes through a security review and hands its admin powers to a timelock. A product launches with no wait over reviewed code and ends with its admin powers at the same timelock. After that, a change to a product's policy, code or roles waits in public for the delay, and an incident follows a fixed order: stop, enforce, resume.</p>
   <div class="facts">
-    <span class="fact">stage 1: <b>ignition/modules/Components.ts</b></span>
-    <span class="fact">stage 2: <b>ignition/modules/Activate.ts</b></span>
-    <span class="fact">rule lists: <b>RULE_ORDER</b> in roles.ts</span>
+    <span class="fact">once per issuer: <b>Core, CoreHandover</b></span>
+    <span class="fact">per fund: <b>Fund, FundOpen</b></span>
+    <span class="fact">per product: <b>Legos, Product</b></span>
+    <span class="fact">delay: <b>24 hours</b> by default, floor 1 hour</span>
     <span class="fact">post-deploy check: <b>assertHandedOver</b></span>
   </div>
 </header>
@@ -38,124 +39,160 @@
 <nav class="toc" aria-label="On this page">
   <a href="#in-one-minute">In one minute</a>
   <a href="#live">Going live</a>
-  <a href="#components">Stage 1</a>
+  <a href="#core">Core</a>
   <a href="#council">Council step</a>
-  <a href="#activate">Stage 2</a>
-  <a href="#rule-order">Rule lists</a>
   <a href="#handover">Hand-over</a>
+  <a href="#products">Funds and products</a>
+  <a href="#rule-order">Rule lists</a>
+  <a href="#profiles">Profiles</a>
   <a href="#check">Post-deploy check</a>
   <a href="#changes">Changing policy</a>
   <a href="#watching">Watching</a>
   <a href="#incident">Incident runbook</a>
   <a href="#why">Why</a>
+  <a href="#limits">Limits</a>
 </nav>
 
 <section id="in-one-minute">
   <div class="callout">
     <h3>In one minute</h3>
-    <p>Deployment uses Hardhat Ignition, a tool that runs a scripted list of contract deployments and calls. The first script, <code>Components</code>, deploys everything that does not depend on a token. Then the security council reviews that code and <b>attests</b> it: it records each contract's code fingerprint (its codehash) in the <code>PolicyRegistry</code>, the list of reviewed code. The second script, <code>Activate</code>, creates the tokens, configures them and hands the deployer's admin powers to the main timelock, except on the two timelocks, which administer themselves; along the way it refuses any implementation, hook or rule that is not on that list. From then on a change is proposed by governance, waits at least seven days in public, and runs only if nobody cancels it.</p>
+    <p>Deployment uses Hardhat Ignition, a tool that runs a scripted list of contract deployments and calls. An issuer runs one <b>core</b>: two timelocks, the list of reviewed code (<code>PolicyRegistry</code>), one shared hook, <code>ProxyDeployer</code>, and the rules and implementations its products use. A <b>timelock</b> is a contract that runs a call only after it has been public for a fixed delay. The security council reviews the code and <b>attests</b> it: it records each contract's code fingerprint (its codehash) in the registry. <code>CoreHandover</code> then removes the deployer and gives <code>ProxyDeployer</code> to an <b>operations account</b>, which launches each <b>product</b> (one token or vault) with no wait, because a launch only adds a proxy over attested code and touches nothing that exists. Each launch ends with that product's admin powers at the main timelock. From then on, a change to its code, rules or roles is scheduled by governance, waits at least the delay (24 hours by default) in public, and runs unless someone cancels it. The check that all of this came out as intended, <code>assertHandedOver</code>, runs in CI against a local chain. On a live chain an operator has to run it.</p>
   </div>
 </section>
 
 <section id="live">
   <div class="prose">
     <h2>Going live</h2>
-    <p>Five steps, by four parties. The test fixture <code>deployStack</code> in <code>test/nodejs/fixtures.ts</code> runs this exact sequence on a local chain, playing the council and the KYC attester, so every test starts from a real deployment.</p>
+    <p>Six Ignition modules and three steps outside them. The test fixtures <code>deployProfile</code> and <code>deployStack</code> in <code>test/nodejs/fixtures.ts</code> run this sequence on a local chain, playing the council and, where a test needs holders, the KYC attester, so the Node tests start from a real deployment.</p>
   </div>
   <figure>
     <div class="fig-scroll">
-      <svg class="d" viewBox="0 0 960 550" role="img" aria-label="Going live in five steps. 1, the deployer runs Components: the timelocks, the policy registry, the shared hook, the credential registry, five rules, the fund, three implementations, ProxyDeployer and the two executors. 2, the security council checks the code and attests five rules, the hook and three implementations. 3, the deployer runs Activate: deploys each token with its rules, configures, registers the fund's classes, grants roles and hands the deployer's admin powers to the main timelock, except on the two timelocks, which administer themselves. 4, the KYC attester credentials the 7540 vault and every holder. 5, the post-deploy check confirms the hand-over, the hook and the rule lists.">
+      <svg class="d" viewBox="0 0 780 776" role="img" aria-label="Going live in nine steps. Once per issuer: 1, the deployer runs Core. 2, the security council attests the rules, the hook and the implementations. 3, the deployer runs CoreHandover, which ends with the main timelock as admin and the operations account as owner of ProxyDeployer. Per fund and per product, run by the operations account with no timelock wait: 4, Fund, after which the council attests the fund's rule. 5, Legos, for a product that has any, after which the council attests all of them except the desk. 6, Product. 7, FundOpen, which ends with the fund owned by the main timelock. After the modules: 8, the KYC attester credentials each holder. 9, the post-deploy check assertHandedOver reads the chain; CI runs it on a local chain and on a live chain an operator has to run it.">
         <defs>
           <marker id="dp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
         </defs>
 
-        <rect class="b2" x="20" y="16" width="150" height="84" rx="8"/>
-        <text x="95" y="54" class="bold" text-anchor="middle">Deployer</text>
-        <text x="95" y="72" class="m sm" text-anchor="middle">account 0</text>
-        <rect class="act" x="190" y="16" width="470" height="84" rx="8"/>
-        <text x="206" y="39" class="bold">1. Components</text>
-        <text x="206" y="58">Two timelocks, PolicyRegistry, the one ComplianceHook,</text>
-        <text x="206" y="75">CredentialRegistry, five rules, Fund, three implementations,</text>
-        <text x="206" y="92">ProxyDeployer, IntentExecutor, DvPExecutor</text>
-        <rect class="b" x="690" y="16" width="250" height="84" rx="8"/>
-        <text x="706" y="52" class="sm">The deployer is the temporary</text>
-        <text x="706" y="68" class="sm">admin of what needs one</text>
-        <line class="ln" x1="425" y1="100" x2="425" y2="122" marker-end="url(#dp-arrow)"/>
+        <text x="12" y="18" class="bold acc-t">Once per issuer</text>
 
-        <rect class="b2" x="20" y="124" width="150" height="84" rx="8"/>
-        <text x="95" y="171" class="bold" text-anchor="middle">Security council</text>
-        <rect class="act" x="190" y="124" width="470" height="84" rx="8"/>
-        <text x="206" y="147" class="bold">2. Council step</text>
-        <text x="206" y="166">Checks each contract against the release build,</text>
-        <text x="206" y="183">then attests 5 rules as RULE, the hook as HOOK</text>
-        <text x="206" y="200">and 3 implementations as IMPLEMENTATION</text>
-        <rect class="b" x="690" y="124" width="250" height="84" rx="8"/>
-        <text x="706" y="160" class="sm">Activate checks these</text>
-        <text x="706" y="176" class="sm">attestations at install time</text>
-        <line class="ln" x1="425" y1="208" x2="425" y2="230" marker-end="url(#dp-arrow)"/>
+        <rect class="b2" x="12" y="28" width="128" height="64" rx="8"/>
+        <text x="76" y="56" class="bold" text-anchor="middle">Deployer</text>
+        <text x="76" y="74" class="m sm" text-anchor="middle">account 0</text>
+        <rect class="act" x="156" y="28" width="612" height="64" rx="8"/>
+        <text x="172" y="48" class="bold">1. Core</text>
+        <text x="172" y="66" class="sm">Recovery timelock, main timelock, PolicyRegistry, ComplianceHook, ProxyDeployer,</text>
+        <text x="172" y="82" class="sm">and what the profile's products use: rules, one implementation per template, executors</text>
+        <line class="ln" x1="462" y1="92" x2="462" y2="108" marker-end="url(#dp-arrow)"/>
 
-        <rect class="b2" x="20" y="232" width="150" height="84" rx="8"/>
-        <text x="95" y="270" class="bold" text-anchor="middle">Deployer</text>
-        <text x="95" y="288" class="m sm" text-anchor="middle">last act as admin</text>
-        <rect class="act" x="190" y="232" width="470" height="84" rx="8"/>
-        <text x="206" y="255" class="bold">3. Activate</text>
-        <text x="206" y="274">ProxyDeployer.deploy for each token, with its rules;</text>
-        <text x="206" y="291">configure, register the fund's classes, grant roles,</text>
-        <text x="206" y="308">then hand admin to the main timelock and renounce</text>
-        <rect class="b" x="690" y="232" width="250" height="84" rx="8"/>
-        <text x="706" y="268" class="sm">deploy refuses unreviewed code</text>
-        <text x="706" y="284" class="sm">and an unexpected rule list</text>
-        <line class="ln" x1="425" y1="316" x2="425" y2="338" marker-end="url(#dp-arrow)"/>
+        <rect class="b2" x="12" y="110" width="128" height="48" rx="8"/>
+        <text x="76" y="139" class="bold" text-anchor="middle">Security council</text>
+        <rect class="act" x="156" y="110" width="612" height="48" rx="8"/>
+        <text x="172" y="130" class="bold">2. Council step</text>
+        <text x="172" y="148" class="sm">Attests the rules as RULE, the hook as HOOK and each implementation as IMPLEMENTATION</text>
+        <line class="ln" x1="462" y1="158" x2="462" y2="174" marker-end="url(#dp-arrow)"/>
 
-        <rect class="b2" x="20" y="340" width="150" height="84" rx="8"/>
-        <text x="95" y="387" class="bold" text-anchor="middle">KYC attester</text>
-        <rect class="act" x="190" y="340" width="470" height="84" rx="8"/>
-        <text x="206" y="363" class="bold">4. Credentials</text>
-        <text x="206" y="382">The KYC attester credentials the 7540 vault, which</text>
-        <text x="206" y="399">holds shares in escrow, and every holder</text>
-        <rect class="b" x="690" y="340" width="250" height="84" rx="8"/>
-        <text x="706" y="376" class="sm">Without a credential an</text>
-        <text x="706" y="392" class="sm">account cannot receive</text>
-        <line class="ln" x1="425" y1="424" x2="425" y2="446" marker-end="url(#dp-arrow)"/>
+        <rect class="b2" x="12" y="176" width="128" height="64" rx="8"/>
+        <text x="76" y="204" class="bold" text-anchor="middle">Deployer</text>
+        <text x="76" y="222" class="m sm" text-anchor="middle">last act</text>
+        <rect class="act" x="156" y="176" width="612" height="64" rx="8"/>
+        <text x="172" y="196" class="bold">3. CoreHandover</text>
+        <text x="172" y="214" class="sm">First KYC attester; the guardian as canceller; recovery and operator roles on the executors;</text>
+        <text x="172" y="230" class="sm">admin to the main timelock and the deployer renounces; ProxyDeployer to the operations account</text>
+        <line class="ln" x1="462" y1="240" x2="462" y2="278" marker-end="url(#dp-arrow)"/>
 
-        <rect class="b2" x="20" y="448" width="150" height="84" rx="8"/>
-        <text x="95" y="486" class="bold" text-anchor="middle">Read-only check</text>
-        <text x="95" y="504" class="m sm" text-anchor="middle">anyone can run it</text>
-        <rect class="act" x="190" y="448" width="470" height="84" rx="8"/>
-        <text x="206" y="471" class="bold">5. Post-deploy check</text>
-        <text x="206" y="490">assertHandedOver: the deployer holds nothing, the main</text>
-        <text x="206" y="507">timelock is admin of the tokens, executors and registries,</text>
-        <text x="206" y="524">rule lists match RULE_ORDER, every fund class is intact</text>
-        <rect class="b" x="690" y="448" width="250" height="84" rx="8"/>
-        <text x="706" y="484" class="sm">Refuses a second hook that</text>
-        <text x="706" y="500" class="sm">shares the attested codehash</text>
+        <text x="12" y="268" class="bold acc-t">Per fund and per product, with no timelock wait</text>
+
+        <rect class="b2" x="12" y="280" width="128" height="64" rx="8"/>
+        <text x="76" y="308" class="bold" text-anchor="middle">Operations</text>
+        <text x="76" y="325" class="bold" text-anchor="middle">account</text>
+        <rect class="b" x="156" y="280" width="612" height="64" rx="8"/>
+        <text x="172" y="300" class="bold">4. Fund, once per fund</text>
+        <text x="172" y="318" class="sm">A Fund, owned by the operations account, and the FundHoldersRule that points at it.</text>
+        <text x="172" y="334" class="sm">The council then attests the rule, after reading the fund's code and its owner</text>
+        <line class="ln" x1="462" y1="344" x2="462" y2="360" marker-end="url(#dp-arrow)"/>
+
+        <rect class="b2" x="12" y="362" width="128" height="64" rx="8"/>
+        <text x="76" y="390" class="bold" text-anchor="middle">Operations</text>
+        <text x="76" y="407" class="bold" text-anchor="middle">account</text>
+        <rect class="b" x="156" y="362" width="612" height="64" rx="8"/>
+        <text x="172" y="382" class="bold">5. Legos, once per product that has any</text>
+        <text x="172" y="400" class="sm">NavDesk, Portfolio, adapters, validators, FeeModel, built against ProxyDeployer.predict.</text>
+        <text x="172" y="416" class="sm">The council then attests all of them except the desk</text>
+        <line class="ln" x1="462" y1="426" x2="462" y2="442" marker-end="url(#dp-arrow)"/>
+
+        <rect class="b2" x="12" y="444" width="128" height="64" rx="8"/>
+        <text x="76" y="472" class="bold" text-anchor="middle">Operations</text>
+        <text x="76" y="489" class="bold" text-anchor="middle">account</text>
+        <rect class="b" x="156" y="444" width="612" height="64" rx="8"/>
+        <text x="172" y="464" class="bold">6. Product, once per product</text>
+        <text x="172" y="482" class="sm">ProxyDeployer.deploy, then configuration, then role grants, then admin to the main timelock.</text>
+        <text x="172" y="498" class="sm">The first product and the fiftieth take this same path</text>
+        <line class="ln" x1="462" y1="508" x2="462" y2="524" marker-end="url(#dp-arrow)"/>
+
+        <rect class="b2" x="12" y="526" width="128" height="64" rx="8"/>
+        <text x="76" y="554" class="bold" text-anchor="middle">Operations</text>
+        <text x="76" y="571" class="bold" text-anchor="middle">account</text>
+        <rect class="b" x="156" y="526" width="612" height="64" rx="8"/>
+        <text x="172" y="546" class="bold">7. FundOpen, once per fund</text>
+        <text x="172" y="564" class="sm">Installs the rule, sets the cap and registers the first classes in order;</text>
+        <text x="172" y="580" class="sm">then the fund's ownership moves to the main timelock</text>
+        <line class="ln" x1="462" y1="590" x2="462" y2="628" marker-end="url(#dp-arrow)"/>
+
+        <text x="12" y="618" class="bold acc-t">After the modules</text>
+
+        <rect class="b2" x="12" y="630" width="128" height="48" rx="8"/>
+        <text x="76" y="659" class="bold" text-anchor="middle">KYC attester</text>
+        <rect class="b" x="156" y="630" width="612" height="48" rx="8"/>
+        <text x="172" y="650" class="bold">8. Credentials</text>
+        <text x="172" y="668" class="sm">Credentials each holder: with no credential, an account cannot receive under CredentialRule</text>
+        <line class="ln" x1="462" y1="678" x2="462" y2="694" marker-end="url(#dp-arrow)"/>
+
+        <rect class="b2" x="12" y="696" width="128" height="64" rx="8"/>
+        <text x="76" y="724" class="bold" text-anchor="middle">An operator</text>
+        <text x="76" y="742" class="m sm" text-anchor="middle">read-only</text>
+        <rect class="b" x="156" y="696" width="612" height="64" rx="8"/>
+        <text x="172" y="716" class="bold">9. Post-deploy check</text>
+        <text x="172" y="734" class="sm">assertHandedOver reads the chain and throws on anything not as the profile says.</text>
+        <text x="172" y="750" class="sm">CI runs it on a local chain. On a live chain an operator has to run it</text>
       </svg>
     </div>
-    <figcaption><b>Review sits between the two stages because the second stage checks it.</b> Everything the council attests exists after stage 1, and nothing in stage 2 can install code the council has not attested. The right-hand column is what each step makes safe.</figcaption>
+    <figcaption><b>No step in going live waits for a timelock.</b> The delay starts to apply to each thing as it is handed over: the core at step 3, a product at the end of step 6, a fund at the end of step 7. Steps 4 to 7 repeat for each fund and each product, on the same core.</figcaption>
   </figure>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Step</th><th>Who runs it</th><th>Waits for a timelock</th><th>What it leaves behind</th></tr></thead>
+      <tbody>
+        <tr><td><code>Core</code></td><td>Deployer, account 0 of the run</td><td>No</td><td>The core's contracts. The deployer is temporary admin of both timelocks, the credential registry and the executors, and owns <code>ProxyDeployer</code>.</td></tr>
+        <tr><td>Council step</td><td>Security council, with <code>ATTESTER_ROLE</code></td><td>No: <code>attest</code> has no delay</td><td>The rules, the hook and the implementations on the list of reviewed code.</td></tr>
+        <tr><td><code>CoreHandover</code></td><td>Deployer</td><td>No</td><td>The deployer holds nothing. The main timelock administers the core, and the operations account owns <code>ProxyDeployer</code>.</td></tr>
+        <tr><td><code>Fund</code></td><td>Operations account; then the council attests the rule</td><td>No</td><td>A <code>Fund</code> the operations account owns, and its <code>FundHoldersRule</code>.</td></tr>
+        <tr><td><code>Legos</code></td><td>Operations account; then the council attests</td><td>No</td><td>The product's desk, portfolio, adapters, validators and fee model, built against the vault's predicted address.</td></tr>
+        <tr><td><code>Product</code></td><td>Operations account, as owner of <code>ProxyDeployer</code></td><td>No</td><td>A live proxy administered by the main timelock. The operations account holds nothing on it.</td></tr>
+        <tr><td><code>FundOpen</code></td><td>Operations account, as owner of the fund</td><td>No. From here a later class or a change to the fund waits for the delay.</td><td>The fund with its rule, cap and first classes, owned by the main timelock.</td></tr>
+        <tr><td>Credentials</td><td>KYC attester, in <code>CredentialRegistry</code></td><td>No</td><td>Each holder's record. A vault needs none for its own shares, because <code>CredentialRule</code> does not judge a token's own address. A vault whose asset is a gated token needs one that token's policy accepts, and so does a third party that pays into a vault or receives its redemption cash, <a href="contracts/SignedEntry.html"><code>SignedEntry</code></a> included.</td></tr>
+        <tr><td><code>assertHandedOver</code></td><td>CI on a local chain; an operator on a live one (<a href="#check">details</a>)</td><td>No: it sends no transaction</td><td>Nothing. It throws on the first thing that is not as the profile says.</td></tr>
+      </tbody>
+    </table>
+  </div>
 </section>
 
-<section id="components">
+<section id="core">
   <div class="prose">
-    <h2>Stage 1: <code>Components</code></h2>
-    <p>Everything that does not depend on a token's address. Its parameters are <code>governance</code>, <code>council</code>, <code>guardian</code> and <code>minDelay</code> (seven days by default; the main timelock refuses less). The deployer is account 0.</p>
+    <h2>The core: <code>Core</code></h2>
+    <p>Everything that does not depend on a product. Its parameters are <code>governance</code>, <code>council</code>, <code>guardian</code> and <code>minDelay</code>, which is 24 hours unless stated. The first five rows always deploy. The rest follow from the profile: a rule only if a product lists it, an implementation only if a product uses that template, an executor only if a product names it. A <code>FundHoldersRule</code> is not part of the core, because each one points at its own fund.</p>
   </div>
   <div class="table-wrap">
     <table class="tight">
       <thead><tr><th>Contract</th><th>Constructor arguments</th><th>What it is set up as</th></tr></thead>
       <tbody>
-        <tr><td>Recovery timelock, OpenZeppelin <code>TimelockController</code></td><td><code>minDelay, [governance], [governance], deployer</code></td><td>Deployed first, so the main timelock can name it. Governance proposes and executes.</td></tr>
-        <tr><td><a href="contracts/GovernanceTimelock.html"><code>GovernanceTimelock</code></a>, the main timelock</td><td><code>minDelay, [governance], [governance], deployer, recoveryTimelock</code></td><td>Its constructor gives the recovery timelock <code>RECOVERY_ROLE</code>. The deployer is admin of both timelocks until <code>Activate</code>.</td></tr>
-        <tr><td><a href="contracts/PolicyRegistry.html"><code>PolicyRegistry</code></a></td><td><code>timelock, council</code></td><td>Administered by the main timelock from the start; the council attests.</td></tr>
-        <tr><td><a href="contracts/ComplianceHook.html"><code>ComplianceHook</code></a></td><td><code>registry</code></td><td>The one hook every token uses. No admin and no rules yet: each token installs its own list.</td></tr>
-        <tr><td><a href="contracts/CredentialRegistry.html"><code>CredentialRegistry</code></a></td><td><code>deployer, guardian</code></td><td>Who is vouched for. No attester yet.</td></tr>
-        <tr><td><a href="contracts/CredentialRule.html"><code>CredentialRule</code></a></td><td><code>credentialRegistry</code></td><td>The identity rule, reading that registry.</td></tr>
-        <tr><td><a href="contracts/MinPositionRule.html"><code>MinPositionRule</code></a>, <a href="contracts/HolderRestrictionRule.html"><code>HolderRestrictionRule</code></a>, <a href="contracts/SettlementWindowRule.html"><code>SettlementWindowRule</code></a></td><td>none</td><td>One instance each, shared by the tokens that list it (<code>SettlementWindowRule</code> only by <code>INT</code>); settings are kept per token.</td></tr>
-        <tr><td><a href="contracts/Fund.html"><code>Fund</code></a></td><td><code>deployer, registry</code></td><td>Owned by the deployer until <code>Activate</code>.</td></tr>
-        <tr><td><a href="contracts/FundHoldersRule.html"><code>FundHoldersRule</code></a></td><td><code>fund</code></td><td>The fund-wide investor cap. The fund and its rule need each other, so the rule takes the fund here and <code>Activate</code> installs the rule in the fund.</td></tr>
-        <tr><td><a href="contracts/IntentToken.html"><code>IntentToken</code></a>, <a href="contracts/Gated4626Vault.html"><code>Gated4626Vault</code></a>, <a href="contracts/Gated7540Vault.html"><code>Gated7540Vault</code></a></td><td>none</td><td>One implementation per template: the shared code behind each token. Their constructors lock them so only proxies can be initialised.</td></tr>
-        <tr><td><a href="contracts/ProxyDeployer.html"><code>ProxyDeployer</code></a></td><td><code>deployer, registry</code></td><td>Creates every token at a predictable address.</td></tr>
-        <tr><td><a href="contracts/IntentExecutor.html"><code>IntentExecutor</code></a>, <a href="contracts/DvPExecutor.html"><code>DvPExecutor</code></a></td><td><code>deployer, guardian</code></td><td>Not attested: neither is a hook, a rule or an implementation. A token authorises an executor by granting it <code>EXECUTOR_ROLE</code>.</td></tr>
+        <tr><td>Recovery timelock, a <a href="contracts/GovernanceTimelock.html"><code>GovernanceTimelock</code></a></td><td><code>minDelay, [governance], [governance], deployer, 0</code></td><td>Deployed first, so the main timelock can name it. Governance proposes and executes. The zero address means nobody holds <code>RECOVERY_ROLE</code> over it. It has the same one-hour floor as the main one.</td></tr>
+        <tr><td>Main timelock, a <code>GovernanceTimelock</code></td><td><code>minDelay, [governance], [governance], deployer, recoveryTimelock</code></td><td>Its constructor gives the recovery timelock <code>RECOVERY_ROLE</code>. The deployer is admin of both timelocks until <code>CoreHandover</code>.</td></tr>
+        <tr><td><a href="contracts/PolicyRegistry.html"><code>PolicyRegistry</code></a></td><td><code>timelock, council</code></td><td>Administered by the main timelock from the start. The council attests.</td></tr>
+        <tr><td><a href="contracts/ComplianceHook.html"><code>ComplianceHook</code></a></td><td><code>registry</code></td><td>The one hook every product uses. It has no admin and no rules yet: each product installs its own list.</td></tr>
+        <tr><td><a href="contracts/ProxyDeployer.html"><code>ProxyDeployer</code></a></td><td><code>deployer, registry</code></td><td>Places each product at a predictable address. The deployer owns it until <code>CoreHandover</code>.</td></tr>
+        <tr><td><a href="contracts/CredentialRegistry.html"><code>CredentialRegistry</code></a>, <a href="contracts/CredentialRule.html"><code>CredentialRule</code></a></td><td><code>deployer, guardian</code>; <code>credentialRegistry</code></td><td>If a product lists the credential rule. The registry has no attester yet.</td></tr>
+        <tr><td><a href="contracts/MinPositionRule.html"><code>MinPositionRule</code></a>, <a href="contracts/HolderRestrictionRule.html"><code>HolderRestrictionRule</code></a>, <a href="contracts/SettlementWindowRule.html"><code>SettlementWindowRule</code></a>, <a href="contracts/SupplyCapRule.html"><code>SupplyCapRule</code></a>, <a href="contracts/ExecutedOnlyRule.html"><code>ExecutedOnlyRule</code></a></td><td>none</td><td>Each one that a product lists, one instance shared by every product that lists it. Settings are kept per token.</td></tr>
+        <tr><td><a href="contracts/GatedToken.html"><code>GatedToken</code></a>, <a href="contracts/IntentToken.html"><code>IntentToken</code></a>, <a href="contracts/Gated4626Vault.html"><code>Gated4626Vault</code></a>, <a href="contracts/Gated7540Vault.html"><code>Gated7540Vault</code></a></td><td>none</td><td>One implementation per template used: the shared code behind every product of that template. Their constructors lock them, so only proxies can be initialised.</td></tr>
+        <tr><td><a href="contracts/IntentExecutor.html"><code>IntentExecutor</code></a>, <a href="contracts/DvPExecutor.html"><code>DvPExecutor</code></a></td><td><code>deployer, guardian</code></td><td>Each one that a product names. Not attested: neither is a hook, a rule or an implementation. A token authorises an executor by granting it <code>EXECUTOR_ROLE</code>.</td></tr>
       </tbody>
     </table>
   </div>
@@ -164,118 +201,139 @@
 <section id="council">
   <div class="prose">
     <h2>The council step</h2>
-    <p>The council attests five rules as <code>RULE</code>, the hook as <code>HOOK</code> and the three implementations as <code>IMPLEMENTATION</code>, with a link to its review for each (<code>attest(codehash, kind, uri)</code>). The README describes the procedure: rebuild from the release tag with <code>npm run verify:reproducible</code>, compare with the published build and with the code on chain, then attest.</p>
-    <p>A codehash covers a contract's code including its immutable values, such as an address fixed at construction, but not the code that lives at that address. So the council also reads what three contracts point at:</p>
+    <p>The council attests in three places in the sequence, each time with a link to its review (<code>attest(codehash, kind, uri)</code>), and none of them waits for a timelock:</p>
+    <ul class="plain">
+      <li>after <code>Core</code>: each rule as <code>RULE</code>, the hook as <code>HOOK</code> and each implementation as <code>IMPLEMENTATION</code>;</li>
+      <li>after each <code>Fund</code>: its <code>FundHoldersRule</code> as <code>RULE</code>. A class cannot list the rule before that, because the hook refuses an unattested rule;</li>
+      <li>after each <code>Legos</code>: the portfolio as <code>PORTFOLIO</code>, each guarded account and adapter as <code>ADAPTER</code>, each validator as <code>VALIDATOR</code> and the fee model as <code>FEE_MODEL</code>. The desk is not attested: it holds no money and acts by the role <code>Product</code> grants it.</li>
+    </ul>
+    <p>The <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/README.md#deployment-runbook">README runbook</a> describes the procedure: rebuild from the release tag with <code>npm run verify:reproducible</code>, compare with the published build and with the code on chain, then attest.</p>
+    <p>A codehash covers a contract's code including its immutable values, such as an address fixed at construction, but not the code that lives at that address. So the council also reads what these contracts point at:</p>
     <ul class="plain">
       <li>the hook's <code>REGISTRY()</code>, which must be the deployment's registry;</li>
-      <li>the credential registry behind <code>CredentialRule</code>: its code, its admin and its attester list;</li>
-      <li>the fund behind <code>FundHoldersRule</code>: its code and its owner.</li>
+      <li>the credential registry behind <code>CredentialRule</code>: its code. At that step the deployer is still its admin and it has no attester, and the post-deploy check asserts its admin and its one attester after hand-over. The registry is not attested;</li>
+      <li>the fund behind <code>FundHoldersRule</code>: its code and its owner. The fund is not attested;</li>
+      <li>the outside vault behind an <a href="contracts/ERC4626Adapter.html"><code>ERC4626Adapter</code></a>. That reading is the only control on the target itself.</li>
     </ul>
-    <p>Every deployment of a UUPS implementation has its own codehash, because OpenZeppelin's <code>UUPSUpgradeable</code> stores the implementation's own address as an immutable. A redeployed hook or rule with the same constructor arguments, on the other hand, shares the codehash of the attested one, and <code>attest</code> refuses a second attestation of it (<code>PolicyRegistry_AlreadyAttested</code>).</p>
+    <p>Every deployment of a UUPS implementation has its own codehash, because OpenZeppelin's <code>UUPSUpgradeable</code> stores the implementation's own address as an immutable. A redeployed hook or rule with the same constructor arguments shares the codehash of the attested one, and <code>attest</code> refuses a second attestation of it (<code>PolicyRegistry_AlreadyAttested</code>). So two instances of the same code cannot be told apart by attestation, which is why the post-deploy check pins the instance.</p>
   </div>
 </section>
 
-<section id="activate">
+<section id="handover">
   <div class="prose">
-    <h2>Stage 2: <code>Activate</code></h2>
-    <p><code>Activate</code> takes the addresses from stage 1 as parameters, plus the accounts that will hold the operational roles (<code>minter</code>, <code>burner</code>, <code>agent</code>, <code>operator</code>, <code>fulfiller</code>, <code>kycAttester</code>), the vaults' <code>asset</code> and the 7540 vault's <code>custody</code>, the settlement window (<code>windowOpen</code>, <code>windowClose</code>, <code>windowDays</code>), the fund's <code>fundHolderCap</code> and each token's minimum position (0 by default, which switches the rule off). Ignition orders the calls by what each one depends on.</p>
+    <h2>The hand-over</h2>
+    <p>Hand-over happens in three places: <code>CoreHandover</code> for the core, the end of each <code>Product</code> for that product, and the end of each <code>FundOpen</code> for that fund. <a href="roles.html#holders">Who can do what</a> lists every holder afterwards.</p>
+    <p><code>CoreHandover</code> takes the addresses <code>Core</code> produced as parameters, plus the accounts <code>governance</code>, <code>guardian</code>, <code>operations</code>, <code>operator</code> and <code>kycAttester</code>. It runs as the deployer, in this order:</p>
   </div>
-  <figure>
-    <div class="fig-scroll">
-      <svg class="d" viewBox="0 0 960 480" role="img" aria-label="The order inside Activate. First the three tokens are deployed through ProxyDeployer; every later call waits for all three. Then two things in parallel: configuration (the KYC attester, each token's credential policy, the settlement window, the minimum positions) and the fund (its rule and cap, then the three classes in order). Role grants wait for the class registrations. The hand-over waits for configuration and grants. Separately, after the deploys ProxyDeployer ownership moves to the main timelock and the recovery timelock loses its cancellers, and after the registrations Fund ownership moves to the main timelock.">
-        <defs>
-          <marker id="dp-a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
-        </defs>
-        <rect class="act" x="20" y="140" width="190" height="170" rx="8"/>
-        <text x="34" y="164" class="bold">1. Deploy the tokens</text>
-        <text x="34" y="184" class="mono sm">ProxyDeployer.deploy</text>
-        <text x="34" y="208">INT, IntentToken</text>
-        <text x="34" y="226">gFUND, Gated4626Vault</text>
-        <text x="34" y="244">gASYNC, Gated7540Vault</text>
-        <text x="34" y="272" class="m sm">every later call waits</text>
-        <text x="34" y="288" class="m sm">for all three</text>
+  <ol class="steps">
+    <li><div><b>Configure.</b> <code>CredentialRegistry.addAttester(kycAttester, kycAllowedQuals)</code> makes the KYC function attester 0. <code>kycAllowedQuals</code> is 1023 unless stated, which is the ten named qualification bits.</div></li>
+    <li><div><b>Grant.</b> The guardian gets <code>CANCELLER_ROLE</code> on the main timelock. The recovery timelock gets <code>RECOVERY_ROLE</code> on the credential registry and on each executor. The <code>operator</code> account gets <code>OPERATOR_ROLE</code> on each executor.</div></li>
+    <li><div><b>Hand over.</b> On the credential registry and each executor, <code>grantRole(DEFAULT_ADMIN_ROLE, timelock)</code> and then the deployer's <code>renounceRole</code>. On the main timelock the deployer only renounces, because OpenZeppelin makes every timelock its own admin. On the recovery timelock it first revokes the <code>CANCELLER_ROLE</code> that OpenZeppelin gives governance as a proposer, so nobody can cancel there, and then renounces. <code>ProxyDeployer.transferOwnership(operations)</code> moves the deployer to the operations account.</div></li>
+  </ol>
+  <div class="prose">
+    <p>Governance keeps <code>CANCELLER_ROLE</code> on the main timelock, next to the guardian. The renounce calls run only after the calls that need the deployer's rights, so a failed step leaves those rights in place.</p>
+  </div>
+</section>
 
-        <line class="ln" x1="210" y1="225" x2="236" y2="225"/>
-        <line class="ln" x1="236" y1="100" x2="236" y2="250"/>
-        <line class="ln" x1="236" y1="100" x2="258" y2="100" marker-end="url(#dp-a2)"/>
-        <line class="ln" x1="236" y1="250" x2="258" y2="250" marker-end="url(#dp-a2)"/>
-
-        <rect class="b" x="260" y="40" width="240" height="120" rx="8"/>
-        <text x="274" y="62" class="bold">2. Configure</text>
-        <text x="274" y="84" class="mono sm">addAttester(kyc, quals)</text>
-        <text x="274" y="104" class="mono sm">setPolicy(token, KYC, 0, 0, 1)</text>
-        <text x="274" y="124" class="mono sm">setWindow(INT, …)</text>
-        <text x="274" y="144" class="mono sm">setMinPosition(token, min)</text>
-
-        <rect class="b" x="260" y="190" width="240" height="120" rx="8"/>
-        <text x="274" y="212" class="bold">2. The fund, in order</text>
-        <text x="274" y="234" class="mono sm">setRule(fundHoldersRule)</text>
-        <text x="274" y="254" class="mono sm">setHolderCap(fundHolderCap)</text>
-        <text x="274" y="274" class="mono sm">registerClass(INT)</text>
-        <text x="274" y="294" class="m sm">then gFUND, then gASYNC</text>
-
-        <line class="ln" x1="500" y1="250" x2="523" y2="250" marker-end="url(#dp-a2)"/>
-        <rect class="b" x="525" y="160" width="235" height="208" rx="8"/>
-        <text x="539" y="182" class="bold">3. Grant roles</text>
-        <text x="539" y="204" class="sm">INT: MINTER, BURNER</text>
-        <text x="539" y="222" class="sm">INT: EXECUTOR to both executors</text>
-        <text x="539" y="240" class="sm">gASYNC: FULFILLER</text>
-        <text x="539" y="258" class="sm">each token: AGENT to the agent,</text>
-        <text x="539" y="276" class="sm">UPGRADER to the main timelock,</text>
-        <text x="539" y="294" class="sm">RECOVERY to the recovery timelock</text>
-        <text x="539" y="312" class="sm">executors: OPERATOR, RECOVERY</text>
-        <text x="539" y="330" class="sm">CredentialRegistry: RECOVERY</text>
-        <text x="539" y="348" class="sm">timelock: guardian as canceller</text>
-
-        <path class="ln" d="M500,100 H865 V158" marker-end="url(#dp-a2)"/>
-        <text x="640" y="92" class="m sm" text-anchor="middle">once configured</text>
-        <line class="ln" x1="760" y1="255" x2="783" y2="255" marker-end="url(#dp-a2)"/>
-        <rect class="act" x="785" y="160" width="160" height="190" rx="8"/>
-        <text x="799" y="182" class="bold">4. Hand over</text>
-        <text x="799" y="206" class="sm">admin role to the</text>
-        <text x="799" y="222" class="sm">main timelock on</text>
-        <text x="799" y="238" class="sm">the tokens, both</text>
-        <text x="799" y="254" class="sm">executors and the</text>
-        <text x="799" y="270" class="sm">credential registry;</text>
-        <text x="799" y="294" class="sm">then the deployer</text>
-        <text x="799" y="310" class="sm">renounces there and</text>
-        <text x="799" y="326" class="sm">on the main timelock</text>
-
-        <path class="ln" d="M115,310 V424 H258" marker-end="url(#dp-a2)"/>
-        <rect class="b2" x="260" y="380" width="685" height="88" rx="8"/>
-        <text x="274" y="402" class="bold">Also, each after only the step named</text>
-        <text x="274" y="422" class="sm">After the deploys: ProxyDeployer ownership moves to the main timelock; on the recovery timelock,</text>
-        <text x="274" y="438" class="sm">governance's CANCELLER_ROLE is revoked, then the deployer renounces its admin role there.</text>
-        <text x="274" y="456" class="sm">After the registrations: Fund ownership moves to the main timelock.</text>
-      </svg>
-    </div>
-    <figcaption><b>One failing token grants nothing anywhere.</b> Every call after the deploys waits for all three, so a token that fails <code>ProxyDeployer</code>'s checks stops the stage before any configuration or role exists. Grants wait for the fund's three registrations, so no operational role exists on a class the fund has not registered. The hand-over waits for both configuration and grants, because they need the deployer's admin rights.</figcaption>
-  </figure>
+<section id="products">
+  <div class="prose">
+    <h2>Funds and products</h2>
+    <p>All four modules here are run by the operations account, and none waits for a timelock. <code>PROFILE</code> chooses the profile for <code>hardhat ignition deploy</code>, <code>PRODUCT</code> one of its products and <code>FUND</code> one of its funds. <code>full</code>, its first product and its first fund are the defaults.</p>
+    <h3><code>Fund</code>: once per fund</h3>
+    <p>A <a href="contracts/Fund.html"><code>Fund</code></a> owned by the operations account, and the <a href="contracts/FundHoldersRule.html"><code>FundHoldersRule</code></a> that points at it. An issuer has as many as it has funds, each with its own investor cap.</p>
+    <h3 id="legos"><code>Legos</code>: once per product that has any</h3>
+    <p>A desk and a portfolio name their vault, so they are built before it exists: <code>ProxyDeployer.predict(symbol, implementation)</code> gives the address. What a lego fixes at construction is in its codehash: the vault, an adapter's target, a validator's address and limit, a fee model's rates. A portfolio's caps and adapters and a guarded account's permissions are set later, by the vault's admin, and no attestation covers them.</p>
+  </div>
   <div class="table-wrap">
     <table class="tight">
-      <thead><tr><th>Step</th><th>Calls</th><th>Why</th></tr></thead>
+      <thead><tr><th>Lego</th><th>When</th><th>Constructor arguments</th><th>Attested as</th></tr></thead>
       <tbody>
-        <tr><td>Deploy</td><td><code>ProxyDeployer.deploy(symbol, implementation, initData, hook, rules)</code> for each token. <code>initData</code> is the token's <code>initialize</code> with its name, symbol, the deployer as admin, the guardian, the registry, the hook and its rule list (the vaults also take the <code>asset</code>, and the 7540 vault the <code>custody</code>).</td><td>The token installs its own rules on the shared hook while it is initialised. <code>ProxyDeployer</code> refuses an unattested implementation and checks the registry, the hook and the exact rule list afterwards (<a href="contracts/ProxyDeployer.html">how</a>).</td></tr>
-        <tr><td>Configure</td><td><code>CredentialRegistry.addAttester(kycAttester, kycAllowedQuals)</code>, 255 by default, so attester 0 may assert all eight named bits. <code>CredentialRule.setPolicy(token, KYC, 0, 0, 1)</code> for each token. <code>SettlementWindowRule.setWindow</code> for <code>INT</code>. <code>MinPositionRule.setMinPosition</code> for each token.</td><td>Every receiver needs the <code>KYC</code> bit from attester 0. Until a token has a policy, its credential rule admits no receiver (<code>RECEIVER_NOT_ELIGIBLE</code>). The rules ask the token whether the caller is its admin, which the deployer still is.</td></tr>
-        <tr><td>The fund</td><td><code>Fund.setRule(fundHoldersRule)</code> and <code>setHolderCap(fundHolderCap)</code>, then <code>registerClass</code> for <code>INT</code>, <code>gFUND</code>, <code>gASYNC</code>, each after the one before.</td><td>Class numbers 1 to 3 never depend on scheduling. Registration refuses a token whose hook does not list the fund's rule or that has any supply, so a wrong list stops <code>Activate</code> here.</td></tr>
-        <tr><td>Grant</td><td>As in the figure. <code>EXECUTOR_ROLE</code> on <code>INT</code> goes to the two executor contracts and to no one else; <code>UPGRADER_ROLE</code> goes to the main timelock only.</td><td>Operational roles exist only on tokens that came up as reviewed and are registered in the fund.</td></tr>
-        <tr><td>Hand over</td><td><code>grantRole(DEFAULT_ADMIN_ROLE, timelock)</code>, then <code>renounceRole(DEFAULT_ADMIN_ROLE, deployer)</code>, on each token, both executors and the credential registry. The deployer renounces on the main timelock. <code>transferOwnership(timelock)</code> on <code>ProxyDeployer</code> and <code>Fund</code>.</td><td>After this the deployer can change nothing. A later token or class is a governance operation.</td></tr>
+        <tr><td><a href="contracts/Portfolio.html"><code>Portfolio</code></a></td><td>The product states a portfolio</td><td><code>vault, asset</code> and whether it accepts reported adapters, which is true exactly for a 7540</td><td><code>PORTFOLIO</code></td></tr>
+        <tr><td><a href="contracts/GuardedAccount.html"><code>GuardedAccount</code></a></td><td>One per custodian</td><td><code>portfolio, riskId, 0</code>, the risk id being the <code>keccak256</code> of <code>custodian:</code> followed by the custodian's <code>key</code> in the profile</td><td><code>ADAPTER</code></td></tr>
+        <tr><td><a href="contracts/ERC20CallValidator.html"><code>ERC20CallValidator</code></a></td><td>One per custodian</td><td>The custodian's address and <code>maxPerCall</code></td><td><code>VALIDATOR</code></td></tr>
+        <tr><td><code>ERC4626Adapter</code></td><td>One per outside vault</td><td><code>portfolio, target, 0</code></td><td><code>ADAPTER</code></td></tr>
+        <tr><td><a href="contracts/NavDesk.html"><code>NavDesk</code></a></td><td>The product states a schedule</td><td><code>vault, cash, periodLength, cooldown, maxReportAge</code>: <code>cash</code> is <code>custodianAccount</code> with no portfolio and zero with one</td><td>Not attested</td></tr>
+        <tr><td><a href="contracts/FeeModel.html"><code>FeeModel</code></a></td><td>The product states fees</td><td><code>feeRecipient, managementBps, performanceBps, hurdleBps, softHurdle</code></td><td><code>FEE_MODEL</code></td></tr>
       </tbody>
     </table>
   </div>
   <div class="prose">
-    <p>Outside the module, the KYC attester credentials the 7540 vault, which receives shares into escrow when a redemption is requested and must pass the credential check like any receiver, and every holder. That needs attester 0, which <code>Activate</code> adds, so it happens after <code>Activate</code>. The fixture gives the vault the <code>KYC</code> and <code>INFRA</code> bits. A gated cash token for <a href="contracts/DvPExecutor.html"><code>DvPExecutor</code></a> is a separate instrument and is not deployed here: its own administrator grants the DvP executor <code>EXECUTOR_ROLE</code> on it.</p>
+    <h3><code>Product</code>: once per product</h3>
+    <p>The operations account owns <code>ProxyDeployer</code>, so a launch waits for no timelock. Each stage waits for the one before it.</p>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 780 214" role="img" aria-label="The order inside Product. 1, ProxyDeployer.deploy places the proxy and refuses unattested code and a wrong rule list; every later call waits for it. 2, while the operations account is the token's admin, configure its rule settings and its legos. 3, grant the token's roles, after the configuration. 4, hand over: the admin role to the main timelock, and the operations account renounces it.">
+        <defs>
+          <marker id="dp-a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+        </defs>
+        <rect class="act" x="12" y="14" width="172" height="188" rx="8"/>
+        <text x="24" y="36" class="bold">1. Deploy</text>
+        <text x="24" y="58" class="mono sm">ProxyDeployer.deploy</text>
+        <text x="24" y="80" class="sm">refuses unattested code</text>
+        <text x="24" y="97" class="sm">and a wrong rule list</text>
+        <text x="24" y="124" class="m sm">every later call</text>
+        <text x="24" y="141" class="m sm">waits for this one</text>
+
+        <line class="ln" x1="184" y1="108" x2="204" y2="108" marker-end="url(#dp-a2)"/>
+        <rect class="b" x="206" y="14" width="172" height="188" rx="8"/>
+        <text x="218" y="36" class="bold">2. Configure</text>
+        <text x="218" y="58" class="m sm">as the token's admin</text>
+        <text x="218" y="78" class="mono sm">setPolicy</text>
+        <text x="218" y="95" class="mono sm">setMinPosition</text>
+        <text x="218" y="112" class="mono sm">setSupplyCap</text>
+        <text x="218" y="129" class="mono sm">setWindow</text>
+        <text x="218" y="146" class="mono sm">addAdapter, setCaps</text>
+        <text x="218" y="163" class="mono sm">setPermission</text>
+        <text x="218" y="185" class="m sm">desk or vault plugs</text>
+
+        <line class="ln" x1="378" y1="108" x2="398" y2="108" marker-end="url(#dp-a2)"/>
+        <rect class="b" x="400" y="14" width="172" height="188" rx="8"/>
+        <text x="412" y="36" class="bold">3. Grant</text>
+        <text x="412" y="58" class="sm">agent, upgrader, recovery</text>
+        <text x="412" y="78" class="sm">minter, burner on a token</text>
+        <text x="412" y="98" class="sm">settler on a 7540</text>
+        <text x="412" y="118" class="sm">reporter, checker: a desk</text>
+        <text x="412" y="138" class="sm">allocator: a portfolio</text>
+        <text x="412" y="158" class="sm">executors it names</text>
+
+        <line class="ln" x1="572" y1="108" x2="592" y2="108" marker-end="url(#dp-a2)"/>
+        <rect class="act" x="594" y="14" width="172" height="188" rx="8"/>
+        <text x="606" y="36" class="bold">4. Hand over</text>
+        <text x="606" y="58" class="sm">admin role to the</text>
+        <text x="606" y="75" class="sm">main timelock; the</text>
+        <text x="606" y="92" class="sm">operations account</text>
+        <text x="606" y="109" class="sm">renounces it</text>
+      </svg>
+    </div>
+    <figcaption><b>A token that fails its checks grants nothing.</b> Configuration waits for the deploy, grants wait for configuration, and the hand-over waits for the grants, because each needs the operations account's admin rights. A failed deploy leaves no proxy and does not use up the symbol.</figcaption>
+  </figure>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Stage</th><th>Calls</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>Deploy</td><td><code>ProxyDeployer.deploy(symbol, implementation, initData, hook, rules)</code>. <code>initData</code> is the token's <code>initialize</code> with the operations account as admin, the guardian, the registry, the hook and the rule list. A vault also takes the <code>asset</code>, and a token its <code>decimals</code> (18 unless stated).</td><td>The token installs its own rules on the shared hook while it is initialised. <code>ProxyDeployer</code> refuses an unattested implementation (<code>ProxyDeployer_ImplementationNotAttested</code>), and afterwards a wrong registry, hook, rule list or symbol (<code>ProxyDeployer_RegistryMismatch</code>, <code>ProxyDeployer_HookNotInstalled</code>, <code>ProxyDeployer_RulesMismatch</code>, <code>ProxyDeployer_SymbolMismatch</code>). A symbol works once (<code>ProxyDeployer_SaltUsed</code>).</td></tr>
+        <tr><td>Configure</td><td>For each rule the product lists: <code>CredentialRule.setPolicy</code> (<code>KYC</code> from attester 0 unless the profile states a policy), <code>MinPositionRule.setMinPosition</code> (parameter <code>minPosition</code>, 0 unless stated), <code>SupplyCapRule.setSupplyCap</code> (parameter <code>supplyCap</code>), <code>SettlementWindowRule.setWindow</code>. For its legos: <code>Portfolio.addAdapter</code> and <code>setCaps</code>, <code>GuardedAccount.setPermission</code> for the asset's <code>transfer</code>, then <code>NavDesk.setSettings</code> and <code>setFeeModel</code>, or <code>Gated4626Vault.setPortfolio</code> and <code>setFeeModel</code>.</td><td>Rules and legos ask the token whether the caller is its admin, which the operations account still is. Until a token has a policy its credential rule admits no receiver (<code>RECEIVER_NOT_ELIGIBLE</code>). The plugs refuse what the council has not attested.</td></tr>
+        <tr><td>Grant</td><td><code>AGENT_ROLE</code> to the <code>agent</code>, <code>UPGRADER_ROLE</code> to the main timelock, <code>RECOVERY_ROLE</code> to the recovery timelock. <code>MINTER_ROLE</code> and <code>BURNER_ROLE</code> on a <code>GatedToken</code> or <code>IntentToken</code>. <code>SETTLER_ROLE</code> on a 7540, to its desk, or to the <code>settler</code> account if it has none. <code>REPORTER_ROLE</code> and <code>CHECKER_ROLE</code> with a desk. <code>ALLOCATOR_ROLE</code> with a portfolio. <code>EXECUTOR_ROLE</code> to the executors the product names.</td><td>Operational roles exist only on tokens that came up as reviewed.</td></tr>
+        <tr><td>Hand over</td><td><code>grantRole(DEFAULT_ADMIN_ROLE, timelock)</code>, then <code>renounceRole(DEFAULT_ADMIN_ROLE, operations)</code>.</td><td>After this the operations account can change nothing on the product.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <p>A product that lists the fund rule takes that rule as a parameter and does not touch the fund, so its launch cannot fail on one. Until the fund registers it, every movement on it is refused with <code>NOT_FUND_CLASS</code>, so it stays at zero supply.</p>
+    <h3><code>FundOpen</code>: once per fund, after its first classes</h3>
+    <p><code>Fund.setRule</code> and <code>setHolderCap</code>, then <code>registerClass</code> for each class, each after the one before, so the class numbers do not depend on scheduling. Then <code>transferOwnership(timelock)</code>. Registration refuses a token whose hook does not list the fund's rule (<code>Fund_RuleNotListed</code>) and a token that has supply (<code>Fund_ClassHasSupply</code>). From here a later class launches through <code>Product</code> like any other, and is inert until a timelock operation registers it.</p>
   </div>
 </section>
 
 <section id="rule-order">
   <div class="prose">
-    <h2>Each token's rules</h2>
-    <p><code>RULE_ORDER</code> in <code>ignition/modules/roles.ts</code> is the ordered list each token installs. The hook asks the rules in this order and stops at the first rejection. The symbols and names are defaults that the <code>&lt;key&gt;Symbol</code> and <code>&lt;key&gt;Name</code> parameters can override; the CREATE2 salt is the hash of the symbol, so the symbol, with the implementation, decides the token's address.</p>
+    <h2>Each product's rules</h2>
+    <p>A product's profile states its ordered list, and the hook asks the rules in that order and stops at the first rejection. <code>RULE_ORDER</code> in <code>ignition/modules/roles.ts</code> holds the lists of the <code>full</code> profile. The other five profiles list <code>CredentialRule</code> then <code>HolderRestrictionRule</code>. No shipped profile lists <code>SupplyCapRule</code> or <code>ExecutedOnlyRule</code>: a profile asks for them by name.</p>
   </div>
   <div class="table-wrap">
     <table class="tight">
-      <thead><tr><th>Token</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th></tr></thead>
+      <thead><tr><th>Product in <code>full</code></th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th></tr></thead>
       <tbody>
         <tr><td><code>IntentToken</code><br><span class="small">"Intent Token", <code>INT</code></span></td><td><code>CredentialRule</code></td><td><code>MinPositionRule</code></td><td><code>HolderRestrictionRule</code></td><td><code>SettlementWindowRule</code></td><td><code>FundHoldersRule</code></td></tr>
         <tr><td><code>Gated4626Vault</code><br><span class="small">"Gated Fund", <code>gFUND</code></span></td><td><code>CredentialRule</code></td><td><code>MinPositionRule</code></td><td><code>HolderRestrictionRule</code></td><td><code>FundHoldersRule</code></td><td></td></tr>
@@ -288,138 +346,191 @@
       <li><b>Credential first:</b> who may hold at all.</li>
       <li><b>Minimum position second:</b> with a minimum set, the rules after it see real positions, except after a forced move, a burner's burn or a move involving an exempt account.</li>
       <li><b>Settlement window on the intent token only:</b> it judges <span class="k k-executed">EXECUTED</span> moves, and the vaults have none.</li>
-      <li><b>The fund rule last:</b> the investor count that matters is fund-wide, across the three classes.</li>
+      <li><b>The fund rule last:</b> the investor count that matters is fund-wide, across the classes.</li>
     </ul>
-    <p><code>Activate</code> sets every minimum to 0 unless told otherwise, which switches the rule off while it stays in the list. A deployment that wants no minimum on a token can leave the rule out of that token's entry, and add it later with a <code>setRules</code>.</p>
+    <p>The hash of a token's symbol is its CREATE2 salt, so the symbol, with the implementation and the <code>ProxyDeployer</code>, decides the token's address.</p>
   </div>
 </section>
 
-<section id="handover">
+<section id="profiles">
   <div class="prose">
-    <h2>The hand-over</h2>
-    <p>Until the hand-over, the deployer administers the tokens, both executors, the credential registry and both timelocks, and owns <code>ProxyDeployer</code> and the fund. The hand-over moves the powers over the tokens, both executors, the credential registry, <code>ProxyDeployer</code> and the fund to the main timelock, and removes the deployer. Each timelock administers itself, as OpenZeppelin sets up every <code>TimelockController</code>, so on the timelocks the deployer only renounces. On the recovery timelock it also revokes the canceller role that OpenZeppelin gives governance as a proposer, so nobody can cancel there. <a href="roles.html#holders">Who can do what</a> lists every holder afterwards.</p>
+    <h2>The profiles</h2>
+    <p><code>ignition/profiles.ts</code> names six combinations, and what <code>Core</code> deploys follows from the profile. Every profile deploys the two timelocks, the policy registry, the hook, <code>ProxyDeployer</code> and the credential registry, then the rules its products list and one implementation per template they use, and what the last column says.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Profile</th><th>Products</th><th>Rules</th><th>Legos and the rest</th></tr></thead>
+      <tbody>
+        <tr><td><code>token</code></td><td>One <code>GatedToken</code>, <code>GTK</code></td><td><code>CredentialRule</code>, <code>HolderRestrictionRule</code></td><td>No legos, no fund, no executor.</td></tr>
+        <tr><td><code>vault4626</code></td><td>One <code>Gated4626Vault</code>, <code>gFUND</code></td><td>The same two</td><td>No legos. The vault keeps its own money.</td></tr>
+        <tr><td><code>vault7540</code></td><td>One <code>Gated7540Vault</code>, <code>gASYNC</code></td><td>The same two</td><td>A <code>NavDesk</code> with a daily period, a one-day cooldown and a report good for three days. Its cash account is the <code>custodianAccount</code> parameter: a fund with one custodian.</td></tr>
+        <tr><td><code>managed-fund</code></td><td>One <code>Gated7540Vault</code>, <code>mFUND</code></td><td>The same two</td><td>The same desk schedule. A <code>Portfolio</code> that accepts reported adapters. Two <code>GuardedAccount</code>s, each with an <code>ERC20CallValidator</code> and its own caps. A <code>FeeModel</code>: 1% management, 10% performance, a hard 3% hurdle. It sets <code>custodyOnly</code>, which refuses an outside vault at build time.</td></tr>
+        <tr><td><code>vault4626-invest</code></td><td>One <code>Gated4626Vault</code>, <code>iFUND</code></td><td>The same two</td><td>A <code>Portfolio</code> that refuses reported adapters. One <code>ERC4626Adapter</code>. A rate limit of 10% a year (<code>maxRateBps</code> 1000). A <code>FeeModel</code>: 0.5% management, 10% performance, no hurdle.</td></tr>
+        <tr><td><code>full</code></td><td><code>IntentToken</code> <code>INT</code>, <code>Gated4626Vault</code> <code>gFUND</code>, <code>Gated7540Vault</code> <code>gASYNC</code>, as three classes of one fund</td><td>The lists above</td><td>A <code>Fund</code> and its <code>FundHoldersRule</code>. <code>IntentExecutor</code> and <code>DvPExecutor</code>, both with <code>EXECUTOR_ROLE</code> on the intent token. No desk: a plain <code>settler</code> account holds <code>SETTLER_ROLE</code> and sets any price alone, so a test can price at will. It is the default profile, and it is for tests.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <p>All six set <code>singleSigners</code> to <code>DEMO_SIGNERS</code>, which names all four sensitive roles as exceptions to the post-deploy check's refusal of a single key (<a href="#check">see below</a>). They are demo stacks: a real deployment has to state its own.</p>
+    <p>A product that makes no sense throws when its <code>Legos</code> or <code>Product</code> module is built, before that module sends a transaction (<code>assertUsable</code>). <code>Core</code>, <code>CoreHandover</code> and <code>Fund</code> do not call it, so they can already have run. It refuses:</p>
+    <ul class="plain">
+      <li><code>windowRule</code> or <code>executedOnlyRule</code> on anything but an <code>IntentToken</code>, and <code>supplyCapRule</code> on a vault;</li>
+      <li>a desk on anything but a 7540, and a portfolio on anything but a vault;</li>
+      <li>a portfolio behind a 7540 with no desk to price it;</li>
+      <li>on a 4626 with a portfolio, a custodian, or no rate limit;</li>
+      <li>fees on anything but a vault, on a 7540 with no desk, or on a 4626 with no portfolio;</li>
+      <li>an outside vault on a <code>custodyOnly</code> product;</li>
+      <li><code>fundHoldersRule</code> with no fund named, and a fund named without <code>fundHoldersRule</code>.</li>
+    </ul>
   </div>
 </section>
 
 <section id="check">
   <div class="prose">
     <h2>The post-deploy check</h2>
-    <p><code>assertHandedOver</code> in <code>test/nodejs/fixtures.ts</code> runs after every fixture deployment and is the check to run after a live one. It reads the chain only. It asserts that:</p>
+    <p><code>assertHandedOver</code> is a function in <code>test/nodejs/fixtures.ts</code>. It makes read calls and <code>getCode</code> calls and sends no transaction, and it throws on the first thing that is not as the profile says.</p>
+    <p><b>Who runs it.</b> The fixture calls it at the end of every deployment, so every Node test that deploys a stack runs it on Hardhat's in-process chain, and CI's <code>test</code> job runs those tests with <code>npm test</code> on each pull request and each push to <code>main</code>. That shows the modules produce a stack that passes. It says nothing about a chain in production: no CI job, no <code>package.json</code> script and no module points it at a live network, and it has no command of its own. After a live deployment, and after each later product, an operator must run it, giving it the real addresses, the product list and the named accounts the way the fixture does.</p>
+    <p><b>What "named" means.</b> The roles here keep no list of holders, so the check can only ask about accounts it is told about: the deployer, governance, the council, the guardian, the operations account and the operational accounts of the deployment. A role granted to any other address is not seen.</p>
   </div>
-  <ol class="steps">
-    <li><div>the deployer holds no role on either timelock, either registry, the tokens or the executors, and the main timelock holds <code>DEFAULT_ADMIN_ROLE</code> on itself, both registries, the tokens and the executors;</div></li>
-    <li><div>the recovery timelock holds exactly <code>RECOVERY_ROLE</code> on the main timelock, each token, both executors and the credential registry, nothing on the policy registry; no account the deployment knows of can cancel there, and the guardian holds nothing on it;</div></li>
-    <li><div><code>EXECUTOR_ROLE</code> on <code>IntentToken</code> is held by the two executors and by no account the deployment knows of; the main timelock holds <code>UPGRADER_ROLE</code> on each token and no known account does; the DvP executor's operator and guardian are the deployment's;</div></li>
-    <li><div>every token runs the exact hook instance the council reviewed, that hook names the registry, and its list for each token equals <code>RULE_ORDER</code>; no rule has access control of its own;</div></li>
-    <li><div><code>ProxyDeployer</code> and the fund are owned by the main timelock; the fund runs the attested rule that points back at it, has the intended cap, and holds the three tokens as classes 1 to 3, each intact (<code>firstBrokenClass()</code> is the zero address);</div></li>
-    <li><div>the guardian holds only <code>GUARDIAN_ROLE</code> on the credential registry, which has one attester, the KYC provider, not killed; the credential rule reads that registry and is attested; each token's policy is <code>KYC</code> from attester 0;</div></li>
-    <li><div>the guardian can cancel on the main timelock but cannot propose or execute, and both delays are at least seven days.</div></li>
-  </ol>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>About</th><th>What it asserts</th></tr></thead>
+      <tbody>
+        <tr><td>The deployer and the operations account</td><td>Neither holds any role that a <code>*_ROLE()</code> getter names, on either timelock, the policy registry, the credential registry, the products or the executors. The getters are read from each contract's ABI, so a role added later is covered.</td></tr>
+        <tr><td>The main timelock</td><td>It holds <code>DEFAULT_ADMIN_ROLE</code> on itself, the policy registry, the credential registry, the products and the executors, so the line above is not vacuous. The guardian holds its <code>CANCELLER_ROLE</code> and neither <code>PROPOSER_ROLE</code> nor <code>EXECUTOR_ROLE</code>. <code>getMinDelay()</code> is at least 24 hours.</td></tr>
+        <tr><td>The recovery timelock</td><td>It runs exactly the same code as the main timelock. It holds exactly <code>RECOVERY_ROLE</code> on the main timelock, each product, the executors and the credential registry, nothing on the policy registry, and exactly <code>DEFAULT_ADMIN_ROLE</code> on itself. Governance is its proposer and executor. No named account can cancel there, the guardian holds nothing on it, and no named account, not itself and not the main timelock holds <code>RECOVERY_ROLE</code> on it. <code>getMinDelay()</code> is at least 24 hours.</td></tr>
+        <tr><td>Upgrades</td><td>The main timelock holds <code>UPGRADER_ROLE</code> on each product, and no named account does.</td></tr>
+        <tr><td>Hook and rules</td><td>The hook's <code>REGISTRY()</code> is the stack's registry. Each product's <code>policyHook()</code> is that exact instance. Each product's <code>rules(token)</code> equals the list in its profile, in order. No rule's ABI exposes <code>hasRole</code> or <code>owner</code>.</td></tr>
+        <tr><td>Executors</td><td>The operator holds exactly <code>OPERATOR_ROLE</code> and the guardian exactly <code>GUARDIAN_ROLE</code> on each. On each <code>IntentToken</code>, the executors the product names hold <code>EXECUTOR_ROLE</code>, and no named account does.</td></tr>
+        <tr><td><code>ProxyDeployer</code></td><td>The operations account owns it.</td></tr>
+        <tr><td>Each fund</td><td>The main timelock owns it. <code>rule()</code> is the fund's rule, that rule's <code>FUND()</code> points back, and the rule is attested as <code>RULE</code>. The cap is the intended one. <code>classCount()</code> and <code>classAt(i)</code> are the classes it opened with, in order, each intact, and <code>firstBrokenClass()</code> is the zero address.</td></tr>
+        <tr><td>Credentials</td><td>The guardian holds exactly <code>GUARDIAN_ROLE</code> on the registry. There is one attester, the KYC account, not killed. <code>CredentialRule</code> reads this registry and is attested as <code>RULE</code>. Each product's <code>policyOf</code> equals its profile's policy.</td></tr>
+        <tr><td>Each product's legos</td><td>The reporter, the checker and the allocator it uses are different accounts. With a desk: the desk's <code>VAULT()</code> is this product, and <code>SETTLER_ROLE</code> sits with the desk, <code>REPORTER_ROLE</code> with the reporter and <code>CHECKER_ROLE</code> with the checker, and with no other named account. With a portfolio: its <code>VAULT()</code> is this product, it is plugged in (the desk's or the vault's <code>portfolio()</code>) and attested as <code>PORTFOLIO</code>, <code>ALLOCATOR_ROLE</code> sits with the allocator and no other named account, and <code>adapters()</code> is the built list, each attested as <code>ADAPTER</code>. With fees: the fee model is plugged in and attested as <code>FEE_MODEL</code>.</td></tr>
+        <tr><td>The single-key refusal</td><td>For <code>MINTER_ROLE</code>, <code>BURNER_ROLE</code>, <code>AGENT_ROLE</code> and <code>SETTLER_ROLE</code>: if the deployment's <code>minter</code>, <code>burner</code>, <code>agent</code> or <code>settler</code> account holds the role on a product, it must answer <code>getThreshold()</code> with 2 or more, as a Safe that requires at least two signatures does. An account with no such function fails. A profile can name a role in <code>singleSigners</code> to except it, for example for an MPC custody wallet whose policy engine does the same job. A product with a desk passes on the settler, because the <code>settler</code> account does not hold the role there.</td></tr>
+      </tbody>
+    </table>
+  </div>
   <div class="prose">
-    <p>Item 4 covers what attestation cannot. A second <code>ComplianceHook</code> on the same registry has the same codehash, so it is attested too and <code>ProxyDeployer</code> accepts it. A test deploys such a twin: <code>Activate</code> completes on it, and the check refuses it with "runs another hook".</p>
+    <p>Tests pin that it refuses: a deployer left holding a role, a twin hook on the same registry ("runs another hook"), a recovery timelock running other code, <code>RECOVERY_ROLE</code> granted on the recovery timelock, a stray <code>EXECUTOR_ROLE</code>, a stray settler beside a desk, a desk that names another vault or does not hold the role, a reporter who is also the checker, a sensitive role on a single key, a Safe of one signer, and a portfolio or fee model whose attestation was revoked. It also throws when a delay is below 24 hours, although the contract accepts anything from 1 hour.</p>
+    <h3>What it does not check</h3>
+    <ul class="plain">
+      <li>A role held by an address it was not told about, as above.</li>
+      <li>Who holds <code>GUARDIAN_ROLE</code> on a product. It pins the guardian on the executors and the credential registry only.</li>
+      <li>Whether governance, the guardian, the operations account or the operator is a multisig. Only the four roles above are asked for a threshold, and a Safe's signers are not read.</li>
+      <li>Which implementation a proxy points at, and whether the hook is attested: <code>ProxyDeployer</code> and the token's initialiser checked those at launch, and the check does not read them again.</li>
+      <li>Settings. It does not read a <code>GuardedAccount</code>'s permissions, a portfolio's caps, a desk's schedule, a fee model's rates or a minimum position.</li>
+      <li>Any account a <code>Distributor</code> or <code>SignedEntry</code> uses: no module deploys either.</li>
+    </ul>
   </div>
 </section>
 
 <section id="changes">
   <div class="prose">
     <h2>Changing the policy later</h2>
-    <p>After the hand-over every change takes one path through the main timelock. What differs is the call at the end and the check that guards it.</p>
+    <p>After the hand-over a change to an existing product takes one path through the main timelock. What differs is the call at the end and the check that guards it. Launching another product does not take this path: the operations account does that at once.</p>
   </div>
   <figure>
     <div class="fig-scroll">
-      <svg class="d" viewBox="0 0 960 420" role="img" aria-label="The change path. 1, new code is deployed and the council attests it, unless it is already attested. 2, governance schedules one batch on the main timelock. 3, it waits at least the delay, public, and the guardian or governance can cancel. 4, governance executes it with the timelock as the caller. The batch ends in one of six kinds of call: replace a rule list, replace the hook, change the fund's rule, upgrade a token, add a token, or change settings and roles. Each has its own check.">
+      <svg class="d" viewBox="0 0 780 512" role="img" aria-label="The change path. 1, code not yet attested is deployed and the council attests it. 2, governance schedules one batch on the main timelock. 3, it waits at least the minimum delay, in public as CallScheduled, and a canceller, the guardian or governance, can stop it. 4, governance executes it with the timelock as the caller. The batch ends in one of seven kinds of call: replace a rule list, replace the hook, change the fund's rule, upgrade a product, register a later class, settings and roles, or change a lego. Each has its own check.">
         <defs>
           <marker id="dp-a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
         </defs>
-        <rect class="b" x="20" y="20" width="230" height="84" rx="8"/>
-        <text x="34" y="43" class="bold">1. New code?</text>
-        <text x="34" y="62" class="sm">deploy it; the council attests</text>
-        <text x="34" y="78" class="sm">its codehash. Code already</text>
-        <text x="34" y="94" class="sm">attested needs no new step</text>
-        <line class="ln" x1="135" y1="104" x2="135" y2="132" marker-end="url(#dp-a3)"/>
-        <rect class="act" x="20" y="134" width="230" height="60" rx="8"/>
-        <text x="34" y="158" class="bold">2. Governance schedules</text>
-        <text x="34" y="178" class="sm">one batch on the main timelock</text>
-        <line class="ln" x1="135" y1="194" x2="135" y2="222" marker-end="url(#dp-a3)"/>
-        <rect class="b2" x="20" y="224" width="230" height="84" rx="8"/>
-        <text x="34" y="247" class="bold">3. The delay</text>
-        <text x="34" y="266" class="sm">at least 7 days, public as</text>
-        <text x="34" y="282" class="sm">CallScheduled; the guardian</text>
-        <text x="34" y="298" class="sm">or governance can cancel</text>
-        <line class="ln" x1="135" y1="308" x2="135" y2="328" marker-end="url(#dp-a3)"/>
-        <rect class="act" x="20" y="330" width="230" height="60" rx="8"/>
-        <text x="34" y="354" class="bold">4. Governance executes</text>
-        <text x="34" y="374" class="sm">the timelock is the caller</text>
+        <rect class="b" x="12" y="14" width="190" height="96" rx="8"/>
+        <text x="24" y="36" class="bold">1. Code not attested?</text>
+        <text x="24" y="56" class="sm">deploy it, and the council</text>
+        <text x="24" y="72" class="sm">attests its codehash. Code</text>
+        <text x="24" y="88" class="sm">attested already skips this</text>
+        <line class="ln" x1="107" y1="110" x2="107" y2="138" marker-end="url(#dp-a3)"/>
+        <rect class="act" x="12" y="140" width="190" height="66" rx="8"/>
+        <text x="24" y="162" class="bold">2. Governance schedules</text>
+        <text x="24" y="182" class="sm">one batch on the main</text>
+        <text x="24" y="198" class="sm">timelock</text>
+        <line class="ln" x1="107" y1="206" x2="107" y2="234" marker-end="url(#dp-a3)"/>
+        <rect class="b2" x="12" y="236" width="190" height="96" rx="8"/>
+        <text x="24" y="258" class="bold">3. The delay</text>
+        <text x="24" y="278" class="sm">at least the minimum delay,</text>
+        <text x="24" y="294" class="sm">public as CallScheduled;</text>
+        <text x="24" y="310" class="sm">a canceller can stop it</text>
+        <line class="ln" x1="107" y1="332" x2="107" y2="360" marker-end="url(#dp-a3)"/>
+        <rect class="act" x="12" y="362" width="190" height="66" rx="8"/>
+        <text x="24" y="384" class="bold">4. Governance executes</text>
+        <text x="24" y="404" class="sm">the timelock is the caller</text>
 
-        <line class="ln" x1="250" y1="360" x2="290" y2="360"/>
-        <line class="ln" x1="290" y1="48" x2="290" y2="378"/>
-        <line class="ln" x1="290" y1="48" x2="328" y2="48" marker-end="url(#dp-a3)"/>
-        <line class="ln" x1="290" y1="114" x2="328" y2="114" marker-end="url(#dp-a3)"/>
-        <line class="ln" x1="290" y1="180" x2="328" y2="180" marker-end="url(#dp-a3)"/>
-        <line class="ln" x1="290" y1="246" x2="328" y2="246" marker-end="url(#dp-a3)"/>
-        <line class="ln" x1="290" y1="312" x2="328" y2="312" marker-end="url(#dp-a3)"/>
-        <line class="ln" x1="290" y1="378" x2="328" y2="378" marker-end="url(#dp-a3)"/>
+        <line class="ln" x1="202" y1="395" x2="220" y2="395"/>
+        <line class="ln" x1="220" y1="42" x2="220" y2="462"/>
+        <line class="ln" x1="220" y1="42" x2="236" y2="42" marker-end="url(#dp-a3)"/>
+        <line class="ln" x1="220" y1="112" x2="236" y2="112" marker-end="url(#dp-a3)"/>
+        <line class="ln" x1="220" y1="182" x2="236" y2="182" marker-end="url(#dp-a3)"/>
+        <line class="ln" x1="220" y1="252" x2="236" y2="252" marker-end="url(#dp-a3)"/>
+        <line class="ln" x1="220" y1="322" x2="236" y2="322" marker-end="url(#dp-a3)"/>
+        <line class="ln" x1="220" y1="392" x2="236" y2="392" marker-end="url(#dp-a3)"/>
+        <line class="ln" x1="220" y1="462" x2="236" y2="462" marker-end="url(#dp-a3)"/>
 
-        <rect class="b" x="330" y="20" width="615" height="56" rx="8"/>
-        <text x="346" y="42" class="bold">Replace a rule list</text>
-        <text x="520" y="42" class="mono sm">hook.setRules(token, rules)</text>
-        <text x="346" y="62" class="m sm">the caller must be the token's admin; each rule attested as RULE; at most 16; no ruleId twice</text>
+        <rect class="b" x="238" y="12" width="530" height="62" rx="8"/>
+        <text x="252" y="30" class="bold">Replace a rule list</text>
+        <text x="252" y="47" class="mono sm">hook.setRules(token, rules)</text>
+        <text x="252" y="64" class="m sm">caller is the token's admin; each rule attested as RULE; at most 16; no ruleId twice</text>
 
-        <rect class="b" x="330" y="86" width="615" height="56" rx="8"/>
-        <text x="346" y="108" class="bold">Replace the hook</text>
-        <text x="520" y="108" class="mono sm">newHook.setRules(token, list); token.setPolicyHook(newHook)</text>
-        <text x="346" y="128" class="m sm">the hook attested as HOOK and on the token's registry; its lists set before the swap</text>
+        <rect class="b" x="238" y="82" width="530" height="62" rx="8"/>
+        <text x="252" y="100" class="bold">Replace the hook</text>
+        <text x="252" y="117" class="mono sm">replacement.setRules(token, list); token.setPolicyHook(replacement)</text>
+        <text x="252" y="134" class="m sm">attested as HOOK and on the token's registry; its lists are set before the swap</text>
 
-        <rect class="b" x="330" y="152" width="615" height="56" rx="8"/>
-        <text x="346" y="174" class="bold">Change the fund's rule</text>
-        <text x="520" y="174" class="mono sm">fund.setRule(newRule); hook.setRules(class, list) per class</text>
-        <text x="346" y="194" class="m sm">the rule attested as RULE; both in one batch, or the class is closed in between</text>
+        <rect class="b" x="238" y="152" width="530" height="62" rx="8"/>
+        <text x="252" y="170" class="bold">Change the fund's rule</text>
+        <text x="252" y="187" class="mono sm">fund.setRule(rule); hook.setRules(class, list) per class</text>
+        <text x="252" y="204" class="m sm">attested as RULE, naming this fund; in one batch, or the class is closed in between</text>
 
-        <rect class="b" x="330" y="218" width="615" height="56" rx="8"/>
-        <text x="346" y="240" class="bold">Upgrade a token</text>
-        <text x="520" y="240" class="mono sm">token.upgradeToAndCall(implementation, data)</text>
-        <text x="346" y="260" class="m sm">attested as IMPLEMENTATION and reporting the same templateId</text>
+        <rect class="b" x="238" y="222" width="530" height="62" rx="8"/>
+        <text x="252" y="240" class="bold">Upgrade a product</text>
+        <text x="252" y="257" class="mono sm">token.upgradeToAndCall(implementation, data)</text>
+        <text x="252" y="274" class="m sm">attested as IMPLEMENTATION and reporting the same templateId</text>
 
-        <rect class="b" x="330" y="284" width="615" height="56" rx="8"/>
-        <text x="346" y="306" class="bold">Add a token</text>
-        <text x="520" y="306" class="mono sm">proxyDeployer.deploy(…), then its roles and settings</text>
-        <text x="346" y="326" class="m sm">attested implementation; the token comes up with exactly the hook and rules named</text>
+        <rect class="b" x="238" y="292" width="530" height="62" rx="8"/>
+        <text x="252" y="310" class="bold">Register a later class</text>
+        <text x="252" y="327" class="mono sm">fund.registerClass(token)</text>
+        <text x="252" y="344" class="m sm">the token's hook lists the fund's rule, and the token has no supply</text>
 
-        <rect class="b" x="330" y="350" width="615" height="56" rx="8"/>
-        <text x="346" y="372" class="bold">Settings and roles</text>
-        <text x="520" y="372" class="mono sm">setPolicy, setWindow, setMinPosition, grantRole, …</text>
-        <text x="346" y="392" class="m sm">each rule asks the token whether the caller is its admin</text>
+        <rect class="b" x="238" y="362" width="530" height="62" rx="8"/>
+        <text x="252" y="380" class="bold">Settings and roles</text>
+        <text x="252" y="397" class="mono sm">setPolicy, setWindow, setMinPosition, setHolderCap, grantRole</text>
+        <text x="252" y="414" class="m sm">caller is the token's admin, or for setHolderCap the fund's owner</text>
+
+        <rect class="b" x="238" y="432" width="530" height="62" rx="8"/>
+        <text x="252" y="450" class="bold">Change a lego</text>
+        <text x="252" y="467" class="mono sm">addAdapter, setCaps, setPermission, setPortfolio, setSettings, adopt</text>
+        <text x="252" y="484" class="m sm">each lego asks the vault if the caller is its admin, and refuses what is not attested</text>
       </svg>
     </div>
-    <figcaption><b>One path for every change.</b> The batch is public for the whole delay as the timelock's <code>CallScheduled</code> events, and the guardian can cancel it in that time. Several calls to one token can also go as one <code>token.multicall</code>, which is atomic and runs each call with the timelock as sender.</figcaption>
+    <figcaption><b>One path for each change to what exists.</b> The batch is public for the whole delay as the timelock's <code>CallScheduled</code> events, and the guardian can cancel it in that time. Several calls to one token can also go as one <code>token.multicall</code>, which is atomic and runs each call with the timelock as sender.</figcaption>
   </figure>
 
   <div class="prose">
-    <h3>Replace a token's rule list</h3>
-    <p><code>hook.setRules(token, rules)</code> replaces the whole ordered list of one token in one call and leaves every other token alone. The caller must be the token itself or hold <code>DEFAULT_ADMIN_ROLE</code> on it, which the hook asks the token at call time (<code>ComplianceHook_NotTokenAdmin</code>). Each rule must be attested as <code>RULE</code> (<code>ComplianceHook_NotAttested</code>), at most 16 (<code>ComplianceHook_TooManyRules</code>), and no two may share a <code>ruleId</code> (<code>ComplianceHook_DuplicateRule</code>). Any failure keeps the old list. An empty list is accepted and rejects every movement with <code>NO_RULES</code>. The hook emits <code>RuleSetChanged(token, ruleIds)</code>.</p>
-    <p>Two things to avoid. Dropping <code>CredentialRule</code> without an equivalent: no other shipped rule checks who the holder is, and the hook does not warn. Dropping <code>FundHoldersRule</code> from a class that has holders: the fund stops hearing about that class's movements and its investor count goes stale. To have a new minimum in force from the moment <code>MinPositionRule</code> is listed, put <code>setMinPosition</code> before <code>setRules</code> in the same batch.</p>
+    <h3>Replace a product's rule list</h3>
+    <p><code>hook.setRules(token, rules)</code> replaces the whole ordered list of one token in one call and leaves every other token alone. The caller must be the token itself or hold <code>DEFAULT_ADMIN_ROLE</code> on it, which the hook asks the token at call time (<code>ComplianceHook_NotTokenAdmin</code>). Each rule must be attested as <code>RULE</code> (<code>ComplianceHook_NotAttested</code>), at most 16 (<code>ComplianceHook_TooManyRules</code>), and no two may share a <code>ruleId</code> (<code>ComplianceHook_DuplicateRule</code>). Any failure keeps the list as it was. An empty list is accepted and rejects every movement with <code>NO_RULES</code>. The hook emits <code>RuleSetChanged</code> with the token and the rule ids.</p>
+    <p>Two things to avoid. Dropping <code>CredentialRule</code> without an equivalent: no other shipped rule checks who the holder is, and the hook does not warn. Dropping <code>FundHoldersRule</code> from a class that has holders: the fund stops hearing about that class's movements, the cap stops applying to it and its investor count goes stale. To have a minimum in force from the moment <code>MinPositionRule</code> is listed, put <code>setMinPosition</code> before <code>setRules</code> in the same batch.</p>
 
     <h3>Replace the hook</h3>
-    <p>One hook serves every token, and each token moves by its own <code>setPolicyHook</code>. A new <code>ComplianceHook(registry)</code> on the same registry has the attested codehash already, so it needs no new attestation. The batch sets each moving token's list on the new hook first, called by the timelock as the token's admin, then calls <code>token.setPolicyHook(newHook)</code>. In that order, because a token whose new hook holds no list for it rejects every movement with <code>NO_RULES</code>. <code>setPolicyHook</code> checks that the hook is attested as <code>HOOK</code> (<code>PolicyGated_NotAttested</code>) and names the token's registry (<code>PolicyGated_HookRegistryMismatch</code>), and emits <code>PolicyHookChanged</code>. The rules need no change: they accept <code>after_</code> from whichever hook the token reports. A fund class's new list must still name the fund's current rule.</p>
+    <p>One hook serves every product, and each product moves by its own <code>setPolicyHook</code>. A second <code>ComplianceHook(registry)</code> on the same registry has the attested codehash already, so it needs no attestation of its own. The batch sets each moving token's list on the replacement first, called by the timelock as the token's admin, then calls <code>token.setPolicyHook(replacement)</code>. In that order, because a token whose hook holds no list for it rejects every movement with <code>NO_RULES</code>. <code>setPolicyHook</code> checks that the hook is attested as <code>HOOK</code> (<code>PolicyGated_NotAttested</code>) and names the token's registry (<code>PolicyGated_HookRegistryMismatch</code>), and emits <code>PolicyHookChanged</code>. The rules need no change: they accept <code>after_</code> from whichever hook the token reports. A fund class's list must still name the fund's current rule.</p>
 
     <h3>Change the fund's rule</h3>
-    <p>The investor count and each investor's classes live in <a href="contracts/Fund.html"><code>Fund</code></a>, not in the rule, so a new rule starts with the right numbers. What changes is who may write them: after <code>fund.setRule(newRule)</code>, only <code>newRule</code> may call <code>join</code> and <code>leave</code>. A class whose list still names the old rule is closed: the old rule sees that it is not the installed one and rejects every movement of that class with <code>NOT_FUND_CLASS</code>, forced ones included. So the change is one batch: <code>fund.setRule(newRule)</code> and, for every registered class, <code>hook.setRules(class, list)</code> with the old rule swapped for the new one. <code>setRule</code> requires the new rule to be attested as <code>RULE</code> (<code>Fund_NotAttested</code>).</p>
+    <p>The investor count and each investor's classes live in <a href="contracts/Fund.html"><code>Fund</code></a>, not in the rule, so a replacement rule starts with the right numbers. What changes is who may write them: after <code>fund.setRule(rule)</code>, only that rule may call <code>join</code> and <code>leave</code>. A class whose list still names the rule it replaced is closed: that rule sees it is not the installed one and rejects every movement of the class with <code>NOT_FUND_CLASS</code>, forced ones included. So the change is one batch: <code>fund.setRule(rule)</code> and, for every registered class, <code>hook.setRules(class, list)</code> with the rule swapped. <code>setRule</code> requires the rule to be attested as <code>RULE</code> (<code>Fund_NotAttested</code>) and to name this fund (<code>Fund_RuleForAnotherFund</code>).</p>
 
-    <h3>Upgrade a token</h3>
-    <p>Deploy the new implementation; the council attests it as <code>IMPLEMENTATION</code>; governance schedules <code>token.upgradeToAndCall(newImplementation, data)</code>. <code>_authorizeUpgrade</code> requires <code>UPGRADER_ROLE</code> (the main timelock), the attestation, and that the new implementation reports the token's own <code>templateId()</code>, so an attested vault implementation offered to an <code>IntentToken</code> proxy is refused with <code>Templated_WrongTemplate</code>. The template ids are <code>keccak256</code> of the template's name and carry no version. State lives in ERC-7201 namespaced storage, so new code keeps reading the old fields; <code>npm run validate:upgrades</code> runs OpenZeppelin's upgrade-safety check.</p>
+    <h3>Upgrade a product</h3>
+    <p>Deploy the implementation; the council attests it as <code>IMPLEMENTATION</code>; governance schedules <code>token.upgradeToAndCall(implementation, data)</code>. <code>_authorizeUpgrade</code> requires <code>UPGRADER_ROLE</code> (the main timelock), the attestation, and that the implementation reports the token's own <code>templateId()</code>, so an attested vault implementation offered to an <code>IntentToken</code> proxy is refused with <code>Templated_WrongTemplate</code>. The template ids are <code>keccak256</code> of the template's name and carry no version. State lives in ERC-7201 namespaced storage, so upgraded code keeps reading the same fields; <code>npm run validate:upgrades</code> runs OpenZeppelin's upgrade-safety check.</p>
 
-    <h3>Add a token</h3>
-    <p>Governance schedules <code>proxyDeployer.deploy(symbol, implementation, initData, hook, rules)</code>, with <code>initData</code> naming the main timelock as admin. <code>ProxyDeployer.predict(symbol, implementation)</code> gives the address in advance. The token comes up with its admin and guardian only, so the operation also needs its other roles (an agent, <code>UPGRADER_ROLE</code> and <code>RECOVERY_ROLE</code> among them), its credential policy, since until <code>setPolicy</code> its credential rule admits no receiver, and, to join the fund, <code>fund.registerClass(token)</code> while its supply is still zero and its list names the fund's rule. A new implementation needs the council's attestation first.</p>
+    <h3>Add a product or a class</h3>
+    <p>Another product needs no timelock: the operations account runs <code>Legos</code> and <code>Product</code> again. If the product is a class of a fund that has opened, the timelock then calls <code>fund.registerClass(token)</code> while its supply is zero and its list names the fund's rule. A later implementation needs the council's attestation first.</p>
 
     <h3>Settings and roles</h3>
-    <p>Credential policy, settlement window, minimum position and its exemptions are set on the rules by the token's admin. The fund's cap and exemptions, custody of the 7540 vault, the credential registry's attesters and every role change are called by the main timelock too. Among the policy inputs, the agent's lockups and address freezes on <code>HolderRestrictionRule</code>, the KYC attester's credentials, and the guardian's blocks and attester kills on the credential registry take effect at once.</p>
+    <p>Credential policy, settlement window, minimum position and its exemptions and supply cap are set on the rules by the token's admin. The fund's cap and exemptions, the credential registry's attesters and every role change are called by the main timelock too. So are the legos' changes: <code>Portfolio.addAdapter</code>, <code>removeAdapter</code>, <code>writeOffAdapter</code>, <code>migrateTo</code> and raising a cap; <code>GuardedAccount.setPermission</code>; <code>Gated4626Vault.setPortfolio</code>, <code>setFeeModel</code> and raising <code>setMaxRate</code>; <code>NavDesk.setSettings</code>, <code>setFeeModel</code> and <code>adopt</code>. Replacing a desk is one batch that swaps <code>SETTLER_ROLE</code> and calls the successor's <code>adopt</code> with the desk it replaces. Among the policy inputs, the agent's lockups and address freezes on <code>HolderRestrictionRule</code>, the KYC attester's credentials, and the guardian's blocks and attester kills on the credential registry take effect at once.</p>
   </div>
 </section>
 
 <section id="watching">
   <div class="prose">
     <h2>Watching the policy</h2>
-    <p>The hook accepts any list of attested rules, and <code>Fund.setRule</code> does not look at the classes. So a list could leave out the fund's rule, or the fund's rule could change under lists that still name the old one. These reads report such a state; they prevent nothing.</p>
+    <p>The hook accepts any list of attested rules, and <code>Fund.setRule</code> does not look at the classes. So a list could leave out the fund's rule, or the fund's rule could change under lists that still name the one it replaced. These reads report such a state. They prevent nothing, and the repository ships no monitor that polls them.</p>
   </div>
   <div class="table-wrap">
     <table class="tight">
@@ -427,86 +538,90 @@
       <tbody>
         <tr><td><code>fund.firstBrokenClass()</code></td><td>The zero address when every registered class lists the fund's installed rule. Otherwise the first class, in registration order, that does not, or whose token or hook could not be asked.</td></tr>
         <tr><td><code>fund.isClassIntact(token)</code></td><td><code>true</code> when the token is a registered class and its hook lists the installed rule.</td></tr>
+        <tr><td><code>fund.holderCount()</code>, <code>fund.holderCap()</code></td><td>A count above the cap comes from a lowered cap, from lifting an exemption from an account that holds a class, or from a forced delivery, such as a recovery from a 7540 vault into an account that held nothing. The rule admits no further investor until the count comes back down, apart from a forced move.</td></tr>
         <tr><td><code>hook.rules(token)</code></td><td>The token's ordered list, to compare with the last approved one. A dropped <code>CredentialRule</code> shows only here.</td></tr>
         <tr><td><code>token.paused()</code>, <code>executor.paused()</code></td><td>Whether the guardian has stopped it.</td></tr>
+        <tr><td><code>desk.isWired()</code></td><td>Whether the desk holds <code>SETTLER_ROLE</code> on its vault. The vault does not check who holds that role, and the holder sets the price.</td></tr>
+        <tr><td><code>portfolio.priceFresh()</code>, <code>portfolio.writtenOff()</code></td><td><code>priceFresh()</code> is false when an adapter's price cannot be read, or once the money has gone to a successor, which stops deposits and withdrawals on a 4626. <code>writtenOff()</code> is true once an adapter was written off, which leaves a 4626 exit-only. So does a fall of more than half in one count, which <code>exitOnly()</code> on the vault shows.</td></tr>
       </tbody>
     </table>
   </div>
   <div class="prose">
-    <p>To watch rather than poll: <code>RuleSetChanged</code> on the hook, <code>PolicyHookChanged</code> on a token, <code>RuleSet</code> on the fund, and before any of them, the timelock's <code>CallScheduled</code>.</p>
+    <p>To watch rather than poll: <code>RuleSetChanged</code> on the hook, <code>PolicyHookChanged</code> on a token, <code>RuleSet</code> on the fund, <code>AttestationRevoked</code> on the registry, and before any change through the timelock, its <code>CallScheduled</code>.</p>
   </div>
 </section>
 
 <section id="incident">
   <div class="prose">
     <h2>Incident runbook: pause, enforce, resume</h2>
-    <p>The order for an incident on one token: stop it, move what must be moved, resume. A <b>quarantine account</b> is an account prepared in advance to receive tokens taken from a holder.</p>
+    <p>The order for an incident on one product: stop it, move what must be moved, resume. A <b>quarantine account</b> is an account prepared in advance to receive tokens taken from a holder.</p>
   </div>
   <figure>
     <div class="fig-scroll">
-      <svg class="d" viewBox="0 0 960 490" role="img" aria-label="Incident sequence. 1, the guardian pauses the token at once; only FORCED moves pass. 2, the agent force-transfers the holder's tokens to the quarantine account. 3, governance schedules unpause on the main timelock. The delay passes, and the guardian could cancel. 4, governance executes. 5, the main timelock unpauses the token. 6, on IntentToken, the burner burns from the quarantine account.">
+      <svg class="d" viewBox="0 0 780 470" role="img" aria-label="Incident sequence. 1, the guardian pauses the token at once; only FORCED moves pass. 2, the agent force-transfers the holder's tokens to the quarantine account. 3, governance schedules unpause on the main timelock. The delay passes, and the guardian could cancel. 4, governance executes. 5, the main timelock unpauses the token. 6, on a GatedToken or IntentToken, the burner burns from the quarantine account.">
         <defs>
           <marker id="dp-a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
         </defs>
-        <rect class="b2" x="15" y="16" width="130" height="44" rx="8"/>
-        <text x="80" y="43" class="bold" text-anchor="middle">Guardian</text>
-        <rect class="b2" x="165" y="16" width="130" height="44" rx="8"/>
-        <text x="230" y="43" class="bold" text-anchor="middle">Agent</text>
-        <rect class="act" x="335" y="16" width="130" height="44" rx="8"/>
-        <text x="400" y="43" class="bold" text-anchor="middle">Token</text>
-        <rect class="act" x="515" y="16" width="130" height="44" rx="8"/>
-        <text x="580" y="43" class="bold" text-anchor="middle">Main timelock</text>
-        <rect class="b2" x="675" y="16" width="130" height="44" rx="8"/>
-        <text x="740" y="43" class="bold" text-anchor="middle">Governance</text>
-        <rect class="b2" x="825" y="16" width="120" height="44" rx="8"/>
-        <text x="885" y="43" class="bold" text-anchor="middle">Burner</text>
+        <rect class="b2" x="14" y="16" width="116" height="44" rx="8"/>
+        <text x="72" y="43" class="bold" text-anchor="middle">Guardian</text>
+        <rect class="b2" x="138" y="16" width="116" height="44" rx="8"/>
+        <text x="196" y="43" class="bold" text-anchor="middle">Agent</text>
+        <rect class="act" x="262" y="16" width="116" height="44" rx="8"/>
+        <text x="320" y="43" class="bold" text-anchor="middle">Token</text>
+        <rect class="act" x="386" y="16" width="116" height="44" rx="8"/>
+        <text x="444" y="43" class="bold" text-anchor="middle">Main timelock</text>
+        <rect class="b2" x="510" y="16" width="116" height="44" rx="8"/>
+        <text x="568" y="43" class="bold" text-anchor="middle">Governance</text>
+        <rect class="b2" x="634" y="16" width="116" height="44" rx="8"/>
+        <text x="692" y="43" class="bold" text-anchor="middle">Burner</text>
 
-        <line class="life" x1="80" y1="60" x2="80" y2="470"/>
-        <line class="life" x1="230" y1="60" x2="230" y2="470"/>
-        <line class="life" x1="400" y1="60" x2="400" y2="470"/>
-        <line class="life" x1="580" y1="60" x2="580" y2="470"/>
-        <line class="life" x1="740" y1="60" x2="740" y2="470"/>
-        <line class="life" x1="885" y1="60" x2="885" y2="470"/>
+        <line class="life" x1="72" y1="60" x2="72" y2="450"/>
+        <line class="life" x1="196" y1="60" x2="196" y2="450"/>
+        <line class="life" x1="320" y1="60" x2="320" y2="450"/>
+        <line class="life" x1="444" y1="60" x2="444" y2="450"/>
+        <line class="life" x1="568" y1="60" x2="568" y2="450"/>
+        <line class="life" x1="692" y1="60" x2="692" y2="450"/>
 
-        <line class="ln" x1="80" y1="100" x2="398" y2="100" marker-end="url(#dp-a4)"/>
-        <text x="90" y="92" class="m">1  pause(), at once</text>
-        <rect class="b2" x="410" y="110" width="160" height="40" rx="6"/>
-        <text x="420" y="126" class="sm">only FORCED moves pass;</text>
-        <text x="420" y="142" class="sm">the rest: PAUSED</text>
+        <line class="ln" x1="72" y1="100" x2="318" y2="100" marker-end="url(#dp-a4)"/>
+        <text x="82" y="92" class="m">1  pause(), at once</text>
+        <rect class="b2" x="330" y="108" width="170" height="42" rx="6"/>
+        <text x="342" y="125" class="sm">only FORCED moves pass;</text>
+        <text x="342" y="141" class="sm">the rest: PAUSED</text>
 
-        <line class="ln" x1="230" y1="180" x2="398" y2="180" marker-end="url(#dp-a4)"/>
-        <text x="314" y="172" class="m" text-anchor="middle">2  forcedTransfer(…)</text>
+        <line class="ln" x1="196" y1="180" x2="318" y2="180" marker-end="url(#dp-a4)"/>
+        <text x="257" y="172" class="m" text-anchor="middle">2  forcedTransfer(…)</text>
 
-        <line class="ln" x1="740" y1="230" x2="582" y2="230" marker-end="url(#dp-a4)"/>
-        <text x="660" y="222" class="m" text-anchor="middle">3  schedule(unpause())</text>
-        <rect class="b2" x="500" y="250" width="160" height="40" rx="6"/>
-        <text x="510" y="266" class="sm">at least the delay;</text>
-        <text x="510" y="282" class="sm">the guardian may cancel</text>
+        <line class="ln" x1="568" y1="230" x2="446" y2="230" marker-end="url(#dp-a4)"/>
+        <text x="507" y="222" class="m" text-anchor="middle">3  schedule(unpause())</text>
+        <rect class="b2" x="462" y="244" width="170" height="42" rx="6"/>
+        <text x="474" y="261" class="sm">at least the delay;</text>
+        <text x="474" y="277" class="sm">the guardian may cancel</text>
 
-        <line class="ln" x1="740" y1="320" x2="582" y2="320" marker-end="url(#dp-a4)"/>
-        <text x="660" y="312" class="m" text-anchor="middle">4  execute(…)</text>
+        <line class="ln" x1="568" y1="320" x2="446" y2="320" marker-end="url(#dp-a4)"/>
+        <text x="507" y="312" class="m" text-anchor="middle">4  execute(…)</text>
 
-        <line class="ln" x1="580" y1="370" x2="402" y2="370" marker-end="url(#dp-a4)"/>
-        <text x="490" y="362" class="m" text-anchor="middle">5  unpause()</text>
+        <line class="ln" x1="444" y1="370" x2="322" y2="370" marker-end="url(#dp-a4)"/>
+        <text x="383" y="362" class="m" text-anchor="middle">5  unpause()</text>
 
-        <line class="ln" x1="885" y1="430" x2="402" y2="430" marker-end="url(#dp-a4)"/>
-        <text x="410" y="422" class="m">6  burn(quarantine, amount)</text>
+        <line class="ln" x1="692" y1="430" x2="322" y2="430" marker-end="url(#dp-a4)"/>
+        <text x="332" y="422" class="m">6  burn(quarantine, amount)</text>
       </svg>
     </div>
-    <figcaption><b>Enforcement happens during the pause, destruction after it.</b> A <span class="k k-forced">FORCED</span> movement is the one kind a pause lets through: <code>forcedTransfer</code>, and on the 7540 vault <code>recoverRedeemRequest</code> and <code>recoverClaimable</code>. Step 6 exists on <code>IntentToken</code> only: the vaults' role <code>burn</code> always reverts, so their shares leave the quarantine account by an ordinary redemption.</figcaption>
+    <figcaption><b>Enforcement happens during the pause, destruction after it.</b> A <span class="k k-forced">FORCED</span> movement is the one kind a pause lets through: <code>forcedTransfer</code>, and on the 7540 vault <code>recoverRedeemRequest</code> and <code>recoverClaimable</code>. Step 6 exists on <code>GatedToken</code> and <code>IntentToken</code>: the vaults' role <code>burn</code> always reverts (<code>GatedVault_Unsupported</code>), so their shares leave the quarantine account by an ordinary redemption.</figcaption>
   </figure>
   <ol class="steps">
-    <li><div><b>Pause.</b> The guardian calls <code>pause()</code> on the token. Every movement except <span class="k k-forced">FORCED</span> is rejected with <code>PAUSED</code>, the issuer's <code>mint</code> and <code>burn</code> included, and a vault's <code>max*</code> functions return 0. Calls that move no balance still work: <code>setFrozenTokens</code>, and the agent's <code>setLockup</code> and <code>setFrozen</code>. Each executor has its own <code>pause()</code>. <a href="roles.html#pause">Every entry point while paused</a>.</div></li>
-    <li><div><b>Enforce.</b> The agent calls <code>forcedTransfer(holder, quarantine, amount)</code>. It ignores the sender's credential, address freeze, lockup and minimum position, and may take frozen tokens, lowering the frozen amount by the part it takes. The receiver is still judged: <code>quarantine</code> needs an active credential the token's policy accepts (<code>RECEIVER_NOT_VERIFIED</code>, <code>CREDENTIAL_EXPIRED</code>, <code>RECEIVER_NOT_ELIGIBLE</code>) and must not be address-frozen (<code>RECEIVER_FROZEN</code>). On a fund class a forced move is exempt from the investor cap but still counted. On the 7540 vault, <code>recoverRedeemRequest</code> and <code>recoverClaimable</code> also work while paused. Several enforcement calls can go in one <code>multicall</code>.</div></li>
-    <li><div><b>Resume.</b> The token stays paused until <code>unpause()</code>, which only the main timelock or the recovery timelock can call, each after its delay. Plan for a pause of at least seven days. If the guardian cancels the unpause on the main timelock, governance uses <a href="roles.html#recovery">the recovery path</a>, which nobody can cancel.</div></li>
-    <li><div><b>Burn what sits in quarantine.</b> On <code>IntentToken</code> the burner calls <code>burn(quarantine, amount)</code> after the unpause. It is an enforcement burn, exempt from the lockup, the minimum position and the credential check on the sender, but <code>quarantine</code> must not be address-frozen.</div></li>
+    <li><div><b>Pause.</b> The guardian calls <code>pause()</code> on the product, with no delay. Every movement except <span class="k k-forced">FORCED</span> is rejected with <code>PAUSED</code>, the issuer's <code>mint</code> and <code>burn</code> included, and a vault's <code>max*</code> functions return 0. Calls that move no balance still work: <code>setFrozenTokens</code>, and the agent's <code>setLockup</code> and <code>setFrozen</code>. Each product and each executor has its own <code>pause()</code>. <a href="roles.html#pause">Every entry point while paused</a>.</div></li>
+    <li><div><b>Stop the rest, where it applies.</b> The guardian's other powers, also with no delay: <code>cancel</code> a pending operation on the main timelock; <code>blockSubject</code> an address or <code>killAttester</code> in the credential registry; <code>NavDesk.cancel</code> a price not yet executed; <code>Portfolio.deallocate</code> to bring money back from an adapter to the portfolio; lower a cap with <code>Portfolio.setCaps</code>; <code>GuardedAccount.revokePermission</code>; lower a 4626's rate with <code>setMaxRate</code>. A paused vault's portfolio refuses <code>allocate</code> and its guarded accounts refuse <code>execute</code> on their own. <a href="roles.html#guardian">The guardian's powers in full</a>.</div></li>
+    <li><div><b>Enforce.</b> The agent calls <code>forcedTransfer(holder, quarantine, amount)</code>. It ignores the sender's credential, address freeze, lockup and minimum position, and may take frozen tokens, lowering the frozen amount by the part it takes. The receiver is still judged: <code>quarantine</code> needs an active credential the token's policy accepts (<code>RECEIVER_NOT_VERIFIED</code>, <code>CREDENTIAL_EXPIRED</code>, <code>RECEIVER_NOT_ELIGIBLE</code>) and must not be address-frozen (<code>RECEIVER_FROZEN</code>). On a fund class a forced move is exempt from the investor cap but still counted. On the 7540 vault, <code>recoverClaimable</code> and <code>recoverRedeemRequest</code> also work while paused. Once a request's period has closed, <code>recoverRedeemRequest</code> needs <code>SETTLER_ROLE</code>, so with a desk the agent goes through <code>NavDesk.recoverRequest</code>, which needs no proposal on the table and the period closed for longer than <code>maxReportAge</code>. Several enforcement calls can go in one <code>multicall</code>.</div></li>
+    <li><div><b>Resume.</b> The token stays paused until <code>unpause()</code>, which accepts <code>DEFAULT_ADMIN_ROLE</code> or <code>RECOVERY_ROLE</code>: the main timelock or the recovery timelock, each after its delay. Plan for a pause of at least that delay, 24 hours by default. If the guardian cancels the unpause on the main timelock, governance uses <a href="roles.html#recovery">the recovery path</a>, which nobody can cancel.</div></li>
+    <li><div><b>Burn what sits in quarantine.</b> On a <code>GatedToken</code> or <code>IntentToken</code> the burner calls <code>burn(quarantine, amount)</code> after the unpause. It is an enforcement burn, exempt from the lockup, the minimum position and the credential check on the sender, but <code>quarantine</code> must not be address-frozen (<code>SENDER_FROZEN</code>).</div></li>
   </ol>
   <div class="prose">
     <p>Prepare the quarantine account before it is needed:</p>
     <ul class="plain">
       <li>The KYC attester credentials it with the bits the token's policy asks for and renews it before it lapses: a lapsed account cannot receive, so a forced move into it would fail with <code>CREDENTIAL_EXPIRED</code>.</li>
-      <li>The agent never address-freezes it with <code>setFrozen</code>, because a frozen receiver refuses forced moves too. To keep it from sending, use <code>setLockup</code>: a lockup does not stop a forced move or the burner's burn. On a vault class its exit is its own redemption, which a lockup stops, so the agent clears the lockup first.</li>
-      <li>On a fund class, governance can exempt it from the investor count in advance with <code>fund.setExempt(quarantine, true)</code>, a timelock operation that cannot wait for the incident.</li>
+      <li>The agent does not address-freeze it with <code>setFrozen</code>, because a frozen receiver refuses forced moves too. To keep it from sending, use <code>setLockup</code>: a lockup does not stop a forced move or the burner's burn. On a vault class its exit is its own redemption, which a lockup stops, so the agent clears the lockup first.</li>
+      <li>On a fund class, governance can exempt it from the investor count in advance with <code>fund.setExempt(quarantine, true)</code>, a timelock operation, so it has to be done ahead of the incident.</li>
     </ul>
     <p>A holder who is address-frozen cannot be emptied by <code>burn</code>, even the burner's (<code>SENDER_FROZEN</code>). <code>forcedTransfer</code> ignores the sender's freeze, so it is the way out of such an account, and the burn then comes from the quarantine account.</p>
   </div>
@@ -516,12 +631,31 @@
   <div class="prose">
     <h2>Why it is built this way</h2>
     <ul class="plain">
-      <li><b>Two stages around the review.</b> The hook's only immutable is the registry and it holds no rules until a token installs them, so its codehash depends on no token. The council can attest it, the rules and the implementations once, before any token exists, and every token is then created against attestations that already exist.</li>
-      <li><b>Install-time checks, not run-time ones.</b> The registry is asked when a hook, a rule list, the fund's rule, a token or an upgrade is installed. Withdrawing an attestation later does not silently change a running token; governance removes the component, and the guardian can pause meanwhile.</li>
-      <li><b>Nothing granted until everything checks out.</b> Calls wait for all three deploys and for the class registrations, so a mis-built token or rule list stops the deployment before any role exists.</li>
-      <li><b>Classes registered at zero supply.</b> A token can join the fund only before it has any balance, and until it is registered its fund rule rejects every movement, so the fund has seen every holder there is.</li>
+      <li><b>One core, many products.</b> An issuer runs its products on one set of timelocks, one guardian, one hook and one credential registry, so a client is verified once, and someone who wants one product alone runs the core and that product with the same code.</li>
+      <li><b>No wait for a launch.</b> A launch only adds a proxy over attested code and sets settings under its own token's key. A timelock delay would slow every launch and protect nothing that exists, so the operations account owns <code>ProxyDeployer</code>.</li>
+      <li><b>Review between the stages.</b> The hook's only immutable is the registry and it holds no rules until a token installs them, so its codehash depends on no product. The council can attest it, the rules and the implementations once, before any product exists, and each product is then created against attestations that already exist.</li>
+      <li><b>Install-time checks, not run-time ones.</b> The registry is asked when a hook, a rule list, a fund's rule, a product, an upgrade, or a portfolio, adapter, validator or fee model is installed. Withdrawing an attestation later does not silently change a running token; governance removes the component, and the guardian can pause meanwhile.</li>
+      <li><b>Nothing granted until everything checks out.</b> Configuration, grants and the hand-over each wait for the stage before, so a mis-built token or rule list stops before any operational role exists.</li>
+      <li><b>Classes registered at zero supply.</b> A token can join a fund only before it has any balance, and until it is registered its fund rule rejects every movement, so the fund has seen every holder there is.</li>
       <li><b>A check after the hand-over.</b> Attestation cannot tell two instances of the same code apart, and the rule lists live in the hook's storage, outside any codehash. The post-deploy check pins both.</li>
       <li><b>Changes in one batch.</b> Steps that would leave a token closed or uncounted in between, such as a hook swap and its lists, or a fund rule and its classes, go in one timelock batch, so no movement can fall between them.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="prose">
+    <h2>What it does not do</h2>
+    <ul class="plain">
+      <li><b>The post-deploy check is not automatic on a live chain.</b> CI runs it on a local one. <a href="#check">It sees only the accounts it is given</a>.</li>
+      <li><b>The operations account is powerful and has no delay.</b> A stolen key can place a token over an attested implementation with its own admin, and can use up a symbol. It cannot change an existing product, and such a token is not one the issuer published, so holders and integrators should take addresses from the issuer's list. The timelock has no power over <code>ProxyDeployer</code>: recovery from a stolen key is a further <code>ProxyDeployer</code>, which changes where later tokens land.</li>
+      <li><b>Ownership of <code>ProxyDeployer</code> and <code>Fund</code> moves in one step.</b> A two-step transfer would make the timelock schedule an accept for every fund, and leave the operations account owning the fund for the delay. A mistaken transfer has no undo. Both also inherit OpenZeppelin's <code>renounceOwnership</code>.</li>
+      <li><b>The 24-hour delay is a default, not a contract rule.</b> The contract's floor is 1 hour. Governance can lower a delay to that floor through a delayed operation of that timelock, and the check, if run again, would then fail.</li>
+      <li><b>The modules do not credential anyone.</b> They add the first attester and stop. Every holder, a vault over a gated asset and a third-party payer need a credential from outside the modules.</li>
+      <li><b>No module deploys <code>SignedEntry</code> or <code>Distributor</code>.</b> Anyone can deploy a <code>SignedEntry</code>, and a vault's policy decides whether to accept it. A <code>Distributor</code> needs the timelock to grant <code>DISTRIBUTION_MAKER_ROLE</code> on its token, and <code>CHECKER_ROLE</code> too unless the token is a vault with a desk, whose checker already holds that role.</li>
+      <li><b>Nothing stops a bad list or a bad grant.</b> The hook accepts any attested rules, and the timelock can grant <code>SETTLER_ROLE</code> to anyone. Those changes are delayed and public, not prevented.</li>
+      <li><b>Revoking an attestation changes nothing that is running.</b> It only stops the next install.</li>
+      <li><b>A compromised governance multisig is out of scope.</b> It proposes and executes on both timelocks. The guardian can cancel on the main one and not on the recovery one. The recovery path bounds the guardian, not governance.</li>
     </ul>
   </div>
 </section>
@@ -530,11 +664,13 @@
   <div class="prose"><h2>Connected to</h2></div>
   <div class="cards">
     <a class="card" href="roles.html"><span class="name">Who can do what</span><p>Every role holder after the hand-over, and every entry point during a pause.</p></a>
-    <a class="card" href="contracts/ProxyDeployer.html"><span class="name">ProxyDeployer</span><p>How each token is placed and checked in stage 2.</p></a>
+    <a class="card" href="contracts/ProxyDeployer.html"><span class="name">ProxyDeployer</span><p>How each product is placed and checked.</p></a>
     <a class="card" href="contracts/PolicyRegistry.html"><span class="name">PolicyRegistry</span><p>The list of reviewed code the council writes to.</p></a>
     <a class="card" href="contracts/ComplianceHook.html"><span class="name">ComplianceHook</span><p>The shared hook and its per-token rule lists.</p></a>
     <a class="card" href="contracts/Fund.html"><span class="name">Fund</span><p>Classes, the investor count, and the monitor views.</p></a>
-    <a class="card" href="contracts/GovernanceTimelock.html"><span class="name">GovernanceTimelock</span><p>The main timelock every change goes through.</p></a>
+    <a class="card" href="contracts/GovernanceTimelock.html"><span class="name">GovernanceTimelock</span><p>The contract both timelocks run, with its one-hour floor.</p></a>
+    <a class="card" href="contracts/NavDesk.html"><span class="name">NavDesk</span><p>The lego a 7540 product deals through.</p></a>
+    <a class="card" href="contracts/Portfolio.html"><span class="name">Portfolio</span><p>The lego that says where a vault's money may go.</p></a>
   </div>
 </section>
 
@@ -542,14 +678,15 @@
   <div class="prose">
     <h2>Source and tests</h2>
     <ul class="plain">
-      <li>Deployment: <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/ignition/modules/Components.ts"><code>ignition/modules/Components.ts</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/ignition/modules/Activate.ts"><code>Activate.ts</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/ignition/modules/roles.ts"><code>roles.ts</code></a> (<code>RULE_ORDER</code>, <code>TOKENS</code>)</li>
-      <li>Council step and post-deploy check: <code>deployUntilActivate</code> and <code>assertHandedOver</code> in <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/test/nodejs/fixtures.ts"><code>test/nodejs/fixtures.ts</code></a>; procedure in the <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/README.md#deployment-runbook">README runbook</a></li>
-      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/test/nodejs/deployment.test.ts"><code>test/nodejs/deployment.test.ts</code></a> (rule order, a twin hook, an unattested rule or implementation stopping <code>Activate</code>), <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/test/nodejs/governance.test.ts"><code>test/nodejs/governance.test.ts</code></a> (upgrades, hook and rule changes, a new token after the hand-over, pause and recovery)</li>
+      <li>Modules: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/ignition/modules/Core.ts"><code>Core.ts</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/ignition/modules/CoreHandover.ts"><code>CoreHandover.ts</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/ignition/modules/Fund.ts"><code>Fund.ts</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/ignition/modules/Legos.ts"><code>Legos.ts</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/ignition/modules/Product.ts"><code>Product.ts</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/ignition/modules/FundOpen.ts"><code>FundOpen.ts</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/ignition/modules/roles.ts"><code>roles.ts</code></a></li>
+      <li>Profiles: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/ignition/profiles.ts"><code>ignition/profiles.ts</code></a></li>
+      <li>Council step and post-deploy check: <code>stages</code> and <code>assertHandedOver</code> in <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/fixtures.ts"><code>test/nodejs/fixtures.ts</code></a>; procedure in the <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/README.md#deployment-runbook">README runbook</a>; the CI job in <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/.github/workflows/ci.yml"><code>.github/workflows/ci.yml</code></a></li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/deployment.test.ts"><code>deployment.test.ts</code></a> (rule order, a twin hook, an unattested rule or implementation stopping a product), <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/products.test.ts"><code>products.test.ts</code></a> (one core and many products, funds, a later class), <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/legos.test.ts"><code>legos.test.ts</code></a> (the legos by profile, what the hand-over check refuses, products that do not build), <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/governance.test.ts"><code>governance.test.ts</code></a> (upgrades, hook and rule changes, pause and recovery)</li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>cd1e525</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>babef08</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

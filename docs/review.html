@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Security review · Gated Token Stack</title>
-<meta name="description" content="The 2026-10-26 security review of the gated token, its policy contracts, governance, deployer and executors: scope, method, findings and their status, and the tests behind each property.">
+<meta name="description" content="The record of what has been reviewed and what has not: the reviews of 2026-10-26 and 2026-10-31, their findings and where each stands, the contracts no review has covered, and the automated checks.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
@@ -26,11 +26,12 @@
 <header class="top">
   <div class="crumbs"><a href="index.html">Overview</a> / Topics</div>
   <h1>Security review</h1>
-  <p class="lede">On 2026-10-26 the token, its policy contracts, the registry, the main timelock, the fund, the deployer and the two executors were reviewed for security. The review found no issue it could rate medium or higher. This page sets out what it covered, how it worked, what it found and where each item stands, and the tests that hold the properties it relied on.</p>
+  <p class="lede">What has been reviewed, by whom and when, what came out of it, and what has not been looked at. Two reviews are recorded here in detail. The first was run by an AI assistant, the repository does not record who ran the second, neither is an audit, and this page is a record, not a certification.</p>
   <div class="facts">
-    <span class="fact">reviewed <b>2026-10-26</b></span>
-    <span class="fact">nothing rated <b>medium or higher</b></span>
-    <span class="fact"><b>1</b> low finding, fixed</span>
+    <span class="fact">first review by <b>an AI assistant</b></span>
+    <span class="fact"><b>2026-10-26</b> and <b>2026-10-31</b></span>
+    <span class="fact">first review: nothing rated <b>medium or higher</b></span>
+    <span class="fact"><b>no external audit</b></span>
     <span class="fact">not a certification</span>
   </div>
 </header>
@@ -38,119 +39,113 @@
 <section id="in-one-minute">
   <div class="callout">
     <h3>In one minute</h3>
-    <p>A reviewer read the token, its policy and the contracts around it, ran a scan against a catalogue of known attack patterns, and then tried freely to build an attack. Nothing rated medium or higher came out of it. One low finding concerns the deployer, which must ask the registry of reviewed code about a new token's implementation; it does (finding 1). Two informational items are by design or depend on configuration: a batch of intents is all-or-nothing, and while a token's minimum position is 0, tiny transfers can take investor slots. The identity contracts and the vaults were not part of the review.</p>
+    <p>Two reviews in the last week of October 2026 are recorded here in detail, each on the code as it stood then. The review of 2026-10-26, by an AI assistant, covered the token, its policy and the contracts around them, and left out the vaults and the credential layer. It rated nothing medium or higher. <code>PLAN.md</code> calls the review of 2026-10-31 a whole-stack assessment, and it came while the 7540 vault's dealing periods and <code>NavDesk</code> were unfinished. <code>PLAN.md</code> rates two of its findings low and gives no rating for the rest, and the repository keeps no report of it. Each item is fixed or decided below, except that finding 3 stays open on a fund class with no minimum.</p>
+    <p>That is less than it sounds. Eight contracts were built after the second review and have had automated checks and mutation testing but no review: <code>GuardedAccount</code>, <code>ERC20CallValidator</code>, <code>ERC4626CallValidator</code>, <code>FeeModel</code>, <code>SignedEntry</code>, <code>SupplyCapRule</code>, <code>ExecutedOnlyRule</code> and <code>Distributor</code>. No review ran on the code at this commit as a whole. Checking these pages against the code found sixteen more code problems, some of which could cost holders money. All are fixed, with the limits stated there, and no review has read those fixes. No external audit has happened. An earlier review, on 2026-10-17 and of much earlier code, did rate three items medium; all three were fixed. This page is a record of that, not a certification of anything.</p>
   </div>
+</section>
+
+<section id="record">
+  <div class="prose">
+    <h2>The record</h2>
+    <p>The reviews this page counts, oldest first, with the outside reviews it does not count and the assistant's documentation check of 2026-11-01, which it does not count either. <code>PLAN.md</code> also records a test-quality review (2026-10-17) and assessments on 2026-10-30, one of them by three sessions, and this page does not count those either. The ratings are as recorded, here or in <code>PLAN.md</code>, and nobody independent checked them.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Date</th><th>Who</th><th>What it looked at</th><th>Result</th></tr></thead>
+      <tbody>
+        <tr><td>From <code>2026-10-16</code></td><td>Outside the repository; authors not recorded</td><td>Written reviews received on several dates. See <a href="#earlier">earlier passes</a>.</td><td>Checked claim by claim in <code>PLAN.md</code>. Not counted here as reviews of a stated scope.</td></tr>
+        <tr><td><code>2026-10-17</code></td><td>Not recorded; <code>PLAN.md</code> calls it independent</td><td>The code of that date, the 7540 vault included. <code>PLAN.md</code> does not name the commit. Most of the code at this commit was written after it. See <a href="#earlier">earlier passes</a>.</td><td>Three items rated medium and several low. Each fixed or decided by 2026-10-22.</td></tr>
+        <tr><td><code>2026-10-26</code></td><td>AI assistant</td><td>Sixteen contracts at commit <code>a148d2f</code>: <a href="#scope">the token, policy, fund, governance, deployment and settlement</a>.</td><td>Nothing rated medium or higher. <a href="#findings">One low, two informational</a>.</td></tr>
+        <tr><td><code>2026-10-31</code></td><td>Not recorded</td><td><a href="#review-2026-10-31">The whole stack</a>, in the words of <code>PLAN.md</code>, part of it unfinished. The exact tree is not recorded.</td><td>Nine items. <code>PLAN.md</code> rates two low and gives no rating for the rest.</td></tr>
+        <tr><td><code>2026-11-01</code></td><td>AI assistant</td><td><a href="#pages-check">Every shipped contract, claim by claim, while writing these pages.</a> A documentation check, by the assistant that wrote much of the code, so this page does not count it as a review.</td><td>Sixteen code problems, all fixed, with the limits stated there.</td></tr>
+        <tr><td>None yet</td><td>External auditor</td><td>No external audit has happened. <code>PLAN.md</code> names one as the next step, to include the vaults, the credential layer and each lego.</td><td>None.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="not-reviewed">
+  <div class="prose">
+    <h2>What no review has covered</h2>
+    <ul class="plain">
+      <li><b>Eight contracts have had no review at all.</b> <code>GuardedAccount</code>, <code>ERC20CallValidator</code>, <code>ERC4626CallValidator</code>, <code>FeeModel</code>, <code>SignedEntry</code>, <code>SupplyCapRule</code>, <code>ExecutedOnlyRule</code> and <code>Distributor</code> did not exist when the second review ran. They have had the <a href="#evidence">automated checks and mutation testing</a> and nothing more. <code>SECURITY.md</code> calls <code>GuardedAccount</code> the most dangerous lego in the stack.</li>
+      <li><b><code>Portfolio</code> and <code>ERC4626Adapter</code> should be read the same way.</b> They were merged on 2026-10-31, the day of the second review, and one small item of that review concerns <code>Portfolio</code>. An outside review of their first commit found three faults, fixed before the merge (the merge record of <code>b7df8ac</code>, the body of pull request 11, and the <code>Portfolio</code> section of <code>PLAN.md</code>). The repository keeps neither that review nor who wrote it, so this page does not count it as coverage.</li>
+      <li><b>What was added to older contracts.</b> The 4626's investing path (<code>setPortfolio</code>, <code>setMaxRate</code>, <code>setFeeModel</code>, <code>collectFees</code> and the limit on its counted value) came after the second review. So did the credential record's loss of its country, which changes <code>CREDENTIAL_TYPEHASH</code>, <code>set</code>, <code>profileOf</code> and <code>CredentialSet</code> in <code>CredentialRegistry</code>, and <code>CredentialRule</code> with them. So did the deployment module <code>Legos.ts</code>, the lego part of <code>Product.ts</code>, the <code>managed-fund</code> and <code>vault4626-invest</code> profiles, and the lego part of <code>assertHandedOver</code>.</li>
+      <li><b>The finished 7540 dealing periods and <code>NavDesk</code>.</b> <code>PLAN.md</code> records findings of the second review on <code>NavDesk</code> and <code>settlePeriod</code>, fixed in the row whose result it dates 2026-11-01, the day they were finished and merged. So that review saw them unfinished, and nothing records how closely. Their merge record calls them the highest audit priority.</li>
+      <li><b>This commit as a whole.</b> No review ran on <code>babef08</code>. The first review's baseline is <code>a148d2f</code>, and ten of its sixteen contracts have changed since, so its result does not carry over on its own. The fixes for the second review's items, and for what <a href="#pages-check">checking these pages</a> found, have tests, and mutants apart from the default of 1023 attester bits, and no later review.</li>
+      <li><b>An external audit.</b> None has happened. The commit messages on <code>main</code> credit an AI assistant on all but one commit, and an AI assistant ran the review of 2026-10-26. The repository does not record who ran the reviews of 2026-10-17 and 2026-10-31, so nothing shows them to be independent of that process. An AI review cannot show that no bug exists. The code, the tests, the planted bugs and any review from that process can share a blind spot.</li>
+      <li><b>Things outside every pass.</b> OpenZeppelin 5.6.1 itself, which was read for how these contracts use it. The attesters' off-chain checks. What a target vault or a custodian does with money it holds. Economic and legal questions. A compromised security council, governance multisig or issuer key is outside what the code can defend against.</li>
+    </ul>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Contracts</th><th>First review</th><th>Second review</th><th>In short</th></tr></thead>
+      <tbody>
+        <tr><td class="wrap-any"><code>PolicyGatedERC20Upgradeable</code>, <code>IntentSettledUpgradeable</code>, <code>IntentToken</code></td><td class="ok">Reviewed</td><td>Existed</td><td>Reviewed. The movement path, <code>canExecute</code> and <code>IntentToken</code>'s decimals changed after the first review.</td></tr>
+        <tr><td class="wrap-any"><code>ComplianceHook</code>, <code>BaseRule</code>, <code>MinPositionRule</code>, <code>HolderRestrictionRule</code>, <code>SettlementWindowRule</code>, <code>FundHoldersRule</code></td><td class="ok">Reviewed</td><td>Existed</td><td>Reviewed. <code>FundHoldersRule.after_</code> changed after both.</td></tr>
+        <tr><td class="wrap-any"><code>PolicyRegistry</code>, <code>GovernanceTimelock</code>, <code>Fund</code>, <code>ProxyDeployer</code>, <code>TokenProxy</code></td><td class="ok">Reviewed</td><td>Existed</td><td>Reviewed. <code>GovernanceTimelock</code>, <code>Fund</code> and <code>ProxyDeployer</code> changed since, mostly to fix findings.</td></tr>
+        <tr><td class="wrap-any"><code>IntentExecutor</code>, <code>DvPExecutor</code></td><td class="ok">Reviewed</td><td>Existed</td><td>Reviewed, with small changes since.</td></tr>
+        <tr><td class="wrap-any"><code>CredentialRegistry</code>, <code>CredentialRule</code></td><td>Not in the code it read</td><td>Existed</td><td>Second review only, and the credential record changed after it.</td></tr>
+        <tr><td class="wrap-any"><code>GatedToken</code>, <code>GatedVaultBase</code></td><td>Did not exist</td><td>Existed</td><td>Second review only.</td></tr>
+        <tr><td class="wrap-any"><code>Gated4626Vault</code></td><td>Left out</td><td>Existed, without its investing path</td><td>Second review only, and <span class="no">no review</span> of the investing path.</td></tr>
+        <tr><td class="wrap-any"><code>Gated7540Vault</code></td><td>Left out</td><td>Unfinished dealing periods</td><td>Seen once, on unfinished code.</td></tr>
+        <tr><td class="wrap-any"><code>NavDesk</code></td><td>Did not exist</td><td>Unfinished</td><td>Seen once, on unfinished code.</td></tr>
+        <tr><td class="wrap-any"><code>Portfolio</code>, <code>ERC4626Adapter</code></td><td>Did not exist</td><td>Merged that day</td><td>One small item, on the pause, and an outside review not counted here. Treat as <span class="no">not reviewed</span>.</td></tr>
+        <tr><td class="wrap-any"><code>GuardedAccount</code>, <code>ERC20CallValidator</code>, <code>ERC4626CallValidator</code>, <code>FeeModel</code></td><td>Did not exist</td><td>Did not exist</td><td><span class="no">No review</span>.</td></tr>
+        <tr><td class="wrap-any"><code>SignedEntry</code>, <code>Distributor</code>, <code>SupplyCapRule</code>, <code>ExecutedOnlyRule</code></td><td>Did not exist</td><td>Did not exist</td><td><span class="no">No review</span>.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small">The first review is the one of 2026-10-26, the second the one of 2026-10-31. "Existed" means the contract had been committed by the end of 2026-10-31, on <code>main</code> or in <code>28c0bd3</code>, whose tree is that of <code>refs/pull/14/head</code>. It does not mean each line was read: see <a href="#review-2026-10-31">that review's section</a>.</p>
+  <p class="small"><code>PLAN.md</code> also records outside reviews of, among others, the rules of Phase 4, <code>Fund</code> and <code>FundHoldersRule</code>, <code>DvPExecutor</code>, the shared hook and the base, <code>HolderRestrictionRule</code> and <code>MinPositionRule</code>, <code>GatedToken</code> and the deployment modules, the 7540's escrow and <code>Portfolio</code>, and of the plans for the 7540's price, <code>FeeModel</code> and the 4626's counted value before that code was written. Their claims were checked against the code or the plan. The repository keeps neither the reviews nor who wrote them, and this table does not count them.</p>
 </section>
 
 <section id="scope">
   <div class="prose">
-    <h2>Scope</h2>
-    <p>The review covered <code>PolicyGatedERC20Upgradeable</code> and <code>IntentToken</code> and the policy, fund, governance, deployment and settlement contracts around them. The identity layer (<code>CredentialRegistry</code>, <code>CredentialRule</code>) and the two vaults were not part of it.</p>
-  </div>
-  <figure>
-    <div class="fig-scroll">
-      <svg class="d" viewBox="0 0 900 344" role="img" aria-label="Scope of the review. Reviewed: PolicyGatedERC20Upgradeable, IntentSettledUpgradeable, IntentToken, ComplianceHook, BaseRule, MinPositionRule, HolderRestrictionRule, SettlementWindowRule, FundHoldersRule, PolicyRegistry, GovernanceTimelock, Fund, ProxyDeployer, TokenProxy, IntentExecutor and DvPExecutor. Not part of the review: CredentialRegistry, CredentialRule, Gated4626Vault and Gated7540Vault.">
-        <rect class="frame" x="20" y="10" width="620" height="324" rx="10"/>
-        <text x="36" y="32" class="bold">Reviewed</text>
-
-        <text x="36" y="56" class="m sm">Token</text>
-        <rect class="act" x="34" y="62" width="194" height="26" rx="6"/>
-        <text x="42" y="79" class="mono sm">PolicyGatedERC20Upgradeable</text>
-        <rect class="act" x="234" y="62" width="194" height="26" rx="6"/>
-        <text x="242" y="79" class="mono sm">IntentSettledUpgradeable</text>
-        <rect class="act" x="434" y="62" width="194" height="26" rx="6"/>
-        <text x="442" y="79" class="mono sm">IntentToken</text>
-
-        <text x="36" y="112" class="m sm">Policy</text>
-        <rect class="act" x="34" y="118" width="194" height="26" rx="6"/>
-        <text x="42" y="135" class="mono sm">ComplianceHook</text>
-        <rect class="act" x="234" y="118" width="194" height="26" rx="6"/>
-        <text x="242" y="135" class="mono sm">BaseRule</text>
-        <rect class="act" x="434" y="118" width="194" height="26" rx="6"/>
-        <text x="442" y="135" class="mono sm">MinPositionRule</text>
-        <rect class="act" x="34" y="150" width="194" height="26" rx="6"/>
-        <text x="42" y="167" class="mono sm">HolderRestrictionRule</text>
-        <rect class="act" x="234" y="150" width="194" height="26" rx="6"/>
-        <text x="242" y="167" class="mono sm">SettlementWindowRule</text>
-        <rect class="act" x="434" y="150" width="194" height="26" rx="6"/>
-        <text x="442" y="167" class="mono sm">FundHoldersRule</text>
-
-        <text x="36" y="200" class="m sm">Governance and the fund</text>
-        <rect class="act" x="34" y="206" width="194" height="26" rx="6"/>
-        <text x="42" y="223" class="mono sm">PolicyRegistry</text>
-        <rect class="act" x="234" y="206" width="194" height="26" rx="6"/>
-        <text x="242" y="223" class="mono sm">GovernanceTimelock</text>
-        <rect class="act" x="434" y="206" width="194" height="26" rx="6"/>
-        <text x="442" y="223" class="mono sm">Fund</text>
-
-        <text x="36" y="256" class="m sm">Deployment and settlement</text>
-        <rect class="act" x="34" y="262" width="194" height="26" rx="6"/>
-        <text x="42" y="279" class="mono sm">ProxyDeployer</text>
-        <rect class="act" x="234" y="262" width="194" height="26" rx="6"/>
-        <text x="242" y="279" class="mono sm">TokenProxy</text>
-        <rect class="act" x="434" y="262" width="194" height="26" rx="6"/>
-        <text x="442" y="279" class="mono sm">IntentExecutor</text>
-        <rect class="act" x="34" y="294" width="194" height="26" rx="6"/>
-        <text x="42" y="311" class="mono sm">DvPExecutor</text>
-
-        <rect class="frame dash" x="656" y="10" width="228" height="324" rx="10"/>
-        <text x="670" y="32" class="bold">Not part of the review</text>
-        <text x="670" y="56" class="m sm">Identity</text>
-        <rect class="b2 dash" x="670" y="62" width="200" height="26" rx="6"/>
-        <text x="678" y="79" class="mono sm">CredentialRegistry</text>
-        <rect class="b2 dash" x="670" y="94" width="200" height="26" rx="6"/>
-        <text x="678" y="111" class="mono sm">CredentialRule</text>
-        <text x="670" y="144" class="m sm">Vaults</text>
-        <rect class="b2 dash" x="670" y="150" width="200" height="26" rx="6"/>
-        <text x="678" y="167" class="mono sm">Gated4626Vault</text>
-        <rect class="b2 dash" x="670" y="182" width="200" height="26" rx="6"/>
-        <text x="678" y="199" class="mono sm">Gated7540Vault</text>
-      </svg>
-    </div>
-    <figcaption><b>Sixteen contracts reviewed, four not.</b> The interfaces were read for their events, errors and reason codes. OpenZeppelin's own code, including the <code>TimelockController</code> used unmodified for the recovery timelock, was read for how these contracts use it, not reviewed itself.</figcaption>
-  </figure>
-  <div class="prose">
-    <p><b>The code here.</b> This page describes the reviewed contracts at commit <code>cd1e525</code>, which includes the fix for finding 1 below in <code>ProxyDeployer</code>. <code>GovernanceTimelock</code>'s seven-day floor came after the review and was not part of it. The test names on this page are the ones at that commit.</p>
+    <h2>The review of 2026-10-26: scope</h2>
+    <p><code>PLAN.md</code> gives commit <code>a148d2f</code> as the test baseline when it plans the fix for finding 1, and this page takes that as the code the review read. The commit is not on <code>main</code>, which squashed it into <code>2f8c2e7</code>: fetch <code>refs/pull/3/head</code> to read it. The first committed version of this page (<code>df4f13a</code>) names sixteen contracts: <code>PolicyGatedERC20Upgradeable</code>, <code>IntentSettledUpgradeable</code>, <code>IntentToken</code>, <code>ComplianceHook</code>, <code>BaseRule</code>, <code>MinPositionRule</code>, <code>HolderRestrictionRule</code>, <code>SettlementWindowRule</code>, <code>FundHoldersRule</code>, <code>PolicyRegistry</code>, <code>GovernanceTimelock</code>, <code>Fund</code>, <code>ProxyDeployer</code>, <code>TokenProxy</code>, <code>IntentExecutor</code> and <code>DvPExecutor</code>. The interfaces were read for their events, errors and reason codes.</p>
+    <p>It left out <code>Gated4626Vault</code>, <code>Gated7540Vault</code> and the deployment modules in <code>ignition/modules/</code>. The credential layer (<code>CredentialRegistry</code>, <code>CredentialRule</code>) was not in that tree. <code>TimelockController</code> and the rest of OpenZeppelin's code were read for how these contracts use them, and not reviewed. The tree also held two rules deleted on 2026-10-27, an identity rule and a per-token holder cap. Notes kept outside the repository list a fourth informational item, on the holder cap. The repository does not record it, and it is not listed below.</p>
   </div>
 </section>
 
 <section id="method">
   <div class="prose">
-    <h2>How the review worked</h2>
+    <h2>The review of 2026-10-26: how it worked</h2>
+    <p>This account comes from the first committed version of this page (<code>git show df4f13a:docs/review.html</code>). Nothing else in the repository records how the review ran, so it cannot be checked.</p>
     <ol class="steps">
-      <li><div><b>A manual read</b> of every contract in scope, against the project's build brief, the documentation and <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/SECURITY.md"><code>SECURITY.md</code></a>.</div></li>
+      <li><div><b>A read by the assistant</b> of every contract in scope, against the project's build brief, the documentation and <code>SECURITY.md</code>.</div></li>
       <li><div><b>Four parallel scans</b> of the code against a catalogue of 170 known attack patterns. Each pattern was marked skipped, surviving or borderline, and each survivor was traced from its external entry point through every modifier and guard.</div></li>
       <li><div><b>One adversarial pass</b> that reasoned freely about the code and tried to build a concrete attack.</div></li>
-      <li><div><b>The full test suite</b>, <code>npx hardhat test</code> (Solidity unit, fuzz and invariant tests, and Node tests with viem). The Halmos symbolic properties run in CI on every pull request and on pushes to <code>main</code> (<code>npm run test:halmos</code>); they were read for the review, not re-run.</div></li>
+      <li><div><b>The full test suite</b>, <code>npx hardhat test</code>, at 1011 passing (915 Solidity, 96 Node) at that commit, as <code>PLAN.md</code> records. The Halmos properties were read and not re-run.</div></li>
       <li><div><b>Every candidate finding was checked</b> against the code and the repository's own notes before it was reported.</div></li>
     </ol>
-    <p>The review was run by an AI assistant, and its scan reports are not stored in the repository. An AI review cannot show that no bug exists. Mutation testing, the Halmos properties and an external audit are stronger evidence than this page, and this page does not replace them.</p>
+    <p>The review was run by an AI assistant, and its scan reports are not stored in the repository. An AI review cannot show that no bug exists. This page does not replace an external audit, and none has happened.</p>
   </div>
 </section>
 
 <section id="findings">
   <div class="prose">
-    <h2>Findings</h2>
-    <p>Each was checked against the code. None puts funds at risk.</p>
+    <h2>The review of 2026-10-26: findings</h2>
+    <p>The last column gives where each one stands at <code>babef08</code>, checked against the code.</p>
   </div>
   <div class="table-wrap">
     <table class="tight">
-      <thead><tr><th>#</th><th>Rating</th><th>Where</th><th>What</th><th>Status</th></tr></thead>
+      <thead><tr><th>#</th><th>Rating</th><th>Where</th><th>What it found</th><th>Where it stands</th></tr></thead>
       <tbody>
         <tr>
           <td>1</td><td><span class="pill">LOW</span></td><td><code>ProxyDeployer.deploy</code></td>
-          <td><code>deploy</code> must ask the registry about the implementation of a new token before it creates the proxy, as an upgrade does. Checking the hook, the rules and the symbol after setup is not enough: unreviewed code could answer those correctly. Only the owner can deploy, and after deployment that is the main timelock.</td>
-          <td><span class="ok">Fixed.</span> See <a href="#finding-1">below</a>.</td>
+          <td>At that commit <code>deploy</code> did not ask the registry about a new token's implementation, as an upgrade does. Checking the hook, the rules and the symbol after setup is not enough: unreviewed code could answer those correctly.</td>
+          <td><span class="ok">Fixed on 2026-10-27.</span> See <a href="#finding-1">below</a>.</td>
         </tr>
         <tr>
           <td>2</td><td><span class="pill">INFO</span></td><td><code>IntentExecutor.executeBatch</code></td>
           <td>A batch is all-or-nothing. A signer who cancels an intent, or moves the balance, before the batch lands reverts it for everyone in it. This costs the operator gas and time.</td>
-          <td>By design. See <a href="#finding-2">below</a>.</td>
+          <td>Unchanged, by design. See <a href="#finding-2">below</a>.</td>
         </tr>
         <tr>
-          <td>3</td><td><span class="pill">INFO</span></td><td><code>MinPositionRule</code> with <code>FundHoldersRule</code></td>
-          <td>While a token's minimum position is 0, one unit sent to a fresh address with an eligible credential makes it an investor. A holder with several such addresses can fill the fund's investor cap and block new investors.</td>
-          <td>Closed where a minimum is set. See <a href="#finding-3">below</a>.</td>
+          <td>3</td><td><span class="pill">INFO</span></td><td><code>FundHoldersRule</code> with <code>MinPositionRule</code></td>
+          <td>Where a token has no minimum position, one unit sent to a fresh address with an eligible credential makes it an investor. A holder with several such addresses can fill the fund's investor cap and block new investors.</td>
+          <td>Closed where a minimum is set. Open otherwise. The review of 2026-10-17 rated the same issue low, and it was accepted then. See <a href="#finding-3">below</a>.</td>
         </tr>
       </tbody>
     </table>
@@ -164,54 +159,55 @@
   </div>
   <figure>
     <div class="fig-scroll">
-      <svg class="d" viewBox="0 0 900 196" role="img" aria-label="The deploy checks in order: the symbol has not been used, the implementation is attested, the proxy is created and set up, the token names the deployer's registry, the hook, rules and symbol match, then ProxyDeployed. The second and fourth checks answer finding 1. Any failed check reverts the whole call, so no proxy is left and the symbol stays free.">
+      <svg class="d" viewBox="0 0 780 208" role="img" aria-label="The deploy checks in order: the symbol has not been used, the implementation is attested, the proxy is created and set up, the token names the deployer's registry, the hook, rules and symbol match, then ProxyDeployed. The second and fourth checks answer finding 1. Any failed check reverts the whole call, so no proxy is left and the symbol stays free.">
         <defs>
           <marker id="rv-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
           <marker id="rv-arrow-rej" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="rej"/></marker>
         </defs>
-        <rect class="b" x="10" y="20" width="132" height="60" rx="8"/>
-        <text x="22" y="45" class="bold">Symbol</text>
-        <text x="22" y="64" class="m">not used yet?</text>
-        <line class="ln" x1="142" y1="50" x2="158" y2="50" marker-end="url(#rv-arrow)"/>
+        <rect class="b" x="12" y="14" width="116" height="60" rx="8"/>
+        <text x="22" y="39" class="bold">Symbol</text>
+        <text x="22" y="58" class="m">not used yet?</text>
+        <line class="ln" x1="128" y1="44" x2="139" y2="44" marker-end="url(#rv-arrow)"/>
 
-        <rect class="act" x="160" y="20" width="132" height="60" rx="8"/>
-        <text x="172" y="45" class="bold">Implementation</text>
-        <text x="172" y="64" class="m">attested?</text>
-        <line class="ln" x1="292" y1="50" x2="308" y2="50" marker-end="url(#rv-arrow)"/>
+        <rect class="act" x="140" y="14" width="116" height="60" rx="8"/>
+        <text x="150" y="39" class="bold">Implementation</text>
+        <text x="150" y="58" class="m">attested?</text>
+        <line class="ln" x1="256" y1="44" x2="267" y2="44" marker-end="url(#rv-arrow)"/>
 
-        <rect class="b2" x="310" y="20" width="132" height="60" rx="8"/>
-        <text x="322" y="45" class="bold">Create proxy,</text>
-        <text x="322" y="64" class="m">run its setup</text>
-        <line class="ln" x1="442" y1="50" x2="458" y2="50" marker-end="url(#rv-arrow)"/>
+        <rect class="b2" x="268" y="14" width="116" height="60" rx="8"/>
+        <text x="278" y="39" class="bold">Create proxy,</text>
+        <text x="278" y="58" class="m">run its setup</text>
+        <line class="ln" x1="384" y1="44" x2="395" y2="44" marker-end="url(#rv-arrow)"/>
 
-        <rect class="act" x="460" y="20" width="132" height="60" rx="8"/>
-        <text x="472" y="45" class="bold">Token names</text>
-        <text x="472" y="64" class="m">our registry?</text>
-        <line class="ln" x1="592" y1="50" x2="608" y2="50" marker-end="url(#rv-arrow)"/>
+        <rect class="act" x="396" y="14" width="116" height="60" rx="8"/>
+        <text x="406" y="39" class="bold">Token names</text>
+        <text x="406" y="58" class="m">our registry?</text>
+        <line class="ln" x1="512" y1="44" x2="523" y2="44" marker-end="url(#rv-arrow)"/>
 
-        <rect class="b" x="610" y="20" width="132" height="60" rx="8"/>
-        <text x="622" y="45" class="bold">Hook, rules,</text>
-        <text x="622" y="64" class="m">symbol match?</text>
-        <line class="ln" x1="742" y1="50" x2="758" y2="50" marker-end="url(#rv-arrow)"/>
+        <rect class="b" x="524" y="14" width="116" height="60" rx="8"/>
+        <text x="534" y="39" class="bold">Hook, rules,</text>
+        <text x="534" y="58" class="m">symbol match?</text>
+        <line class="ln" x1="640" y1="44" x2="651" y2="44" marker-end="url(#rv-arrow)"/>
 
-        <rect class="b2" x="760" y="20" width="132" height="60" rx="8"/>
-        <text x="772" y="45" class="bold">ProxyDeployed</text>
-        <text x="772" y="64" class="m">the token is live</text>
+        <rect class="b2" x="652" y="14" width="116" height="60" rx="8"/>
+        <text x="662" y="39" class="bold">ProxyDeployed</text>
+        <text x="662" y="58" class="m">token is live</text>
 
-        <line class="ln-rej" x1="76" y1="80" x2="76" y2="124" marker-end="url(#rv-arrow-rej)"/>
-        <line class="ln-rej" x1="226" y1="80" x2="226" y2="124" marker-end="url(#rv-arrow-rej)"/>
-        <line class="ln-rej" x1="526" y1="80" x2="526" y2="124" marker-end="url(#rv-arrow-rej)"/>
-        <line class="ln-rej" x1="676" y1="80" x2="676" y2="124" marker-end="url(#rv-arrow-rej)"/>
-        <text x="84" y="106" class="sm m">no</text>
-        <text x="234" y="106" class="sm m">no</text>
-        <text x="534" y="106" class="sm m">no</text>
-        <text x="684" y="106" class="sm m">no</text>
-        <rect class="rejbox" x="10" y="126" width="882" height="58" rx="6"/>
-        <text x="24" y="148" class="m">A failed check reverts the whole call: no proxy is left at the address, and the symbol stays free.</text>
-        <text x="24" y="170" class="mono sm rej">…SaltUsed   …ImplementationNotAttested   …RegistryMismatch   …HookNotInstalled   …RulesMismatch   …SymbolMismatch</text>
+        <line class="ln-rej" x1="70" y1="74" x2="70" y2="116" marker-end="url(#rv-arrow-rej)"/>
+        <line class="ln-rej" x1="198" y1="74" x2="198" y2="116" marker-end="url(#rv-arrow-rej)"/>
+        <line class="ln-rej" x1="454" y1="74" x2="454" y2="116" marker-end="url(#rv-arrow-rej)"/>
+        <line class="ln-rej" x1="582" y1="74" x2="582" y2="116" marker-end="url(#rv-arrow-rej)"/>
+        <text x="78" y="99" class="sm m">no</text>
+        <text x="206" y="99" class="sm m">no</text>
+        <text x="462" y="99" class="sm m">no</text>
+        <text x="590" y="99" class="sm m">no</text>
+        <rect class="rejbox" x="12" y="118" width="756" height="80" rx="6"/>
+        <text x="24" y="140" class="m">A failed check reverts the whole call: no proxy is left at the address, and the symbol stays free.</text>
+        <text x="24" y="162" class="mono sm rej">ProxyDeployer_SaltUsed   ProxyDeployer_ImplementationNotAttested   ProxyDeployer_RegistryMismatch</text>
+        <text x="24" y="182" class="mono sm rej">ProxyDeployer_HookNotInstalled   ProxyDeployer_RulesMismatch   ProxyDeployer_SymbolMismatch</text>
       </svg>
     </div>
-    <figcaption><b>The highlighted checks answer finding 1.</b> Each <code>…</code> stands for <code>ProxyDeployer_</code>. The full sequence is on the <a href="contracts/ProxyDeployer.html">ProxyDeployer</a> page.</figcaption>
+    <figcaption><b>The highlighted checks answer finding 1.</b> This is the order in <code>ProxyDeployer.deploy</code> at this commit. The full sequence is on the <a href="contracts/ProxyDeployer.html">ProxyDeployer</a> page.</figcaption>
   </figure>
   <div class="table-wrap">
     <table class="tight fixed">
@@ -223,15 +219,15 @@
       </tbody>
     </table>
   </div>
-  <p class="small">The registry is fixed when the deployer is created and cannot be changed. The tests are in <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/deploy/ProxyDeployer.t.sol"><code>ProxyDeployer.t.sol</code></a>.</p>
+  <p class="small">The registry is fixed when the deployer is created and cannot be changed. The tests are in <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/deploy/ProxyDeployer.t.sol"><code>ProxyDeployer.t.sol</code></a>. <code>deploy</code> is owner-only, and after <code>CoreHandover</code> the owner is the operations account, so a launch has no timelock delay. A stolen operations key can still place a token over attested code with its own admin, and can use up a symbol. It cannot change an existing product.</p>
 </section>
 
 <section id="finding-2">
   <div class="prose">
     <h2>Finding 2: a batch is all-or-nothing</h2>
-    <p><code>executeBatch</code> runs every intent in one transaction. If one fails, the executor reverts with <code>IntentExecutor_BatchItemFailed(index, reason)</code>, carrying the token's own revert data, and nothing in the batch settles. So any signer in the batch can make it fail, by cancelling the nonce with <code>cancelIntent</code> or by moving the balance first. Nobody loses tokens: the cost is the operator's gas and time.</p>
-    <p>This is by design. The operator can pre-flight each intent with <code>canExecute</code>, called from the executor's address, submit intents one at a time with <code>execute</code>, or drop the failing intent and send the rest again.</p>
-    <p class="small wrap-any">Pinned by <code>test_WhenOneIntentIsRejected_NothingSettlesAndTheIndexIsReported</code>, <code>test_WhenOneIntentFails_ItRevertsWithItsIndexAndTheTokensReason</code> and <code>test_WhenTheFailingIntentIsDroppedAndResubmitted_TheRestSettles</code> in <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/intents/IntentExecutor.t.sol"><code>IntentExecutor.t.sol</code></a>.</p>
+    <p><code>executeBatch</code> runs every intent in one transaction. If one fails, the executor reverts with <code>IntentExecutor_BatchItemFailed(index, reason)</code>, carrying the token's own revert data, and nothing in the batch settles. An intent that states a payment is refused first with <code>IntentExecutor_ConsiderationNotSupported(index)</code>. So any signer in the batch can make it fail, by cancelling the nonce with <code>cancelIntent</code> or by moving the balance first. Nobody loses tokens: the cost is the operator's gas and time.</p>
+    <p>This is by design. The operator can pre-flight each intent with <code>canExecute(intent, sig, executor)</code>, naming the executor's address, submit intents one at a time with <code>execute</code>, or drop the failing intent and send the rest again.</p>
+    <p class="small wrap-any">Pinned by <code>test_WhenOneIntentIsRejected_NothingSettlesAndTheIndexIsReported</code>, <code>test_WhenOneIntentFails_ItRevertsWithItsIndexAndTheTokensReason</code> and <code>test_WhenTheFailingIntentIsDroppedAndResubmitted_TheRestSettles</code> in <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/intents/IntentExecutor.t.sol"><code>IntentExecutor.t.sol</code></a>.</p>
   </div>
 </section>
 
@@ -239,93 +235,271 @@
   <div class="prose">
     <h2>Finding 3: dust and the investor slot</h2>
     <p><code>FundHoldersRule</code> counts an address as an investor as soon as it holds any amount of a class. With no minimum position, one unit is enough. Someone with several addresses that hold an eligible credential can send each of them one unit, fill the fund's cap, and keep new investors out until the agent takes the dust back with a forced transfer.</p>
-    <p><code>MinPositionRule</code> closes this where the token has a minimum above 0. It sits second in every deployed rule list, before <code>FundHoldersRule</code>, and refuses with <code>BELOW_MIN_POSITION</code> any transfer, intent or mint that would leave the receiver above zero and below the minimum, and any movement that would leave the sender such a remainder. The rules after it therefore see only real positions. Forced moves, the burner's burns, the token itself and accounts the token's admin exempts are outside the rule, so the agent can still clear dust.</p>
-    <p>The deployment sets each token's minimum from a parameter (<code>intentMinPosition</code>, <code>fundMinPosition</code>, <code>asyncFundMinPosition</code>), which is 0 by default. Until a minimum is set the rule is off and the finding stands; the operational answer is then the agent's forced transfer and monitoring of the investor count.</p>
-    <p class="small wrap-any">Pinned by <code>test_WhenADustTransferTargetsAnEmptyAccount_ItIsRejectedWithParity</code>, <code>test_WhenATransferWouldLeaveDustBehind_ItIsRejected</code>, <code>test_WhenAMintWouldLeaveDust_ItIsRejected</code> and <code>test_WhenForced_DustIsAllowed</code> in <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/hooks/rules/RuleSetIntegration.t.sol"><code>RuleSetIntegration.t.sol</code></a>.</p>
+    <p><code>MinPositionRule</code> closes this where a token lists it with a minimum above 0. It refuses with <code>BELOW_MIN_POSITION</code> a transfer, intent or mint that would leave the receiver above zero and below the minimum, and a movement that would leave the sender such a remainder. Forced moves, the burner's burns, the token itself and accounts the token's admin exempts are outside the rule, so the agent can still clear dust.</p>
+    <p>It is not on by default. The demo profile <code>full</code> lists the rule second on each of its tokens, with the minimum taken from the <code>minPosition</code> parameter of <code>Product.ts</code>, which is 0 unless given. The other profiles list neither this rule nor <code>FundHoldersRule</code>. On a fund class with no minimum the finding stands, and the answer is operational: the agent's forced transfer, and monitoring of the investor count.</p>
+    <p class="small wrap-any">Pinned by <code>test_WhenADustTransferTargetsAnEmptyAccount_ItIsRejectedWithParity</code>, <code>test_WhenATransferWouldLeaveDustBehind_ItIsRejected</code>, <code>test_WhenAMintWouldLeaveDust_ItIsRejected</code> and <code>test_WhenForced_DustIsAllowed</code> in <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/hooks/rules/RuleSetIntegration.t.sol"><code>RuleSetIntegration.t.sol</code></a>.</p>
   </div>
 </section>
 
 <section id="tried">
   <div class="prose">
-    <h2>What the adversarial pass tried and could not break</h2>
+    <h2>What that review's adversarial pass tried and could not break</h2>
+    <p>The first committed version of this page (<code>df4f13a</code>) lists these as what the pass tried, and nothing else in the repository records them. Each sentence below was read again against this commit. That the code still reads this way is not a new review of it.</p>
     <ul class="plain">
-      <li><b>Shared hook and rule state.</b> An address can set the rule list of its own address only. Anyone else needs <code>DEFAULT_ADMIN_ROLE</code> on that token, and an address with no code is refused. <code>afterTransfer</code> is accepted only from the token it names. A fake token that names itself can only write under its own key, and <code>FundHoldersRule</code> rejects a token that is not a registered class of its fund.</li>
-      <li><b>Copies of attested contracts.</b> A hook or rule deployed again from the same code has the same attested hash. It behaves the same, starts with empty state, and installing it on a token needs the timelock.</li>
-      <li><b>The intent path.</b> The checks run in the documented order, the type hash matches the struct, the nonce is marked used before the tokens move, and a revert also undoes the announced kind. Signatures go through OpenZeppelin's <code>SignatureChecker</code>: ECDSA accepts low-s signatures only, and smart accounts (ERC-1271) are asked with a read-only call.</li>
+      <li><b>Shared hook and rule state.</b> An address can set the rule list of its own address. Anyone else needs <code>DEFAULT_ADMIN_ROLE</code> on that token, and naming an address with no code reverts. <code>afterTransfer</code> is accepted from the token it names and no other caller. A fake token that names itself writes under its own key, and <code>FundHoldersRule</code> rejects a token that is not a registered class of its fund.</li>
+      <li><b>Copies of attested contracts.</b> A hook or rule deployed again from the same code with the same constructor arguments has the same attested hash. It behaves the same and starts with empty state. Installing it on a token needs the token's admin, which after hand-over is the timelock.</li>
+      <li><b>The intent path.</b> The checks run in the documented order, the type hash matches the struct, and the nonce is marked used before the tokens move. Signatures go through OpenZeppelin's <code>SignatureChecker</code>: ECDSA accepts low-s signatures only, and smart accounts (ERC-1271) are asked with a read-only call.</li>
       <li><b>Trade settlement.</b> The mirror check ties the two legs of a DvP trade together. In the ERC-3009 form the buyer's authorization nonce is <code>keccak256(abi.encode(securityToken, intentHash))</code>, which commits to the security token's address and the seller's intent. Both entry points are guarded against reentry. In the ERC-3009 form the executor also checks that its own cash balance ends where it started and that the seller's rises by exactly the price.</li>
-      <li><b>Frozen balances.</b> The release of frozen tokens cannot underflow: an enforcement action never takes more than the balance, so the frozen part it takes is never more than the frozen amount.</li>
-      <li><b>Governance and deployment.</b> The recovery role is narrow, the guardian can only stop things, and the registry refuses to attest the hash of empty code.</li>
+      <li><b>Frozen balances.</b> The release of frozen tokens cannot underflow: <code>_releaseFrozen</code> reverts above the balance, so the frozen part an enforcement action takes is at most the frozen amount.</li>
+      <li><b>Governance and deployment.</b> The recovery role is narrow, the guardian can stop things and do little else, and the registry refuses to attest the hash of empty code.</li>
     </ul>
+  </div>
+</section>
+
+<section id="review-2026-10-31">
+  <div class="prose">
+    <h2>The review of 2026-10-31: nine items</h2>
+    <p><code>PLAN.md</code> calls it a whole-stack assessment and dates its first fixes 2026-10-31. Nothing records who ran it or the exact tree it read. Commit times suggest three commits not yet merged (<code>refs/pull/12/head</code> to <code>refs/pull/14/head</code>, the last authored at 23:14 UTC that day; the last two were rebased on 2026-11-01 with the same trees), with the 7540 vault's dealing periods and <code>NavDesk</code> not yet committed (<code>refs/pull/15/head</code> is dated 2026-11-01). <code>PLAN.md</code> rates the first two findings low and records no rating for the rest.</p>
+    <p>The repository keeps no report of it. What it records is the findings, in <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/PLAN.md"><code>PLAN.md</code></a> (the sections "Review fixes (2026-10-31)" and "The last review items, settled on 2026-11-01") and <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/SECURITY.md"><code>SECURITY.md</code></a> section 3. Nothing says which attacks it tried or how closely each contract was read, so "whole stack" describes what it set out to cover and not a line-by-line read. Every item below is closed or decided, and each was checked against the code at this commit. Item 6 is a group of four smaller points.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>#</th><th>What it found</th><th>Where it stands</th><th>Pinned by</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td><b>The recovery timelock had no floor.</b> It was OpenZeppelin's plain <code>TimelockController</code>. Governance could schedule <code>updateDelay(0)</code> on it once, then unpause and remove the guardian with no delay.</td>
+          <td><span class="ok">Fixed.</span> <code>Core.ts</code> deploys it as a <code>GovernanceTimelock</code> with no recovery of its own, so <code>updateDelay</code> below one hour reverts with <code>GovernanceTimelock_DelayBelowFloor</code>. The post-deploy check compares the code of the two timelocks and asserts at least 24 hours at hand-over; governance can later lower a delay to the floor through a delayed operation.</td>
+          <td class="wrap-any"><code>test_WhenDeployedWithNoRecovery_NobodyHoldsTheRoleAndTheFloorHolds</code>; <code>test/nodejs/governance.test.ts</code></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td><b><code>Fund.setRule</code> checked attestation only.</b> A <code>FundHoldersRule</code> attested for another fund passed, and would count investors into that other fund while <code>isClassIntact</code> read intact.</td>
+          <td><span class="ok">Fixed.</span> <code>setRule</code> also requires the rule's <code>FUND()</code> to be this fund, or reverts with <code>Fund_RuleForAnotherFund(rule, fund)</code>.</td>
+          <td class="wrap-any"><code>test_WhenTheRuleNamesAnotherFund_Reverts</code>, <code>test_WhenARealRuleOfAnotherFundIsInstalled_Reverts</code></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td><b><code>NavDesk</code> accepted a report age below its cooldown.</b> With <code>maxReportAge</code> under <code>cooldown</code>, no proposal could execute: it stayed too early until its report was too old.</td>
+          <td><span class="ok">Fixed.</span> The constructor and <code>setSettings</code> revert with <code>NavDesk_ReportAgeBelowCooldown(maxReportAge, cooldown)</code>.</td>
+          <td class="wrap-any"><code>test_WhenTheMaximumAgeIsBelowTheCooldown_ItReverts</code>, <code>test_TheMaximumAgeCannotFallBelowTheCooldown</code></td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td><b>Nothing said what <code>settlePeriod</code>'s NAV must leave out.</b> A value that counted the vault's own balance would count pending deposits and claimable redemption cash as invested money.</td>
+          <td><span class="ok">Documented, not checked.</span> The NatSpec of <code>IGated7540Vault.settlePeriod</code> says it. The vault takes the value it is given. <code>NavDesk.propose</code> builds it from the reported value plus the portfolio's <code>pricedValue</code>, less the fee, and does not read what the vault holds. Whether the reported figure is right is the reporter's and checker's to answer for.</td>
+          <td>A note, so no test.</td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td><b>Nothing tied <code>SETTLER_ROLE</code> to a desk.</b> <code>Product.ts</code> granted it to a plain account, no module deployed a <code>NavDesk</code>, and the post-deploy check did not pin the settler. One key could set any price.</td>
+          <td><span class="ok">Fixed in the deployment.</span> <code>Legos.ts</code> builds a desk for a product whose profile names one, <code>Product.ts</code> grants it the role, and <code>assertHandedOver</code> requires the desk to hold it and no account the stack knows of to hold it too. A desk-less fund's settler must be a Safe of at least 2 signers unless the profile names an exception. <b>Limits:</b> the vault does not check the holder, the timelock can grant the role to anyone (delayed and visible), <code>NavDesk.isWired</code> shows it to monitors, and each demo profile names all four sensitive roles as exceptions (<code>DEMO_SIGNERS</code>), so a real deployment must state its own.</td>
+          <td class="wrap-any"><code>test/nodejs/legos.test.ts</code></td>
+        </tr>
+        <tr>
+          <td>6a</td>
+          <td><b>A pause did not stop <code>Portfolio</code>.</b> A stolen allocator key could keep sending money out during one.</td>
+          <td><span class="ok">Fixed.</span> While the vault is paused, <code>Portfolio.allocate</code> reverts with <code>Portfolio_VaultPaused</code> and <code>GuardedAccount.execute</code>, built later, with <code>GuardedAccount_VaultPaused</code>. <code>deallocate</code> still works, for the guardian too. The cost: a permission that pulls money back through <code>execute</code> waits for the unpause, and no profile grants one.</td>
+          <td class="wrap-any"><code>PortfolioUnit_WhileThePauseHolds</code>, <code>test_WhileTheVaultIsPaused_ItRefusesAndNothingMoves</code></td>
+        </tr>
+        <tr>
+          <td>6b</td>
+          <td><b><code>FundHoldersRule.after_</code> joined before it left.</b> A net-zero move at a full fund emitted a count above the cap for a monitor to read.</td>
+          <td><span class="ok">Fixed.</span> The sender leaves first, then the receiver joins.</td>
+          <td class="wrap-any"><code>test_WhenTheSenderLeavesTheFundAtAFullCap_NoEventShowsTheCountAboveTheCap</code></td>
+        </tr>
+        <tr>
+          <td>6c</td>
+          <td><b><code>ProxyDeployer</code> and <code>Fund</code> transfer ownership in one step</b>, OpenZeppelin's plain <code>Ownable</code>.</td>
+          <td>Kept on purpose. <code>PLAN.md</code> gives the reason as a delay in a launch. In the modules the classes are registered first, so a two-step transfer would make the timelock schedule an accept for each fund and leave the operations account owning the fund for the delay. The post-deploy check pins each owner, and a mistaken <code>ProxyDeployer</code> transfer costs a new deployer, not money.</td>
+          <td>The post-deploy check in <code>test/nodejs/fixtures.ts</code></td>
+        </tr>
+        <tr>
+          <td>6d</td>
+          <td><b><code>IntentExecutor.executeBatch</code> can lose the index.</b> A token that returns malformed data escapes the <code>catch</code>, so the batch reverts without naming which item failed.</td>
+          <td>Kept on purpose. Batches are atomic and nothing moves, so the shape of the error is what is lost.</td>
+          <td>No test.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small">Planted bugs for items 1, 2, 6a and 6b: 15 of 15 caught, after two that removed a hand-over check survived and each got a test. Item 3's are in the <code>NavDesk</code> row and item 5's in the Ignition row of <code>SECURITY.md</code> section 5. The post-deploy check is <code>assertHandedOver</code> in <code>test/nodejs/fixtures.ts</code>. The tests run it against each profile on the local network, and no script in the repository runs it against a live deployment. It is not a contract, and it can only ask about accounts it is told of.</p>
+</section>
+
+<section id="pages-check">
+  <div class="prose">
+    <h2>What checking these pages found: sixteen code problems</h2>
+    <p>On 2026-11-01 separate agents wrote these pages and checked about 4,200 of their claims against the code at <code>60c1de3</code>. Where a claim could not be made true by rewording it, the code was wrong. Each problem below has a failing run on the code before the fix, except 9, which is a default in <code>CoreHandover.ts</code> read by hand. The sixteenth came from validating an outside list, which reported the desk's half of it. The fifteen before it were found by the page check itself. The fixes are in <a href="https://github.com/fepvenancio/rwa-token/pull/21">pull request 21</a>.</p>
+    <p>This is not an independent review. An AI assistant wrote much of the code, ran the check and wrote the fixes, and nothing here shows these are the last such problems. <code>PLAN.md</code> has the section "Sixteen code problems found while writing the HTML pages".</p>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>#</th><th>What could happen</th><th>Pinned by</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td><b>A 4626's price written to zero for good.</b> Between a split <code>migrateTo</code> and <code>setPortfolio</code>, anyone's <code>accrue()</code> wrote <code>last = 0</code>.</td><td><code>test_InTheGapThePriceHoldsAndDealingStops</code></td></tr>
+        <tr><td>2</td><td><b>A position left behind.</b> <code>setPortfolio</code> during an outage passed with no write-off, with deposits open at about zero.</td><td><code>test_APortfolioWithAnAdapterOnItsListCannotBeReplaced</code></td></tr>
+        <tr><td>3</td><td><b>A read of nothing written down for good,</b> with deposits open at about zero. A read of nothing writes nothing and stops dealing, and a fall of more than half closes deposits for good.</td><td><code>test_AReadOfNothingIsNotWrittenDownAndDealingStops</code>, <code>test_AStrangersUnitDuringAReadOfNothingOpensNothing</code></td></tr>
+        <tr><td>4</td><td><b>A jammed vault.</b> A target with no code or a short answer made every read revert, the write-off included.</td><td><code>test_WhenTheTargetHasNoCodeThePriceHoldsAndItCanBeWrittenOff</code></td></tr>
+        <tr><td>5</td><td><b>A performance fee on principal.</b> A first fee model plugged during a cooldown, or before <code>adopt</code> from a feeless desk, lost its mark.</td><td><code>test_AFirstPlugDuringACooldownKeepsItsMarkAndChargesNoPrincipal</code>, <code>test_AdoptingFromADeskThatNeverChargedKeepsThePlug</code></td></tr>
+        <tr><td>6</td><td>An approval carried over to the same numbers on a later report: <code>hashOf</code> left out <code>asOf</code>.</td><td><code>test_AnApprovalDoesNotCarryOverToALaterReportWithTheSameNumbers</code></td></tr>
+        <tr><td>7</td><td>A proposal settled the wrong period, with a second settler.</td><td><code>test_WhenAnotherPeriodIsClosedNow_ItReverts</code></td></tr>
+        <tr><td>8</td><td>A <code>maxRate</code> large enough to overflow jammed the vault.</td><td><code>test_ARateAboveTheCeilingIsRefused</code></td></tr>
+        <tr><td>9</td><td>The default attester could not assert <code>US_PERSON</code> or <code>EEA</code>, so a <code>forbidAny</code> on them refused nobody.</td><td><code>credentials.test.ts</code></td></tr>
+        <tr><td>10</td><td><code>SupplyCapRule</code> did not answer ERC-165 for its own interface.</td><td><code>test_ItAnswersForItsInterfaces</code></td></tr>
+        <tr><td>11</td><td>A fee model with a zero recipient stranded the fees owed.</td><td><code>test_NobodyToPayIsRefused</code></td></tr>
+        <tr><td>12</td><td><code>collectFees</code> paid out during a pause.</td><td><code>test_FeesAreNotPaidWhilePaused</code></td></tr>
+        <tr><td>13</td><td><code>setPortfolio</code> and <code>NavDesk.setSettings</code> did not compare the portfolio's asset.</td><td><code>test_APortfolioForAnotherAssetIsRefused</code></td></tr>
+        <tr><td>14</td><td>A wrong flag on <code>SignedEntry</code>, with the contract named as controller of a settled request, stranded an investor's cash.</td><td><code>test_WhenTheVaultDoesNotTakeTheCash_NothingHappens</code></td></tr>
+        <tr><td>15</td><td><b>A gain dropped.</b> A replacement restarted the limit's clock, and the next depositor bought that much cheap.</td><td><code>test_AReplacementKeepsWhatTheLimitHadAllowed</code></td></tr>
+        <tr><td>16</td><td><b>A performance fee on principal, from value with no shares.</b> On a desk a stranger's one-unit donation cost 100 of an unchanged 1,000 at 20%. On a 4626 the last holder's rounding cost the next investor 92 of 1,000. A mark below par and a charge rounding to nothing did the same through dust shares.</td><td><code>NavDesk_NoShares</code>, <code>test_WhenTheLastHolderLeavesDustTheNextInvestorPaysNoFeeOnPrincipal</code>, <code>testFuzz_DustSharesAfterALossDoNotChargeTheNextInvestorOnPrincipal</code>, <code>test_WhenTheChargeRoundsToNoFeeTheMarkIsThePrice</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <p><b>After the sixteen.</b> The last check of these pages found that <code>exitOnly()</code> read true through a read of nothing and false again when the value returned, although no count had been made. No money was at risk, because dealing is stopped through such a read either way. It is fixed in <a href="https://github.com/fepvenancio/rwa-token/pull/22">pull request 22</a>.</p>
+    <p><b>What stays open.</b> A read that is low and not nothing still counts at once, and recovers at <code>maxRate</code>. A fall of half or less in one count leaves deposits open at that price, and falls with a count between them do not add up. A real loss of that size, later made good, needs no wrong read: the buyer shares the recovery.</p>
+    <p>During a read of nothing, a donation that lifts the priced value above <code>feesOwed</code> makes it a low read. In a run, a stranger's one unit took a holder's 1,000 to one raw unit of the asset (a millionth of a token with 6 decimals), and it was still one a year after the target got its money back at a limit of 10%. The stranger cannot buy shares from the vault at that price, because deposits close at that count, and the timelock has to raise the rate to bring the value back. A donation of half the counted value or more does not close them: in a run, 500 donated and 100,000 deposited during a read of nothing took the holder's 1,000 to about 505 once the target had recovered, and left the depositor about 495 ahead. The donations need a target that reads nothing while it is still fresh, and the council's reading of each target before attesting it is the control. New money after a close needs a new vault.</p>
+  </div>
+</section>
+
+<section id="earlier">
+  <div class="prose">
+    <h2>Earlier passes</h2>
+    <p><b>2026-10-17.</b> <code>PLAN.md</code> calls it an independent review, names neither the reviewer nor the commit it read, and records every security and logic finding as real. It rated three items medium. Each was fixed by 2026-10-18 and tagged as a release:</p>
+    <ul class="plain">
+      <li>The guardian's right to cancel timelock operations was a permanent veto: it could pause, then cancel each unpause and its own removal. The recovery timelock is the answer: the guardian holds nothing on it.</li>
+      <li>A rejected 7540 redemption went back to the controller as a forced move, which skipped the investor cap and the pause. <code>rejectRedeemRequest</code> returns the shares as a plain transfer.</li>
+      <li>Once a 7540 claim was ready, a controller that had lost its eligibility could still claim, and a full cap could strand a deposit. Claims check again, and the agent's <code>recoverClaimable</code> delivers what is stranded.</li>
+    </ul>
+    <p>Most of the code at this commit was written after it, so the result says little about this commit. Before it, <code>PLAN.md</code> rates the fixes made when the first code was brought into the repository, two high and two medium. Those were made while building, before any review listed here.</p>
+    <p><b>From 2026-10-16.</b> Written reviews from outside the repository arrived on several dates. The repository keeps neither the reviews nor who wrote them. <code>PLAN.md</code> records their claims checked against the code: some were right and changed the code, and others were wrong. They are not audits, and this page does not count them as coverage.</p>
+  </div>
+</section>
+
+<section id="evidence">
+  <div class="prose">
+    <h2>The automated evidence</h2>
+    <p><a href="https://github.com/fepvenancio/rwa-token/blob/babef08/.github/workflows/ci.yml"><code>ci.yml</code></a> runs these on every pull request and every push to <code>main</code>, with two exceptions: <code>npm run verify:reproducible</code> runs on pull requests into <code>main</code> and, through <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/.github/workflows/release.yml"><code>release.yml</code></a>, on <code>v*</code> tags; mutation testing is by hand and not in CI. The CI run for this commit on <code>main</code> (run 41331469861) passed on 2026-11-01. The runs on <code>main</code> for the commits from <code>f1787df</code> to <code>e6418c0</code>, and for <code>61a103a</code>, were cancelled, so for those the record is the pull request's run. Each merge record names it, except that of <code>f1787df</code>, whose run was on <code>08ea2fd</code>. Two runs on <code>main</code> failed: <code>a2082b8</code> (2026-10-17, the type check) and <code>c859dc6</code> (2026-10-30, the analysis job). The next run after <code>c859dc6</code>, on <code>b7df8ac</code>, passed. Nothing in the repository makes a merge wait for a pass.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Check</th><th>What runs</th><th>What a pass means, and does not</th><th>On record</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Test suite</td>
+          <td><code>npm test</code>, then <code>npx hardhat test solidity --test-profile isolated</code>. Solidity unit, fuzz (256 runs) and invariant tests next to each contract, and Node tests with viem that deploy each profile. <code>ContractSizes.t.sol</code> holds contract sizes to the EIP-170 limit, and <code>InterfaceFreeze.t.sol</code> pins interface ids and event topics.</td>
+          <td>Every written test holds. It says nothing about a case nobody wrote.</td>
+          <td><code>1792 passing (1622 solidity, 170 nodejs)</code> on 2026-11-02, in the merge record of <code>babef08</code>.</td>
+        </tr>
+        <tr>
+          <td>Slither 0.11.5</td>
+          <td><code>npm run slither</code>, a build of the contracts that ship (no <code>.t.sol</code> files, no <code>contracts/test/</code>), then Slither on that build.</td>
+          <td>The gate fails on a finding. A pass means nothing is left after 4 project-wide exclusions (<code>naming-convention</code>, <code>assembly</code>, <code>timestamp</code>, <code>calls-loop</code>) and the 61 <code>slither-disable</code> lines in shipped code at this commit. It does not mean the tool flagged nothing: removing the 59 that existed at <code>60c1de3</code> gave 56 findings across 14 detectors and 22 files, measured on 2026-11-01, and the two added since have not been measured. <code>SECURITY.md</code> section 4 gives the reasons.</td>
+          <td>0 findings on 2026-11-01. Narrowing the build lost nothing on shipped code: the wider and the narrower run reported the same 56.</td>
+        </tr>
+        <tr>
+          <td>Aderyn 0.6.8</td>
+          <td><code>npm run aderyn</code>, from a binary pinned by sha256.</td>
+          <td>The gate fails on a high or low finding left after 5 detectors excluded in <code>aderyn.toml</code> and the 102 <code>aderyn-ignore</code> lines in shipped code at this commit. A second reader for the same kinds of pattern, with the same caveat.</td>
+          <td>0 findings on 2026-11-01. <code>SECURITY.md</code> section 4 lists what was acknowledged.</td>
+        </tr>
+        <tr>
+          <td>Halmos 0.3.3</td>
+          <td><code>npm run test:halmos</code>: 22 properties in 6 suites, in <code>contracts/test/halmos/</code>. <code>IntentTokenHalmos</code> (replay, cancelled nonces, executor binding, frozen balances), <code>DvPExecutorHalmos</code>, <code>CredentialRegistryHalmos</code>, <code>FundHalmos</code>, <code>MinPositionRuleHalmos</code> and <code>PortfolioHalmos</code> (an allocation never passes a cap).</td>
+          <td class="wrap-any">A property holds on every path Halmos explores, within its limits on loops and lengths. The token's suite runs with a stub hook that accepts everything, so it says nothing about rules. The property that a period's claims never pass what it booked is not in: the solvers did not finish on it, and <code>testFuzz_TheSumOfClaimsNeverExceedsTheBookAndFallsShortByAtMostOneUnitEach</code>, <code>testFuzz_TheCashClaimsNeverExceedTheBookAndTheVaultCanPayThem</code> and the invariants in <code>Gated7540Vault.t.sol</code> carry it. None of the eight contracts no review has covered has a property.</td>
+          <td>22 properties on 2026-11-01, in the merge record of <code>61a103a</code>.</td>
+        </tr>
+        <tr>
+          <td>Mutation testing</td>
+          <td>By hand: a bug is planted and the tests run. <code>SECURITY.md</code> section 5 has each row. No script or patch for the mutants is committed, only that section's prose, so these counts rest on that record and cannot be re-run as they were.</td>
+          <td>Each planted bug was caught, its gap closed, or it was shown to be equivalent. It shows the tests catch those bugs, chosen by the same process that wrote the tests, and not that they catch every bug.</td>
+          <td class="wrap-any"><code>Portfolio</code> and its adapter: 87 of 87 (2026-10-30). <code>GuardedAccount</code>, validators, <code>FeeModel</code>, the 4626 with a portfolio: 106 run, 8 alive at first: 2 were code doing nothing, removed; 5 were missing tests, written; 1 is equivalent and stays alive. A rerun on the changed lines is recorded as 8 of 8. <code>Gated7540Vault</code> dealing periods: 38 of 39, the survivor a branch that changed nothing and was removed. <code>NavDesk</code>: 49 of 49. <code>SignedEntry</code>: 20 of 20. <code>SupplyCapRule</code>, <code>ExecutedOnlyRule</code>, <code>Distributor</code>: 34, all caught. Deployment modules and the post-deploy check: 33, all caught. The sixteen fixes above: 66 planted, 62 caught at first, and the 4 survivors were missing tests, which were written and catch them. The read of nothing after them: 9 of 9 (2026-11-02). All on 2026-11-01 unless dated.</td>
+        </tr>
+        <tr>
+          <td>Upgrade validation</td>
+          <td><code>npm run validate:upgrades</code>: OpenZeppelin's <code>upgrades-core</code> 1.46.0 on the upgradeable contracts.</td>
+          <td>Each avoids patterns that are unsafe behind a proxy. No source names an earlier version (<code>@custom:oz-upgrades-from</code>), so it compares no storage layouts across versions.</td>
+          <td>4 of 4 on 2026-11-01, in the merge record of <code>61a103a</code>.</td>
+        </tr>
+        <tr>
+          <td>Reproducibility</td>
+          <td><code>npm run verify:reproducible</code>: two clean production builds, the default profile and forge compared, and <code>TokenProxy</code> against the creation code inside <code>ProxyDeployer</code>.</td>
+          <td>The same source gives the same bytecode however it is built, so a code hash can be recomputed. It says nothing about whether that code is correct.</td>
+          <td>29 contracts on 2026-11-01, in the merge record of <code>61a103a</code>.</td>
+        </tr>
+        <tr>
+          <td>Lint, format, types</td>
+          <td><code>npm run lint:sol</code>, <code>npm run fmt:check</code>, <code>npm run typecheck</code>.</td>
+          <td>Style and type errors. Not a security check.</td>
+          <td>Clean on 2026-11-01, in the merge record of <code>61a103a</code>.</td>
+        </tr>
+        <tr>
+          <td>Toolchain pins</td>
+          <td>Actions by commit hash, <code>npm ci --ignore-scripts</code> from the lockfile, Python tools by <code>pip install --require-hashes</code>, forge and Aderyn by sha256 in <code>tools.lock</code>.</td>
+          <td>CI runs the tools it was pinned to. <code>SECURITY.md</code> section 6 has the detail.</td>
+          <td>In <code>ci.yml</code> at this commit.</td>
+        </tr>
+      </tbody>
+    </table>
   </div>
 </section>
 
 <section id="holds">
   <div class="prose">
     <h2>What holds, and the test that pins it</h2>
-    <p>These are the properties the rest of the documentation depends on. Each was traced in the code and is covered by a test or a Halmos property in the repository at <code>cd1e525</code>. The integration tests in <code>RuleSetIntegration.t.sol</code> use a test identity rule in place of <code>CredentialRule</code>.</p>
+    <p>The properties the rest of the documentation depends on, listed for the review of 2026-10-26 and re-read at this commit. They cover the token and its policy, not the vaults or the portfolio. Each is covered by a test or a Halmos property at <code>babef08</code>, except where a row says otherwise. The integration tests in <code>RuleSetIntegration.t.sol</code> use a test identity rule in place of <code>CredentialRule</code>.</p>
   </div>
   <div class="table-wrap">
     <table class="tight fixed">
       <thead><tr><th>Property</th><th>Where it is enforced</th><th>Pinned by</th></tr></thead>
       <tbody>
-        <tr><td>A hook rejection changes nothing</td><td><code>_update</code></td><td><code>test_WhenHookRejects_ItRevertsAndChangesNothing</code></td></tr>
-        <tr><td>Balances always add up to the supply, and the pre-flight allows exactly the unfrozen balance</td><td>base arithmetic, <code>_check</code></td><td><code>invariant_SumOfBalancesEqualsTotalSupply</code>, <code>invariant_TheUnfrozenBalanceIsExactlyWhatCanBeSent</code></td></tr>
+        <tr><td>A hook rejection changes nothing</td><td><code>_move</code></td><td><code>test_WhenHookRejects_ItRevertsAndChangesNothing</code></td></tr>
+        <tr><td>Balances add up to the supply, and the pre-flight allows exactly the unfrozen balance</td><td>base arithmetic, <code>_check</code></td><td><code>invariant_SumOfBalancesEqualsTotalSupply</code>, <code>invariant_TheUnfrozenBalanceIsExactlyWhatCanBeSent</code></td></tr>
         <tr><td>Frozen tokens are released by exactly the part taken</td><td><code>_releaseFrozen</code></td><td><code>test_WhenSomeOfTheAmountIsUnfrozen_OnlyTheRestIsReleased</code>; Halmos <code>check_frozenBalanceInvariants</code>, <code>check_enforcementCanTakeFrozenTokens</code></td></tr>
-        <tr><td>The kind announced for one movement never leaks into the next</td><td><code>_consumePending</code></td><td><code>test_WhenAPlainTransferFollowsAForcedTransferInTheSameTransaction_ItIsAPlainTransfer</code>, <code>test_WhenAPlainTransferFollowsAnExecutionInTheSameTransaction_ItIsAPlainTransfer</code>, <code>test_WhenAForcedMintIsFollowedByAPlainTransfer_TheTransferIsPlain</code></td></tr>
-        <tr><td>The guardian can pause and cannot unpause; the recovery role can only unpause and remove the guardian</td><td><code>pause</code>, <code>unpause</code>, <code>revokeRole</code></td><td><code>test_WhenGuardianUnpauses_ItReverts</code>, <code>test_WhenRecoveryRevokesAnyOtherRole_ItReverts</code>, <code>test_WhenRecoveryChangesTheHookOrUpgrades_ItReverts</code>, <code>test_WhenRecoveryGrantsAnyRole_ItReverts</code></td></tr>
+        <tr><td>The kind of one movement does not leak into the next</td><td><code>_moveAs</code>, <code>_mintAs</code>: the kind is an argument, not stored</td><td><code>test_WhenAPlainTransferFollowsAForcedTransferInTheSameTransaction_ItIsAPlainTransfer</code>, <code>test_WhenAPlainTransferFollowsAnExecutionInTheSameTransaction_ItIsAPlainTransfer</code>, <code>test_WhenAForcedMintIsFollowedByAPlainTransfer_TheTransferIsPlain</code></td></tr>
+        <tr><td>The guardian can pause and cannot unpause; the recovery role can unpause and remove the guardian, and nothing else on the token</td><td><code>pause</code>, <code>unpause</code>, <code>revokeRole</code></td><td><code>test_WhenGuardianUnpauses_ItReverts</code>, <code>test_WhenRecoveryRevokesAnyOtherRole_ItReverts</code>, <code>test_WhenRecoveryChangesTheHookOrUpgrades_ItReverts</code>, <code>test_WhenRecoveryGrantsAnyRole_ItReverts</code></td></tr>
         <tr><td>A hook must be attested and name the token's registry</td><td><code>_setHook</code></td><td><code>test_WhenHookIsNotAttested_ItReverts</code>, <code>test_WhenTheHookNamesAnotherRegistry_SetPolicyHookReverts</code></td></tr>
         <tr><td>An upgrade needs an attested implementation of the same template</td><td><code>_authorizeUpgrade</code></td><td><code>test_WhenImplementationIsNotAttested_ItReverts</code>, <code>test_WhenTheImplementationIsAnotherTemplate_ItIsRefusedEvenIfAttested</code></td></tr>
         <tr><td>A new token needs an attested implementation and must name the deployer's registry</td><td><code>ProxyDeployer.deploy</code></td><td><code>test_WhenTheImplementationIsNotAttested_ItRevertsAndNothingIsDeployed</code>, <code>test_WhenTheTokenNamesAnotherRegistry_ItRevertsAndNothingIsDeployed</code></td></tr>
-        <tr><td>An intent cannot be replayed, and a cancelled nonce never runs</td><td><code>executeTransfer</code>, <code>cancelIntent</code></td><td><code>test_WhenReplayed_ItRevertsWithNonceUsed</code>; Halmos <code>check_executedIntentCannotReplay</code>, <code>check_cancelledNonceNeverExecutes</code></td></tr>
+        <tr><td>An intent cannot be replayed, and a cancelled nonce does not run</td><td><code>executeTransfer</code>, <code>cancelIntent</code></td><td><code>test_WhenReplayed_ItRevertsWithNonceUsed</code>; Halmos <code>check_executedIntentCannotReplay</code>, <code>check_cancelledNonceNeverExecutes</code></td></tr>
         <tr><td>An altered intent, another key, chain or token, or a high-s signature fails</td><td><code>intentHash</code>, <code>SignatureChecker</code></td><td><code>test_WhenTheExecutorAltersTheIntent_ItRevertsWithBadSignature</code>, <code>test_WhenSignedByAnotherKey_ItRevertsWithBadSignature</code>, <code>test_WhenSignedForAnotherChain_ItRevertsWithBadSignature</code>, <code>test_WhenSignedForAnotherToken_ItRevertsWithBadSignature</code>, <code>test_WhenSignatureIsMalleatedToHighS_ItRevertsWithBadSignature</code></td></tr>
-        <tr><td>An intent naming another executor, or stating a payment with no executor, never runs</td><td><code>_intentPreflight</code></td><td>Halmos <code>check_intentNamingAnotherExecutorNeverExecutes</code>, <code>check_considerationWithoutExecutorNeverExecutes</code></td></tr>
-        <tr><td>The intent checks run in the documented order: deadline, nonce, consideration, executor, <code>validAfter</code>, signature, then the hook</td><td><code>_intentPreflight</code>, <code>executeTransfer</code></td><td><code>test_WhenTheIntentIsExpiredAndMalformed_ExpiryWins</code>, <code>test_WhenTheNonceIsUsedAndTheIntentIsMalformed_NonceUsedWins</code>, <code>test_WhenTheIntentIsMalformedAndNotYetValid_TheConsiderationCheckWins</code>, <code>test_WhenTheExecutorIsWrongAndTheIntentIsNotYetValid_TheExecutorCheckWins</code>, <code>test_WhenTheIntentIsNotYetValidAndTheSignatureIsBad_TheWindowWins</code>, <code>test_WhenTheSignatureIsBadAndTheHookRejects_TheSignatureWins</code></td></tr>
-        <tr><td><code>canExecute</code> and <code>executeTransfer</code> agree for a caller that holds the role</td><td>shared path</td><td><code>test_WhenAnyIntentIsChecked_CanExecuteAgreesWithExecuteTransfer</code>, <code>test/nodejs/parity.test.ts</code></td></tr>
+        <tr><td>An intent naming another executor, or stating a payment with no executor, does not run</td><td><code>_intentPreflight</code></td><td>Halmos <code>check_intentNamingAnotherExecutorNeverExecutes</code>, <code>check_considerationWithoutExecutorNeverExecutes</code></td></tr>
+        <tr><td>The intent checks run in the documented order: deadline, nonce, consideration, executor, <code>validAfter</code>, a zero receiver, signature, then the hook</td><td><code>_intentPreflight</code>, <code>executeTransfer</code></td><td><code>test_WhenTheIntentIsExpiredAndMalformed_ExpiryWins</code>, <code>test_WhenTheNonceIsUsedAndTheIntentIsMalformed_NonceUsedWins</code>, <code>test_WhenTheNonceIsUsedAndTheExecutorIsWrong_NonceUsedWins</code>, <code>test_WhenTheIntentIsMalformedAndNotYetValid_TheConsiderationCheckWins</code>, <code>test_WhenTheExecutorIsWrongAndTheIntentIsNotYetValid_TheExecutorCheckWins</code>, <code>test_WhenTheIntentIsNotYetValidAndTheSignatureIsBad_TheWindowWins</code>, <code>test_WhenTheSignatureIsBadAndTheHookRejects_TheSignatureWins</code>. No test pins deadline before nonce, or the place of the zero receiver.</td></tr>
+        <tr><td><code>canExecute</code> takes the account that would call, and agrees with <code>executeTransfer</code>; an account without the role reads <code>NOT_EXECUTOR</code></td><td>shared path</td><td><code>test_WhenAnyIntentIsChecked_CanExecuteAgreesWithExecuteTransfer</code>, <code>test/nodejs/parity.test.ts</code>; for the role, <code>test_WhenTheNamedAccountHoldsNoRole_ItSaysSoAndTheCallAgrees</code>, <code>test_TheRoleIsCheckedBeforeEverythingElseAsInTheCall</code></td></tr>
         <tr><td>The first rule to say no wins, and an empty list fails closed</td><td><code>beforeTransfer</code></td><td><code>test_WhenARuleRejects_ItReturnsTheFirstReasonAndShortCircuits</code>, <code>test_WhenNoRules_ItReturnsNoRules</code></td></tr>
-        <tr><td>A token sets only its own rule list; anyone else needs that token's admin role</td><td><code>setRules</code></td><td><code>test_WhenCallerIsAnotherToken_ItCannotSetTheRulesOfThisOne</code>, <code>test_WhenAdminOfOneTokenSetsAnother_ItReverts</code></td></tr>
-        <tr><td><code>afterTransfer</code> is accepted only from the token it names</td><td><code>afterTransfer</code></td><td><code>test_WhenCallerIsNotTheContextToken_ItReverts</code>, <code>test_WhenAnotherTokenNamesThisOne_ItReverts</code></td></tr>
-        <tr><td>A rule that re-enters the token reverts the movement</td><td><code>nonReentrant</code> on <code>_update</code></td><td><code>test_WhenARuleReentersTheToken_TheTransferReverts</code></td></tr>
-        <tr><td>Only reviewed rules can be listed: no unattested rule, no duplicate, at most 16</td><td><code>_setRules</code></td><td><code>test_WhenARuleIsNotAttested_ItReverts</code>, <code>test_WhenARuleIsDuplicated_ItReverts</code>, <code>test_WhenAboveTheCap_ItReverts</code></td></tr>
+        <tr><td>A token sets its own rule list; anyone else needs that token's admin role</td><td><code>setRules</code></td><td><code>test_WhenCallerIsAnotherToken_ItCannotSetTheRulesOfThisOne</code>, <code>test_WhenAdminOfOneTokenSetsAnother_ItReverts</code></td></tr>
+        <tr><td><code>afterTransfer</code> is accepted from the token it names and no other caller</td><td><code>afterTransfer</code></td><td><code>test_WhenCallerIsNotTheContextToken_ItReverts</code>, <code>test_WhenAnotherTokenNamesThisOne_ItReverts</code></td></tr>
+        <tr><td>A rule that re-enters the token reverts the movement</td><td><code>nonReentrant</code> on <code>_move</code></td><td><code>test_WhenARuleReentersTheToken_TheTransferReverts</code></td></tr>
+        <tr><td>A rule list takes attested rules, no duplicate, at most 16</td><td><code>_setRules</code></td><td><code>test_WhenARuleIsNotAttested_ItReverts</code>, <code>test_WhenARuleIsDuplicated_ItReverts</code>, <code>test_WhenAboveTheCap_ItReverts</code></td></tr>
         <tr><td>A failed deployment leaves no proxy and does not use up the symbol</td><td><code>ProxyDeployer.deploy</code></td><td><code>test_WhenInitialisationReverts_NothingIsDeployed</code>, <code>test_WhenInitialisationReverts_TheSameSymbolDeploysAfterTheFix</code></td></tr>
         <tr><td>A token that came up with other rules than expected is refused</td><td><code>_rulesMatch</code></td><td><code>test_WhenTheHookHoldsOtherRules_ItRevertsAndNothingIsDeployed</code></td></tr>
-        <tr><td>Empty code and the wrong kind never read as attested</td><td><code>PolicyRegistry</code></td><td><code>test_WhenCodehashIsEmptyCode_ItReverts</code>, <code>test_WhenAttestedAsAnotherKind_ItReturnsFalse</code></td></tr>
+        <tr><td>Empty code and the wrong kind do not read as attested</td><td><code>PolicyRegistry</code></td><td><code>test_WhenCodehashIsEmptyCode_ItReverts</code>, <code>test_WhenAttestedAsAnotherKind_ItReturnsFalse</code></td></tr>
         <tr><td>For a movement the holder starts, the pre-flight and the write agree through a rule set</td><td>shared path</td><td><code>test_WhenAHolderIsLocked_TransfersAndIntentsAgreeUntilUnlock</code>, <code>test_WhenTheSenderIsFrozen_TransfersAndIntentsAgreeUntilUnfrozen</code>, <code>test_WhenADustTransferTargetsAnEmptyAccount_ItIsRejectedWithParity</code></td></tr>
-        <tr><td>For a plain transfer, <code>canTransfer</code> is never true while <code>canSend</code> or <code>canReceive</code> is false</td><td>shared path</td><td><code>testFuzz_CanTransferNeverExceedsTheAccountQuestions</code></td></tr>
-        <tr><td><code>MinPositionRule</code> never reverts, never rejects a forced move, and rejects a transfer exactly when a position would be dust</td><td><code>check</code></td><td>Halmos <code>check_theRuleNeverReverts</code>, <code>check_aForcedMovementIsNeverRejected</code>, <code>check_aTransferIsRejectedExactlyWhenAPositionWouldBeDust</code></td></tr>
+        <tr><td>For a plain transfer, <code>canTransfer</code> is not true while <code>canSend</code> or <code>canReceive</code> is false</td><td>shared path</td><td><code>testFuzz_CanTransferNeverExceedsTheAccountQuestions</code></td></tr>
+        <tr><td><code>MinPositionRule</code> does not revert, does not reject a forced move, and rejects a transfer exactly when a position would be dust</td><td><code>check</code></td><td>Halmos <code>check_theRuleNeverReverts</code>, <code>check_aForcedMovementIsNeverRejected</code>, <code>check_aTransferIsRejectedExactlyWhenAPositionWouldBeDust</code></td></tr>
       </tbody>
     </table>
   </div>
-  <p class="small">Unit and integration tests sit next to each contract (<code>*.t.sol</code>); the Halmos properties are in <a href="https://github.com/fepvenancio/rwa-token/tree/cd1e525/contracts/test/halmos"><code>contracts/test/halmos/</code></a> (<code>IntentTokenHalmos.t.sol</code>, <code>MinPositionRuleHalmos.t.sol</code>).</p>
+  <p class="small">Unit and integration tests sit next to each contract (<code>*.t.sol</code>); the Halmos properties are in <a href="https://github.com/fepvenancio/rwa-token/tree/babef08/contracts/test/halmos"><code>contracts/test/halmos/</code></a> (here <code>IntentTokenHalmos.t.sol</code> and <code>MinPositionRuleHalmos.t.sol</code>).</p>
 </section>
 
 <section id="accepted">
   <div class="prose">
     <h2>Behaviour that looks like a bug and is on purpose</h2>
-    <p>These behaviours are in the code by design. They are listed so that a reader does not report them as findings.</p>
+    <p>These behaviours are in the code by design. They are listed so that a reader does not report them as findings. <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/SECURITY.md"><code>SECURITY.md</code></a> section 3 has the longer list, vaults and legos included.</p>
     <ul class="plain">
       <li><b><code>canTransfer</code> can say yes where the write reverts.</b> ERC-7943 forbids it to fail on a plain balance shortfall, so with nothing frozen an amount above the balance reads true when the rules accept it. <code>canTransferWithReason</code> says no with <code>INSUFFICIENT_UNFROZEN</code>.</li>
       <li><b>A pause stops mints and burns too.</b> Only <span class="k k-forced">FORCED</span> movements pass.</li>
-      <li><b>The account questions are not movement answers.</b> <code>canSend</code> and <code>canReceive</code> leave out the fund's investor cap and the minimum position, which ERC-7943 keeps out of them. They also cannot see the kinds a rule exempts: <code>canSend</code> says <code>LOCKED</code> for a locked holder whose forced transfer still passes, and for a locked holder that holds <code>BURNER_ROLE</code>, whose own burn reads true in <code>canTransfer</code>.</li>
-      <li><b>Revoking an attestation does not affect running tokens.</b> The registry is asked at install and upgrade time only. The guardian can pause while governance removes the component.</li>
+      <li><b>The account questions are not movement answers.</b> <code>canSend</code> and <code>canReceive</code> leave out the fund's investor cap and the minimum position, which ERC-7943 keeps out of them. They also cannot see the kinds a rule exempts: <code>canSend</code> says no for a locked holder whose forced transfer still passes, and for a locked holder that holds <code>BURNER_ROLE</code>, whose own burn reads true in <code>canTransfer</code>.</li>
+      <li><b>Revoking an attestation does not affect running tokens.</b> The registry is asked at install and upgrade time. The guardian can pause while governance removes the component.</li>
       <li><b>One unit can still reach an existing holder.</b> A minimum does not stop one unit sent to a holder at or above it. That holder's exit of its old exact balance then leaves a remainder and reverts with <code>BELOW_MIN_POSITION</code>; it exits its current balance instead.</li>
       <li class="wrap-any"><b>Lowering the fund's cap is a ratchet.</b> While the investor count is above the cap, no new investor gets in, not even by a move that empties the sender's only class. Existing investors can still move among themselves and leave (<code>test_WhenTheCountIsAboveALoweredCap_ANetZeroMoveIsStillRejected</code>).</li>
       <li><b>The investor count is by address.</b> One person with two addresses counts twice.</li>
       <li><b>A burner's own burns are enforcement burns.</b> The rules look at the operator, so a burn by a <code>BURNER_ROLE</code> holder passes its own lockup and minimum position. A burner account should not also be used as an investor.</li>
-      <li><b>The recovery timelock administers itself,</b> as every OpenZeppelin <code>TimelockController</code> does: an operation it runs, after its delay, can change its own roles.</li>
+      <li><b>The recovery timelock administers itself,</b> as every OpenZeppelin <code>TimelockController</code> does: an operation it runs, after its delay, can change its own roles. The floor on its delay still holds.</li>
+      <li><b>With no shares a report changes nothing.</b> A desk proposes a value of zero whatever is reported or sits in the portfolio, and a 4626 counts zero, so the next investors buy at par. What is left goes to them.</li>
+      <li><b>A low read counts at once.</b> Losses are not rate limited. Deposits stay open at a price that can still be read while the fall in one count is half or less, and close for good beyond that. See <a href="#pages-check">what checking these pages found</a>.</li>
       <li><b>Pre-flights answer for the latest block.</b> A write lands in a later one, so at a lockup end, a window edge or an intent deadline the two can differ by a second.</li>
-    </ul>
-  </div>
-</section>
-
-<section id="not-covered">
-  <div class="prose">
-    <h2>What the review does not cover</h2>
-    <ul class="plain">
-      <li><code>CredentialRegistry</code> and <code>CredentialRule</code>, the identity layer that decides who may hold.</li>
-      <li><code>Gated4626Vault</code> and <code>Gated7540Vault</code>, and everything only they use.</li>
-      <li>The Ignition deployment modules in <code>ignition/modules/</code>.</li>
-      <li>OpenZeppelin 5.6.1 itself. The contracts were read for how they use it, not the library.</li>
-      <li>Economic and governance risk. A compromised security council, governance multisig or issuer key is outside what the code can defend against.</li>
     </ul>
     <p>To run the tests behind this page: <code>npx hardhat test</code>, and <code>npm run test:halmos</code> for the symbolic properties.</p>
   </div>
@@ -336,13 +510,28 @@
   <div class="cards">
     <a class="card" href="contracts/ProxyDeployer.html"><span class="name">ProxyDeployer</span><p>The deploy checks behind finding 1.</p></a>
     <a class="card" href="contracts/IntentExecutor.html"><span class="name">IntentExecutor</span><p>Single intents and all-or-nothing batches.</p></a>
-    <a class="card" href="contracts/MinPositionRule.html"><span class="name">MinPositionRule</span><p>The minimum position that closes finding 3.</p></a>
-    <a class="card" href="movement.html"><span class="name">One movement</span><p>The path every property on this page is about.</p></a>
+    <a class="card" href="contracts/MinPositionRule.html"><span class="name">MinPositionRule</span><p>The minimum position that closes finding 3 where it is set.</p></a>
+    <a class="card" href="contracts/GovernanceTimelock.html"><span class="name">GovernanceTimelock</span><p>The floor that holds on both timelocks.</p></a>
+    <a class="card" href="contracts/NavDesk.html"><span class="name">NavDesk</span><p>The desk that holds the settler's role.</p></a>
+    <a class="card" href="movement.html"><span class="name">One movement</span><p>The path most properties on this page are about.</p></a>
     <a class="card" href="deployment.html"><span class="name">Deployment and governance</span><p>The registry, the timelocks and the guardian in practice.</p></a>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>cd1e525</code> on <code>main</code>.</footer>
+<section id="source">
+  <div class="prose">
+    <h2>Source</h2>
+    <ul class="plain">
+      <li>The audit package and its limits: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/SECURITY.md"><code>SECURITY.md</code></a></li>
+      <li>The review items as recorded: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/PLAN.md"><code>PLAN.md</code></a></li>
+      <li>CI: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/.github/workflows/ci.yml"><code>ci.yml</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/.github/workflows/release.yml"><code>release.yml</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/scripts/verify-reproducible.ts"><code>verify-reproducible.ts</code></a></li>
+      <li>Analyser settings: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/slither.config.json"><code>slither.config.json</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/aderyn.toml"><code>aderyn.toml</code></a></li>
+      <li>The post-deploy check: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/fixtures.ts"><code>test/nodejs/fixtures.ts</code></a></li>
+    </ul>
+  </div>
+</section>
+
+<footer>Describes the contracts at commit <code>babef08</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

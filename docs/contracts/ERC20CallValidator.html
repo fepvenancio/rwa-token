@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ERC20CallValidator · Gated Token Stack</title>
+<meta name="description" content="Accepts a transfer to one address, or an approval of one spender, up to one amount per call, and refuses everything else.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="../index.html">Gated Token Stack</a>
+  <a href="../index.html">Overview</a>
+  <a href="../index.html#contracts">Contracts</a>
+  <a href="../roles.html">Who can do what</a>
+  <a href="../movement.html">One movement</a>
+  <a href="../deployment.html">Deployment and governance</a>
+  <a href="../money.html">Where the money sits</a>
+  <a href="../review.html">Security review</a>
+</nav>
+<main class="page">
+
+<header class="top wrap-any">
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Portfolio</div>
+  <h1>ERC20CallValidator</h1>
+  <p class="lede">Judges a token call for a <a href="GuardedAccount.html">GuardedAccount</a>: a <code>transfer</code> to one address, or an <code>approve</code> of one spender, up to one amount per call. It refuses everything else.</p>
+  <div class="facts">
+    <span class="fact"><b>contracts/portfolio/ERC20CallValidator.sol</b></span>
+    <span class="fact">immutable, <b>no storage</b></span>
+    <span class="fact">attested as <b>VALIDATOR</b></span>
+  </div>
+</header>
+
+<section id="in-one-minute">
+  <div class="callout wrap-any">
+    <h3>In one minute</h3>
+    <p>A <a href="GuardedAccount.html">GuardedAccount</a> permission says which function of which contract may be called, and this contract says with which parameters. It holds two settings, the one address allowed (<code>WHO</code>) and the most one call may name (<code>MAX_PER_CALL</code>), both immutable, so the attested code hash covers the exact address and amount. A custodian is an account with one permission, the asset's <code>transfer</code>, judged by one of these naming the custodian.</p>
+  </div>
+</section>
+
+<section id="how">
+  <div class="prose wrap-any">
+    <h2>What it accepts and refuses</h2>
+    <p><code>validate(account, target, data)</code> returns true or false. It looks at <code>data</code> alone: the account and the target are ignored, because the permission already names the target. It checks the length first, then the selector, then decodes the two arguments.</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>The call data</th><th>Answer</th><th>Test</th></tr></thead>
+      <tbody>
+        <tr><td><code>transfer(WHO, amount)</code> with <code>amount</code> up to <code>MAX_PER_CALL</code>, zero included</td><td class="c ok">true</td><td><code>testFuzz_ATransferToTheOneAddressUpToTheAmountPasses</code></td></tr>
+        <tr><td><code>approve(WHO, amount)</code> with <code>amount</code> up to <code>MAX_PER_CALL</code>, zero included</td><td class="c ok">true</td><td><code>testFuzz_AnApprovalOfTheOneSpenderUpToTheAmountPasses</code></td></tr>
+        <tr><td>Either of those with one more than <code>MAX_PER_CALL</code></td><td class="c no">false</td><td><code>test_OneAboveTheAmountIsRefused</code></td></tr>
+        <tr><td>Either of those naming any other address</td><td class="c no">false</td><td><code>testFuzz_AnyOtherAddressIsRefused</code></td></tr>
+        <tr><td><code>transferFrom</code>, which is longer</td><td class="c no">false</td><td><code>test_TransferFromIsRefused</code></td></tr>
+        <tr><td>Another function of the same shape, such as <code>increaseAllowance</code> or <code>mint</code></td><td class="c no">false</td><td><code>test_AnyOtherFunctionWithTheSameShapeIsRefused</code></td></tr>
+        <tr><td>Any length but 68 bytes, including extra bytes after a valid call</td><td class="c no">false</td><td><code>testFuzz_AnyOtherLengthIsRefused</code>, <code>test_ExtraDataIsRefused</code></td></tr>
+        <tr><td>Too short to hold a selector, or empty</td><td class="c no">false, with no revert</td><td><code>test_TooShortIsRefusedRatherThanReverting</code></td></tr>
+        <tr><td>68 bytes and the right selector, with non-zero bits in the unused upper part of the address word</td><td class="c no">reverts</td><td>None at this commit</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose wrap-any">
+    <p>The last row is the one case that does not return false. The call has the right length and selector, so it reaches the decoder, and the decoder refuses a malformed address by reverting with no data. <code>GuardedAccount.execute</code> then reverts with that empty revert in place of <code>GuardedAccount_CallRefused</code>. Nothing runs either way.</p>
+  </div>
+</section>
+
+<section id="functions">
+  <div class="prose wrap-any"><h2>What it can do</h2></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>validate(account, target, data)</code></td><td>Anyone (read-only)</td><td>The answer above. It is a view, so it changes nothing.</td></tr>
+        <tr><td><code>WHO()</code>, <code>MAX_PER_CALL()</code></td><td>Anyone (read-only)</td><td>The one address allowed, and the most one call may name.</td></tr>
+        <tr><td>The constructor</td><td>The deployer</td><td>Takes <code>(who, maxPerCall)</code> and reverts with <code>ERC20CallValidator_ZeroAddress</code> on a zero address. A <code>maxPerCall</code> of zero is accepted, and then only zero amounts pass.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="why">
+  <div class="prose wrap-any">
+    <h2>Why it is built this way</h2>
+    <ul class="plain">
+      <li><b>An exact length.</b> Extra bytes after a valid call cannot pass unread.</li>
+      <li><b>The selector is read here as well.</b> <code>increaseAllowance</code> has the same arguments as <code>approve</code>, so a check on the arguments alone would pass it.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="prose wrap-any">
+    <h2>What it does not do</h2>
+    <ul class="plain">
+      <li><b>It does not keep a total.</b> It has no storage, so <code>MAX_PER_CALL</code> applies to each call. Several transfers, in one batch or many, can send more. The portfolio's <a href="Portfolio.html#caps">caps</a> limit what reaches the account.</li>
+      <li><b>It does not separate <code>transfer</code> from <code>approve</code>.</b> It accepts both. Which one an account may make depends on the permission's selector: the deployment module grants only <code>transfer</code> for a custodian.</li>
+      <li><b>It does not look at the token.</b> The permission names the target, and the validator would accept the same call on any token it was attached to.</li>
+      <li><b>An approval is not undone by a revoke.</b> See the <a href="GuardedAccount.html#limits">GuardedAccount page</a>.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="connected">
+  <div class="prose wrap-any"><h2>Connected to</h2></div>
+  <div class="cards">
+    <a class="card" href="GuardedAccount.html"><span class="name">GuardedAccount</span><p>Calls it before each call a permission covers.</p></a>
+    <a class="card" href="ERC4626CallValidator.html"><span class="name">ERC4626CallValidator</span><p>The other validator, for entering and leaving an outside vault.</p></a>
+    <a class="card" href="PolicyRegistry.html"><span class="name">PolicyRegistry</span><p>Where its code hash must be attested as <code>VALIDATOR</code>.</p></a>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose wrap-any">
+    <h2>Source and tests</h2>
+    <ul class="plain">
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/portfolio/ERC20CallValidator.sol"><code>contracts/portfolio/ERC20CallValidator.sol</code></a>, interfaces <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/IERC20CallValidator.sol"><code>IERC20CallValidator.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/ICallValidator.sol"><code>ICallValidator.sol</code></a></li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/portfolio/ERC20CallValidator.t.sol"><code>ERC20CallValidator.t.sol</code></a>, and through an account in <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/portfolio/GuardedAccount.t.sol"><code>GuardedAccount.t.sol</code></a></li>
+    </ul>
+  </div>
+</section>
+
+<footer>Describes the contracts at commit <code>babef08</code> on <code>main</code>.</footer>
+</main>
+</body>
+</html>

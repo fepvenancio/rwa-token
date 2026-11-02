@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GuardedAccount · Gated Token Stack</title>
+<meta name="description" content="A portfolio adapter that makes only the calls its attested validators allow, which is how a custodian or a strategy is expressed in the stack.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="../index.html">Gated Token Stack</a>
+  <a href="../index.html">Overview</a>
+  <a href="../index.html#contracts">Contracts</a>
+  <a href="../roles.html">Who can do what</a>
+  <a href="../movement.html">One movement</a>
+  <a href="../deployment.html">Deployment and governance</a>
+  <a href="../money.html">Where the money sits</a>
+  <a href="../review.html">Security review</a>
+</nav>
+<main class="page">
+
+<header class="top wrap-any">
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Portfolio</div>
+  <h1>GuardedAccount</h1>
+  <p class="lede">A <a href="Portfolio.html">Portfolio</a> adapter that makes outside calls, and only the calls its validators allow. A custodian or a strategy is one of these with a small set of permissions.</p>
+  <div class="facts">
+    <span class="fact"><b>contracts/portfolio/GuardedAccount.sol</b></span>
+    <span class="fact">immutable, <b>not a proxy</b></span>
+    <span class="fact">attested as <b>ADAPTER</b></span>
+    <span class="fact"><b>reported</b>: <b>reported()</b> is true</span>
+    <span class="fact">plain calls: <b>no delegatecall, no value</b></span>
+    <span class="fact">no role table: it <b>asks the vault</b></span>
+  </div>
+</header>
+
+<section id="in-one-minute">
+  <div class="callout wrap-any">
+    <h3>In one minute</h3>
+    <p>Some of a fund's money has to leave the chain, or go through a contract no adapter was written for. An ordinary wallet could do that, and could also do anything else. This account does only what has been written down. Each call needs a permission for that exact contract and function, and the permission's validator, a small attested contract, must accept the parameters. No permission means refused. The timelock grants permissions, the guardian can revoke one at once, the timelock can revoke one after its delay, and the allocator makes the calls. Its money can sit off-chain, so its value comes from a report, which means it can only join a portfolio that accepts reported adapters. <code>SECURITY.md</code> calls it the most dangerous lego in the stack, and a review of each permission set is what closes that.</p>
+  </div>
+</section>
+
+<section id="how">
+  <div class="prose wrap-any">
+    <h2>How a call is judged</h2>
+    <p><code>execute(calls)</code> takes a list of calls, each a <code>Call</code> with a <code>target</code> and <code>data</code>. It is all or nothing: if any call is refused or fails, nothing in the batch happens (<code>test_AllOrNothing</code>).</p>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 780 588" role="img" aria-label="The execute call, step by step. The allocator calls execute. If the caller lacks the vault's ALLOCATOR_ROLE, it reverts with GuardedAccount_Unauthorized. If the vault is paused, it reverts with GuardedAccount_VaultPaused. Then for each call in order: it reads the selector, the first four bytes of the data or zero if the data is shorter. If there is no validator for this target and selector, or the validator does not accept the parameters, it reverts with GuardedAccount_CallRefused. Otherwise it emits CallMade and makes a plain call with no value and no delegatecall. If the call fails, its error comes back and the whole batch is undone.">
+        <defs>
+          <marker id="ga-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+          <marker id="ga-arrow-rej" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="rej"/></marker>
+        </defs>
+        <rect class="act" x="40" y="14" width="440" height="40" rx="8"/>
+        <text x="60" y="39" class="bold">The allocator calls <tspan class="mono">execute(calls)</tspan></text>
+        <line class="ln" x1="260" y1="54" x2="260" y2="74" marker-end="url(#ga-arrow)"/>
+
+        <rect class="b" x="40" y="76" width="440" height="44" rx="8"/>
+        <text x="60" y="103">1. Does the caller hold the vault's <tspan class="mono sm">ALLOCATOR_ROLE</tspan>?</text>
+        <line class="ln-rej" x1="480" y1="98" x2="530" y2="98" marker-end="url(#ga-arrow-rej)"/>
+        <text x="492" y="90" class="sm m">no</text>
+        <rect class="rejbox" x="534" y="80" width="226" height="36" rx="6"/>
+        <text x="546" y="103" class="mono sm rej">GuardedAccount_Unauthorized</text>
+        <line class="ln" x1="260" y1="120" x2="260" y2="140" marker-end="url(#ga-arrow)"/>
+
+        <rect class="b" x="40" y="142" width="440" height="44" rx="8"/>
+        <text x="60" y="169">2. Is the vault paused?</text>
+        <line class="ln-rej" x1="480" y1="164" x2="530" y2="164" marker-end="url(#ga-arrow-rej)"/>
+        <text x="492" y="156" class="sm m">yes</text>
+        <rect class="rejbox" x="534" y="146" width="226" height="36" rx="6"/>
+        <text x="546" y="169" class="mono sm rej">GuardedAccount_VaultPaused</text>
+        <line class="ln" x1="260" y1="186" x2="260" y2="222" marker-end="url(#ga-arrow)"/>
+
+        <rect class="frame" x="24" y="204" width="472" height="306" rx="10"/>
+        <text x="36" y="219" class="sm m">for each call, in order</text>
+
+        <rect class="b2" x="40" y="224" width="440" height="44" rx="8"/>
+        <text x="60" y="251">3. Selector: the first 4 bytes of data, or zero if shorter</text>
+        <line class="ln" x1="260" y1="268" x2="260" y2="288" marker-end="url(#ga-arrow)"/>
+
+        <rect class="b" x="40" y="290" width="440" height="44" rx="8"/>
+        <text x="60" y="317">4. Is there a validator for this target and selector?</text>
+        <line class="ln-rej" x1="480" y1="312" x2="530" y2="312" marker-end="url(#ga-arrow-rej)"/>
+        <text x="506" y="304" class="sm m">no</text>
+        <rect class="rejbox" x="534" y="294" width="226" height="102" rx="6"/>
+        <text x="546" y="340" class="mono sm rej">GuardedAccount_CallRefused</text>
+        <text x="546" y="358" class="sm rej">(target, selector)</text>
+        <line class="ln" x1="260" y1="334" x2="260" y2="354" marker-end="url(#ga-arrow)"/>
+
+        <rect class="b" x="40" y="356" width="440" height="44" rx="8"/>
+        <text x="60" y="383">5. Does the validator accept the parameters?</text>
+        <line class="ln-rej" x1="480" y1="378" x2="530" y2="378" marker-end="url(#ga-arrow-rej)"/>
+        <text x="506" y="370" class="sm m">no</text>
+        <line class="ln" x1="260" y1="400" x2="260" y2="420" marker-end="url(#ga-arrow)"/>
+
+        <rect class="b2" x="40" y="422" width="440" height="72" rx="8"/>
+        <text x="60" y="448">6. Emit <tspan class="mono sm">CallMade</tspan>, then a plain call:</text>
+        <text x="78" y="468">no value, no delegatecall</text>
+        <line class="ln-rej" x1="480" y1="458" x2="530" y2="458" marker-end="url(#ga-arrow-rej)"/>
+        <text x="506" y="450" class="sm m">fails</text>
+        <rect class="rejbox" x="534" y="430" width="226" height="56" rx="6"/>
+        <text x="546" y="453" class="sm rej">Its error comes back, and</text>
+        <text x="546" y="471" class="sm rej">the whole batch is undone</text>
+        <line class="ln" x1="260" y1="494" x2="260" y2="534" marker-end="url(#ga-arrow)"/>
+
+        <rect class="act" x="40" y="536" width="440" height="40" rx="8"/>
+        <text x="60" y="561" class="bold">Every call in the list ran</text>
+      </svg>
+    </div>
+    <figcaption class="wrap-any"><b>Two gates per call.</b> The permission says which function of which contract, and the validator says which parameters. A validator that reverts rather than answering also stops the batch, with the validator's revert in place of <code>GuardedAccount_CallRefused</code>: nothing runs either way. The validator is called as a view, so it cannot change state.</figcaption>
+  </figure>
+  <ul class="plain wrap-any">
+    <li><b>Plain calls.</b> The call goes through OpenZeppelin's <code>Address.functionCall</code>, with zero value. A target with no code fails with <code>AddressEmptyCode</code> (<code>test_ItCanCallANonExistentContractOnlyByFailing</code>), and a failing call's own error comes back, or <code>FailedCall</code> if it gave none. <code>test_AFailingCallBubblesItsError</code> checks only that the batch reverts. The account has no delegatecall, no modules, no payable function and no <code>receive</code> function.</li>
+    <li><b>Short data.</b> Data under 4 bytes reads as the selector zero, and with no permission at that selector it is refused (<code>test_DataTooShortForASelectorIsRefused</code>). A permission set at selector zero would hand such a call to its validator. The two shipped validators refuse it.</li>
+    <li><b>Same function, other contract.</b> A permission covers one target and one selector. Another function of that contract, or the same function of another contract, is refused (<code>test_AnotherFunctionOfAPermittedContractIsRefused</code>, <code>test_TheSameFunctionOfAnotherContractIsRefused</code>).</li>
+  </ul>
+</section>
+
+<section id="permissions">
+  <div class="prose wrap-any">
+    <h2>Permissions</h2>
+    <p><code>validatorOf(target, selector)</code> holds the table. Zero means refused, so a function passes only because someone listed it.</p>
+    <ul class="plain">
+      <li><b>Granting: <code>setPermission(target, selector, validator)</code>.</b> The vault's <code>DEFAULT_ADMIN_ROLE</code>, which is the timelock after the hand-over. The guardian cannot grant (<code>test_TheGuardianCannotGrant</code>). The validator must be attested as <code>VALIDATOR</code> in the registry the vault names (<code>GuardedAccount_NotAttested</code>), and one attested as anything else is refused (<code>test_AValidatorAttestedAsSomethingElseIsRefused</code>). It emits <code>PermissionSet(target, selector, validator)</code>.</li>
+      <li><b>Accounts that cannot be named.</b> The account's own portfolio, its own vault and the account itself, as the target of a permission (<code>GuardedAccount_ForbiddenTarget</code>, <code>test_ItsOwnPortfolioVaultAndSelfCannotBeNamed</code>). These are the contracts that govern the account. Every other contract can be named, so the review of each permission set is what decides.</li>
+      <li><b>Revoking: <code>revokePermission(target, selector)</code>.</b> The vault's <code>DEFAULT_ADMIN_ROLE</code> or <code>GUARDIAN_ROLE</code>, with effect on the next call (<code>test_ARevokedPermissionRefusesAtOnce</code>). It has no pause check, so it works while the vault is paused. It emits <code>PermissionRevoked(target, selector)</code>.</li>
+      <li><b>Making calls.</b> The vault's <code>ALLOCATOR_ROLE</code>, asked live, so a revoked allocator stops at once (<code>test_ARevokedAllocatorStopsAtOnce</code>).</li>
+    </ul>
+  </div>
+</section>
+
+<section id="custodian">
+  <div class="prose wrap-any">
+    <h2>A custodian is one permission</h2>
+    <p>A custodian is expressed as a <code>GuardedAccount</code> with one permission: the asset's <code>transfer</code>, judged by an <a href="ERC20CallValidator.html">ERC20CallValidator</a> that names the custodian. The <code>managed-fund</code> deployment profile builds exactly this for each custodian, and <code>test/nodejs/legos.test.ts</code> runs it end to end.</p>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 780 242" role="img" aria-label="A custodian as a GuardedAccount. The allocator moves money from the portfolio to the account with allocate, under caps on its allocation. The allocator then calls execute, and the account makes a transfer to the custodian, which the ERC20CallValidator judges: the one address it names, up to its amount per call. The custodian sends money back to the account by its own decision. The allocator or the guardian moves the account's balance to the portfolio with deallocate.">
+        <defs>
+          <marker id="gc-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+        </defs>
+        <rect class="b2" x="350" y="12" width="384" height="62" rx="8"/>
+        <text x="370" y="36" class="mono bold">ERC20CallValidator</text>
+        <text x="370" y="56" class="sm m">transfer to <tspan class="mono sm">WHO</tspan> only, up to <tspan class="mono sm">MAX_PER_CALL</tspan> each call</text>
+        <line class="ln dash" x1="542" y1="74" x2="542" y2="150" marker-end="url(#gc-arrow)"/>
+        <text x="550" y="104" class="sm m">judges each transfer</text>
+
+        <rect class="b" x="14" y="124" width="170" height="104" rx="8"/>
+        <text x="99" y="170" text-anchor="middle" class="bold">Portfolio</text>
+        <text x="99" y="190" text-anchor="middle" class="sm m">idle money</text>
+
+        <rect class="act" x="310" y="124" width="170" height="104" rx="8"/>
+        <text x="395" y="164" text-anchor="middle" class="mono bold">GuardedAccount</text>
+        <text x="395" y="184" text-anchor="middle" class="sm m">its balance is</text>
+        <text x="395" y="200" text-anchor="middle" class="sm m">what it can return</text>
+
+        <rect class="b" x="606" y="124" width="160" height="104" rx="8"/>
+        <text x="686" y="170" text-anchor="middle" class="bold">Custodian</text>
+        <text x="686" y="190" text-anchor="middle" class="sm m">off-chain from here</text>
+
+        <line class="ln" x1="184" y1="154" x2="308" y2="154" marker-end="url(#gc-arrow)"/>
+        <text x="246" y="144" text-anchor="middle" class="mono sm">allocate</text>
+        <text x="246" y="170" text-anchor="middle" class="sm m">allocator, caps</text>
+        <line class="ln" x1="310" y1="200" x2="186" y2="200" marker-end="url(#gc-arrow)"/>
+        <text x="246" y="191" text-anchor="middle" class="mono sm">deallocate</text>
+        <text x="246" y="216" text-anchor="middle" class="sm m">allocator, guardian</text>
+
+        <line class="ln" x1="480" y1="154" x2="604" y2="154" marker-end="url(#gc-arrow)"/>
+        <text x="534" y="144" text-anchor="end" class="mono sm">execute</text>
+        <text x="542" y="170" text-anchor="middle" class="sm m">allocator</text>
+        <line class="ln dash" x1="606" y1="200" x2="482" y2="200" marker-end="url(#gc-arrow)"/>
+        <text x="544" y="191" text-anchor="middle" class="sm">sends it back</text>
+        <text x="544" y="216" text-anchor="middle" class="sm m">its own decision</text>
+      </svg>
+    </div>
+    <figcaption class="wrap-any"><b>Three moves, each with its own control.</b> The caps limit what reaches the account, the validator limits where it goes next, and <code>deallocate</code> takes only what the account holds. The dashed return is not a contract's doing.</figcaption>
+  </figure>
+  <ol class="steps wrap-any">
+    <li><div><b>Build.</b> Deploy <code>ERC20CallValidator(_who, _maxPerCall)</code>, naming the custodian, and <code>GuardedAccount(_portfolio, _riskId, _sharedRiskId)</code>. The council attests the validator as <code>VALIDATOR</code> and the account as <code>ADAPTER</code>.</div></li>
+    <li><div><b>Plug in.</b> The vault's admin calls <code>addAdapter(account)</code> and <code>setCaps(riskId, absoluteCap, relativeCapBps)</code> on the portfolio, and <code>setPermission(asset, transfer, validator)</code> on the account.</div></li>
+    <li><div><b>Send to the account.</b> The allocator calls the portfolio's <code>allocate(_adapter, _assets, _minAdded)</code>, naming the account. The money sits at the account, and <code>liquid()</code> shows it. The account's <code>allocate</code> does nothing but check its caller.</div></li>
+    <li><div><b>Send to the custodian.</b> The allocator calls <code>execute</code> with one <code>transfer(custodian, amount)</code> on the asset. A transfer to anyone else is refused (<code>test_WhenTheValidatorRefuses_SoDoesTheAccount</code>).</div></li>
+    <li><div><b>Value it.</b> The portfolio's <code>pricedValue()</code> leaves this money out (<code>test_CustodyOutAndBack</code>), and the <a href="NavDesk.html">NavDesk</a> report carries it (<code>test/nodejs/legos.test.ts</code>).</div></li>
+    <li><div><b>Bring it back.</b> The custodian sends money to the account. The allocator or the guardian then calls the portfolio's <code>deallocate(account, assets)</code>.</div></li>
+  </ol>
+</section>
+
+<section id="deallocate">
+  <div class="prose wrap-any">
+    <h2>What <code>deallocate</code> can do, and what a pause stops</h2>
+    <p>The account's <code>deallocate(assets)</code> can be called by its portfolio alone (<code>GuardedAccount_Unauthorized</code>), and pays the portfolio from the account's own balance. It reaches no further. Money at a custodian cannot be deallocated: the asset's transfer reverts on the shortfall (<code>test_MoneyAtTheCustodianCannotBeDeallocated</code>). The custodian has to send it to the account first.</p>
+    <p>A pause on the vault stops <code>execute</code>, after the role check (<code>test_WhileTheVaultIsPaused_ItRefusesAndNothingMoves</code>, <code>test_WhileTheVaultIsPaused_AStrangerStillGetsTheRoleError</code>). It does not stop <code>setPermission</code>, <code>revokePermission</code> or <code>deallocate</code>, so the guardian can bring the account's balance back while paused (<code>test_WhileTheVaultIsPaused_TheGuardianStillBringsItsBalanceBack</code>). A permission that pulls money back through <code>execute</code>, such as a target's <code>redeem</code>, waits for the unpause. No deployment profile grants one.</p>
+  </div>
+</section>
+
+<section id="functions">
+  <div class="prose wrap-any"><h2>What it can do</h2></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>execute(calls)</code></td><td>The vault's <code>ALLOCATOR_ROLE</code>, not while paused</td><td>Makes the calls, atomically. <code>GuardedAccount_Unauthorized</code>, <code>GuardedAccount_VaultPaused</code>, <code>GuardedAccount_CallRefused(target, selector)</code>. Emits <code>CallMade(target, selector, data)</code> for each.</td></tr>
+        <tr><td><code>setPermission(target, selector, validator)</code></td><td>The vault's <code>DEFAULT_ADMIN_ROLE</code></td><td>Allows a function of a contract, judged by an attested validator. <code>GuardedAccount_ForbiddenTarget</code>, <code>GuardedAccount_NotAttested</code>. Emits <code>PermissionSet</code>.</td></tr>
+        <tr><td><code>revokePermission(target, selector)</code></td><td>The vault's <code>DEFAULT_ADMIN_ROLE</code> or <code>GUARDIAN_ROLE</code></td><td>Removes a permission. Emits <code>PermissionRevoked</code>.</td></tr>
+        <tr><td><code>allocate(assets)</code></td><td>The portfolio</td><td>Checks its caller and does nothing else: the money stays until the allocator sends it on.</td></tr>
+        <tr><td><code>deallocate(assets)</code></td><td>The portfolio</td><td>Pays the portfolio from the account's own balance.</td></tr>
+        <tr><td><code>liquid()</code></td><td>Anyone (read-only)</td><td>The account's own balance of the asset. It does not include what a custodian holds.</td></tr>
+        <tr><td><code>value()</code>, <code>fresh()</code>, <code>reported()</code></td><td>Anyone (read-only)</td><td>Zero, true and true, at all times. The value is in the report.</td></tr>
+        <tr><td><code>riskIds()</code>, <code>asset()</code></td><td>Anyone (read-only)</td><td><code>RISK_ID</code>, plus <code>SHARED_RISK_ID</code> when it is not zero, and the portfolio's asset.</td></tr>
+        <tr><td><code>validatorOf(target, selector)</code></td><td>Anyone (read-only)</td><td>The validator for a function of a contract. Zero means refused.</td></tr>
+        <tr><td><code>PORTFOLIO()</code>, <code>VAULT()</code>, <code>RISK_ID()</code>, <code>SHARED_RISK_ID()</code></td><td>Anyone (read-only)</td><td>The settings fixed at construction.</td></tr>
+        <tr><td>The constructor</td><td>The deployer</td><td>Takes <code>(_portfolio, _riskId, _sharedRiskId)</code>. <code>GuardedAccount_ZeroAddress</code> on a zero portfolio, <code>GuardedAccount_NoRiskId</code> on a zero risk, and <code>GuardedAccount_ReportedNotAccepted</code> if the portfolio's <code>ACCEPTS_REPORTED</code> is false (<code>test_AnOnChainOnlyPortfolioIsRefused</code>). It reads the vault and the asset from the portfolio.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="why">
+  <div class="prose wrap-any">
+    <h2>Why it is built this way</h2>
+    <ul class="plain">
+      <li><b>Refused unless listed.</b> A forgotten function stays closed. Nothing passes by omission.</li>
+      <li><b>A permission and a validator.</b> The timelock's grant says which function, and the validator's attested code says which parameters. A validator's settings are immutables, so the attested code hash covers the exact address and amount.</li>
+      <li><b>A slow grant and a fast revoke.</b> Adding a power goes through the timelock's delay. Taking one away needs no delay, and the guardian can do that.</li>
+      <li><b>No delegatecall.</b> A delegatecall runs another contract's code with this account's balance and storage, so no check on the parameters could bound it.</li>
+      <li><b><code>deallocate</code> names no receiver.</b> The way back through the adapter interface leads to the portfolio and nowhere else.</li>
+      <li><b>Reported, not priced.</b> Its money can leave the chain, so the chain cannot price it. A 4626 refuses it for that reason, as the <a href="Portfolio.html#priced-and-reported">Portfolio page</a> explains.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="prose wrap-any">
+    <h2>What it does not do</h2>
+    <ul class="plain">
+      <li><b>It cannot make a bad permission safe.</b> It makes whatever calls its permissions allow. Default deny, one narrow validator per call and a timelock on every grant reduce the danger, and only a review of each permission set closes it. A validator's code hash covers its settings, not how the target behaves.</li>
+      <li><b>It cannot recover money from a custodian.</b> A custodian that does not return money is an off-chain risk no contract covers.</li>
+      <li><b>An approval outlives a pause and a revoke.</b> If a permission allows <code>approve</code>, the spender can draw up to that amount at any later time. Pausing the vault or revoking the permission leaves the allowance in the asset.</li>
+      <li><b>A per-call limit is not a total.</b> <code>MAX_PER_CALL</code> applies to each call, so a batch of several transfers can send more. The caps on what reaches the account are the limit on the total.</li>
+      <li><b>It does not ask the portfolio.</b> An account taken off the list, by removal or by write-off, keeps its permissions, and <code>execute</code> still works on what it holds until the permissions are revoked. A written-off account also holds its balance out of reach of <code>deallocate</code> until it is added back.</li>
+      <li><b>The forbidden list looks at the target of a call, not at who a call pays.</b> <code>setPermission</code> would accept the asset's <code>transfer</code> with a validator that names the portfolio or the vault as its one address. Money sent to the portfolio that way raises <code>pricedValue()</code> without changing <code>moves</code> or the allocation. No deployment profile does this, and the council's review of the validator is the control.</li>
+      <li><b>It does not value anything.</b> <code>value()</code> is zero at all times. What the position is worth is in the report, and a report is a claim.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="connected">
+  <div class="prose wrap-any"><h2>Connected to</h2></div>
+  <div class="cards">
+    <a class="card" href="Portfolio.html"><span class="name">Portfolio</span><p>Sends money here under caps on its allocation, and takes it back with <code>deallocate</code>.</p></a>
+    <a class="card" href="ERC20CallValidator.html"><span class="name">ERC20CallValidator</span><p>One address, one amount per call: the custodian's validator.</p></a>
+    <a class="card" href="ERC4626CallValidator.html"><span class="name">ERC4626CallValidator</span><p>Lets an account enter and leave an outside vault, with everything coming back to it.</p></a>
+    <a class="card" href="NavDesk.html"><span class="name">NavDesk</span><p>Approves the report that carries this account's value.</p></a>
+    <a class="card" href="Gated7540Vault.html"><span class="name">Gated7540Vault</span><p>The vault a reported adapter can sit behind, through its desk.</p></a>
+    <a class="card" href="PolicyRegistry.html"><span class="name">PolicyRegistry</span><p>Where the account and each validator must be attested.</p></a>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose wrap-any">
+    <h2>Source and tests</h2>
+    <ul class="plain">
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/portfolio/GuardedAccount.sol"><code>contracts/portfolio/GuardedAccount.sol</code></a>, interfaces <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/IGuardedAccount.sol"><code>IGuardedAccount.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/IAdapter.sol"><code>IAdapter.sol</code></a></li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/portfolio/GuardedAccount.t.sol"><code>GuardedAccount.t.sol</code></a> (a real portfolio and registry over a mock vault, including <code>test_ItRunsAStrategyThroughAnOutsideVaultAndKeepsTheShares</code>), and <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/legos.test.ts"><code>test/nodejs/legos.test.ts</code></a> (the <code>managed-fund</code> profile, money to a custodian and back)</li>
+    </ul>
+  </div>
+</section>
+
+<footer>Describes the contracts at commit <code>babef08</code> on <code>main</code>.</footer>
+</main>
+</body>
+</html>

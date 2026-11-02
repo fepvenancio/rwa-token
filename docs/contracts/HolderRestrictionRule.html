@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>HolderRestrictionRule · Gated Token Stack</title>
-<meta name="description" content="How HolderRestrictionRule applies a per-holder lockup and address freeze set by the token's agent, which movements each one stops, and the way out of a frozen account.">
+<meta name="description" content="How HolderRestrictionRule applies a lockup and an address freeze to one holder of one token, what each stops, and the one way tokens leave a frozen account.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
@@ -32,13 +32,14 @@
     <span class="fact">immutable, <b>not a proxy</b></span>
     <span class="fact">set per holder by the token's <b>AGENT_ROLE</b></span>
     <span class="fact">attested as <b>RULE</b></span>
+    <span class="fact">ruleId: <b>keccak256('HolderRestrictionRule.v1')</b></span>
   </div>
 </header>
 
 <section id="in-one-minute">
   <div class="callout">
     <h3>In one minute</h3>
-    <p>Issuers need two everyday tools for single holders. A <b>lockup</b> keeps a holder's tokens in place until a date, for example after a private placement: the holder cannot transfer or redeem before then, but can still receive. A <b>freeze</b> stops an address altogether, for example while a court order or an investigation is open: nothing goes in or out. The token's agent sets both, holder by holder. Neither blocks enforcement entirely: the agent can always take tokens out of a locked or frozen account with a forced transfer, to an account that is allowed to hold them.</p>
+    <p>Issuers need two everyday tools for single holders. A <b>lockup</b> keeps a holder's tokens in place until a date, for example after a private placement: the holder cannot transfer or redeem before then, but can still receive. A <b>freeze</b> stops an address altogether, for example while a court order or an investigation is open: nothing goes in or out. The token's agent sets both, holder by holder. The agent can still take tokens out of a locked or frozen account with a forced transfer, to an account that is allowed to hold them.</p>
   </div>
 </section>
 
@@ -109,7 +110,8 @@
 
 <section id="kinds">
   <div class="prose">
-    <h2>What it checks for each kind of movement</h2>
+    <h2>What it does for each kind of movement</h2>
+    <p>Zero amounts are judged like any other, because the rule does not read the amount.</p>
   </div>
   <div class="table-wrap">
     <table>
@@ -124,14 +126,14 @@
     </table>
   </div>
   <div class="prose">
-    <p>A lockup never stops a holder from receiving: only the sender's lockup is read. A lockup covers the holder's whole balance, including tokens received after it was set. The token reverts a refused movement with <code>PolicyGated_TransferRejected(reason)</code>.</p>
+    <p>A lockup does not stop a holder from receiving: only the sender's lockup is read. A lockup covers the holder's whole balance, including tokens received after it was set. The token reverts a refused movement with <code>PolicyGated_TransferRejected(reason)</code>.</p>
   </div>
 </section>
 
 <section id="way-out">
   <div class="prose">
     <h2>The way out of a frozen account</h2>
-    <p>A freeze stops even the burner, so the one enforcement route out of a frozen account is a forced transfer by the agent to a quarantine account. The receiver side is still checked on a forced transfer, so the quarantine account must never be frozen itself, and it must pass the token's other rules, such as holding a credential the token accepts.</p>
+    <p>A freeze stops even the burner, so the one enforcement route out of a frozen account is a forced transfer by the agent to a quarantine account. The receiver side is still checked on a forced transfer, so the quarantine account must not be frozen itself, and it must pass the token's other rules, such as holding a credential the token accepts.</p>
   </div>
   <figure>
     <div class="fig-scroll">
@@ -173,10 +175,44 @@
         <text x="434" y="223" class="sm m">and must pass the other rules (credential)</text>
       </svg>
     </div>
-    <figcaption><b>Only a forced transfer leaves a frozen account.</b> The agent moves the tokens to a quarantine account that is not frozen and is allowed to hold them. The freeze itself stays until the agent lifts it.</figcaption>
+    <figcaption><b>A forced transfer is the route out of a frozen account.</b> The agent moves the tokens to a quarantine account that is not frozen and is allowed to hold them. The freeze itself stays until the agent lifts it.</figcaption>
   </figure>
   <div class="prose">
     <p>The address freeze here is not the token's own frozen amount (<code>setFrozenTokens</code> on the token), which holds back part of a balance and lets the rest move. The two can be used together.</p>
+  </div>
+</section>
+
+<section id="account">
+  <div class="prose">
+    <h2>The account questions</h2>
+    <p><code>checkSend(token, account)</code> answers <code>SENDER_FROZEN</code> for a frozen account, then <code>LOCKED</code> while its lockup runs, otherwise <code>TRANSFER_OK</code>. <code>checkReceive(token, account)</code> answers <code>RECEIVER_FROZEN</code> for a frozen account, otherwise <code>TRANSFER_OK</code>. So the token's <code>canSend</code> is false for a frozen holder and for a locked one, and <code>canReceive</code> is false for a frozen one.</p>
+    <p>These answers agree with <code>check</code> for every movement the holder drives. They cannot know about the movements the rule exempts, which only the movement itself reveals: a forced transfer still passes for a frozen or locked sender, and a burn by the burner still passes for a locked one, while <code>canSend</code> says no.</p>
+  </div>
+</section>
+
+<section id="config">
+  <div class="prose">
+    <h2>Who sets them, and what happens before they do</h2>
+    <p>The rule asks the token at call time whether the caller holds <code>AGENT_ROLE</code>, through a read-only call. The <code>Product</code> module grants that role on every product to the agent account named in its parameters, and sets no restriction. These settings have no timelock in front of them: they take effect in the agent's call.</p>
+    <p><b>Not configured means not restricted.</b> This rule neither fails closed nor has an on or off switch. A holder with no entry has an unlock time of 0 and is not frozen, and every movement passes. A lockup ends by itself at its unlock second: the holder is locked while the block time is before <code>unlockTime</code> and free from that second on. A freeze stays until the agent lifts it.</p>
+  </div>
+</section>
+
+<section id="order">
+  <div class="prose">
+    <h2>Where it sits, and who lists it</h2>
+    <p>Every product in every profile of <code>ignition/profiles.ts</code> lists it. In the demo deployment (<code>full</code>, through <code>RULE_ORDER</code>) it is third on the intent token and both vaults, after the credential check and the minimum position. In the other profiles (<code>PLAIN_RULES</code>) it is second, after the credential check.</p>
+  </div>
+</section>
+
+<section id="vaults">
+  <div class="prose">
+    <h2>On the vaults</h2>
+    <ul class="plain">
+      <li><a href="Gated4626Vault.html"><code>Gated4626Vault</code></a>: a holder's <code>redeem</code> or <code>withdraw</code> burns shares as a holder burn, so a lockup and a freeze both stop it. <code>maxRedeem</code> and <code>maxWithdraw</code> read 0 for a locked or frozen owner, and <code>maxDeposit</code> and <code>maxMint</code> read 0 for a frozen receiver.</li>
+      <li><a href="Gated7540Vault.html"><code>Gated7540Vault</code></a>: <code>requestRedeem</code> moves the owner's shares into the vault as a <span class="k k-transfer">TRANSFER</span>, so both settings apply there. Collecting a settled redemption runs a burn check of nothing on the controller, so a locked or frozen controller cannot collect until released. Requesting and claiming a deposit run a mint check on the controller, so a frozen controller can do neither.</li>
+      <li><b>On the vault's own address.</b> Unlike the credential rule, this rule does not pass the token's own address. A freeze on a 7540's own address stops the settlement of any period with redemptions: the burn of the escrowed shares is refused with <code>SENDER_FROZEN</code>. A lockup there does the same with <code>LOCKED</code>, unless the settler holds <code>BURNER_ROLE</code>. A period with no redemptions makes no such burn, so it still settles, and any net inflow goes to the cash account.</li>
+    </ul>
   </div>
 </section>
 
@@ -186,36 +222,16 @@
     <table>
       <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
       <tbody>
-        <tr><td><code>setLockup(token, holder, unlockTime)</code></td><td>The token's <code>AGENT_ROLE</code></td><td>Locks the holder until <code>unlockTime</code>, the first second at which it may send again. A time at or before now clears the lockup (stored as 0). Leaves the freeze as it is. Emits <code>LockupSet(token, holder, storedTime)</code>. Reverts with <code>HolderRestrictionRule_OnlyTokenAgent(token, caller)</code>, <code>HolderRestrictionRule_ZeroAddress</code> for a zero holder, or <code>HolderRestrictionRule_UnlockTimeTooLarge(time)</code> for a future time that does not fit 64 bits.</td></tr>
+        <tr><td><code>setLockup(token, holder, unlockTime)</code></td><td>The token's <code>AGENT_ROLE</code></td><td>Locks the holder until <code>unlockTime</code>, the first second at which it may send again. A time at or before the current block clears the lockup (stored as 0). Leaves the freeze as it is. Emits <code>LockupSet(token, holder, unlockTime)</code> with the stored time. Reverts with <code>HolderRestrictionRule_OnlyTokenAgent(token, caller)</code>, <code>HolderRestrictionRule_ZeroAddress</code> for a zero holder, or <code>HolderRestrictionRule_UnlockTimeTooLarge(time)</code> for a future time that does not fit 64 bits.</td></tr>
         <tr><td><code>setFrozen(token, holder, frozen)</code></td><td>The token's <code>AGENT_ROLE</code></td><td>Freezes or unfreezes the holder. Leaves the lockup as it is. Emits <code>HolderFrozenSet(token, holder, frozen)</code>. Reverts with <code>HolderRestrictionRule_OnlyTokenAgent</code> or <code>HolderRestrictionRule_ZeroAddress</code>.</td></tr>
         <tr><td><code>check(ctx)</code></td><td>Anyone (read-only); the hook in practice</td><td>The decision above: <code>TRANSFER_OK</code>, <code>SENDER_FROZEN</code>, <code>LOCKED</code> or <code>RECEIVER_FROZEN</code>.</td></tr>
-        <tr><td><code>checkSend(token, account)</code></td><td>Anyone (read-only)</td><td><code>SENDER_FROZEN</code> for a frozen account, then <code>LOCKED</code> while its lockup runs, otherwise <code>TRANSFER_OK</code>. Asks the token for no role.</td></tr>
-        <tr><td><code>checkReceive(token, account)</code></td><td>Anyone (read-only)</td><td><code>RECEIVER_FROZEN</code> for a frozen account, otherwise <code>TRANSFER_OK</code>. A locked account can receive.</td></tr>
-        <tr><td><code>unlockTime(token, holder)</code>, <code>isFrozen(token, holder)</code></td><td>Anyone (read-only)</td><td>The stored unlock time (0 when not locked) and the freeze flag.</td></tr>
+        <tr><td><code>checkSend(token, account)</code>, <code>checkReceive(token, account)</code></td><td>Anyone (read-only)</td><td>The account questions above. Neither asks the token for a role.</td></tr>
+        <tr><td><code>unlockTime(token, holder)</code>, <code>isFrozen(token, holder)</code></td><td>Anyone (read-only)</td><td>The stored unlock time and the freeze flag. The time is 0 when never set or when cleared; a lockup that has run out still returns its past time.</td></tr>
         <tr><td><code>AGENT_ROLE()</code></td><td>Anyone (read-only)</td><td><code>keccak256('AGENT_ROLE')</code>, the token role the setters require.</td></tr>
-        <tr><td><code>ruleId()</code>, <code>wantsAfter()</code>, <code>supportsInterface(id)</code></td><td>Anyone (read-only)</td><td><code>keccak256('HolderRestrictionRule.v1')</code>; false (no <code>after_</code>); ERC-165 for <code>IHolderRestrictionRule</code>, <code>IComplianceRule</code> and <code>IERC165</code>.</td></tr>
+        <tr><td><code>after_(ctx)</code></td><td>The hook of <code>ctx.token</code></td><td>The empty default. The hook does not call it, because <code>wantsAfter()</code> is false.</td></tr>
+        <tr><td><code>ruleId()</code>, <code>wantsAfter()</code>, <code>supportsInterface(id)</code></td><td>Anyone (read-only)</td><td><code>keccak256('HolderRestrictionRule.v1')</code>; false; ERC-165 for <code>IHolderRestrictionRule</code>, <code>IComplianceRule</code> and <code>IERC165</code>.</td></tr>
       </tbody>
     </table>
-  </div>
-  <div class="prose">
-    <p>The rule asks the token at call time whether the caller holds <code>AGENT_ROLE</code>, through a read-only call. The deployment grants that role on every token to the agent account named in its parameters. A lockup ends exactly at its unlock second: the holder is locked while the block time is before <code>unlockTime</code> and free from that second on.</p>
-  </div>
-</section>
-
-<section id="account">
-  <div class="prose">
-    <h2>What <code>canSend</code> and <code>canReceive</code> say</h2>
-    <p>The token's account questions reach this rule through the hook. <code>canSend</code> is false for a frozen holder and for a locked one, and <code>canReceive</code> is false only for a frozen one. These answers agree with <code>check</code> for every movement the holder drives. They cannot know about the movements the rule exempts, which only the movement itself reveals: a forced transfer still passes for a frozen or locked sender, and a burn by the burner still passes for a locked one, while <code>canSend</code> says no.</p>
-  </div>
-</section>
-
-<section id="vaults">
-  <div class="prose">
-    <h2>On the vaults</h2>
-    <ul class="plain">
-      <li><a href="Gated4626Vault.html"><code>Gated4626Vault</code></a>: a holder's <code>redeem</code> or <code>withdraw</code> burns shares as a holder burn, so a lockup and a freeze both stop it. <code>maxRedeem</code> and <code>maxWithdraw</code> read 0 for a locked or frozen owner, and <code>maxDeposit</code> and <code>maxMint</code> read 0 for a frozen receiver.</li>
-      <li><a href="Gated7540Vault.html"><code>Gated7540Vault</code></a>: <code>requestRedeem</code> moves the owner's shares into the vault as a <span class="k k-transfer">TRANSFER</span>, so both settings apply there. Collecting a fulfilled redemption runs a burn check of nothing on the controller, so a locked or frozen controller cannot collect until released. Requesting and claiming a deposit run a mint check on the controller, so a frozen controller can do neither.</li>
-    </ul>
   </div>
 </section>
 
@@ -223,12 +239,24 @@
   <div class="prose">
     <h2>Why it is built this way</h2>
     <ul class="plain">
-      <li><b>One word per holder.</b> The unlock time (64 bits) and the freeze flag share one storage word, so each side of a movement costs one read, and setting one never disturbs the other.</li>
+      <li><b>One word per holder.</b> The unlock time (64 bits) and the freeze flag share one storage word, so each side of a movement costs one read, and setting one does not disturb the other.</li>
       <li><b>The agent's role, asked live.</b> Lockups and freezes are day-to-day operational data, so they belong to the same role that runs forced transfers and frozen amounts on the token. The rule keeps no list of agents; it asks the token, so a role change on the token takes effect here at once.</li>
       <li><b>A holder's exit respects the lockup; enforcement does not.</b> A holder's own burn, such as a vault redemption, is a way out and waits for the unlock. A burn by the token's <code>BURNER_ROLE</code> and a forced transfer are enforcement actions and pass a lockup.</li>
-      <li><b>A freeze has a single exit.</b> A frozen sender is refused in every kind but a forced transfer, the burner's burn included, and a frozen receiver in every kind that has a receiver. That leaves exactly one controlled route out: the agent's forced transfer to a quarantine account that is never frozen.</li>
-      <li><b>Clearing needs no range check.</b> A time at or before now clears the lockup, so only a future time has to fit the 64 bits it is stored in.</li>
+      <li><b>A freeze has a single exit.</b> A frozen sender is refused in every kind but a forced transfer, the burner's burn included, and a frozen receiver in every kind that has a receiver. That leaves one controlled route out: the agent's forced transfer to a quarantine account that is not frozen.</li>
+      <li><b>Clearing needs no range check.</b> A time at or before the current block clears the lockup, so only a future time has to fit the 64 bits it is stored in.</li>
       <li><b>One instance for every token.</b> Restrictions are stored per token and holder, so a freeze on one token does not touch the same address on another.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="prose">
+    <h2>What it does not do</h2>
+    <ul class="plain">
+      <li><b>It locks a holder, not a tranche.</b> A lockup covers the whole balance, and there is one unlock time per holder per token.</li>
+      <li><b>It has no exception for enforcement on the receiving side.</b> A forced transfer or an enforcement mint into a frozen account is refused, so a quarantine account must not be frozen.</li>
+      <li><b>It asks the operator, not the intent.</b> A <code>BURNER_ROLE</code> holder that redeems its own vault shares passes its own lockup, because the rule sees a burn by that role. It does not pass its own address freeze. Burner accounts are issuer service accounts and should not also be investors.</li>
+      <li><b>It does not cover a stolen agent key.</b> Whoever holds <code>AGENT_ROLE</code> can lock or freeze any holder, at once, with no delay. The post-deploy check (<code>assertHandedOver</code>) looks at the deployment's <code>agent</code> account: unless the profile names the exception, if that account holds the role it must answer <code>getThreshold()</code> with 2 or more. A grant to an address the check was not told about goes unseen. Every profile in <code>ignition/profiles.ts</code> names it, as demo signers, so a real deployment has to state its own.</li>
     </ul>
   </div>
 </section>
@@ -236,7 +264,7 @@
 <section id="connected">
   <div class="prose"><h2>Connected to</h2></div>
   <div class="cards">
-    <a class="card" href="ComplianceHook.html"><span class="name">ComplianceHook</span><p>Asks this rule third in every deployed list, after the credential and minimum checks.</p></a>
+    <a class="card" href="ComplianceHook.html"><span class="name">ComplianceHook</span><p>Asks this rule in every profile's list.</p></a>
     <a class="card" href="PolicyGatedERC20Upgradeable.html"><span class="name">PolicyGatedERC20Upgradeable</span><p>Where the agent runs <code>forcedTransfer</code> and the token's own frozen amounts.</p></a>
     <a class="card" href="CredentialRule.html"><span class="name">CredentialRule</span><p>What a quarantine account must also pass to receive a forced transfer.</p></a>
     <a class="card" href="BaseRule.html"><span class="name">BaseRule</span><p>The parent this rule inherits from.</p></a>
@@ -249,13 +277,13 @@
   <div class="prose">
     <h2>Source and tests</h2>
     <ul class="plain">
-      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/hooks/rules/HolderRestrictionRule.sol"><code>contracts/hooks/rules/HolderRestrictionRule.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/interfaces/IHolderRestrictionRule.sol"><code>IHolderRestrictionRule.sol</code></a></li>
-      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/hooks/rules/HolderRestrictionRule.t.sol"><code>HolderRestrictionRule.t.sol</code></a> (setters, each kind under a lockup and a freeze, the unlock second, the account questions and a fuzz test that they agree with <code>check</code>), <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/contracts/hooks/rules/RuleSetIntegration.t.sol"><code>RuleSetIntegration.t.sol</code></a> (on a real token, including the forced transfer to a quarantine account) and <a href="https://github.com/fepvenancio/rwa-token/blob/cd1e525/test/nodejs/time.test.ts"><code>test/nodejs/time.test.ts</code></a> (a lockup holds until its unlock second)</li>
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/hooks/rules/HolderRestrictionRule.sol"><code>contracts/hooks/rules/HolderRestrictionRule.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/IHolderRestrictionRule.sol"><code>IHolderRestrictionRule.sol</code></a></li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/hooks/rules/HolderRestrictionRule.t.sol"><code>HolderRestrictionRule.t.sol</code></a> (setters, each kind under a lockup and a freeze, the unlock second, the account questions and a fuzz test that they agree with <code>check</code>), <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/hooks/rules/RuleSetIntegration.t.sol"><code>RuleSetIntegration.t.sol</code></a> (on a real token, including the forced transfer to a quarantine account) and <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/time.test.ts"><code>test/nodejs/time.test.ts</code></a> (a lockup holds until its unlock second)</li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>cd1e525</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>babef08</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>
