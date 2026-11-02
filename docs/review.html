@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Security review · Gated Token Stack</title>
-<meta name="description" content="The record of what has been reviewed and what has not: the reviews of 2026-10-26 and 2026-10-31, their findings and where each stands, the contracts no review has covered, and the automated checks.">
+<meta name="description" content="The record of what has been reviewed and what has not: the reviews of 2026-10-26 and 2026-10-31, the read of 2026-11-02, their findings and where each stands, the contracts no review has covered, and the automated checks.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
@@ -39,15 +39,15 @@
 <section id="in-one-minute">
   <div class="callout">
     <h3>In one minute</h3>
-    <p>Two reviews in the last week of October 2026 are recorded here in detail, each on the code as it stood then. The review of 2026-10-26, by an AI assistant, covered the token, its policy and the contracts around them, and left out the vaults and the credential layer. It rated nothing medium or higher. <code>PLAN.md</code> calls the review of 2026-10-31 a whole-stack assessment, and it came while the 7540 vault's dealing periods and <code>NavDesk</code> were unfinished. <code>PLAN.md</code> rates two of its findings low and gives no rating for the rest, and the repository keeps no report of it. Each item is fixed or decided below, except that finding 3 stays open on a fund class with no minimum.</p>
-    <p>That is less than it sounds. Eight contracts were built after the second review and have had automated checks and mutation testing but no review: <code>GuardedAccount</code>, <code>ERC20CallValidator</code>, <code>ERC4626CallValidator</code>, <code>FeeModel</code>, <code>SignedEntry</code>, <code>SupplyCapRule</code>, <code>ExecutedOnlyRule</code> and <code>Distributor</code>. No review ran on the code at this commit as a whole. Checking these pages against the code found sixteen more code problems, some of which could cost holders money. All are fixed, with the limits stated there, and no review has read those fixes. No external audit has happened. An earlier review, on 2026-10-17 and of much earlier code, did rate three items medium; all three were fixed. This page is a record of that, not a certification of anything.</p>
+    <p>Two reviews in the last week of October 2026 are recorded here in detail, each on the code as it stood then. The review of 2026-10-26, by an AI assistant, covered the token, its policy and the contracts around them, and left out the vaults and the credential layer. It rated nothing medium or higher. <code>PLAN.md</code> calls the review of 2026-10-31 a whole-stack assessment, and it came while the 7540 vault's dealing periods and <code>NavDesk</code> were unfinished. <code>PLAN.md</code> rates two of its findings low and gives no rating for the rest, and the repository keeps no report of it. Each item is fixed or decided below, except that finding 3 stays open on a fund class with no minimum. A read of the redemption gate on 2026-11-02 found no fault in the accounting on a fresh deployment, one thing since fixed, and <a href="#open">one more open item</a>.</p>
+    <p>That is less than it sounds. Eight contracts were built after the second review and have had automated checks and mutation testing but no review: <code>GuardedAccount</code>, <code>ERC20CallValidator</code>, <code>ERC4626CallValidator</code>, <code>FeeModel</code>, <code>SignedEntry</code>, <code>SupplyCapRule</code>, <code>ExecutedOnlyRule</code> and <code>Distributor</code>. <code>Gated7540Settlement</code>, <code>Gated7540Common</code> and the 7540's part fills came after it too, and have had that one read. No review ran on the code at this commit as a whole. Checking these pages against the code found sixteen more code problems, some of which could cost holders money. All are fixed, with the limits stated there, and no review has read those fixes. No external audit has happened. An earlier review, on 2026-10-17 and of much earlier code, did rate three items medium; all three were fixed. This page is a record of that, not a certification of anything.</p>
   </div>
 </section>
 
 <section id="record">
   <div class="prose">
     <h2>The record</h2>
-    <p>The reviews this page counts, oldest first, with the outside reviews it does not count and the assistant's documentation check of 2026-11-01, which it does not count either. <code>PLAN.md</code> also records a test-quality review (2026-10-17) and assessments on 2026-10-30, one of them by three sessions, and this page does not count those either. The ratings are as recorded, here or in <code>PLAN.md</code>, and nobody independent checked them.</p>
+    <p>The reviews this page counts, oldest first, with the outside reviews it does not count, and the assistant's documentation check of 2026-11-01 and the agent's read of 2026-11-02, which it does not count either. <code>PLAN.md</code> also records a test-quality review (2026-10-17) and assessments on 2026-10-30, one of them by three sessions, and this page does not count those either. The ratings are as recorded, here or in <code>PLAN.md</code>, and nobody independent checked them.</p>
   </div>
   <div class="table-wrap">
     <table class="tight">
@@ -58,6 +58,7 @@
         <tr><td><code>2026-10-26</code></td><td>AI assistant</td><td>Sixteen contracts at commit <code>a148d2f</code>: <a href="#scope">the token, policy, fund, governance, deployment and settlement</a>.</td><td>Nothing rated medium or higher. <a href="#findings">One low, two informational</a>.</td></tr>
         <tr><td><code>2026-10-31</code></td><td>Not recorded</td><td><a href="#review-2026-10-31">The whole stack</a>, in the words of <code>PLAN.md</code>, part of it unfinished. The exact tree is not recorded.</td><td>Nine items. <code>PLAN.md</code> rates two low and gives no rating for the rest.</td></tr>
         <tr><td><code>2026-11-01</code></td><td>AI assistant</td><td><a href="#pages-check">Every shipped contract, claim by claim, while writing these pages.</a> A documentation check, by the assistant that wrote much of the code, so this page does not count it as a review.</td><td>Sixteen code problems, all fixed, with the limits stated there.</td></tr>
+        <tr><td><code>2026-11-02</code></td><td>A fresh AI agent, with no sight of the plan's reasoning</td><td><a href="#read-2026-11-02">The redemption gate, the desk and the 4626's event</a>, before the fix it led to, by reading and by random sequences of operations. An agent from the same process that wrote the code, so this page does not count it as a review.</td><td>No fault in the accounting on a fresh deployment. Two items: one fixed, <a href="#open">one open</a>.</td></tr>
         <tr><td>None yet</td><td>External auditor</td><td>No external audit has happened. <code>PLAN.md</code> names one as the next step, to include the vaults, the credential layer and each lego.</td><td>None.</td></tr>
       </tbody>
     </table>
@@ -72,7 +73,8 @@
       <li><b><code>Portfolio</code> and <code>ERC4626Adapter</code> should be read the same way.</b> They were merged on 2026-10-31, the day of the second review, and one small item of that review concerns <code>Portfolio</code>. An outside review of their first commit found three faults, fixed before the merge (the merge record of <code>b7df8ac</code>, the body of pull request 11, and the <code>Portfolio</code> section of <code>PLAN.md</code>). The repository keeps neither that review nor who wrote it, so this page does not count it as coverage.</li>
       <li><b>What was added to older contracts.</b> The 4626's investing path (<code>setPortfolio</code>, <code>setMaxRate</code>, <code>setFeeModel</code>, <code>collectFees</code> and the limit on its counted value) came after the second review. So did the credential record's loss of its country, which changes <code>CREDENTIAL_TYPEHASH</code>, <code>set</code>, <code>profileOf</code> and <code>CredentialSet</code> in <code>CredentialRegistry</code>, and <code>CredentialRule</code> with them. So did the deployment module <code>Legos.ts</code>, the lego part of <code>Product.ts</code>, the <code>managed-fund</code> and <code>vault4626-invest</code> profiles, and the lego part of <code>assertHandedOver</code>.</li>
       <li><b>The finished 7540 dealing periods and <code>NavDesk</code>.</b> <code>PLAN.md</code> records findings of the second review on <code>NavDesk</code> and <code>settlePeriod</code>, fixed in the row whose result it dates 2026-11-01, the day they were finished and merged. So that review saw them unfinished, and nothing records how closely. Their merge record calls them the highest audit priority.</li>
-      <li><b>This commit as a whole.</b> No review ran on <code>babef08</code>. The first review's baseline is <code>a148d2f</code>, and ten of its sixteen contracts have changed since, so its result does not carry over on its own. The fixes for the second review's items, and for what <a href="#pages-check">checking these pages</a> found, have tests, and mutants apart from the default of 1023 attester bits, and no later review.</li>
+      <li><b>The 7540's second contract and its part fills.</b> <code>Gated7540Settlement</code>, <code>Gated7540Common</code>, the limit on <code>settlePeriod</code>, the walk in the request roll, the desk's redemption gate and the 4626's <code>DepositsClosed</code> came after both reviews. <a href="#read-2026-11-02">One read</a> came after them, and the record does not say how closely it read each. The fix it led to has tests and planted bugs and no later read.</li>
+      <li><b>This commit as a whole.</b> No review ran on <code>d903344</code>. The first review's baseline is <code>a148d2f</code>, and ten of its sixteen contracts have changed since, so its result does not carry over on its own. The fixes for the second review's items, and for what <a href="#pages-check">checking these pages</a> found, have tests, and mutants apart from the default of 1023 attester bits, and no later review.</li>
       <li><b>An external audit.</b> None has happened. The commit messages on <code>main</code> credit an AI assistant on all but one commit, and an AI assistant ran the review of 2026-10-26. The repository does not record who ran the reviews of 2026-10-17 and 2026-10-31, so nothing shows them to be independent of that process. An AI review cannot show that no bug exists. The code, the tests, the planted bugs and any review from that process can share a blind spot.</li>
       <li><b>Things outside every pass.</b> OpenZeppelin 5.6.1 itself, which was read for how these contracts use it. The attesters' off-chain checks. What a target vault or a custodian does with money it holds. Economic and legal questions. A compromised security council, governance multisig or issuer key is outside what the code can defend against.</li>
     </ul>
@@ -88,8 +90,9 @@
         <tr><td class="wrap-any"><code>CredentialRegistry</code>, <code>CredentialRule</code></td><td>Not in the code it read</td><td>Existed</td><td>Second review only, and the credential record changed after it.</td></tr>
         <tr><td class="wrap-any"><code>GatedToken</code>, <code>GatedVaultBase</code></td><td>Did not exist</td><td>Existed</td><td>Second review only.</td></tr>
         <tr><td class="wrap-any"><code>Gated4626Vault</code></td><td>Left out</td><td>Existed, without its investing path</td><td>Second review only, and <span class="no">no review</span> of the investing path.</td></tr>
-        <tr><td class="wrap-any"><code>Gated7540Vault</code></td><td>Left out</td><td>Unfinished dealing periods</td><td>Seen once, on unfinished code.</td></tr>
-        <tr><td class="wrap-any"><code>NavDesk</code></td><td>Did not exist</td><td>Unfinished</td><td>Seen once, on unfinished code.</td></tr>
+        <tr><td class="wrap-any"><code>Gated7540Vault</code></td><td>Left out</td><td>Unfinished dealing periods</td><td>Seen once, on unfinished code. Its settlement code has moved to <code>Gated7540Settlement</code> since.</td></tr>
+        <tr><td class="wrap-any"><code>NavDesk</code></td><td>Did not exist</td><td>Unfinished</td><td>Seen once, on unfinished code. The redemption gate came after it.</td></tr>
+        <tr><td class="wrap-any"><code>Gated7540Settlement</code>, <code>Gated7540Common</code></td><td>Did not exist</td><td>Did not exist</td><td>Code moved out of the 7540 vault, plus part fills. <a href="#read-2026-11-02">One read</a>, and <span class="no">no review</span>.</td></tr>
         <tr><td class="wrap-any"><code>Portfolio</code>, <code>ERC4626Adapter</code></td><td>Did not exist</td><td>Merged that day</td><td>One small item, on the pause, and an outside review not counted here. Treat as <span class="no">not reviewed</span>.</td></tr>
         <tr><td class="wrap-any"><code>GuardedAccount</code>, <code>ERC20CallValidator</code>, <code>ERC4626CallValidator</code>, <code>FeeModel</code></td><td>Did not exist</td><td>Did not exist</td><td><span class="no">No review</span>.</td></tr>
         <tr><td class="wrap-any"><code>SignedEntry</code>, <code>Distributor</code>, <code>SupplyCapRule</code>, <code>ExecutedOnlyRule</code></td><td>Did not exist</td><td>Did not exist</td><td><span class="no">No review</span>.</td></tr>
@@ -126,7 +129,7 @@
 <section id="findings">
   <div class="prose">
     <h2>The review of 2026-10-26: findings</h2>
-    <p>The last column gives where each one stands at <code>babef08</code>, checked against the code.</p>
+    <p>The last column gives where each one stands at <code>d903344</code>, checked against the code.</p>
   </div>
   <div class="table-wrap">
     <table class="tight">
@@ -219,7 +222,7 @@
       </tbody>
     </table>
   </div>
-  <p class="small">The registry is fixed when the deployer is created and cannot be changed. The tests are in <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/deploy/ProxyDeployer.t.sol"><code>ProxyDeployer.t.sol</code></a>. <code>deploy</code> is owner-only, and after <code>CoreHandover</code> the owner is the operations account, so a launch has no timelock delay. A stolen operations key can still place a token over attested code with its own admin, and can use up a symbol. It cannot change an existing product.</p>
+  <p class="small">The registry is fixed when the deployer is created and cannot be changed. The tests are in <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/deploy/ProxyDeployer.t.sol"><code>ProxyDeployer.t.sol</code></a>. <code>deploy</code> is owner-only, and after <code>CoreHandover</code> the owner is the operations account, so a launch has no timelock delay. A stolen operations key can still place a token over attested code with its own admin, and can use up a symbol. It cannot change an existing product.</p>
 </section>
 
 <section id="finding-2">
@@ -227,7 +230,7 @@
     <h2>Finding 2: a batch is all-or-nothing</h2>
     <p><code>executeBatch</code> runs every intent in one transaction. If one fails, the executor reverts with <code>IntentExecutor_BatchItemFailed(index, reason)</code>, carrying the token's own revert data, and nothing in the batch settles. An intent that states a payment is refused first with <code>IntentExecutor_ConsiderationNotSupported(index)</code>. So any signer in the batch can make it fail, by cancelling the nonce with <code>cancelIntent</code> or by moving the balance first. Nobody loses tokens: the cost is the operator's gas and time.</p>
     <p>This is by design. The operator can pre-flight each intent with <code>canExecute(intent, sig, executor)</code>, naming the executor's address, submit intents one at a time with <code>execute</code>, or drop the failing intent and send the rest again.</p>
-    <p class="small wrap-any">Pinned by <code>test_WhenOneIntentIsRejected_NothingSettlesAndTheIndexIsReported</code>, <code>test_WhenOneIntentFails_ItRevertsWithItsIndexAndTheTokensReason</code> and <code>test_WhenTheFailingIntentIsDroppedAndResubmitted_TheRestSettles</code> in <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/intents/IntentExecutor.t.sol"><code>IntentExecutor.t.sol</code></a>.</p>
+    <p class="small wrap-any">Pinned by <code>test_WhenOneIntentIsRejected_NothingSettlesAndTheIndexIsReported</code>, <code>test_WhenOneIntentFails_ItRevertsWithItsIndexAndTheTokensReason</code> and <code>test_WhenTheFailingIntentIsDroppedAndResubmitted_TheRestSettles</code> in <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/intents/IntentExecutor.t.sol"><code>IntentExecutor.t.sol</code></a>.</p>
   </div>
 </section>
 
@@ -237,7 +240,7 @@
     <p><code>FundHoldersRule</code> counts an address as an investor as soon as it holds any amount of a class. With no minimum position, one unit is enough. Someone with several addresses that hold an eligible credential can send each of them one unit, fill the fund's cap, and keep new investors out until the agent takes the dust back with a forced transfer.</p>
     <p><code>MinPositionRule</code> closes this where a token lists it with a minimum above 0. It refuses with <code>BELOW_MIN_POSITION</code> a transfer, intent or mint that would leave the receiver above zero and below the minimum, and a movement that would leave the sender such a remainder. Forced moves, the burner's burns, the token itself and accounts the token's admin exempts are outside the rule, so the agent can still clear dust.</p>
     <p>It is not on by default. The demo profile <code>full</code> lists the rule second on each of its tokens, with the minimum taken from the <code>minPosition</code> parameter of <code>Product.ts</code>, which is 0 unless given. The other profiles list neither this rule nor <code>FundHoldersRule</code>. On a fund class with no minimum the finding stands, and the answer is operational: the agent's forced transfer, and monitoring of the investor count.</p>
-    <p class="small wrap-any">Pinned by <code>test_WhenADustTransferTargetsAnEmptyAccount_ItIsRejectedWithParity</code>, <code>test_WhenATransferWouldLeaveDustBehind_ItIsRejected</code>, <code>test_WhenAMintWouldLeaveDust_ItIsRejected</code> and <code>test_WhenForced_DustIsAllowed</code> in <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/hooks/rules/RuleSetIntegration.t.sol"><code>RuleSetIntegration.t.sol</code></a>.</p>
+    <p class="small wrap-any">Pinned by <code>test_WhenADustTransferTargetsAnEmptyAccount_ItIsRejectedWithParity</code>, <code>test_WhenATransferWouldLeaveDustBehind_ItIsRejected</code>, <code>test_WhenAMintWouldLeaveDust_ItIsRejected</code> and <code>test_WhenForced_DustIsAllowed</code> in <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/hooks/rules/RuleSetIntegration.t.sol"><code>RuleSetIntegration.t.sol</code></a>.</p>
   </div>
 </section>
 
@@ -260,7 +263,7 @@
   <div class="prose">
     <h2>The review of 2026-10-31: nine items</h2>
     <p><code>PLAN.md</code> calls it a whole-stack assessment and dates its first fixes 2026-10-31. Nothing records who ran it or the exact tree it read. Commit times suggest three commits not yet merged (<code>refs/pull/12/head</code> to <code>refs/pull/14/head</code>, the last authored at 23:14 UTC that day; the last two were rebased on 2026-11-01 with the same trees), with the 7540 vault's dealing periods and <code>NavDesk</code> not yet committed (<code>refs/pull/15/head</code> is dated 2026-11-01). <code>PLAN.md</code> rates the first two findings low and records no rating for the rest.</p>
-    <p>The repository keeps no report of it. What it records is the findings, in <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/PLAN.md"><code>PLAN.md</code></a> (the sections "Review fixes (2026-10-31)" and "The last review items, settled on 2026-11-01") and <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/SECURITY.md"><code>SECURITY.md</code></a> section 3. Nothing says which attacks it tried or how closely each contract was read, so "whole stack" describes what it set out to cover and not a line-by-line read. Every item below is closed or decided, and each was checked against the code at this commit. Item 6 is a group of four smaller points.</p>
+    <p>The repository keeps no report of it. What it records is the findings, in <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/PLAN.md"><code>PLAN.md</code></a> (the sections "Review fixes (2026-10-31)" and "The last review items, settled on 2026-11-01") and <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/SECURITY.md"><code>SECURITY.md</code></a> section 3. Nothing says which attacks it tried or how closely each contract was read, so "whole stack" describes what it set out to cover and not a line-by-line read. Every item below is closed or decided, and each was checked against the code at this commit. Item 6 is a group of four smaller points.</p>
   </div>
   <div class="table-wrap">
     <table class="tight">
@@ -362,6 +365,39 @@
   </div>
 </section>
 
+<section id="read-2026-11-02">
+  <div class="prose">
+    <h2>The read of 2026-11-02: the redemption gate</h2>
+    <p><code>PLAN.md</code> records that a fresh agent, with no sight of the plan's reasoning, read the code once the gate, the desk and the 4626's event were built. It ran 3,000 random sequences of 48 operations and one of 1,500 steps, with the books, the escrow and the cash checked after every step, and found no fault in the accounting on a fresh deployment. The repository keeps no report of it and does not name the tree it read. It is an AI agent from the same process that wrote the code, so it can share a blind spot with it. It is not an audit.</p>
+    <p>It found two things.</p>
+    <ul class="plain">
+      <li><b>Fixed: an upgrade in place could pay twice.</b> A period's book stored what was taken, which read as nothing taken on a period settled before that field existed, so an upgrade in place would have paid settled redemptions again. Nothing was deployed. The book stores what <code>carried</code>, so zero means filled and a full fill writes nothing extra (<code>test_WhenAPeriodIsFilledInFull_NothingIsWrittenAsCarried</code>). The second contract also reports its own template id, so no proxy can be moved onto it (<code>test_WhenUpgradedOntoTheSecondContract_ItIsRefused</code>).</li>
+      <li><b>Open: dust in a fund everyone has left.</b> It is the first row <a href="#open">below</a>.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="open">
+  <div class="prose">
+    <h2>What stays open at this commit</h2>
+    <p>These are known and not fixed. Two more are elsewhere on this page: <a href="#finding-3">finding 3</a>, on a fund class with no minimum, and the low reads in <a href="#pages-check">what checking these pages found</a>. The first row below came from the read of 2026-11-02, and the gate did not cause it. The rest are limits of the gate itself.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Item</th><th>What happens</th><th>What bounds it</th></tr></thead>
+      <tbody>
+        <tr><td>Dust in a fund everyone has left</td><td class="wrap-any">Each deposit claim rounds down, so a fund whose investors have all left can keep a few share units in <code>unclaimedShares</code>. <code>NavDesk</code>'s case for no shares, <code>_supply == 0</code>, then never runs again. A value of zero reverts with <code>NavDesk_ZeroNav</code>, so the reporter must propose at least 1. <code>FeeModel</code> prices that far above par: one asset unit over one share unit is <code>1e18</code>, against par's <code>1e12</code>. The charge rounds to no fee and the mark moves there. No later gain reaches it, so no performance fee is charged for the rest of the fund's life. The management fee still runs.</td><td class="wrap-any">Investors lose nothing, and the fee recipient goes short. In a run at this commit one unit was left, the reporter proposed 1, and the mark went from about <code>1.05e12</code> to <code>1e18</code>. The next investor's 1,000 bought half the shares par gives, at twice par, the fund doubled, and a 20% performance fee charged nothing. That run is not one of the repository's tests.</td></tr>
+        <tr><td>Over-requesting</td><td>A holder who expects a gate can ask for more than it wants, to get a bigger slice.</td><td class="wrap-any">Only the agent, or the settler once the period has closed, can hand back a carried part. That is the deterrent, and not a complete one.</td></tr>
+        <tr><td>A controller that waited walks</td><td class="wrap-any">Its next read or claim passes the settled gated periods one at a time, at 5,979 gas per period when measured.</td><td class="wrap-any">About 5,000 gated periods in a row fit a block of 30 million, and the cost falls only on calls about that controller. <code>test/nodejs/vaults.test.ts</code> holds it below 7,000.</td></tr>
+        <tr><td>A wind-down under a gate</td><td class="wrap-any">The level is a share of what remains. When everyone is leaving, the queue shrinks by the same fraction each period and does not finish.</td><td class="wrap-any">The timelock sets the level to zero, which is off (<code>setRedemptionGate</code>).</td></tr>
+        <tr><td>A queued investor is out of a fund's count</td><td class="wrap-any">An investor who escrows its whole balance leaves the count at the request, and under a gate it stays out for as long as it queues. If the fund fills up meanwhile, a reject that hands the shares back is refused with <code>MAX_HOLDERS</code>.</td><td class="wrap-any">The agent's recovery still works. <code>test_AQueuedInvestorIsOutOfTheCountUntilHandedBack</code> pins the count. Whether that suits a given fund is a legal question the code does not answer.</td></tr>
+        <tr><td>A low level slows every exit</td><td>The timelock can set one.</td><td>It is delayed and visible. A compromised governance is outside what the code defends against.</td></tr>
+        <tr><td>A plain settler can pass any limit</td><td class="wrap-any">The vault takes the <code>redeemLimit</code> it is given. It can already refuse to settle at all.</td><td class="wrap-any">The post-deploy check refuses that role on a single key unless the profile names the exception, and every demo profile does.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
 <section id="earlier">
   <div class="prose">
     <h2>Earlier passes</h2>
@@ -379,7 +415,7 @@
 <section id="evidence">
   <div class="prose">
     <h2>The automated evidence</h2>
-    <p><a href="https://github.com/fepvenancio/rwa-token/blob/babef08/.github/workflows/ci.yml"><code>ci.yml</code></a> runs these on every pull request and every push to <code>main</code>, with two exceptions: <code>npm run verify:reproducible</code> runs on pull requests into <code>main</code> and, through <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/.github/workflows/release.yml"><code>release.yml</code></a>, on <code>v*</code> tags; mutation testing is by hand and not in CI. The CI run for this commit on <code>main</code> (run 41331469861) passed on 2026-11-01. The runs on <code>main</code> for the commits from <code>f1787df</code> to <code>e6418c0</code>, and for <code>61a103a</code>, were cancelled, so for those the record is the pull request's run. Each merge record names it, except that of <code>f1787df</code>, whose run was on <code>08ea2fd</code>. Two runs on <code>main</code> failed: <code>a2082b8</code> (2026-10-17, the type check) and <code>c859dc6</code> (2026-10-30, the analysis job). The next run after <code>c859dc6</code>, on <code>b7df8ac</code>, passed. Nothing in the repository makes a merge wait for a pass.</p>
+    <p><a href="https://github.com/fepvenancio/rwa-token/blob/d903344/.github/workflows/ci.yml"><code>ci.yml</code></a> runs these on every pull request and every push to <code>main</code>, with two exceptions: <code>npm run verify:reproducible</code> runs on pull requests into <code>main</code> and, through <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/.github/workflows/release.yml"><code>release.yml</code></a>, on <code>v*</code> tags; mutation testing is by hand and not in CI. The CI run on <code>main</code> for this commit (run 41466028477) passed on 2026-11-02, as did its pull request's run on <code>40834b8</code>, the same tree (run 41462102879), which also ran <code>verify:reproducible</code>. The runs on <code>main</code> for the commits from <code>f1787df</code> to <code>e6418c0</code>, and for <code>61a103a</code>, were cancelled, so for those the record is the pull request's run. Each merge record names it, except that of <code>f1787df</code>, whose run was on <code>08ea2fd</code>. Two runs on <code>main</code> failed: <code>a2082b8</code> (2026-10-17, the type check) and <code>c859dc6</code> (2026-10-30, the analysis job). The next run after <code>c859dc6</code>, on <code>b7df8ac</code>, passed. Nothing in the repository makes a merge wait for a pass.</p>
   </div>
   <div class="table-wrap">
     <table class="tight">
@@ -387,45 +423,45 @@
       <tbody>
         <tr>
           <td>Test suite</td>
-          <td><code>npm test</code>, then <code>npx hardhat test solidity --test-profile isolated</code>. Solidity unit, fuzz (256 runs) and invariant tests next to each contract, and Node tests with viem that deploy each profile. <code>ContractSizes.t.sol</code> holds contract sizes to the EIP-170 limit, and <code>InterfaceFreeze.t.sol</code> pins interface ids and event topics.</td>
+          <td><code>npm test</code>, then <code>npx hardhat test solidity --test-profile isolated</code>. Solidity unit, fuzz (256 runs) and invariant tests next to each contract, and Node tests with viem that deploy each profile. <code>ContractSizes.t.sol</code> holds contract sizes to the EIP-170 limit and the 7540's creation code to the EIP-3860 limit, and <code>InterfaceFreeze.t.sol</code> pins interface ids and event topics.</td>
           <td>Every written test holds. It says nothing about a case nobody wrote.</td>
-          <td><code>1792 passing (1622 solidity, 170 nodejs)</code> on 2026-11-02, in the merge record of <code>babef08</code>.</td>
+          <td><code>1851 passing (1678 solidity, 173 nodejs)</code> on 2026-11-02, in <code>PLAN.md</code>'s section on the redemption gate.</td>
         </tr>
         <tr>
           <td>Slither 0.11.5</td>
           <td><code>npm run slither</code>, a build of the contracts that ship (no <code>.t.sol</code> files, no <code>contracts/test/</code>), then Slither on that build.</td>
-          <td>The gate fails on a finding. A pass means nothing is left after 4 project-wide exclusions (<code>naming-convention</code>, <code>assembly</code>, <code>timestamp</code>, <code>calls-loop</code>) and the 61 <code>slither-disable</code> lines in shipped code at this commit. It does not mean the tool flagged nothing: removing the 59 that existed at <code>60c1de3</code> gave 56 findings across 14 detectors and 22 files, measured on 2026-11-01, and the two added since have not been measured. <code>SECURITY.md</code> section 4 gives the reasons.</td>
-          <td>0 findings on 2026-11-01. Narrowing the build lost nothing on shipped code: the wider and the narrower run reported the same 56.</td>
+          <td>The gate fails on a finding. A pass means nothing is left after 4 project-wide exclusions (<code>naming-convention</code>, <code>assembly</code>, <code>timestamp</code>, <code>calls-loop</code>) and the 63 <code>slither-disable</code> lines in shipped code at this commit. It does not mean the tool flagged nothing: removing the 59 that existed at <code>60c1de3</code> gave 56 findings across 14 detectors and 22 files, measured on 2026-11-01, and the four added since have not been measured. <code>SECURITY.md</code> section 4 gives the reasons.</td>
+          <td>0 findings on 2026-11-02, in <code>PLAN.md</code>. Narrowing the build lost nothing on shipped code: the wider and the narrower run reported the same 56 on 2026-11-01.</td>
         </tr>
         <tr>
           <td>Aderyn 0.6.8</td>
           <td><code>npm run aderyn</code>, from a binary pinned by sha256.</td>
-          <td>The gate fails on a high or low finding left after 5 detectors excluded in <code>aderyn.toml</code> and the 102 <code>aderyn-ignore</code> lines in shipped code at this commit. A second reader for the same kinds of pattern, with the same caveat.</td>
-          <td>0 findings on 2026-11-01. <code>SECURITY.md</code> section 4 lists what was acknowledged.</td>
+          <td>The gate fails on a high or low finding left after 5 detectors excluded in <code>aderyn.toml</code> and the 107 <code>aderyn-ignore</code> lines in shipped code at this commit. A second reader for the same kinds of pattern, with the same caveat.</td>
+          <td>0 findings on 2026-11-02, in <code>PLAN.md</code>. <code>SECURITY.md</code> section 4 lists what was acknowledged.</td>
         </tr>
         <tr>
           <td>Halmos 0.3.3</td>
           <td><code>npm run test:halmos</code>: 22 properties in 6 suites, in <code>contracts/test/halmos/</code>. <code>IntentTokenHalmos</code> (replay, cancelled nonces, executor binding, frozen balances), <code>DvPExecutorHalmos</code>, <code>CredentialRegistryHalmos</code>, <code>FundHalmos</code>, <code>MinPositionRuleHalmos</code> and <code>PortfolioHalmos</code> (an allocation never passes a cap).</td>
-          <td class="wrap-any">A property holds on every path Halmos explores, within its limits on loops and lengths. The token's suite runs with a stub hook that accepts everything, so it says nothing about rules. The property that a period's claims never pass what it booked is not in: the solvers did not finish on it, and <code>testFuzz_TheSumOfClaimsNeverExceedsTheBookAndFallsShortByAtMostOneUnitEach</code>, <code>testFuzz_TheCashClaimsNeverExceedTheBookAndTheVaultCanPayThem</code> and the invariants in <code>Gated7540Vault.t.sol</code> carry it. None of the eight contracts no review has covered has a property.</td>
-          <td>22 properties on 2026-11-01, in the merge record of <code>61a103a</code>.</td>
+          <td class="wrap-any">A property holds on every path Halmos explores, within its limits on loops and lengths. The token's suite runs with a stub hook that accepts everything, so it says nothing about rules. The property that a period's claims never pass what it booked is not in: the solvers did not finish on it, and <code>testFuzz_TheSumOfClaimsNeverExceedsTheBookAndFallsShortByAtMostOneUnitEach</code>, <code>testFuzz_TheCashClaimsNeverExceedTheBookAndTheVaultCanPayThem</code> and the invariants in <code>Gated7540Vault.t.sol</code> carry it. No property covers a part fill: the bound on what controllers carry is fuzzed (<code>testFuzz_TheCarriedPartsNeverExceedTheNextBook</code>). None of the eight contracts no review has covered has a property.</td>
+          <td>22 of 22 on 2026-11-02, in <code>PLAN.md</code>.</td>
         </tr>
         <tr>
           <td>Mutation testing</td>
-          <td>By hand: a bug is planted and the tests run. <code>SECURITY.md</code> section 5 has each row. No script or patch for the mutants is committed, only that section's prose, so these counts rest on that record and cannot be re-run as they were.</td>
+          <td>By hand: a bug is planted and the tests run. <code>SECURITY.md</code> section 5 has each row except the last two below, which are counts in the merge record of <code>f363737</code> and in <code>PLAN.md</code>. No script or patch for the mutants is committed, so these counts rest on that record and cannot be re-run as they were.</td>
           <td>Each planted bug was caught, its gap closed, or it was shown to be equivalent. It shows the tests catch those bugs, chosen by the same process that wrote the tests, and not that they catch every bug.</td>
-          <td class="wrap-any"><code>Portfolio</code> and its adapter: 87 of 87 (2026-10-30). <code>GuardedAccount</code>, validators, <code>FeeModel</code>, the 4626 with a portfolio: 106 run, 8 alive at first: 2 were code doing nothing, removed; 5 were missing tests, written; 1 is equivalent and stays alive. A rerun on the changed lines is recorded as 8 of 8. <code>Gated7540Vault</code> dealing periods: 38 of 39, the survivor a branch that changed nothing and was removed. <code>NavDesk</code>: 49 of 49. <code>SignedEntry</code>: 20 of 20. <code>SupplyCapRule</code>, <code>ExecutedOnlyRule</code>, <code>Distributor</code>: 34, all caught. Deployment modules and the post-deploy check: 33, all caught. The sixteen fixes above: 66 planted, 62 caught at first, and the 4 survivors were missing tests, which were written and catch them. The read of nothing after them: 9 of 9 (2026-11-02). All on 2026-11-01 unless dated.</td>
+          <td class="wrap-any"><code>Portfolio</code> and its adapter: 87 of 87 (2026-10-30). <code>GuardedAccount</code>, validators, <code>FeeModel</code>, the 4626 with a portfolio: 106 run, 8 alive at first: 2 were code doing nothing, removed; 5 were missing tests, written; 1 is equivalent and stays alive. A rerun on the changed lines is recorded as 8 of 8. <code>Gated7540Vault</code> dealing periods: 38 of 39, the survivor a branch that changed nothing and was removed. <code>NavDesk</code>: 49 of 49. <code>SignedEntry</code>: 20 of 20. <code>SupplyCapRule</code>, <code>ExecutedOnlyRule</code>, <code>Distributor</code>: 34, all caught. Deployment modules and the post-deploy check: 33, all caught. The sixteen fixes above: 66 planted, 62 caught at first, and the 4 survivors were missing tests, which were written and catch them. The read of nothing after them: 9 of 9 (2026-11-02). The 7540's second contract: 11 of 11 (2026-11-02). The gate, the desk and the 4626's event: 29 of 29, and 11 of 11 on the lines the read's fix rewrote (2026-11-02). All on 2026-11-01 unless dated.</td>
         </tr>
         <tr>
           <td>Upgrade validation</td>
           <td><code>npm run validate:upgrades</code>: OpenZeppelin's <code>upgrades-core</code> 1.46.0 on the upgradeable contracts.</td>
-          <td>Each avoids patterns that are unsafe behind a proxy. No source names an earlier version (<code>@custom:oz-upgrades-from</code>), so it compares no storage layouts across versions.</td>
-          <td>4 of 4 on 2026-11-01, in the merge record of <code>61a103a</code>.</td>
+          <td>Each avoids patterns that are unsafe behind a proxy, apart from what its annotations tell the tool to allow, such as the 7540's hand-off to its second contract. No source names an earlier version (<code>@custom:oz-upgrades-from</code>), so it compares no storage layouts across versions.</td>
+          <td>5 of 5 on 2026-11-02, in <code>PLAN.md</code>.</td>
         </tr>
         <tr>
           <td>Reproducibility</td>
-          <td><code>npm run verify:reproducible</code>: two clean production builds, the default profile and forge compared, and <code>TokenProxy</code> against the creation code inside <code>ProxyDeployer</code>.</td>
+          <td><code>npm run verify:reproducible</code>: two clean production builds, the default profile and forge compared, <code>TokenProxy</code> against the creation code inside <code>ProxyDeployer</code>, and <code>Gated7540Settlement</code> against the creation code inside <code>Gated7540Vault</code>.</td>
           <td>The same source gives the same bytecode however it is built, so a code hash can be recomputed. It says nothing about whether that code is correct.</td>
-          <td>29 contracts on 2026-11-01, in the merge record of <code>61a103a</code>.</td>
+          <td>30 contracts on 2026-11-02, in <code>PLAN.md</code>.</td>
         </tr>
         <tr>
           <td>Lint, format, types</td>
@@ -447,7 +483,7 @@
 <section id="holds">
   <div class="prose">
     <h2>What holds, and the test that pins it</h2>
-    <p>The properties the rest of the documentation depends on, listed for the review of 2026-10-26 and re-read at this commit. They cover the token and its policy, not the vaults or the portfolio. Each is covered by a test or a Halmos property at <code>babef08</code>, except where a row says otherwise. The integration tests in <code>RuleSetIntegration.t.sol</code> use a test identity rule in place of <code>CredentialRule</code>.</p>
+    <p>The properties the rest of the documentation depends on, listed for the review of 2026-10-26 and re-read at this commit. They cover the token and its policy, not the vaults or the portfolio. Each is covered by a test or a Halmos property at <code>d903344</code>, except where a row says otherwise. The integration tests in <code>RuleSetIntegration.t.sol</code> use a test identity rule in place of <code>CredentialRule</code>.</p>
   </div>
   <div class="table-wrap">
     <table class="tight fixed">
@@ -480,13 +516,13 @@
       </tbody>
     </table>
   </div>
-  <p class="small">Unit and integration tests sit next to each contract (<code>*.t.sol</code>); the Halmos properties are in <a href="https://github.com/fepvenancio/rwa-token/tree/babef08/contracts/test/halmos"><code>contracts/test/halmos/</code></a> (here <code>IntentTokenHalmos.t.sol</code> and <code>MinPositionRuleHalmos.t.sol</code>).</p>
+  <p class="small">Unit and integration tests sit next to each contract (<code>*.t.sol</code>); the Halmos properties are in <a href="https://github.com/fepvenancio/rwa-token/tree/d903344/contracts/test/halmos"><code>contracts/test/halmos/</code></a> (here <code>IntentTokenHalmos.t.sol</code> and <code>MinPositionRuleHalmos.t.sol</code>).</p>
 </section>
 
 <section id="accepted">
   <div class="prose">
     <h2>Behaviour that looks like a bug and is on purpose</h2>
-    <p>These behaviours are in the code by design. They are listed so that a reader does not report them as findings. <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/SECURITY.md"><code>SECURITY.md</code></a> section 3 has the longer list, vaults and legos included.</p>
+    <p>These behaviours are in the code by design. They are listed so that a reader does not report them as findings. <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/SECURITY.md"><code>SECURITY.md</code></a> section 3 has the longer list, vaults and legos included.</p>
     <ul class="plain">
       <li><b><code>canTransfer</code> can say yes where the write reverts.</b> ERC-7943 forbids it to fail on a plain balance shortfall, so with nothing frozen an amount above the balance reads true when the rules accept it. <code>canTransferWithReason</code> says no with <code>INSUFFICIENT_UNFROZEN</code>.</li>
       <li><b>A pause stops mints and burns too.</b> Only <span class="k k-forced">FORCED</span> movements pass.</li>
@@ -499,6 +535,7 @@
       <li><b>The recovery timelock administers itself,</b> as every OpenZeppelin <code>TimelockController</code> does: an operation it runs, after its delay, can change its own roles. The floor on its delay still holds.</li>
       <li><b>With no shares a report changes nothing.</b> A desk proposes a value of zero whatever is reported or sits in the portfolio, and a 4626 counts zero, so the next investors buy at par. What is left goes to them.</li>
       <li><b>A low read counts at once.</b> Losses are not rate limited. Deposits stay open at a price that can still be read while the fall in one count is half or less, and close for good beyond that. See <a href="#pages-check">what checking these pages found</a>.</li>
+      <li><b>A redemption can be filled in part.</b> Past a fund's redemption gate each request takes the same fraction, and the rest waits, stays invested and deals at a later price. A holder cannot take the rest back itself. See <a href="#open">what stays open</a>.</li>
       <li><b>Pre-flights answer for the latest block.</b> A write lands in a later one, so at a lockup end, a window edge or an intent deadline the two can differ by a second.</li>
     </ul>
     <p>To run the tests behind this page: <code>npx hardhat test</code>, and <code>npm run test:halmos</code> for the symbolic properties.</p>
@@ -513,6 +550,7 @@
     <a class="card" href="contracts/MinPositionRule.html"><span class="name">MinPositionRule</span><p>The minimum position that closes finding 3 where it is set.</p></a>
     <a class="card" href="contracts/GovernanceTimelock.html"><span class="name">GovernanceTimelock</span><p>The floor that holds on both timelocks.</p></a>
     <a class="card" href="contracts/NavDesk.html"><span class="name">NavDesk</span><p>The desk that holds the settler's role.</p></a>
+    <a class="card" href="contracts/Gated7540Settlement.html"><span class="name">Gated7540Settlement</span><p>The 7540's second contract, and what fixes it in place.</p></a>
     <a class="card" href="movement.html"><span class="name">One movement</span><p>The path most properties on this page are about.</p></a>
     <a class="card" href="deployment.html"><span class="name">Deployment and governance</span><p>The registry, the timelocks and the guardian in practice.</p></a>
   </div>
@@ -522,16 +560,16 @@
   <div class="prose">
     <h2>Source</h2>
     <ul class="plain">
-      <li>The audit package and its limits: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/SECURITY.md"><code>SECURITY.md</code></a></li>
-      <li>The review items as recorded: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/PLAN.md"><code>PLAN.md</code></a></li>
-      <li>CI: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/.github/workflows/ci.yml"><code>ci.yml</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/.github/workflows/release.yml"><code>release.yml</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/scripts/verify-reproducible.ts"><code>verify-reproducible.ts</code></a></li>
-      <li>Analyser settings: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/slither.config.json"><code>slither.config.json</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/aderyn.toml"><code>aderyn.toml</code></a></li>
-      <li>The post-deploy check: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/fixtures.ts"><code>test/nodejs/fixtures.ts</code></a></li>
+      <li>The audit package and its limits: <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/SECURITY.md"><code>SECURITY.md</code></a></li>
+      <li>The review items as recorded: <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/PLAN.md"><code>PLAN.md</code></a></li>
+      <li>CI: <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/.github/workflows/ci.yml"><code>ci.yml</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/.github/workflows/release.yml"><code>release.yml</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/scripts/verify-reproducible.ts"><code>verify-reproducible.ts</code></a></li>
+      <li>Analyser settings: <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/slither.config.json"><code>slither.config.json</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/aderyn.toml"><code>aderyn.toml</code></a></li>
+      <li>The post-deploy check: <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/test/nodejs/fixtures.ts"><code>test/nodejs/fixtures.ts</code></a></li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>babef08</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>d903344</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

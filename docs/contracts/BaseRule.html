@@ -241,13 +241,13 @@
   <div class="prose">
     <h2>Source and tests</h2>
     <ul class="plain">
-      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/hooks/BaseRule.sol"><code>contracts/hooks/BaseRule.sol</code></a>, interfaces <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/IComplianceRule.sol"><code>IComplianceRule.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/IPolicyHook.sol"><code>IPolicyHook.sol</code></a> (the context and the kinds), reason codes in <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/Errors.sol"><code>Errors.sol</code></a></li>
-      <li>Tests: <code>BaseRule</code> has no test file of its own, being abstract; it is tested through the rules built on it. <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/hooks/rules/FundHoldersRule.t.sol"><code>FundHoldersRule.t.sol</code></a> covers <code>onlyHook</code> (<code>FundHoldersRuleGate</code>: an attacker naming the real class, and a fake token naming itself and its hook). <code>SupplyCapRule.t.sol</code> and <code>ExecutedOnlyRule.t.sol</code> pin the account-question defaults. The test files of <code>CredentialRule</code>, <code>MinPositionRule</code>, <code>HolderRestrictionRule</code> and <code>SettlementWindowRule</code> each have a test that a fake token changes only its own records.</li>
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/hooks/BaseRule.sol"><code>contracts/hooks/BaseRule.sol</code></a>, interfaces <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/interfaces/IComplianceRule.sol"><code>IComplianceRule.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/interfaces/IPolicyHook.sol"><code>IPolicyHook.sol</code></a> (the context and the kinds), reason codes in <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/interfaces/Errors.sol"><code>Errors.sol</code></a></li>
+      <li>Tests: <code>BaseRule</code> has no test file of its own, being abstract; it is tested through the rules built on it. <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/hooks/rules/FundHoldersRule.t.sol"><code>FundHoldersRule.t.sol</code></a> covers <code>onlyHook</code> (<code>FundHoldersRuleGate</code>: an attacker naming the real class, and a fake token naming itself and its hook). <code>SupplyCapRule.t.sol</code> and <code>ExecutedOnlyRule.t.sol</code> pin the account-question defaults. The test files of <code>CredentialRule</code>, <code>MinPositionRule</code>, <code>HolderRestrictionRule</code> and <code>SettlementWindowRule</code> each have a test that a fake token changes only its own records.</li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>babef08</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>d903344</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

@@ -254,7 +254,7 @@ Further limits recorded during review:
   shrinks by the same fraction each period. A holder cannot withdraw a carried part: the agent can hand it back. A holder
   who expects a gate can ask for more than they want, to get a bigger slice. That is the deterrent's limit, not a fault in
   the arithmetic.
-- **A queued investor is out of a fund's count (P27).** Under a gate this lasts until the queue reaches them.
+- **A queued investor is out of a fund's count (P27).** Under a gate this lasts for as long as they queue.
 - **A price is a claim.** `reportHash` proves which report was used, not that the money exists. A maker and a checker who
   collude can approve a wrong price, and whoever dealt in between keeps the difference when it is corrected. The cooldown,
   the guardian's cancel and the published hash make that harder and traceable.

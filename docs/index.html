@@ -28,7 +28,7 @@
   <h1>Gated Token Stack</h1>
   <p class="lede">Tokens for fund shares and other real-world assets, where a policy decides who may hold them. Each token keeps its own books and its emergency powers, and asks a separate, replaceable set of compliance rules before a balance changes.</p>
   <div class="facts">
-    <span class="fact"><b>33 contracts</b> in contracts/ (interfaces and test mocks aside)</span>
+    <span class="fact"><b>35 contracts</b> in contracts/ (interfaces and test mocks aside)</span>
     <span class="fact">Solidity <b>0.8.30</b>, OpenZeppelin <b>5.6.1</b></span>
     <span class="fact">ERC-20, <b>ERC-7943</b>, ERC-4626, ERC-7540</span>
     <span class="fact">licence: <b>UNLICENSED</b>, proprietary</span>
@@ -236,14 +236,14 @@
         <text x="602" y="645" class="m sm">the proxy each token is</text>
       </svg>
     </div>
-    <figcaption><b>The policy sits outside the token, and everything around it is opt-in.</b> Arrows are calls between contracts. The grid of rules shows no order: each token has its own ordered list, and lists only the rules its product needs. Not drawn: <code>PolicyRegistry</code> is asked whenever attested code is installed, and never on a transfer; the main timelock holds the admin role on each token; <code>DvPExecutor</code> can also take cash from an ERC-3009 token outside the stack; <code>Distributor</code> serves one token, of any template, and has no deployment module yet; <code>NavDesk</code> reads its vault's <code>Portfolio</code> for a value.</figcaption>
+    <figcaption><b>The policy sits outside the token, and everything around it is opt-in.</b> Arrows are calls between contracts. The grid of rules shows no order: each token has its own ordered list, and lists only the rules its product needs. Not drawn: <code>Gated7540Settlement</code> and <code>Gated7540Common</code>, which run as part of the 7540 vault; <code>PolicyRegistry</code> is asked whenever attested code is installed, and never on a transfer; the main timelock holds the admin role on each token; <code>DvPExecutor</code> can also take cash from an ERC-3009 token outside the stack; <code>Distributor</code> serves one token, of any template, and has no deployment module yet; <code>NavDesk</code> reads its vault's <code>Portfolio</code> for a value.</figcaption>
   </figure>
   <div class="table-wrap">
     <table>
       <thead><tr><th>Layer</th><th>Contracts</th><th>What it does</th></tr></thead>
       <tbody>
         <tr><td>Token</td><td><code>PolicyGatedERC20Upgradeable</code>, <code>IntentSettledUpgradeable</code>, <code>GatedToken</code>, <code>IntentToken</code></td><td>Keeps balances, roles, the pause, frozen amounts and forced transfers. Every balance change goes through one internal function, <code>_move</code>, which asks the hook. <code>GatedToken</code> is the base alone. <code>IntentToken</code> adds the mixin that runs transfers a holder signed.</td></tr>
-        <tr><td>Vaults</td><td><code>GatedVaultBase</code>, <code>Gated4626Vault</code>, <code>Gated7540Vault</code>, <code>NavDesk</code>, <code>FeeModel</code></td><td>Vault shares are gated tokens too. The 4626 deposits and redeems at once. The 7540 deals in periods, one price for everyone in a period. <code>NavDesk</code> turns a reported value into that price, and <code>FeeModel</code> works out a fee for a desk or a 4626.</td></tr>
+        <tr><td>Vaults</td><td><code>GatedVaultBase</code>, <code>Gated4626Vault</code>, <code>Gated7540Vault</code>, <code>Gated7540Settlement</code>, <code>Gated7540Common</code>, <code>NavDesk</code>, <code>FeeModel</code></td><td>Vault shares are gated tokens too. The 4626 deposits and redeems at once. The 7540 deals in periods, one price for everyone in a period, and hands settlement and recovery to a second contract its implementation creates. <code>NavDesk</code> turns a reported value into that price and can hold a redemption gate, and <code>FeeModel</code> works out a fee for a desk or a 4626.</td></tr>
         <tr><td>Portfolio</td><td><code>Portfolio</code>, <code>ERC4626Adapter</code>, <code>GuardedAccount</code>, <code>ERC20CallValidator</code>, <code>ERC4626CallValidator</code></td><td>Where one vault's money may go. The portfolio holds the idle money and sends it to installed adapters, under caps on their allocation. An adapter is an on-chain vault position or a guarded account for a custodian or a strategy, whose calls are limited by validators.</td></tr>
         <tr><td>Policy</td><td><code>ComplianceHook</code>, <code>BaseRule</code>, <code>CredentialRule</code>, <code>MinPositionRule</code>, <code>HolderRestrictionRule</code>, <code>SettlementWindowRule</code>, <code>FundHoldersRule</code>, <code>SupplyCapRule</code>, <code>ExecutedOnlyRule</code></td><td>Decides whether a movement may happen. One hook for the whole deployment, an ordered list of at most 16 rules per token. Each rule returns a reason code. A token with no rules has every movement refused.</td></tr>
         <tr><td>Identity and fund</td><td><code>CredentialRegistry</code>, <code>Fund</code></td><td><code>CredentialRegistry</code> records what attesters (identity providers) say about each address: who vouched for it, its qualification bits, until when, and its standing. <code>CredentialRule</code> reads it. <code>Fund</code> groups several tokens as share classes and counts distinct investors across them, and <code>FundHoldersRule</code> enforces the cap.</td></tr>
@@ -366,6 +366,7 @@
     <dt>dealing period</dt><dd>On <code>Gated7540Vault</code>, the stretch of time whose requests are dealt together. One period is open and requests join it. Everyone in a period gets one price, set in one transaction, and each investor claims later.</dd>
     <dt>cut-off</dt><dd>The moment a dealing period closes, with <code>closePeriod</code>. A request after it waits for the next period. Through <code>NavDesk</code>, anyone can call it once <code>periodLength</code> has passed.</dd>
     <dt>net asset value</dt><dd>NAV: what a fund's assets are worth after fees, in units of its asset. <code>settlePeriod</code> deals a period at the NAV it is given, which leaves out what the vault itself holds (pending deposits and claimable redemption cash).</dd>
+    <dt>redemption gate</dt><dd>The most of a fund that may leave in one period, net of what comes in, set on <code>NavDesk</code> as a level. Past it every request in the period is filled at the same fraction, and the rest carries to the next period, stays invested and deals at that period's price.</dd>
     <dt>maker and checker</dt><dd>Two different accounts behind one decision: one proposes and the other approves. <code>NavDesk</code> asks this of each price, and <code>Distributor</code> of each distribution.</dd>
     <dt>portfolio</dt><dd>A <code>Portfolio</code> contract, one per vault: holds the vault's idle money and sends it to installed adapters, under caps on their allocation.</dd>
     <dt>adapter</dt><dd>The plug between a portfolio and one place money can go. <code>ERC4626Adapter</code> holds a position in an on-chain vault, and <code>GuardedAccount</code> serves a custodian or a strategy.</dd>
@@ -394,8 +395,10 @@
     <div class="cards">
       <a class="card" href="contracts/GatedVaultBase.html"><span class="name">GatedVaultBase</span><p>What both vaults share: the issuer's <code>mint</code> and <code>burn</code> revert, and a third party in a deposit or redemption must pass the token's policy.</p></a>
       <a class="card" href="contracts/Gated4626Vault.html"><span class="name">Gated4626Vault</span><p>An ERC-4626 vault whose shares are a gated token. It can invest through a portfolio, with a limit on how fast its counted value may rise.</p></a>
-      <a class="card" href="contracts/Gated7540Vault.html"><span class="name">Gated7540Vault</span><p>An ERC-7540 vault dealt in periods: investors request, one settlement prices the whole period, and each investor claims later.</p></a>
-      <a class="card" href="contracts/NavDesk.html"><span class="name">NavDesk</span><p>Turns a reported value into an approved price for one 7540 vault: one account proposes, a different one accepts, and a cooldown leaves time to cancel.</p></a>
+      <a class="card" href="contracts/Gated7540Vault.html"><span class="name">Gated7540Vault</span><p>An ERC-7540 vault dealt in periods: investors request, one settlement prices the whole period, and each investor claims later. A settlement can take part of the redemptions, at one fraction for all.</p></a>
+      <a class="card" href="contracts/Gated7540Settlement.html"><span class="name">Gated7540Settlement</span><p>The 7540's second contract: closing, settling, rejecting and recovering run there, on the vault's storage. The implementation creates it, and nobody can swap it alone.</p></a>
+      <a class="card" href="contracts/Gated7540Common.html"><span class="name">Gated7540Common</span><p>The storage and the request roll those two share, so they cannot disagree on the layout.</p></a>
+      <a class="card" href="contracts/NavDesk.html"><span class="name">NavDesk</span><p>Turns a reported value into an approved price for one 7540 vault: one account proposes, a different one accepts, and a cooldown leaves time to cancel. It holds the fund's redemption gate, if it has one.</p></a>
       <a class="card" href="contracts/FeeModel.html"><span class="name">FeeModel</span><p>Works out a management fee and a performance fee from rates fixed at deployment, with no storage of its own.</p></a>
     </div>
   </div>
@@ -464,14 +467,14 @@
   <div class="prose">
     <h2>Source</h2>
     <ul class="plain">
-      <li>Repository: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/README.md"><code>README.md</code></a> (setup and commands) and <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/SECURITY.md"><code>SECURITY.md</code></a> (audit preparation)</li>
-      <li>Contracts: <a href="https://github.com/fepvenancio/rwa-token/tree/babef08/contracts"><code>contracts/</code></a>, interfaces in <a href="https://github.com/fepvenancio/rwa-token/tree/babef08/contracts/interfaces"><code>contracts/interfaces/</code></a></li>
-      <li>Deployment: <a href="https://github.com/fepvenancio/rwa-token/tree/babef08/ignition/modules"><code>ignition/modules/</code></a> (<code>Core.ts</code>, <code>CoreHandover.ts</code>, <code>Fund.ts</code>, <code>Legos.ts</code>, <code>Product.ts</code>, <code>FundOpen.ts</code> and <code>roles.ts</code>), and the combinations in <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/ignition/profiles.ts"><code>ignition/profiles.ts</code></a></li>
+      <li>Repository: <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/README.md"><code>README.md</code></a> (setup and commands) and <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/SECURITY.md"><code>SECURITY.md</code></a> (audit preparation)</li>
+      <li>Contracts: <a href="https://github.com/fepvenancio/rwa-token/tree/d903344/contracts"><code>contracts/</code></a>, interfaces in <a href="https://github.com/fepvenancio/rwa-token/tree/d903344/contracts/interfaces"><code>contracts/interfaces/</code></a></li>
+      <li>Deployment: <a href="https://github.com/fepvenancio/rwa-token/tree/d903344/ignition/modules"><code>ignition/modules/</code></a> (<code>Core.ts</code>, <code>CoreHandover.ts</code>, <code>Fund.ts</code>, <code>Legos.ts</code>, <code>Product.ts</code>, <code>FundOpen.ts</code> and <code>roles.ts</code>), and the combinations in <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/ignition/profiles.ts"><code>ignition/profiles.ts</code></a></li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>babef08</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>d903344</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gated7540Common · Gated Token Stack</title>
+<meta name="description" content="The storage and the request roll that Gated7540Vault and Gated7540Settlement share, in one abstract contract, so the two cannot disagree on the layout.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="../index.html">Gated Token Stack</a>
+  <a href="../index.html">Overview</a>
+  <a href="../index.html#contracts">Contracts</a>
+  <a href="../roles.html">Who can do what</a>
+  <a href="../movement.html">One movement</a>
+  <a href="../deployment.html">Deployment and governance</a>
+  <a href="../money.html">Where the money sits</a>
+  <a href="../review.html">Security review</a>
+</nav>
+<main class="page">
+
+<header class="top">
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Vaults</div>
+  <h1>Gated7540Common</h1>
+  <p class="lede wrap-any">What <a href="Gated7540Vault.html">Gated7540Vault</a> and <a href="Gated7540Settlement.html">Gated7540Settlement</a> share: the storage they both act on, and how a controller's request reads. Abstract, so it runs only as part of those two.</p>
+  <div class="facts">
+    <span class="fact"><b>contracts/vaults/Gated7540Common.sol</b></span>
+    <span class="fact">abstract: <b>inherited, not deployed alone</b></span>
+    <span class="fact">extends <b>GatedVaultBase</b></span>
+    <span class="fact">no external functions</span>
+  </div>
+</header>
+
+<section id="in-one-minute">
+  <div class="callout wrap-any">
+    <h3>In one minute</h3>
+    <p>Two contracts run on one vault's storage, so they have to agree on exactly where each figure lives. If each kept its own copy of the layout, the copies could drift apart, and one contract would read what the other wrote as something else. So the layout is written once, here, and both inherit it. The same goes for the one piece of arithmetic both need: how a controller's request reads once settlements have touched its period.</p>
+  </div>
+</section>
+
+<section id="functions">
+  <div class="prose wrap-any"><h2>What it holds</h2></div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Item</th><th>What it is</th></tr></thead>
+      <tbody>
+        <tr><td><code>Request { period, pending, paid, owed }</code></td><td>One controller's request on one side. <code>period</code> holds <code>pending</code>, and is 0 with nothing pending. <code>paid</code> is settled and not yet claimed, and <code>owed</code> is what that buys.</td></tr>
+        <tr><td><code>Book { paid, owed, carried }</code></td><td>One side of one period, which <code>periodBook</code> reads. <code>paid</code> is what its requests gave, net of rejects. <code>owed</code> is what that bought at settlement. <code>carried</code> is what settlement left for the next period, on the redemption side. Zero means it took it all.</td></tr>
+        <tr><td><code>Gated7540Storage</code></td><td>The vault's ERC-7201 storage, at the location of <code>gated.storage.Gated7540Vault</code>: the asset, the share decimals, the open and settled periods, the last value and supply, <code>unclaimedShares</code>, <code>pendingDeposits</code>, <code>claimableCash</code>, <code>pendingRedeemShares</code>, and the maps of requests, books and operators. <code>Gated7540VaultUnit_Storage</code> pins the location.</td></tr>
+        <tr><td><code>_request(controller, isDeposit)</code></td><td>A controller's request with every settled period rolled in. Every read and write of a request goes through it. It writes nothing.</td></tr>
+        <tr><td><code>_store(controller, isDeposit, request)</code></td><td>Writes a controller's request.</td></tr>
+        <tr><td><code>_getGated7540Storage()</code></td><td>The pointer to that storage.</td></tr>
+        <tr><td><code>_SETTLER_ROLE</code>, <code>_VIRTUAL_SHARES</code></td><td><code>keccak256('SETTLER_ROLE')</code>, and the <code>1e6</code> virtual shares of the price.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="roll">
+  <div class="prose wrap-any">
+    <h2>How a request reads</h2>
+    <p>A settlement writes one total per side of a period, and touches no controller's record. So each read works out a controller's share of the settled periods from those totals, one period at a time, starting where its record stands.</p>
+  </div>
+  <div class="code-block">
+    <div class="code-label">_request, in words close to the code</div>
+<pre>while the request has a period, and that period is settled:
+    carried  = floor(pending × book.carried / book.paid)
+    paid    += pending − carried
+    owed    += floor(pending × book.owed / book.paid)
+    pending  = carried
+    period   = next period if carried is not zero, otherwise none</pre>
+  </div>
+  <div class="prose wrap-any">
+    <ul class="plain wrap-any">
+      <li><b>A full fill ends after one pass.</b> Nothing carries, so the deposit side and any settlement with no limit in the way read in one step.</li>
+      <li><b>A controller that waited walks.</b> It ends where one that claimed each time ends (<code>test_ADormantControllerEndsWhereAnActiveOneDoes</code>), and the views say what a write would store (<code>test_TheViewsSayWhatAWriteWouldStore</code>). A gated period walked cost 5,979 gas when measured, and a test holds it below 7,000 (<code>test/nodejs/vaults.test.ts</code>). About 5,000 gated periods in a row fit a block of 30 million. The cost falls only on calls about that controller.</li>
+      <li><b>Rounding stays on the safe side.</b> What each controller carries rounds down, so the parts add up to no more than the next book holds and a reject of one cannot underflow it. What is owed rounds down too, so it adds up to no more than the assets (<code>testFuzz_TheCarriedPartsNeverExceedTheNextBook</code>, <code>testFuzz_TheVaultCanPayEveryClaimAfterAGate</code>).</li>
+    </ul>
+  </div>
+</section>
+
+<section id="connected">
+  <div class="prose wrap-any"><h2>Connected to</h2></div>
+  <div class="cards">
+    <a class="card" href="Gated7540Vault.html"><span class="name">Gated7540Vault</span><p>Inherits it, for requests, claims and views.</p></a>
+    <a class="card" href="Gated7540Settlement.html"><span class="name">Gated7540Settlement</span><p>Inherits it, for settlement and recovery.</p></a>
+    <a class="card" href="GatedVaultBase.html"><span class="name">GatedVaultBase</span><p>Its parent: the third-party check and the probes.</p></a>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose wrap-any">
+    <h2>Source and tests</h2>
+    <ul class="plain wrap-any">
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/vaults/Gated7540Common.sol"><code>contracts/vaults/Gated7540Common.sol</code></a></li>
+      <li>Tests: it has no test file of its own, being abstract. It is tested through <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/vaults/Gated7540Vault.t.sol"><code>Gated7540Vault.t.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/vaults/Gated7540Settlement.t.sol"><code>Gated7540Settlement.t.sol</code></a>.</li>
+    </ul>
+  </div>
+</section>
+
+<footer>Describes the contracts at commit <code>d903344</code> on <code>main</code>.</footer>
+</main>
+</body>
+</html>

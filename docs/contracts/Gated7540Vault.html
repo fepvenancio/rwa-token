@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Gated7540Vault · Gated Token Stack</title>
-<meta name="description" content="How Gated7540Vault deals in periods: requests join the open period, the period closes, everyone in it gets one price in one transaction, and each investor claims later.">
+<meta name="description" content="How Gated7540Vault deals in periods: requests join the open period, the period closes, everyone in it gets one price in one transaction, and each investor claims later. A settlement can take part of a period's redemptions, filling every request at one fraction.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
@@ -34,6 +34,7 @@
     <span class="fact">implementation attested as <b>IMPLEMENTATION</b></span>
     <span class="fact">share decimals: <b>the asset's plus 6</b></span>
     <span class="fact">priced by: <b>a NavDesk</b> holding SETTLER_ROLE</span>
+    <span class="fact">settlement code: <b>Gated7540Settlement</b></span>
   </div>
 </header>
 
@@ -42,6 +43,7 @@
     <h3>In one minute</h3>
     <p>Many funds cannot settle a subscription the moment it arrives, because the price is worked out later, off chain. ERC-7540 is the standard vault for that: the investor files a request, the fund settles it, and the investor claims the result. Here requests are gathered into dealing periods, as a fund dealing daily would gather its subscriptions and redemptions up to a cut-off.</p>
     <p>When a period closes, the holder of <code>SETTLER_ROLE</code> names its net asset value, normally through a <a href="NavDesk.html"><code>NavDesk</code></a> that needs two people on every price. One transaction prices the whole period. Subscriptions pay redemptions first, and only the difference moves to or from a cash account. Each investor then claims when it likes: shares are minted at the claim, so every compliance rule still applies, and one investor's problem cannot block a settlement. An agent (<code>AGENT_ROLE</code>, the enforcement role) can take a request back or deliver what an investor cannot claim itself.</p>
+    <p>A settlement can take only part of a period's redemptions. Every request is then filled at the same fraction, and the rest stays invested and deals at the next period's price (<a href="#part-fills">part fills</a>). The vault is told how many shares to take and not why: a <code>NavDesk</code> holds the level. Settlement and recovery run in a second contract, <a href="Gated7540Settlement.html"><code>Gated7540Settlement</code></a>, which the implementation creates and nobody can swap alone. An investor calls this vault either way and sees no difference.</p>
   </div>
 </section>
 
@@ -53,7 +55,7 @@
   </div>
   <figure>
     <div class="fig-scroll">
-      <svg class="d" viewBox="0 0 780 404" role="img" aria-label="Two consecutive periods. Period 5 is open and requests join it. closePeriod, by SETTLER_ROLE, closes period 5 and opens period 6. While period 5 is closed, its requests stay pending, a controller with a request in it waits, and a second close reverts. settlePeriod, by SETTLER_ROLE, gives period 5 one price, burns the escrow, nets cash, pays the fee and audits the balance. Period 5 is then settled and investors claim whenever they like. dealingState reads open 5 settled 4, then open 6 settled 4, then open 6 settled 5. Rejects and recoverRedeemRequest belong to AGENT_ROLE while the period is open and to SETTLER_ROLE once it has closed.">
+      <svg class="d" viewBox="0 0 780 404" role="img" aria-label="Two consecutive periods. Period 5 is open and requests join it. closePeriod, by SETTLER_ROLE, closes period 5 and opens period 6. While period 5 is closed, its requests stay pending, a controller with a request in it waits, and a second close reverts. settlePeriod, by SETTLER_ROLE, gives period 5 one price, burns the escrowed shares it takes, carries any others into period 6, nets cash, pays the fee and audits the balance. Period 5 is then settled and investors claim whenever they like. dealingState reads open 5 settled 4, then open 6 settled 4, then open 6 settled 5. Rejects and recoverRedeemRequest belong to AGENT_ROLE while the period is open and to SETTLER_ROLE once it has closed.">
         <text x="10" y="58" class="bold">Period 5</text>
         <rect class="act" x="110" y="30" width="218" height="48" rx="6"/>
         <text x="122" y="50" class="bold">Open</text>
@@ -74,7 +76,7 @@
         <line class="ln dash" x1="550" y1="16" x2="550" y2="84"/>
         <line class="ln dash" x1="550" y1="148" x2="550" y2="162"/>
         <text x="330" y="178" text-anchor="middle" class="mono sm">closePeriod()</text>
-        <text x="550" y="178" text-anchor="middle" class="mono sm">settlePeriod(nav, fee, cash, feeRecipient)</text>
+        <text x="565" y="178" text-anchor="middle" class="mono sm">settlePeriod(nav, fee, cash, feeRecipient, redeemLimit)</text>
         <text x="330" y="194" text-anchor="middle" class="m">SETTLER_ROLE</text>
         <text x="550" y="194" text-anchor="middle" class="m">SETTLER_ROLE, not while paused</text>
 
@@ -104,7 +106,7 @@
 
         <rect class="b" x="552" y="244" width="220" height="150" rx="6"/>
         <text x="564" y="264" class="m">One price for everyone in it.</text>
-        <text x="564" y="280" class="m">Escrow burned, cash netted,</text>
+        <text x="564" y="280" class="m">Shares taken burned, cash netted,</text>
         <text x="564" y="296" class="m">fee paid, balance audited.</text>
         <text x="564" y="320" class="mono sm">deposit, mint</text>
         <text x="564" y="336" class="m">shares minted to the receiver</text>
@@ -112,14 +114,14 @@
         <text x="564" y="374" class="m">cash paid to the receiver</text>
       </svg>
     </div>
-    <figcaption class="wrap-any"><b>Nobody's request is priced before the cut-off.</b> A request made after <code>closePeriod</code> joins the next period (<code>test_ARequestAfterTheCutOffJoinsTheNextPeriod</code>). A period with nothing in it settles too (<code>test_AnEmptyPeriodSettlesAndChangesNothing</code>).</figcaption>
+    <figcaption class="wrap-any"><b>Nobody's request is priced before the cut-off.</b> A request made after <code>closePeriod</code> joins the next period (<code>test_ARequestAfterTheCutOffJoinsTheNextPeriod</code>). A period with nothing in it settles too (<code>test_AnEmptyPeriodSettlesAndChangesNothing</code>). Redemptions a settlement does not take carry into the next period and deal at its price (<a href="#part-fills">part fills</a>).</figcaption>
   </figure>
   <ol class="steps wrap-any">
     <li><div><b>Request a deposit.</b> <code>requestDeposit(assets, controller, owner)</code>, called by the owner or an operator of the owner. In this order it refuses zero assets (<code>Gated7540Vault_ZeroAmount</code>), a zero controller (<code>Gated7540Vault_ZeroAddress</code>), and a caller who may not act (<code>Gated7540Vault_Unauthorized(caller)</code>). The controller must pass the <a href="GatedVaultBase.html#probes">mint probe</a>, a check that it could hold shares at all (<code>Gated7540Vault_ControllerNotEligible(reason)</code>), and an owner other than the controller must pass the <a href="GatedVaultBase.html#how">third-party check</a> (<code>GatedVault_ThirdPartyNotEligible</code>). The assets move from the owner into the vault. Emits <code>DepositRequest</code>.</div></li>
     <li><div><b>Request a redemption.</b> <code>requestRedeem(shares, controller, owner)</code>, called by the owner, an operator of the owner, or an account with the owner's share allowance, which it spends. A controller other than the owner must pass the third-party check. The shares move from the owner to the vault's own address, where they wait in escrow until the request is settled, as an ordinary <span class="k k-transfer">TRANSFER</span> through the hook, so pause, the owner's frozen amount, credential, lockup, address freeze and minimum position apply. Emits <code>RedeemRequest</code>.</div></li>
     <li><div><b>Requests add up per controller.</b> The request id is always 0. A second request from a controller in the same period adds to the first (<code>test_TwoRequestsInTheOpenPeriodAdd</code>). If its earlier request is in a closed, unsettled period it reverts with <code>Gated7540Vault_EarlierRequestUnsettled(period)</code> (<code>test_AControllerWaitsWhileAnEarlierRequestIsUnsettled</code>). There is no way for an investor to cancel.</div></li>
     <li><div><b>Close.</b> <code>closePeriod()</code> opens the next period and emits <code>PeriodClosed(period)</code>. It reverts with <code>Gated7540Vault_PeriodUnsettled(period)</code> while an earlier closed period is unsettled, so at most one is closed. With a <a href="NavDesk.html"><code>NavDesk</code></a> holding the role, anyone can call the desk's <code>closePeriod()</code> once <code>periodLength</code> has passed, so no role picks the moment: the earliest one follows from the last cut-off, and the first successful call from then on sets it.</div></li>
-    <li><div><b>Settle.</b> <code>settlePeriod(nav, fee, cash, feeRecipient)</code> deals the closed period, as described <a href="#settle">below</a>. With a desk, its <code>execute()</code> makes this call after a reporter proposes, a different person accepts and a cooldown passes.</div></li>
+    <li><div><b>Settle.</b> <code>settlePeriod(nav, fee, cash, feeRecipient, redeemLimit)</code> deals the closed period, as described <a href="#settle">below</a>. With a desk, its <code>execute()</code> makes this call after a reporter proposes, a different person accepts and a cooldown passes.</div></li>
     <li><div><b>Claim.</b> <code>deposit(assets, receiver, controller)</code> or <code>mint(shares, receiver, controller)</code> takes the shares; <code>redeem(shares, receiver, controller)</code> or <code>withdraw(assets, receiver, controller)</code> takes the cash. The controller or its operator calls, and picks the receiver. The two-argument <code>deposit(assets, receiver)</code> and <code>mint(shares, receiver)</code> claim for the caller as controller.</div></li>
   </ol>
 </section>
@@ -127,12 +129,13 @@
 <section id="price">
   <div class="prose wrap-any">
     <h2>One price for a period</h2>
-    <p>A settlement takes the net asset value of the fund, <code>nav</code>, what all its shares are worth together, and prices everything in the period from it. <code>nav</code> leaves out what the vault itself holds, which is pending deposits and claimable redemption cash: that money belongs to investors, waiting to be invested or waiting to be paid out. <code>supply</code> is every share at that value: the share supply, including the escrowed shares about to be burned, plus shares bought in earlier periods and not yet claimed.</p>
+    <p>A settlement takes the net asset value of the fund, <code>nav</code>, what all its shares are worth together, and prices everything in the period from it. <code>nav</code> leaves out what the vault itself holds, which is pending deposits and claimable redemption cash: that money belongs to investors, waiting to be invested or waiting to be paid out. <code>supply</code> is every share at that value: the share supply, including every escrowed share, whether this settlement burns it or carries it, plus shares bought in earlier periods and not yet claimed.</p>
   </div>
-  <pre>supply = totalSupply() + unclaimedShares
+  <pre>supply   = totalSupply() + unclaimedShares
+redeemed = the smaller of redemptions and redeemLimit
 
-shares for all deposits    = deposits × (supply + 1e6) / (nav + 1)
-assets for all redemptions = redemptions × (nav + 1) / (supply + 1e6)
+shares for all deposits     = deposits × (supply + 1e6) / (nav + 1)
+assets for the shares taken = redeemed × (nav + 1) / (supply + 1e6)
 
 both rounded down</pre>
   <div class="prose wrap-any">
@@ -153,7 +156,7 @@ both rounded down</pre>
   </div>
   <figure>
     <div class="fig-scroll">
-      <svg class="d" viewBox="0 0 780 660" role="img" aria-label="settlePeriod step by step, each step able to revert the whole call. One: the caller must hold SETTLER_ROLE and the vault must not be paused, else AccessControlUnauthorizedAccount or EnforcedPause. Two: a period must be closed, else Gated7540Vault_NoClosedPeriod. Three: strike the price, book it and emit PeriodSettled; amounts that do not fit 128 bits revert with SafeCastOverflowedUintDowncast. Four: burn the escrowed redemptions through the hook, else PolicyGated_TransferRejected; with no redemptions there is no burn. Five: net. If deposits exceed assets plus fee, send the difference to the cash account. If assets plus fee exceed deposits, pull the difference from the cash account, which can fail with the asset's own ERC20InsufficientBalance or ERC20InsufficientAllowance. If equal, nothing moves. Six: pay the fee to feeRecipient if the fee is not zero. Seven: the vault must hold at least pending deposits plus claimable cash, else Gated7540Vault_BalanceAudit.">
+      <svg class="d" viewBox="0 0 780 660" role="img" aria-label="settlePeriod step by step, each step able to revert the whole call. One: the caller must hold SETTLER_ROLE and the vault must not be paused, else AccessControlUnauthorizedAccount or EnforcedPause. Two: a period must be closed, else Gated7540Vault_NoClosedPeriod. Three: strike the price, take the smaller of the period's redemptions and the limit, book it, carry the rest into the next period and emit PeriodSettled; amounts that do not fit 128 bits revert with SafeCastOverflowedUintDowncast. Four: burn the shares taken through the hook, else PolicyGated_TransferRejected; with none taken there is no burn. Five: net. If deposits exceed assets plus fee, send the difference to the cash account. If assets plus fee exceed deposits, pull the difference from the cash account, which can fail with the asset's own ERC20InsufficientBalance or ERC20InsufficientAllowance. If equal, nothing moves. Six: pay the fee to feeRecipient if the fee is not zero. Seven: the vault must hold at least pending deposits plus claimable cash, else Gated7540Vault_BalanceAudit.">
         <defs>
           <marker id="v75b-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
           <marker id="v75b-arrow-rej" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="rej"/></marker>
@@ -161,7 +164,7 @@ both rounded down</pre>
 
         <rect class="act" x="20" y="12" width="470" height="50" rx="8"/>
         <text x="40" y="33" class="bold">The settler deals the closed period</text>
-        <text x="40" y="51" class="mono sm m">settlePeriod(nav, fee, cash, feeRecipient)</text>
+        <text x="40" y="51" class="mono sm m">settlePeriod(nav, fee, cash, feeRecipient, redeemLimit)</text>
         <line class="ln" x1="255" y1="62" x2="255" y2="84" marker-end="url(#v75b-arrow)"/>
 
         <rect class="b" x="20" y="86" width="470" height="44" rx="8"/>
@@ -182,15 +185,15 @@ both rounded down</pre>
         <rect class="b2" x="20" y="222" width="470" height="62" rx="8"/>
         <text x="40" y="243">3. Strike the price, book it, emit <tspan class="mono sm">PeriodSettled</tspan></text>
         <text x="40" y="261" class="m">The period's totals, unclaimedShares and claimableCash go up;</text>
-        <text x="40" y="275" class="m">pendingDeposits and the booked redemptions go down.</text>
+        <text x="40" y="275" class="m">pendingDeposits and the booked shares taken go down. The rest carries.</text>
         <line class="ln-rej" x1="490" y1="253" x2="530" y2="253" marker-end="url(#v75b-arrow-rej)"/>
         <rect class="rejbox" x="534" y="235" width="236" height="36" rx="6"/>
         <text x="544" y="258" class="mono sm rej">SafeCastOverflowedUintDowncast</text>
         <line class="ln" x1="255" y1="284" x2="255" y2="306" marker-end="url(#v75b-arrow)"/>
 
         <rect class="b" x="20" y="308" width="470" height="50" rx="8"/>
-        <text x="40" y="329">4. <tspan class="t-burn bold">BURN</tspan> the escrowed redemptions, through the hook</text>
-        <text x="40" y="347" class="m">No redemptions in the period: no burn, and no hook call.</text>
+        <text x="40" y="329">4. <tspan class="t-burn bold">BURN</tspan> the shares taken, through the hook</text>
+        <text x="40" y="347" class="m">None taken: no burn, and no hook call.</text>
         <line class="ln-rej" x1="490" y1="333" x2="530" y2="333" marker-end="url(#v75b-arrow-rej)"/>
         <rect class="rejbox" x="534" y="315" width="236" height="36" rx="6"/>
         <text x="544" y="338" class="mono sm rej">PolicyGated_TransferRejected</text>
@@ -230,8 +233,9 @@ both rounded down</pre>
   </figure>
   <ul class="plain wrap-any">
     <li><b>Netting.</b> Subscriptions pay redemptions, so the cash account only sees the difference. It receives net inflow and funds net outflow, and to fund outflow it must have approved the vault. Tests cover each direction, the equal case where no transfer happens at all, and a fee larger than the deposits (<code>test_WhenDepositsExceedRedemptions_OnlyTheDifferenceGoesToTheCashAccount</code>, <code>test_WhenRedemptionsExceedDeposits_OnlyTheDifferenceComesFromTheCashAccount</code>, <code>test_WhenTheyAreEqual_NothingMoves</code>, <code>test_AFeeAboveTheDepositsComesFromTheCashAccount</code>). The settler names the account in each call. With a <a href="NavDesk.html"><code>NavDesk</code></a> it is the desk's portfolio or custodian account.</li>
+    <li><b>The limit.</b> <code>redeemLimit</code> is the most shares this settlement takes from the period's redemptions, and <code>type(uint256).max</code> takes them all. The vault does not ask why. <a href="#part-fills">What a smaller limit does</a>.</li>
     <li><b>The balance audit.</b> After the money moves, the vault must hold at least the assets of its pending deposits plus the cash booked for settled redemptions. It reverts with <code>Gated7540Vault_BalanceAudit(held, owed)</code> otherwise, for example with an asset that delivers less than it was asked to (<code>test_WhenMoneyIsMissingAfterwards_TheBalanceAuditFires</code>). Requests already filed in the next open period are part of what it must still hold.</li>
-    <li><b>The event.</b> <code>PeriodSettled(period, nav, supply, deposits, shares, redemptions, assets, fee)</code> is emitted before the burn. See <a href="#history">what it lets a reader rebuild</a>.</li>
+    <li><b>The event.</b> <code>PeriodSettled(period, nav, supply, deposits, shares, redemptions, redeemed, assets, fee)</code> is emitted before the burn. See <a href="#history">what it lets a reader rebuild</a>.</li>
   </ul>
 </section>
 
@@ -245,14 +249,14 @@ both rounded down</pre>
       <thead><tr><th>Field</th><th>Deposit side</th><th>Redemption side</th><th>Read with</th></tr></thead>
       <tbody>
         <tr><td><code>period</code></td><td colspan="2">The period holding <code>pending</code>; 0 with nothing pending.</td><td>No getter</td></tr>
-        <tr><td><code>pending</code></td><td>Assets requested, not yet settled</td><td>Shares requested, not yet settled, in escrow</td><td><code>pendingDepositRequest</code>, <code>pendingRedeemRequest</code></td></tr>
+        <tr><td><code>pending</code></td><td>Assets requested, not yet settled</td><td>Shares requested and not yet taken, in escrow, a carried part included</td><td><code>pendingDepositRequest</code>, <code>pendingRedeemRequest</code></td></tr>
         <tr><td><code>paid</code></td><td>Assets settled and not yet claimed. They have already gone to redemptions, the fee or the cash account.</td><td>Shares settled and not yet claimed. They have already been burned.</td><td><code>claimableDepositRequest</code>, <code>maxDeposit</code>; <code>claimableRedeemRequest</code>, <code>maxRedeem</code></td></tr>
         <tr><td><code>owed</code></td><td>Shares those assets bought, not yet minted</td><td>Assets those shares pay, held in the vault</td><td><code>maxMint</code>; <code>maxWithdraw</code></td></tr>
       </tbody>
     </table>
   </div>
   <div class="prose wrap-any">
-    <p><b>A settled request rolls when read.</b> Settlement does not touch any investor's record. Once a request's period is settled, every read adds <code>pending</code> to <code>paid</code> and <code>floor(pending × period's owed / period's paid)</code> to <code>owed</code>, and treats <code>pending</code> as zero (<code>test_ClaimableDoesNotDependOnTheRollHavingBeenWritten</code>). The next request or claim writes that down. Amounts from different periods blend in one <code>paid</code> and <code>owed</code> (<code>test_ASettledRequestRollsIntoTheClaimableAmountsAtTheNextRequest</code>).</p>
+    <p><b>A settled request rolls when read.</b> Settlement does not touch any investor's record. Once a request's period is settled, every read works out what that period took from it. The part it carried is <code>floor(pending × period's carried / period's paid)</code>. The rest of <code>pending</code> goes to <code>paid</code>, and <code>floor(pending × period's owed / period's paid)</code> goes to <code>owed</code>. What carried becomes <code>pending</code> in the next period, and the read goes on until it reaches a period not yet settled or nothing is left (<code>test_ClaimableDoesNotDependOnTheRollHavingBeenWritten</code>, <code>test_TheViewsSayWhatAWriteWouldStore</code>). With nothing carried, as on every deposit, one pass ends it. The next request or claim writes that down. Amounts from different periods blend in one <code>paid</code> and <code>owed</code> (<code>test_ASettledRequestRollsIntoTheClaimableAmountsAtTheNextRequest</code>).</p>
     <p><b>A claim can take part of what is claimable.</b> Given what was paid, the other side rounds down. Given what is owed, the paid side rounds up. A claim of everything clears the pair exactly, because there is nothing left to round (<code>test_WhenClaimedInTwoStepsByAssets_SharesNeverExceedTheBook</code>, <code>test_WhenMintingPartially_TheAssetsRoundUp</code>, <code>test_WhenRedeemingPartially_TheAssetsRoundDown</code>, <code>test_WhenWithdrawingPartially_TheSharesRoundUp</code>).</p>
   </div>
   <div class="table-wrap">
@@ -276,7 +280,7 @@ both rounded down</pre>
 <section id="example">
   <div class="prose wrap-any">
     <h2>One investor, from request to claim</h2>
-    <p>Alice invests in period 2 and leaves in period 3. The asset has 6 decimals, so the shares have 12. Figures below are in whole units and show every digit, so that the rounding is visible. "Assets held" is the vault's balance of the asset. Every figure is the contract's own output for these calls, run against the code at this commit.</p>
+    <p>Alice invests in period 2 and leaves in period 3. The asset has 6 decimals, so the shares have 12. Figures below are in whole units and show every digit, so that the rounding is visible. "Assets held" is the vault's balance of the asset. Every figure is the contract's own output for these calls, run against the code at this commit. No limit applies: <code>type(uint256).max</code> as <code>redeemLimit</code> takes all of a period's redemptions.</p>
     <p><b>Before.</b> In period 1 Bob deposited 1,000,000 into an empty vault at a value of 0, and bought 1,000,000 shares. <code>dealingState()</code> reads open 2, settled 1, nothing unclaimed.</p>
   </div>
   <div class="table-wrap">
@@ -285,11 +289,11 @@ both rounded down</pre>
       <tbody>
         <tr><td>1</td><td><code>requestDeposit(10500e6, alice, alice)</code>, in period 2. Alice's 10,500 move into the vault. In the same period Dan requests 10,000 and Erin 21,500, and Bob requests to redeem 20,000 shares, which move to the vault's own address.</td><td>Deposit side: period 2, pending 10,500</td><td>1,000,000</td><td>0</td><td>42,000</td></tr>
         <tr><td>2</td><td><code>closePeriod()</code>. Period 3 opens. If Alice asked to add to her deposit request now, it would revert, naming period 2.</td><td>Unchanged: still pending</td><td>1,000,000</td><td>0</td><td>42,000</td></tr>
-        <tr><td>3</td><td><code>settlePeriod(1050000e6, 500e6, cash, feeRecipient)</code>. The fund is worth 1,050,000 after a fee of 500, a price of 1.05. Worked out below: the escrow is burned, 500 goes to the fee recipient, 20,500.000001 goes to the cash account, and the vault keeps Bob's cash.</td><td>Rolls when read: paid 10,500, owed 10,000.000000000476</td><td>980,000</td><td>40,000.000000001904</td><td>20,999.999999</td></tr>
+        <tr><td>3</td><td><code>settlePeriod(1050000e6, 500e6, cash, feeRecipient, type(uint256).max)</code>. The fund is worth 1,050,000 after a fee of 500, a price of 1.05. Worked out below: the escrow is burned, 500 goes to the fee recipient, 20,500.000001 goes to the cash account, and the vault keeps Bob's cash.</td><td>Rolls when read: paid 10,500, owed 10,000.000000000476</td><td>980,000</td><td>40,000.000000001904</td><td>20,999.999999</td></tr>
         <tr><td>4</td><td><code>deposit(4000e6, alice, alice)</code>. A partial claim. Alice receives <code>floor(4,000 × owed / 10,500)</code> = 3,809.523809523990 shares, as a <span class="k k-mint">MINT</span> through the hook.</td><td>paid 6,500, owed 6,190.476190476486</td><td>983,809.523809523990</td><td>36,190.476190477914</td><td>20,999.999999</td></tr>
         <tr><td>5</td><td><code>deposit(6500e6, alice, alice)</code>. The rest. It clears exactly: she receives 6,190.476190476486 and holds 10,000.000000000476 shares.</td><td>paid 0, owed 0</td><td>990,000.000000000476</td><td>30,000.000000001428</td><td>20,999.999999</td></tr>
         <tr><td>6</td><td>The others claim. Dan receives 9,523.809523809977 shares and Erin 20,476.190476191450. Bob collects his 20,999.999999. Rounding each of the three deposits down left one share unit, which stays unclaimed.</td><td>Unchanged</td><td>1,020,000.000000001903</td><td>0.000000000001</td><td>0</td></tr>
-        <tr><td>7</td><td><code>requestRedeem(10000000000000476, alice, alice)</code>, in period 3. Then the period closes and <code>settlePeriod(1122000e6, 0, cash, feeRecipient)</code> runs: the fund is worth 1,122,000, a price of 1.10. Her shares go to the vault and are burned at settlement. Nobody deposited in this period, so the cash account pays her whole 10,999.999999.</td><td>Redemption side: paid 10,000.000000000476, owed 10,999.999999</td><td>1,010,000.000000001427</td><td>0.000000000001</td><td>10,999.999999</td></tr>
+        <tr><td>7</td><td><code>requestRedeem(10000000000000476, alice, alice)</code>, in period 3. Then the period closes and <code>settlePeriod(1122000e6, 0, cash, feeRecipient, type(uint256).max)</code> runs: the fund is worth 1,122,000, a price of 1.10. Her shares go to the vault and are burned at settlement. Nobody deposited in this period, so the cash account pays her whole 10,999.999999.</td><td>Redemption side: paid 10,000.000000000476, owed 10,999.999999</td><td>1,010,000.000000001427</td><td>0.000000000001</td><td>10,999.999999</td></tr>
         <tr><td>8</td><td><code>redeem(10000000000000476, alice, alice)</code>. She receives 10,999.999999. She put in 10,500.</td><td>paid 0, owed 0</td><td>1,010,000.000000001427</td><td>0.000000000001</td><td>0</td></tr>
       </tbody>
     </table>
@@ -314,12 +318,99 @@ Alice    : owed = 10500e6 × 40,000.000000001904 / 42000e6    = 10,000.000000000
   </div>
 </section>
 
+<section id="part-fills">
+  <div class="prose wrap-any">
+    <h2>When a settlement takes only part</h2>
+    <p>A fund can limit how much leaves in one period. <code>settlePeriod</code> takes the smaller of the period's redemptions and <code>redeemLimit</code>. If that is less than the period's redemptions, every request in the period is filled at the same fraction, and the rest stays in the queue, stays invested and deals at the next period's price. The vault does not know why the limit is what it is. A <a href="NavDesk.html#gate"><code>NavDesk</code></a> works it out from a level the timelock sets.</p>
+    <h3>An example at a tenth of the fund</h3>
+    <p>A level of 10%, at a flat price, leaving out the virtual shares. The fund has 1,000,000 shares worth 1,000,000. The first period's deposits are 20,000, holder A asks to redeem 200,000 shares and holder B 100,000, and nobody asks for anything after that. The limit is a tenth of the fund's shares, plus the shares the period's deposits buy, so the level measures what leaves net of what comes in.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Period</th><th>Shares in the fund</th><th>Limit</th><th>Queue</th><th>Filled</th><th>A and B get out</th><th>Carried</th></tr></thead>
+      <tbody>
+        <tr><td>N</td><td>1,000,000</td><td>100,000 + 20,000 = 120,000</td><td>300,000</td><td>40%</td><td>80,000 and 40,000</td><td>180,000</td></tr>
+        <tr><td>N+1</td><td>900,000</td><td>90,000</td><td>180,000</td><td>50%</td><td>60,000 and 30,000</td><td>90,000</td></tr>
+        <tr><td>N+2</td><td>810,000</td><td>81,000</td><td>90,000</td><td>90%</td><td>54,000 and 27,000</td><td>9,000</td></tr>
+        <tr><td>N+3</td><td>729,000</td><td>72,900</td><td>9,000</td><td>100%</td><td>6,000 and 3,000</td><td>0</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 780 214" role="img" aria-label="The queue in each of the four periods, split into what was filled and what carried. Period N: a queue of 300,000, with 120,000 filled and 180,000 carried. Period N+1: 180,000, with 90,000 filled and 90,000 carried. Period N+2: 90,000, with 81,000 filled and 9,000 carried. Period N+3: 9,000, all filled.">
+        <rect class="seg-a" x="130" y="12" width="14" height="12"/>
+        <text x="150" y="23" class="sm">filled</text>
+        <rect class="seg-b" x="200" y="12" width="14" height="12"/>
+        <text x="220" y="23" class="sm">carried to the next period</text>
+
+        <text x="14" y="54" class="bold">Period N</text>
+        <text x="14" y="70" class="sm m">limit 120,000</text>
+        <rect class="seg-a" x="130" y="42" width="168" height="26"/>
+        <rect class="seg-b" x="298" y="42" width="252" height="26"/>
+        <text x="558" y="59" class="sm">120,000 filled, 180,000 carried</text>
+
+        <text x="14" y="98" class="bold">Period N+1</text>
+        <text x="14" y="114" class="sm m">limit 90,000</text>
+        <rect class="seg-a" x="130" y="86" width="126" height="26"/>
+        <rect class="seg-b" x="256" y="86" width="126" height="26"/>
+        <text x="390" y="103" class="sm">90,000 filled, 90,000 carried</text>
+
+        <text x="14" y="142" class="bold">Period N+2</text>
+        <text x="14" y="158" class="sm m">limit 81,000</text>
+        <rect class="seg-a" x="130" y="130" width="113" height="26"/>
+        <rect class="seg-b" x="243" y="130" width="13" height="26"/>
+        <text x="264" y="147" class="sm">81,000 filled, 9,000 carried</text>
+
+        <text x="14" y="186" class="bold">Period N+3</text>
+        <text x="14" y="202" class="sm m">limit 72,900</text>
+        <rect class="seg-a" x="130" y="174" width="13" height="26"/>
+        <text x="151" y="191" class="sm">9,000 filled, the queue is empty</text>
+      </svg>
+    </div>
+    <figcaption class="wrap-any"><b>The queue clears in four periods.</b> In period N the cash account funds 100,000: 120,000 paid out less the 20,000 paid in, which is a tenth of the fund. <code>test_AQueueClearsInFourPeriodsAtATenthOfTheFund</code> runs this through a desk at a thousandth of the size, in smallest units, and checks the limit, the queue and the shares after each period.</figcaption>
+  </figure>
+  <div class="prose wrap-any">
+    <h3>What a holder sees</h3>
+    <p>The standard's pair of views keeps the two parts apart, and each answers for the controller alone.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>View</th><th>After a part fill it shows</th></tr></thead>
+      <tbody>
+        <tr><td><code>pendingRedeemRequest</code></td><td>The part carried, still in escrow and waiting.</td></tr>
+        <tr><td><code>claimableRedeemRequest</code>, <code>maxRedeem</code></td><td>The shares taken and not yet claimed.</td></tr>
+        <tr><td><code>maxWithdraw</code></td><td>The assets those shares pay, at the price of the period that took them.</td></tr>
+        <tr><td><code>periodBook(period, isDeposit)</code></td><td>One side of one period: what its requests gave, carried shares included (<code>paid</code>), what that bought (<code>owed</code>), and what settlement left for the next period (<code>carried</code>). It reads the same for anyone.</td></tr>
+        <tr><td><code>PeriodSettled</code></td><td><code>redemptions</code> is what was asked, carried shares included, and <code>redeemed</code> what was taken.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small wrap-any">Pinned by <code>test_WhenLimited_EveryRequestFillsAtOneFraction</code>, <code>test_WhenLimited_OnlyThePartTakenBurnsAndIsPaid</code>, <code>test_WhenLimited_TheEventSaysWhatWasAskedAndWhatWasTaken</code> and <code>test_WhenLimited_TheBooksSayWhatWasTakenAndWhatCarried</code>. A limit of zero takes nothing and carries everything (<code>test_WhenTheLimitIsZero_NothingLeavesAndEverythingCarries</code>), and a limit at or above the book fills every request (<code>testFuzz_WhenTheLimitCoversTheBook_EveryRequestIsFilled</code>). A deposit is always filled whole.</p>
+  <div class="prose wrap-any">
+    <h3>What happens to the part carried</h3>
+    <ul class="plain wrap-any">
+      <li><b>It stays in the fund.</b> The shares stay in escrow, in <code>totalSupply()</code> and in <code>pendingRedeemShares</code>, so they count in the next price and share its rise or fall, and a forced transfer cannot reach them (<code>test_WhenLimited_TheCarriedSharesStayOutOfAForcedTransfersReach</code>).</li>
+      <li><b>It deals at the next period's price,</b> not at the price that filled the first part (<code>test_TheCarriedPartDealsAtTheNextPeriodsPrice</code>).</li>
+      <li><b>It has no priority.</b> It joins the next period's book, and a new request in that period is filled at the same fraction.</li>
+      <li><b>A controller that waits loses nothing.</b> It ends exactly where one that claims each period ends (<code>test_ADormantControllerEndsWhereAnActiveOneDoes</code>). Its next read walks the settled periods one at a time. That cost 5,979 gas per gated period when measured, and a Node test holds it below 7,000, so about 5,000 gated periods in a row fit a block of 30 million. The cost falls only on calls about that controller, because a settlement writes one total per side however many are waiting.</li>
+      <li><b>The rounding stays inside the books.</b> What each controller carries rounds down, so what is taken from it rounds up, and the parts add up to no more than the next book holds. What is owed rounds down too. Each gated period can leave up to one share unit per controller, less one, in the next book with nobody's name on it (<code>testFuzz_TheCarriedPartsNeverExceedTheNextBook</code>, <code>testFuzz_EveryCarriedPartCanBeHandedBack</code>, <code>testFuzz_TheVaultCanPayEveryClaimAfterAGate</code>). Those units burn when a settlement takes the whole book.</li>
+    </ul>
+    <h3>What a holder cannot do</h3>
+    <ul class="plain wrap-any">
+      <li><b>Take a carried part back.</b> There is no cancel. The agent can hand it back as a plain transfer while its period is open (<code>test_TheAgentCanHandBackACarriedPartWhileItsPeriodIsOpen</code>), the settler once that period has closed (<code>test_OnceTheCarriedPartsPeriodCloses_OnlyTheSettlerCanHandItBack</code>), and <code>recoverRedeemRequest</code> is the path when that is blocked (<code>test_TheAgentCanRecoverACarriedPart</code>). The part already taken stays claimable, and <code>recoverClaimable</code> leaves a carried part alone (<code>test_RecoveringClaimableLeavesACarriedPartAlone</code>).</li>
+      <li><b>Add to a request while the carried part sits in a closed period.</b> It reverts with <code>Gated7540Vault_EarlierRequestUnsettled</code> (<code>test_ANewRequestWaitsWhileTheCarriedPartSitsInAClosedPeriod</code>). In the open period a new request joins it (<code>test_ANewRequestJoinsACarriedPartInTheOpenPeriod</code>).</li>
+      <li><b>Get ahead by being quick.</b> A request filed early in a period is filled at the same fraction as one filed late. Asking for more than it wants does get a holder a bigger slice, which the limits below come back to.</li>
+    </ul>
+  </div>
+</section>
+
 <section id="escrow">
   <div class="prose wrap-any">
     <h2>The escrow is the vault's own address</h2>
     <p>Shares waiting for redemption sit in one balance at the vault's address, shared by every controller. The vault is the token itself, and the rules treat that address specially: <a href="CredentialRule.html"><code>CredentialRule</code></a> does not judge it (a credential there could lapse and stop every redemption), <a href="FundHoldersRule.html"><code>FundHoldersRule</code></a> does not count it, and <a href="MinPositionRule.html"><code>MinPositionRule</code></a> exempts it, so an escrow below the minimum is fine (<code>test_TheVaultNeedsNoCredentialToHoldItsEscrow</code>, <code>test_WhenTheVaultIsBlocked_TheEscrowStillWorksEndToEnd</code>, <code>test_WhenTheEscrowHoldsLessThanTheMinimum_TheRedeemLifecycleStillRuns</code>).</p>
     <ul class="plain wrap-any">
-      <li><b>Forced transfers stop at the booked total.</b> The vault keeps the total of shares booked to pending redemptions. <code>forcedTransfer</code> out of its own address may take only the shares above that, such as shares a holder sent there by mistake, and reverts with <code>Gated7540Vault_ExceedsSurplus(requested, surplus)</code> otherwise (<code>test_WhenTheAgentForcesBookedSharesOutOfTheEscrow_ItReverts</code>, <code>test_WhenSharesReachTheEscrowOutsideARequest_TheAgentCanForceOnlyThoseOut</code>).</li>
+      <li><b>Forced transfers stop at the booked total.</b> The vault keeps the total of shares booked to pending redemptions. <code>forcedTransfer</code> out of its own address may take only the shares above that, such as shares a holder sent there by mistake, and reverts with <code>Gated7540Vault_ExceedsSurplus(requested, surplus)</code> otherwise (<code>test_WhenTheAgentForcesBookedSharesOutOfTheEscrow_ItReverts</code>, <code>test_WhenSharesReachTheEscrowOutsideARequest_TheAgentCanForceOnlyThoseOut</code>). A carried part stays in that total.</li>
       <li><b>No frozen amount on it.</b> <code>setFrozenTokens</code> on the vault's own address reverts with <code>GatedVault_Unsupported</code>, since a frozen amount there could not name a controller (<code>test_WhenTheAgentFreezesTheEscrow_ItReverts</code>). To hold one controller's redemption, reject or recover it (<code>test_ToHoldOneRedemption_TheAgentRecoversItAndTheOthersStillSettle</code>).</li>
       <li><b>An investor's count changes at the request.</b> An owner who escrows its whole balance stops holding the class at once, and if it holds no other class of the fund, the fund's investor count drops before any settlement (<code>test_WhenARedemptionIsRequested_TheEscrowIsNeverCountedAndTheInvestorLeavesAtTheTransfer</code>).</li>
       <li><b>A gated asset is different.</b> If the vault's asset is itself a gated token, the vault is an ordinary holder of that asset and needs a credential on its policy (<code>test_WhenTheAssetIsGated_TheVaultIsAnOrdinaryHolderOfItAndNeedsACredential</code>).</li>
@@ -330,11 +421,11 @@ Alice    : owed = 10500e6 × 40,000.000000001904 / 42000e6    = 10,000.000000000
 <section id="reject-recover">
   <div class="prose wrap-any">
     <h2>Reject and recover</h2>
-    <p>A request does not have to end in a claim. There is no cancel for the investor, so a role takes a request back. Which role depends on the period: <code>AGENT_ROLE</code> while the request's period is open, and <code>SETTLER_ROLE</code> once it has closed, so that a request cannot leave a period being priced unless whoever prices it says so. Once settled, nothing is pending and these revert with <code>Gated7540Vault_NothingPending</code> (<code>test_OnceSettled_NothingIsPendingToReject</code>).</p>
+    <p>A request does not have to end in a claim. There is no cancel for the investor, so a role takes a request back. Which role depends on the period: <code>AGENT_ROLE</code> while the request's period is open, and <code>SETTLER_ROLE</code> once it has closed, so that a request cannot leave a period being priced unless whoever prices it says so. Once a request is settled in full, nothing is pending and these revert with <code>Gated7540Vault_NothingPending</code> (<code>test_OnceSettled_NothingIsPendingToReject</code>). A part that carried is still pending, and these act on it. Each runs in <a href="Gated7540Settlement.html"><code>Gated7540Settlement</code></a>, on this vault's storage.</p>
   </div>
   <figure>
     <div class="fig-scroll">
-      <svg class="d" viewBox="0 0 780 516" role="img" aria-label="The states of one controller's request on each side, and the ways out. Deposit side: Pending, assets waiting in the vault, becomes Claimable when the period is settled, then Claimed through deposit or mint by the controller. From Pending, rejectDepositRequest sends the assets back to the controller. From Claimable, recoverClaimable by the agent mints the shares to a recovery account. Redemption side: Pending, shares in escrow, becomes Claimable when the period is settled, then Claimed through redeem or withdraw. From Pending, rejectRedeemRequest sends the shares back to the controller, and recoverRedeemRequest moves them to a recovery account as FORCED. From Claimable, recoverClaimable by the agent pays the assets to a recovery account.">
+      <svg class="d" viewBox="0 0 780 516" role="img" aria-label="The states of one controller's request on each side, and the ways out. Deposit side: Pending, assets waiting in the vault, becomes Claimable when the period is settled, then Claimed through deposit or mint by the controller. From Pending, rejectDepositRequest sends the assets back to the controller. From Claimable, recoverClaimable by the agent mints the shares to a recovery account. Redemption side: Pending, shares in escrow, becomes Claimable as a settlement takes it, and what a settlement does not take stays Pending in the next period; then Claimed through redeem or withdraw. From Pending, rejectRedeemRequest sends the shares back to the controller, and recoverRedeemRequest moves them to a recovery account as FORCED. From Claimable, recoverClaimable by the agent pays the assets to a recovery account.">
         <defs>
           <marker id="v75c-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
         </defs>
@@ -379,7 +470,7 @@ Alice    : owed = 10500e6 × 40,000.000000001904 / 42000e6    = 10,000.000000000
         <!-- Redemption lane -->
         <rect class="band" x="0" y="270" width="780" height="26" rx="4"/>
         <text x="12" y="288" class="bold">Redemption side</text>
-        <text x="136" y="288" class="m">one controller; a further request in the same period adds to Pending</text>
+        <text x="136" y="288" class="m">one controller; a further request adds to Pending, and a part a settlement did not take stays there</text>
 
         <rect class="b2" x="20" y="310" width="270" height="46" rx="6"/>
         <text x="32" y="329" class="mono sm">rejectRedeemRequest</text>
@@ -426,8 +517,8 @@ Alice    : owed = 10500e6 × 40,000.000000001904 / 42000e6    = 10,000.000000000
       <thead><tr><th>Function</th><th>Who can call</th><th>Sends</th><th>How it moves</th></tr></thead>
       <tbody>
         <tr><td><code>rejectDepositRequest(controller)</code></td><td>Period open: <code>AGENT_ROLE</code>. Closed: <code>SETTLER_ROLE</code>.</td><td>The whole pending deposit, to the controller, not to an owner who paid for it. Emits <code>DepositRequestRejected</code>.</td><td>An asset transfer. No hook.</td></tr>
-        <tr><td><code>rejectRedeemRequest(controller)</code></td><td>The same</td><td>The whole pending redemption, to the controller. Emits <code>RedeemRequestRejected</code>.</td><td>A <span class="k k-transfer">TRANSFER</span> from the vault through the hook: the whole policy applies.</td></tr>
-        <tr><td><code>recoverRedeemRequest(controller, to)</code></td><td>The same</td><td>The whole pending redemption, to <code>to</code>. Emits <code>RedeemRequestRecovered</code>.</td><td><span class="k k-forced">FORCED</span>: passes pause, lockup, the minimum and the fund cap. <code>to</code> must still pass the credential check and not be address-frozen.</td></tr>
+        <tr><td><code>rejectRedeemRequest(controller)</code></td><td>The same</td><td>The whole pending redemption, a carried part included, to the controller. Emits <code>RedeemRequestRejected</code>.</td><td>A <span class="k k-transfer">TRANSFER</span> from the vault through the hook: the whole policy applies.</td></tr>
+        <tr><td><code>recoverRedeemRequest(controller, to)</code></td><td>The same</td><td>The whole pending redemption, a carried part included, to <code>to</code>. Emits <code>RedeemRequestRecovered</code>.</td><td><span class="k k-forced">FORCED</span>: passes pause, lockup, the minimum and the fund cap. <code>to</code> must still pass the credential check and not be address-frozen.</td></tr>
         <tr><td><code>recoverClaimable(controller, to)</code></td><td><code>AGENT_ROLE</code>, whatever the period</td><td>Everything claimable on both sides, to <code>to</code>. Emits <code>ClaimableRecovered</code>.</td><td>The enforcement probe on <code>to</code> (<code>Gated7540Vault_RecipientNotEligible</code>), then the shares as a <span class="k k-forced">FORCED</span> mint and the assets as a plain transfer.</td></tr>
       </tbody>
     </table>
@@ -452,7 +543,7 @@ Alice    : owed = 10500e6 × 40,000.000000001904 / 42000e6    = 10,000.000000000
       <tbody>
         <tr><td><code>requestDeposit</code></td><td>The mint probe on the controller. With the rules a fund lists: not paused, an <code>ACTIVE</code> credential the vault's policy accepts, address not frozen, room in the fund if it would be a new investor. Then, if the owner is someone else, the enforcement probe on the owner.</td><td><code>Gated7540Vault_ControllerNotEligible(reason)</code>, <code>GatedVault_ThirdPartyNotEligible(account, reason)</code></td></tr>
         <tr><td><code>requestRedeem</code></td><td>If the controller is someone else, the enforcement probe on the controller. Then the escrow <span class="k k-transfer">TRANSFER</span>: credential not missing or blocked, address not frozen, not locked up, nothing or at least the minimum left, within the unfrozen balance.</td><td><code>GatedVault_ThirdPartyNotEligible(account, reason)</code>, <code>PolicyGated_TransferRejected(reason)</code>, <code>ERC7943InsufficientUnfrozenBalance</code>, <code>ERC20InsufficientBalance</code></td></tr>
-        <tr><td><code>settlePeriod</code></td><td>The <span class="k k-burn">BURN</span> from the vault's own address, if the period has redemptions. No investor is judged.</td><td><code>PolicyGated_TransferRejected(reason)</code></td></tr>
+        <tr><td><code>settlePeriod</code></td><td>The <span class="k k-burn">BURN</span> from the vault's own address, if it takes any redemptions. No investor is judged.</td><td><code>PolicyGated_TransferRejected(reason)</code></td></tr>
         <tr><td><code>deposit</code>, <code>mint</code> claims</td><td>The mint probe on the controller, then the real <span class="k k-mint">MINT</span> to the receiver through the hook, which also judges the minimum position.</td><td><code>Gated7540Vault_ControllerNotEligible(reason)</code>, <code>PolicyGated_TransferRejected(reason)</code></td></tr>
         <tr><td><code>redeem</code>, <code>withdraw</code> claims</td><td>Not paused. The burn probe on the controller: a credential not missing or blocked (a lapsed one passes), address not frozen, not locked up. Then, if the receiver is someone else, the enforcement probe on the receiver.</td><td><code>EnforcedPause</code>, <code>Gated7540Vault_ControllerNotEligible(reason)</code>, <code>GatedVault_ThirdPartyNotEligible(account, reason)</code></td></tr>
       </tbody>
@@ -475,7 +566,7 @@ Alice    : owed = 10500e6 × 40,000.000000001904 / 42000e6    = 10,000.000000000
     <p>Each of these reverts <code>settlePeriod</code> and leaves the period closed and its requests pending.</p>
     <ul class="plain wrap-any">
       <li><b>A pause.</b> <code>EnforcedPause</code> (<code>test_WhenPaused_SettlingReverts</code>). <code>closePeriod</code> has no pause check, so a period can still close during one.</li>
-      <li><b>A refused burn, when the period has redemptions.</b> A freeze on the vault's own address in <a href="HolderRestrictionRule.html"><code>HolderRestrictionRule</code></a> gives <code>SENDER_FROZEN</code> (<code>test_WhenTheVaultItselfIsFrozen_SettlementStops</code>), and a lockup there gives <code>LOCKED</code>. A period with deposits only has no burn and settles regardless. A vault that is not a class under the fund's installed rule gives <code>NOT_FUND_CLASS</code>.</li>
+      <li><b>A refused burn, when the settlement takes redemptions.</b> A freeze on the vault's own address in <a href="HolderRestrictionRule.html"><code>HolderRestrictionRule</code></a> gives <code>SENDER_FROZEN</code> (<code>test_WhenTheVaultItselfIsFrozen_SettlementStops</code>), and a lockup there gives <code>LOCKED</code>. A period with deposits only, or a limit of zero, has no burn and settles regardless. A vault that is not a class under the fund's installed rule gives <code>NOT_FUND_CLASS</code>.</li>
       <li><b>The cash account, when money must come from it.</b> Short of funds or without an allowance: the asset's <code>ERC20InsufficientBalance</code> or <code>ERC20InsufficientAllowance</code> (<code>test_WhenTheCashAccountIsShort_SettlementReverts</code>, <code>test_WhenTheCashAccountHasNotApproved_SettlementReverts</code>).</li>
       <li><b>The balance audit.</b> <code>Gated7540Vault_BalanceAudit(held, owed)</code>.</li>
       <li><b>Figures too large to book.</b> A <code>nav</code>, a supply or a period's total that does not fit 128 bits reverts with <code>SafeCastOverflowedUintDowncast</code> (a <code>nav</code> of <code>type(uint256).max</code> panics first), so one period alone cannot overflow a controller's claim.</li>
@@ -488,13 +579,14 @@ Alice    : owed = 10500e6 × 40,000.000000001904 / 42000e6    = 10,000.000000000
 <section id="history">
   <div class="prose wrap-any">
     <h2>What <code>PeriodSettled</code> lets a reader rebuild</h2>
-    <p>Each settlement emits <code>PeriodSettled(period, nav, supply, deposits, shares, redemptions, assets, fee)</code>, so the fund's price history is on chain. <code>test/nodejs/vaults.test.ts</code> rebuilds it from decoded events.</p>
+    <p>Each settlement emits <code>PeriodSettled(period, nav, supply, deposits, shares, redemptions, redeemed, assets, fee)</code>, so the fund's price history is on chain. <code>test/nodejs/vaults.test.ts</code> rebuilds it from decoded events.</p>
     <ul class="plain wrap-any">
       <li><b>The price:</b> <code>nav</code> over <code>supply</code>, and each period's result from the event alone, by the two formulas above.</li>
-      <li><b>The share count from period to period:</b> the next event's <code>supply</code> is this one's <code>supply − redemptions + shares</code>. Claims and <code>recoverClaimable</code> move shares between <code>unclaimedShares</code> and <code>totalSupply()</code> without changing the sum.</li>
+      <li><b>The share count from period to period:</b> the next event's <code>supply</code> is this one's <code>supply − redeemed + shares</code>. Claims and <code>recoverClaimable</code> move shares between <code>unclaimedShares</code> and <code>totalSupply()</code> without changing the sum.</li>
       <li><b>The cash flow:</b> <code>deposits − assets − fee</code> is what went to the cash account, and a negative figure is what came from it. <code>fee</code> is the fee paid.</li>
+      <li><b>The queue:</b> <code>redemptions</code> is what was asked and <code>redeemed</code> what was taken. <code>redemptions − redeemed</code> carried, and is part of the next event's <code>redemptions</code>.</li>
     </ul>
-    <p>It does not say who the cash account or the fee recipient was, what report the value came from, or what each investor got. For one investor, take its requests from <code>DepositRequest</code> and <code>RedeemRequest</code> and apply <code>floor(pending × shares / deposits)</code> or <code>floor(pending × assets / redemptions)</code>. <code>deposits</code> and <code>redemptions</code> are net of rejects, so read <code>DepositRequestRejected</code>, <code>RedeemRequestRejected</code> and <code>RedeemRequestRecovered</code> as well. The report behind a value is in the desk's own events.</p>
+    <p>It does not say who the cash account or the fee recipient was, what report the value came from, or what each investor got. For one investor, take its requests from <code>DepositRequest</code> and <code>RedeemRequest</code> and apply <code>floor(pending × shares / deposits)</code> or <code>floor(pending × assets / redemptions)</code>. On the redemption side <code>floor(pending × (redemptions − redeemed) / redemptions)</code> of it carries, and is its <code>pending</code> in the next period. <code>deposits</code> and <code>redemptions</code> are net of rejects, so read <code>DepositRequestRejected</code>, <code>RedeemRequestRejected</code> and <code>RedeemRequestRecovered</code> as well. The report behind a value is in the desk's own events.</p>
   </div>
 </section>
 
@@ -551,7 +643,7 @@ Alice    : owed = 10500e6 × 40,000.000000001904 / 42000e6    = 10,000.000000000
         <tr><td><code>requestDeposit(assets, controller, owner)</code></td><td>The owner or its operator</td><td>Takes <code>assets</code> from the owner into the vault, pending for the controller in the open period. Returns request id 0. <span class="small">Reverts: <code>Gated7540Vault_ZeroAmount</code>, <code>Gated7540Vault_ZeroAddress</code>, <code>Gated7540Vault_Unauthorized(caller)</code>, <code>Gated7540Vault_ControllerNotEligible(reason)</code>, <code>Gated7540Vault_EarlierRequestUnsettled(period)</code>, <code>GatedVault_ThirdPartyNotEligible</code>, and <code>SafeCastOverflowedUintDowncast</code> for an amount above 128 bits.</span></td></tr>
         <tr><td><code>requestRedeem(shares, controller, owner)</code></td><td>The owner, its operator, or a spender with share allowance</td><td>Moves <code>shares</code> from the owner into escrow, pending for the controller in the open period. Returns request id 0. <span class="small">Reverts: <code>Gated7540Vault_ZeroAmount</code>, <code>Gated7540Vault_ZeroAddress</code>, <code>ERC20InsufficientAllowance</code>, <code>Gated7540Vault_EarlierRequestUnsettled(period)</code>, <code>GatedVault_ThirdPartyNotEligible</code>, <code>PolicyGated_TransferRejected(reason)</code>, <code>ERC7943InsufficientUnfrozenBalance</code>, <code>ERC20InsufficientBalance</code>.</span></td></tr>
         <tr><td><code>closePeriod()</code></td><td><code>SETTLER_ROLE</code></td><td>Closes the open period and opens the next. Emits <code>PeriodClosed(period)</code>. <span class="small">Reverts: <code>Gated7540Vault_PeriodUnsettled(period)</code>.</span></td></tr>
-        <tr><td><code>settlePeriod(nav, fee, cash, feeRecipient)</code></td><td><code>SETTLER_ROLE</code>, not while paused</td><td>Deals the closed period at one price (<a href="#settle">above</a>). Emits <code>PeriodSettled</code>. <span class="small">Reverts: <code>EnforcedPause</code>, <code>Gated7540Vault_NoClosedPeriod</code>, <code>Gated7540Vault_BalanceAudit(held, owed)</code>, <code>PolicyGated_TransferRejected(reason)</code>, the asset's errors.</span></td></tr>
+        <tr><td><code>settlePeriod(nav, fee, cash, feeRecipient, redeemLimit)</code></td><td><code>SETTLER_ROLE</code>, not while paused</td><td>Deals the closed period at one price (<a href="#settle">above</a>), taking at most <code>redeemLimit</code> shares from its redemptions (<a href="#part-fills">part fills</a>). Emits <code>PeriodSettled</code>. <span class="small">Reverts: <code>EnforcedPause</code>, <code>Gated7540Vault_NoClosedPeriod</code>, <code>Gated7540Vault_BalanceAudit(held, owed)</code>, <code>PolicyGated_TransferRejected(reason)</code>, the asset's errors.</span></td></tr>
         <tr><td><code>deposit(assets, receiver, controller)</code>, <code>mint(shares, receiver, controller)</code></td><td>The controller or its operator</td><td>Claims settled deposit shares: mints them to the receiver. Emits <code>Deposit(controller, receiver, assets, shares)</code>. <span class="small">Reverts: <code>Gated7540Vault_Unauthorized</code>, <code>Gated7540Vault_ControllerNotEligible</code>, <code>Gated7540Vault_ZeroAmount</code>, <code>Gated7540Vault_ExceedsClaimable(requested, claimable)</code>, <code>PolicyGated_TransferRejected(reason)</code>.</span></td></tr>
         <tr><td><code>deposit(assets, receiver)</code>, <code>mint(shares, receiver)</code></td><td>The caller, as controller</td><td>The same claim, for the caller's own request. <span class="small">Reverts: As above, without <code>Gated7540Vault_Unauthorized</code>.</span></td></tr>
         <tr><td><code>redeem(shares, receiver, controller)</code>, <code>withdraw(assets, receiver, controller)</code></td><td>The controller or its operator</td><td>Claims settled redemption cash: pays it to the receiver. Emits <code>Withdraw(caller, receiver, controller, assets, shares)</code>. <span class="small">Reverts: <code>EnforcedPause</code>, <code>Gated7540Vault_Unauthorized</code>, <code>Gated7540Vault_ControllerNotEligible</code>, <code>GatedVault_ThirdPartyNotEligible</code>, <code>Gated7540Vault_ZeroAmount</code>, <code>Gated7540Vault_ExceedsClaimable</code>.</span></td></tr>
@@ -564,17 +656,19 @@ Alice    : owed = 10500e6 × 40,000.000000001904 / 42000e6    = 10,000.000000000
         <tr><td><code>maxDeposit</code>, <code>maxMint</code>, <code>maxRedeem</code>, <code>maxWithdraw</code></td><td>Anyone (read-only)</td><td>The controller's claimable amounts on that side, or 0 if its probe fails.</td></tr>
         <tr><td><code>pendingDepositRequest</code>, <code>claimableDepositRequest</code>, <code>pendingRedeemRequest</code>, <code>claimableRedeemRequest</code></td><td>Anyone (read-only)</td><td>The controller's figures. The request id argument is ignored.</td></tr>
         <tr><td><code>dealingState()</code></td><td>Anyone (read-only)</td><td>The open period, the last settled period, and <code>unclaimedShares</code>. A period is closed when <code>settled + 1</code> is below <code>open</code>.</td></tr>
+        <tr><td><code>periodBook(period, isDeposit)</code></td><td>Anyone (read-only)</td><td>One side of one period: <code>paid</code>, net of rejects, with carried shares on the redemption side; <code>owed</code>, what that bought; <code>carried</code>, what settlement left for the next period.</td></tr>
         <tr><td><code>convertToShares</code>, <code>convertToAssets</code>, <code>totalAssets</code></td><td>Anyone (read-only)</td><td>Indicative values at the last settlement's price.</td></tr>
         <tr><td><code>previewDeposit</code>, <code>previewMint</code>, <code>previewRedeem</code>, <code>previewWithdraw</code></td><td>Anyone</td><td>Revert, as ERC-7540 requires of an asynchronous vault. <span class="small">Reverts: <code>Gated7540Vault_AsyncOnly</code>.</span></td></tr>
         <tr><td><code>share()</code>, <code>asset()</code>, <code>decimals()</code></td><td>Anyone (read-only)</td><td>The share token (for ERC-7575: the vault itself), the asset, and the asset's decimals plus 6.</td></tr>
         <tr><td><code>SETTLER_ROLE()</code></td><td>Anyone (read-only)</td><td>The role that closes and settles: <code>keccak256('SETTLER_ROLE')</code>.</td></tr>
+        <tr><td><code>SETTLEMENT_LOGIC()</code></td><td>Anyone (read-only)</td><td>The second contract, <a href="Gated7540Settlement.html"><code>Gated7540Settlement</code></a>, which six functions are handed to. An immutable of the implementation.</td></tr>
         <tr><td><code>mint(address, uint256)</code>, <code>burn(address, uint256)</code></td><td>Anyone, to no effect</td><td>The base token's issuer functions (<a href="GatedVaultBase.html"><code>GatedVaultBase</code></a>). <span class="small">Reverts: <code>GatedVault_Unsupported</code>.</span></td></tr>
         <tr><td><code>initialize</code></td><td>Once, in the transaction that creates the proxy</td><td>Takes the asset, name, symbol, admin, guardian, registry, hook and rules. Sets up the base token, the hook and the rule list, the asset, and the share decimals, and opens period 1. <a href="ProxyDeployer.html"><code>ProxyDeployer</code></a> makes this call. <span class="small">Reverts: <code>Gated7540Vault_ZeroAddress</code> for the asset.</span></td></tr>
         <tr><td><code>supportsInterface</code>, <code>templateId()</code></td><td>Anyone (read-only)</td><td>ERC-165, adding the ERC-7540 operator, deposit and redeem ids and ERC-7575 to what the base token reports; and <code>keccak256('Gated7540Vault')</code>, which an upgrade must match.</td></tr>
       </tbody>
     </table>
   </div>
-  <p class="small wrap-any">The rest is the base token's: share transfers, <code>pause</code> (<code>GUARDIAN_ROLE</code>), <code>unpause</code> (the main timelock or the recovery timelock), roles, upgrades, <code>multicall</code> and the pre-flights. See <a href="PolicyGatedERC20Upgradeable.html"><code>PolicyGatedERC20Upgradeable</code></a>. Other contracts ask this vault's role table too: <code>NavDesk</code> for <code>REPORTER_ROLE</code> and <code>CHECKER_ROLE</code>, and <code>Portfolio</code> for <code>ALLOCATOR_ROLE</code>. The two remaining events are <code>DepositRequest(controller, owner, 0, sender, assets)</code> and <code>RedeemRequest(controller, owner, 0, sender, shares)</code>, and every share movement also emits the token's <code>Transfer</code>.</p>
+  <p class="small wrap-any"><code>closePeriod</code>, <code>settlePeriod</code>, the two rejects and the two recoveries are named here and run in <a href="Gated7540Settlement.html"><code>Gated7540Settlement</code></a>, on this vault's storage, with its caller. The rest is the base token's: share transfers, <code>pause</code> (<code>GUARDIAN_ROLE</code>), <code>unpause</code> (the main timelock or the recovery timelock), roles, upgrades, <code>multicall</code> and the pre-flights. See <a href="PolicyGatedERC20Upgradeable.html"><code>PolicyGatedERC20Upgradeable</code></a>. Other contracts ask this vault's role table too: <code>NavDesk</code> for <code>REPORTER_ROLE</code> and <code>CHECKER_ROLE</code>, and <code>Portfolio</code> for <code>ALLOCATOR_ROLE</code>. The two remaining events are <code>DepositRequest(controller, owner, 0, sender, assets)</code> and <code>RedeemRequest(controller, owner, 0, sender, shares)</code>, and every share movement also emits the token's <code>Transfer</code>.</p>
 </section>
 
 <section id="why">
@@ -586,6 +680,9 @@ Alice    : owed = 10500e6 × 40,000.000000001904 / 42000e6    = 10,000.000000000
       <li><b>The price in the form a 4626 uses.</b> The virtual amounts stop a donation inflating the price, and the extra digits keep them from moving an honest one. There is no separate first-deposit case to get wrong.</li>
       <li><b>Netting.</b> Subscriptions paying redemptions means less money moving to and from custody, and a settlement that needs no cash at all when the two match.</li>
       <li><b>Shares at the claim.</b> A settlement that minted to each investor would cost more with each one, and one ineligible investor could stop it.</li>
+      <li><b>A fraction, not first come.</b> A cap on the shares entering the escrow would let the fastest holders out in full and refuse everyone else with no place in a queue, which rewards the race a limit exists to stop. A fraction of the book treats every request in the period alike, and the standard's two views keep the filled part and the waiting part apart.</li>
+      <li><b>The vault is told how much, and not why.</b> <code>settlePeriod</code> takes a number and has no policy of its own, so a later desk can apply another policy with the vault unchanged.</li>
+      <li><b>Two contracts.</b> One contract's code is limited to 24,576 bytes, and this vault with part fills is above that. <a href="Gated7540Settlement.html">The second contract's page</a> says what fixes it in place and what it costs.</li>
       <li><b>No cancel, so a check at the door.</b> The investor cannot take a deposit request back, so the vault refuses a request whose controller could not hold the shares at all, rather than take assets it could not turn into shares.</li>
       <li><b>Rejects follow the policy, recoveries are enforcement.</b> A redemption reject is an ordinary transfer, so it cannot carry shares past a pause or a full fund. The recoveries are forced moves, and the account they deliver to must still pass.</li>
       <li><b>The settler on a closed period.</b> The value being struck assumes a known list of requests. Taking one out needs the role that prices the period, which with a desk also means the conditions the desk sets.</li>
@@ -598,10 +695,11 @@ Alice    : owed = 10500e6 × 40,000.000000001904 / 42000e6    = 10,000.000000000
   <div class="prose wrap-any">
     <h2>What it does not do</h2>
     <ul class="plain wrap-any">
-      <li><b>It does not check the price.</b> Whoever holds <code>SETTLER_ROLE</code> sets any <code>nav</code> and any fee, names the addresses that receive net inflow and the fee, and can pull net outflow from any account with an allowance for the vault, an investor's included. The vault compares that with nothing. So the role belongs to a <a href="NavDesk.html"><code>NavDesk</code></a>, where a different person checks every price. A deployment profile with no desk gives the role to a plain account, which sets any price alone; the profile's own comment says that is for a test stack.</li>
-      <li><b>It does not let an investor set a limit or leave a queue.</b> A request carries no minimum price and no expiry, and an investor cannot cancel one. A controller with a request in a closed period waits for it. Another account can file a request under a controller that passes the token's policy, for as little as one unit: on the deposit side it pays and must pass the policy itself, on the redeem side it gives up shares. Once that period has closed the controller's own requests on that side revert with <code>Gated7540Vault_EarlierRequestUnsettled</code> until the period settles or the request is taken back.</li>
+      <li><b>It does not check the price or the limit.</b> Whoever holds <code>SETTLER_ROLE</code> sets any <code>nav</code>, any fee and any <code>redeemLimit</code>, names the addresses that receive net inflow and the fee, and can pull net outflow from any account with an allowance for the vault, an investor's included. The vault compares that with nothing. So the role belongs to a <a href="NavDesk.html"><code>NavDesk</code></a>, where a different person checks every price. A deployment profile with no desk gives the role to a plain account, which sets any price alone; the profile's own comment says that is for a test stack.</li>
+      <li><b>It does not let an investor set a price limit or leave a queue.</b> A request carries no minimum price and no expiry, and an investor cannot cancel one. A controller with a request in a closed period waits for it. Another account can file a request under a controller that passes the token's policy, for as little as one unit: on the deposit side it pays and must pass the policy itself, on the redeem side it gives up shares. Once that period has closed the controller's own requests on that side revert with <code>Gated7540Vault_EarlierRequestUnsettled</code> until the period settles or the request is taken back.</li>
       <li><b>It does not force a settlement.</b> Nothing on the vault makes a closed period settle. An investor's way out of a period that stays closed is a role acting on its behalf.</li>
-      <li><b>It does not hold a place in the fund.</b> The investor cap does not reserve room for an open request. A full <code>requestRedeem</code> takes the investor out of the count while the shares wait unburned, and <code>requestDeposit</code> reserves nothing. If the fund fills up meanwhile, a reject that returns the shares, or a deposit claim, is refused with <code>MAX_HOLDERS</code>. The agent's recovery still works, and delivering to an account that holds nothing puts the count above the cap until investors leave (<code>test_WhenARejectedRedemptionReturnsSharesToAnInvestorWhoWasReplaced_TheFundCapAppliesAndRecoveryIsCounted</code>). The mitigation is operational: rejecting deposit requests near the cap, and a monitor on <code>Fund.holderCount()</code> against <code>Fund.holderCap()</code>.</li>
+      <li><b>It does not hold a place in the fund.</b> The investor cap does not reserve room for an open request. A full <code>requestRedeem</code> takes the investor out of the count while the shares wait unburned, and <code>requestDeposit</code> reserves nothing. If the fund fills up meanwhile, a reject that returns the shares, or a deposit claim, is refused with <code>MAX_HOLDERS</code>. The agent's recovery still works, and delivering to an account that holds nothing puts the count above the cap until investors leave (<code>test_WhenARejectedRedemptionReturnsSharesToAnInvestorWhoWasReplaced_TheFundCapAppliesAndRecoveryIsCounted</code>). The mitigation is operational: rejecting deposit requests near the cap, and a monitor on <code>Fund.holderCount()</code> against <code>Fund.holderCap()</code>. A queued investor stays out of the count for as long as the queue lasts, and is counted again if its shares are handed back (<code>test_AQueuedInvestorIsOutOfTheCountUntilHandedBack</code>).</li>
+      <li><b>It does not tell a real request from a large one.</b> A holder who expects a limit can ask for more than it wants, to get a bigger slice. Only a role can hand back a carried part, which is the deterrent, and not a complete one.</li>
       <li><b>It does not return a rejected deposit to the payer.</b> The assets go to the controller, which matters when an owner paid for someone else (<code>test_WhenADepositIsRejected_TheAssetsReturnToTheController</code>).</li>
       <li><b>It does not take out assets sent to it by mistake.</b> The audit only requires the vault to hold at least what it owes. No function moves the surplus, and it counts for nothing in a settlement. Shares sent by mistake are different: <code>forcedTransfer</code> takes those.</li>
       <li><b>It does not say what the money is doing.</b> <code>convertToShares</code>, <code>convertToAssets</code> and <code>totalAssets()</code> are at the last settled price, and the vault does not hold the invested money. Where the cash account sends it is outside this contract.</li>
@@ -615,8 +713,10 @@ Alice    : owed = 10500e6 × 40,000.000000001904 / 42000e6    = 10,000.000000000
   <div class="prose wrap-any"><h2>Connected to</h2></div>
   <div class="cards">
     <a class="card" href="GatedVaultBase.html"><span class="name">GatedVaultBase</span><p>The third-party check, the probes and the reverting issuer functions.</p></a>
+    <a class="card" href="Gated7540Settlement.html"><span class="name">Gated7540Settlement</span><p>The second contract: closing, settling, rejecting and recovering run there, on this vault's storage.</p></a>
+    <a class="card" href="Gated7540Common.html"><span class="name">Gated7540Common</span><p>The storage and the request roll the two contracts share.</p></a>
     <a class="card" href="PolicyGatedERC20Upgradeable.html"><span class="name">PolicyGatedERC20Upgradeable</span><p>The base token the shares are: roles, freezes, pause, forced moves and the hook path.</p></a>
-    <a class="card" href="NavDesk.html"><span class="name">NavDesk</span><p>Holds <code>SETTLER_ROLE</code> and turns a reported value into an approved price.</p></a>
+    <a class="card" href="NavDesk.html"><span class="name">NavDesk</span><p>Holds <code>SETTLER_ROLE</code>, turns a reported value into an approved price, and works out the limit from the level it holds.</p></a>
     <a class="card" href="FeeModel.html"><span class="name">FeeModel</span><p>The fee a desk passes to <code>settlePeriod</code>.</p></a>
     <a class="card" href="Portfolio.html"><span class="name">Portfolio</span><p>With one plugged into the desk, the cash account and the on-chain part of the value.</p></a>
     <a class="card" href="SignedEntry.html"><span class="name">SignedEntry</span><p>Files a deposit request from an investor's two signed messages, the entry and the cash, with a relayer paying the gas.</p></a>
@@ -633,13 +733,13 @@ Alice    : owed = 10500e6 × 40,000.000000001904 / 42000e6    = 10,000.000000000
   <div class="prose wrap-any">
     <h2>Source and tests</h2>
     <ul class="plain wrap-any">
-      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/vaults/Gated7540Vault.sol"><code>contracts/vaults/Gated7540Vault.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/IGated7540Vault.sol"><code>IGated7540Vault.sol</code></a>, and the standard's interfaces <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/IERC7540Deposit.sol"><code>IERC7540Deposit.sol</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/IERC7540Redeem.sol"><code>IERC7540Redeem.sol</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/IERC7540Operator.sol"><code>IERC7540Operator.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/IERC7575.sol"><code>IERC7575.sol</code></a></li>
-      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/vaults/Gated7540Vault.t.sol"><code>Gated7540Vault.t.sol</code></a> (periods, netting, the price, claims and rounding, the escrow, rejects and recoveries with a mocked hook; integration with the real holder-restriction and fund rules and a minimum position; invariants on what the vault holds and owes), <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/vaults/GatedVaultBase.t.sol"><code>GatedVaultBase.t.sol</code></a> (third parties, and the escrow behind the real <code>CredentialRule</code>), <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/hooks/rules/CredentialRuleVaults.t.sol"><code>CredentialRuleVaults.t.sol</code></a> (lapsed and blocked controllers), <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/fund/FundIntegration.t.sol"><code>FundIntegration.t.sol</code></a> (the escrow and the fund's investor count, a deposit stranded by a full fund), <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/nav/NavDesk.t.sol"><code>NavDesk.t.sol</code></a> (the desk driving a real vault), and <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/vaults.test.ts"><code>test/nodejs/vaults.test.ts</code></a> (request, settle and claim from TypeScript, and the price history rebuilt from <code>PeriodSettled</code> events)</li>
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/vaults/Gated7540Vault.sol"><code>contracts/vaults/Gated7540Vault.sol</code></a>, with <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/vaults/Gated7540Settlement.sol"><code>Gated7540Settlement.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/vaults/Gated7540Common.sol"><code>Gated7540Common.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/interfaces/IGated7540Vault.sol"><code>IGated7540Vault.sol</code></a>, and the standard's interfaces <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/interfaces/IERC7540Deposit.sol"><code>IERC7540Deposit.sol</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/interfaces/IERC7540Redeem.sol"><code>IERC7540Redeem.sol</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/interfaces/IERC7540Operator.sol"><code>IERC7540Operator.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/interfaces/IERC7575.sol"><code>IERC7575.sol</code></a></li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/vaults/Gated7540Vault.t.sol"><code>Gated7540Vault.t.sol</code></a> (periods, netting, the price, claims and rounding, the escrow, rejects and recoveries with a mocked hook; integration with the real holder-restriction and fund rules and a minimum position; invariants on what the vault holds and owes), <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/vaults/Gated7540Settlement.t.sol"><code>Gated7540Settlement.t.sol</code></a> (the hand-off, part fills, the walk and rounding), <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/vaults/GatedVaultBase.t.sol"><code>GatedVaultBase.t.sol</code></a> (third parties, and the escrow behind the real <code>CredentialRule</code>), <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/hooks/rules/CredentialRuleVaults.t.sol"><code>CredentialRuleVaults.t.sol</code></a> (lapsed and blocked controllers), <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/fund/FundIntegration.t.sol"><code>FundIntegration.t.sol</code></a> (the escrow and the fund's investor count, a deposit stranded by a full fund), <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/nav/NavDesk.t.sol"><code>NavDesk.t.sol</code></a> (the desk driving a real vault), and <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/test/nodejs/vaults.test.ts"><code>test/nodejs/vaults.test.ts</code></a> (request, settle and claim from TypeScript, the cost of a walk, and the price history rebuilt from <code>PeriodSettled</code> events)</li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>babef08</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>d903344</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>
