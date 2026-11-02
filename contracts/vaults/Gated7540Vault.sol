@@ -5,6 +5,7 @@ import {IERC4626} from '@openzeppelin/contracts/interfaces/IERC4626.sol';
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {IERC20Metadata} from '@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol';
 import {SafeERC20} from '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
+import {Address} from '@openzeppelin/contracts/utils/Address.sol';
 import {Math} from '@openzeppelin/contracts/utils/math/Math.sol';
 import {SafeCast} from '@openzeppelin/contracts/utils/math/SafeCast.sol';
 
@@ -18,18 +19,19 @@ import {IERC7540Operator} from 'interfaces/IERC7540Operator.sol';
 import {IERC7540Redeem} from 'interfaces/IERC7540Redeem.sol';
 import {IERC7575} from 'interfaces/IERC7575.sol';
 import {IGated7540Vault} from 'interfaces/IGated7540Vault.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 import {ITemplated} from 'interfaces/ITemplated.sol';
 
 import {PolicyGatedERC20Upgradeable} from 'contracts/base/PolicyGatedERC20Upgradeable.sol';
-import {GatedVaultBase} from 'contracts/vaults/GatedVaultBase.sol';
+import {Gated7540Common} from 'contracts/vaults/Gated7540Common.sol';
+import {Gated7540Settlement} from 'contracts/vaults/Gated7540Settlement.sol';
 
 /**
  * @title Gated7540Vault
  * @notice ERC-7540 asynchronous vault whose shares are a policy-gated token, dealt in periods, as specified in
  *         `IGated7540Vault`
  * @dev Deployed behind a UUPS proxy. It does not inherit OpenZeppelin's ERC-4626: it would have to override almost all of
- *      it and claim to be a synchronous vault while its previews revert (owner decision P13)
+ *      it and claim to be a synchronous vault while its previews revert (owner decision P13). Everything an investor or an
+ *      operator calls runs here; closing, settling, rejecting and recovering are named here and run in `SETTLEMENT_LOGIC`
  */
 // IERC7575 re-declares every ERC-4626 function; inheriting both would need dual override specifiers on each. Conformance
 // is pinned by the 0x2f0a18c5 ERC-165 test and full function coverage.
@@ -38,7 +40,7 @@ import {GatedVaultBase} from 'contracts/vaults/GatedVaultBase.sol';
 // slither-disable-start missing-inheritance
 // aderyn-ignore-next-line(contract-locks-ether)
 contract Gated7540Vault is
-  GatedVaultBase,
+  Gated7540Common,
   IERC4626,
   IERC7540Operator,
   IERC7540Deposit,
@@ -48,97 +50,21 @@ contract Gated7540Vault is
   using SafeERC20 for IERC20;
   using SafeCast for uint256;
 
-  /**
-   * @notice One controller's request on one side: assets to shares on a deposit, shares to assets on a redemption
-   * @param period The period holding `pending`; 0 with nothing pending
-   * @param pending Requested, not yet settled
-   * @param paid Settled and not yet claimed: what the controller gave
-   * @param owed What that buys, not yet claimed
-   */
-  struct Request {
-    uint64 period;
-    uint128 pending;
-    uint128 paid;
-    uint128 owed;
-  }
-
-  /**
-   * @notice One side of one period
-   * @param paid What its requests gave, net of rejects
-   * @param owed What that bought, at settlement
-   */
-  struct Book {
-    uint128 paid;
-    uint128 owed;
-  }
-
-  /**
-   * @notice What one settlement struck
-   * @param deposits The assets of the period's deposit requests
-   * @param redemptions The shares of its redemption requests
-   * @param supply All shares at the period's value
-   * @param shares The shares its deposits bought
-   * @param assets The assets its redemptions pay
-   */
-  struct Settlement {
-    uint256 deposits;
-    uint256 redemptions;
-    uint256 supply;
-    uint256 shares;
-    uint256 assets;
-  }
-
-  /**
-   * @notice ERC-7201 namespaced storage of the vault
-   * @param asset The underlying asset
-   * @param decimals The share decimals: the asset's plus 6
-   * @param openPeriod The period requests join; the first is 1
-   * @param settledPeriod The last settled period
-   * @param lastNav The value the last settlement dealt at, behind `convertTo*` and `totalAssets`
-   * @param lastSupply All shares at that value
-   * @param unclaimedShares Shares bought in settled periods and not yet minted
-   * @param pendingDeposits Assets held for unsettled deposit requests
-   * @param claimableCash Assets held for settled redemptions
-   * @param pendingRedeemShares The shares booked to pending redemptions, every controller together: the part of the
-   *        vault's own balance that a forced transfer may not take
-   * @param requests Each controller's request on each side (true is the deposit side)
-   * @param books Each period's totals on each side
-   * @param operators Operator approvals per controller
-   * @custom:storage-location erc7201:gated.storage.Gated7540Vault
-   */
-  struct Gated7540Storage {
-    IERC20 asset;
-    uint8 decimals;
-    uint64 openPeriod;
-    uint64 settledPeriod;
-    uint128 lastNav;
-    uint128 lastSupply;
-    uint256 unclaimedShares;
-    uint256 pendingDeposits;
-    uint256 claimableCash;
-    uint256 pendingRedeemShares;
-    mapping(address _controller => mapping(bool _isDeposit => Request _request)) requests;
-    mapping(uint256 _period => mapping(bool _isDeposit => Book _book)) books;
-    mapping(address _controller => mapping(address _operator => bool _approved)) operators;
-  }
-
   /// @inheritdoc IGated7540Vault
-  bytes32 public constant SETTLER_ROLE = keccak256('SETTLER_ROLE');
-
-  /// @notice The virtual shares of the price, and the digits added to the asset's decimals to keep them honest
-  uint256 private constant _VIRTUAL_SHARES = 1e6;
-
-  /// @notice keccak256(abi.encode(uint256(keccak256('gated.storage.Gated7540Vault')) - 1)) & ~bytes32(uint256(0xff))
-  // Read in assembly by the ERC-7201 accessor (test: Gated7540VaultUnit_Storage).
-  // aderyn-ignore-next-line(unused-state-variable)
-  bytes32 private constant _GATED_7540_STORAGE_LOCATION =
-    0x2cc225a2bfbd5a47b58fbfec984f4f856b2fa5e8b68081e6d3300ec76f5f3900;
+  bytes32 public constant SETTLER_ROLE = _SETTLER_ROLE;
 
   /**
-   * @notice Locks the implementation; only proxies can be initialized
-   * @custom:oz-upgrades-unsafe-allow constructor
+   * @inheritdoc IGated7540Vault
+   * @custom:oz-upgrades-unsafe-allow state-variable-immutable
+   */
+  address public immutable SETTLEMENT_LOGIC;
+
+  /**
+   * @notice Creates the second contract and locks the implementation; only proxies can be initialized
+   * @custom:oz-upgrades-unsafe-allow constructor state-variable-immutable state-variable-assignment
    */
   constructor() {
+    SETTLEMENT_LOGIC = address(new Gated7540Settlement());
     _disableInitializers();
   }
 
@@ -213,97 +139,48 @@ contract Gated7540Vault is
   }
 
   /// @inheritdoc IGated7540Vault
-  function closePeriod() external onlyRole(SETTLER_ROLE) {
-    Gated7540Storage storage $ = _getGated7540Storage();
-    uint64 _open = $.openPeriod;
-    uint64 _next = $.settledPeriod + 1;
-    if (_open != _next) revert Gated7540Vault_PeriodUnsettled(_next);
-    $.openPeriod = _open + 1;
-    emit PeriodClosed(_open);
+  function closePeriod() external {
+    _toSettlement();
   }
 
   /// @inheritdoc IGated7540Vault
   function settlePeriod(
-    uint256 _nav,
-    uint256 _fee,
-    address _cash,
-    address _feeRecipient
-  ) external onlyRole(SETTLER_ROLE) whenNotPaused {
-    Settlement memory _s = _strike(_nav, _fee);
-    if (_s.redemptions != 0) _burn(address(this), _s.redemptions);
-    // The book was written before the burn, `_net` writes no state, and what Slither reads as a write here is the storage
-    // pointer.
-    // slither-disable-next-line reentrancy-no-eth
-    _net(_s.deposits, _s.assets, _fee, _cash, _feeRecipient);
+    uint256,
+    uint256,
+    address,
+    address
+  ) external {
+    _toSettlement();
   }
 
   /// @inheritdoc IGated7540Vault
   function rejectDepositRequest(
-    address _controller
+    address
   ) external {
-    uint256 _assets = _takePending(_controller, true);
-    Gated7540Storage storage $ = _getGated7540Storage();
-    $.pendingDeposits -= _assets;
-    emit DepositRequestRejected(_controller, _assets);
-    $.asset.safeTransfer(_controller, _assets);
+    _toSettlement();
   }
 
   /// @inheritdoc IGated7540Vault
   function rejectRedeemRequest(
-    address _controller
+    address
   ) external {
-    uint256 _shares = _takePending(_controller, false);
-    _getGated7540Storage().pendingRedeemShares -= _shares;
-    emit RedeemRequestRejected(_controller, _shares);
-    // A plain TRANSFER back to the controller: cap, pause, lockup and freeze all
-    // apply, so a holder cannot route shares past the cap by naming a new controller. If the transfer is blocked,
-    // this reverts and recoverRedeemRequest (FORCED, to a verified account) is the enforcement path.
-    _transfer(address(this), _controller, _shares);
+    _toSettlement();
   }
 
   /// @inheritdoc IGated7540Vault
   function recoverClaimable(
-    address _controller,
-    address _to
-  ) external onlyRole(AGENT_ROLE) {
-    if (_to == address(0)) revert Gated7540Vault_ZeroAddress();
-    // The recipient must pass the policy as the receiver of an enforcement move, even for the asset leg, which is not
-    // hooked.
-    bytes32 _reason = _enforcementProbe(_to);
-    if (_reason != Reasons.TRANSFER_OK) revert Gated7540Vault_RecipientNotEligible(_reason);
-
-    Gated7540Storage storage $ = _getGated7540Storage();
-    Request memory _deposit = _request(_controller, true);
-    Request memory _redeem = _request(_controller, false);
-    uint256 _shares = _deposit.owed;
-    uint256 _assets = _redeem.owed;
-    if (_shares == 0 && _assets == 0 && _deposit.paid == 0 && _redeem.paid == 0) {
-      revert Gated7540Vault_NothingClaimable();
-    }
-    // Clear every claimable figure: a redemption's shares were burned at settlement, and a deposit's assets already
-    // went to the cash account then, so only `_assets` (held here) and `_shares` (not yet minted) remain.
-    _deposit.paid = _deposit.owed = _redeem.paid = _redeem.owed = 0;
-    _store(_controller, true, _deposit);
-    _store(_controller, false, _redeem);
-    // The mint raises `totalSupply()`, so these shares would otherwise count twice in the next price.
-    $.unclaimedShares -= _shares;
-    $.claimableCash -= _assets;
-    emit ClaimableRecovered(_controller, _to, _assets, _shares, _msgSender());
-    if (_shares != 0) _mintAs(_to, _shares, IPolicyHook.TransferKind.FORCED);
-    if (_assets != 0) $.asset.safeTransfer(_to, _assets);
+    address,
+    address
+  ) external {
+    _toSettlement();
   }
 
   /// @inheritdoc IGated7540Vault
   function recoverRedeemRequest(
-    address _controller,
-    address _to
+    address,
+    address
   ) external {
-    if (_to == address(0)) revert Gated7540Vault_ZeroAddress();
-    uint256 _shares = _takePending(_controller, false);
-    _getGated7540Storage().pendingRedeemShares -= _shares;
-    emit RedeemRequestRecovered(_controller, _to, _shares, _msgSender());
-    // Internal FORCED move: an enforcement action; identity still applies to the recovery account.
-    _moveAs(address(this), _to, _shares, IPolicyHook.TransferKind.FORCED, bytes32(0), 0);
+    _toSettlement();
   }
 
   /// @inheritdoc IERC7540Operator
@@ -627,96 +504,6 @@ contract Gated7540Vault is
   }
 
   /**
-   * @notice Strikes the closed period's price and books it
-   * @param _nav The net asset value the period deals at
-   * @param _fee The fee, for the event
-   * @return _s What was struck
-   */
-  function _strike(
-    uint256 _nav,
-    uint256 _fee
-  ) private returns (Settlement memory _s) {
-    Gated7540Storage storage $ = _getGated7540Storage();
-    uint64 _period = $.settledPeriod + 1;
-    if (_period == $.openPeriod) revert Gated7540Vault_NoClosedPeriod();
-
-    // A mapping's key, which Slither reads as a misused constant.
-    // slither-disable-start boolean-cst
-    _s.deposits = $.books[_period][true].paid;
-    _s.redemptions = $.books[_period][false].paid;
-    _s.supply = totalSupply() + $.unclaimedShares;
-    _s.shares = Math.mulDiv(_s.deposits, _s.supply + _VIRTUAL_SHARES, _nav + 1);
-    _s.assets = Math.mulDiv(_s.redemptions, _nav + 1, _s.supply + _VIRTUAL_SHARES);
-
-    // The casts refuse a period whose claims could not be booked later, so no controller's claim can ever overflow alone.
-    $.books[_period][true].owed = _s.shares.toUint128();
-    $.books[_period][false].owed = _s.assets.toUint128();
-    // slither-disable-end boolean-cst
-    $.settledPeriod = _period;
-    $.lastNav = _nav.toUint128();
-    $.lastSupply = _s.supply.toUint128();
-    $.unclaimedShares += _s.shares;
-    $.pendingDeposits -= _s.deposits;
-    $.pendingRedeemShares -= _s.redemptions;
-    $.claimableCash += _s.assets;
-    emit PeriodSettled(_period, _nav, _s.supply, _s.deposits, _s.shares, _s.redemptions, _s.assets, _fee);
-  }
-
-  /**
-   * @notice Moves only the difference between deposits and what must be paid, pays the fee, and audits the balance
-   * @param _deposits The assets of the period's deposit requests
-   * @param _assets The assets its redemptions pay
-   * @param _fee The fee
-   * @param _cash The account that receives net inflow and funds net outflow
-   * @param _feeRecipient The account that receives the fee
-   */
-  function _net(
-    uint256 _deposits,
-    uint256 _assets,
-    uint256 _fee,
-    address _cash,
-    address _feeRecipient
-  ) private {
-    Gated7540Storage storage $ = _getGated7540Storage();
-    IERC20 _token = $.asset;
-    uint256 _out = _assets + _fee;
-    if (_deposits > _out) {
-      _token.safeTransfer(_cash, _deposits - _out);
-    } else if (_out > _deposits) {
-      // The settler names the account, and only one that approved the vault can be pulled from.
-      // slither-disable-next-line arbitrary-send-erc20
-      _token.safeTransferFrom(_cash, address(this), _out - _deposits); // aderyn-ignore(arbitrary-transfer-from)
-    }
-    if (_fee != 0) _token.safeTransfer(_feeRecipient, _fee);
-
-    uint256 _owed = $.pendingDeposits + $.claimableCash;
-    uint256 _held = _token.balanceOf(address(this));
-    if (_held < _owed) revert Gated7540Vault_BalanceAudit(_held, _owed);
-  }
-
-  /**
-   * @notice Takes a controller's whole pending request off its period. The agent may while the period is open, and only
-   *         the settler once it has closed, so a request cannot leave a period that is being priced
-   * @param _controller The controller
-   * @param _isDeposit True on the deposit side
-   * @return _pending What was pending
-   */
-  function _takePending(
-    address _controller,
-    bool _isDeposit
-  ) private returns (uint256 _pending) {
-    Gated7540Storage storage $ = _getGated7540Storage();
-    Request memory _r = _request(_controller, _isDeposit);
-    _pending = _r.pending;
-    if (_pending == 0) revert Gated7540Vault_NothingPending();
-    _checkRole(_r.period == $.openPeriod ? AGENT_ROLE : SETTLER_ROLE);
-    $.books[_r.period][_isDeposit].paid -= _r.pending;
-    _r.pending = 0;
-    _r.period = 0;
-    _store(_controller, _isDeposit, _r);
-  }
-
-  /**
    * @notice Takes part of a controller's claimable amounts. Given what was paid, the other side rounds down; given what
    *         is owed, the paid side rounds up; a full claim clears exactly, because the rounding has nothing to round
    * @param _controller The controller
@@ -748,20 +535,6 @@ contract Gated7540Vault is
     // aderyn-ignore-next-line(unsafe-casting)
     _r.owed -= uint128(_owed);
     _store(_controller, _isDeposit, _r);
-  }
-
-  /**
-   * @notice Writes a controller's request
-   * @param _controller The controller
-   * @param _isDeposit True on the deposit side
-   * @param _r The request
-   */
-  function _store(
-    address _controller,
-    bool _isDeposit,
-    Request memory _r
-  ) private {
-    _getGated7540Storage().requests[_controller][_isDeposit] = _r;
   }
 
   /**
@@ -815,23 +588,13 @@ contract Gated7540Vault is
   }
 
   /**
-   * @notice A controller's request with any settled part rolled into its claimable amounts
-   * @param _controller The controller
-   * @param _isDeposit True on the deposit side
-   * @return _r The request
+   * @notice Hands this call to the second contract, unchanged, and passes back a revert as it came
+   * @custom:oz-upgrades-unsafe-allow-reachable delegatecall
    */
-  function _request(
-    address _controller,
-    bool _isDeposit
-  ) private view returns (Request memory _r) {
-    Gated7540Storage storage $ = _getGated7540Storage();
-    _r = $.requests[_controller][_isDeposit];
-    if (_r.period == 0 || _r.period > $.settledPeriod) return _r;
-    Book memory _book = $.books[_r.period][_isDeposit];
-    _r.paid += _r.pending;
-    _r.owed += Math.mulDiv(_r.pending, _book.owed, _book.paid).toUint128();
-    _r.pending = 0;
-    _r.period = 0;
+  function _toSettlement() private {
+    // The moved functions return nothing, and the target is this implementation's own immutable.
+    // slither-disable-next-line unused-return
+    Address.functionDelegateCall(SETTLEMENT_LOGIC, msg.data); // aderyn-ignore(unchecked-return)
   }
 
   /**
@@ -857,16 +620,6 @@ contract Gated7540Vault is
     address _sender = _msgSender();
     if (_sender != _controller && !_getGated7540Storage().operators[_controller][_sender]) {
       revert Gated7540Vault_Unauthorized(_sender);
-    }
-  }
-
-  /**
-   * @notice The ERC-7201 storage of the vault
-   * @return $ The storage pointer
-   */
-  function _getGated7540Storage() private pure returns (Gated7540Storage storage $) {
-    assembly ('memory-safe') {
-      $.slot := _GATED_7540_STORAGE_LOCATION
     }
   }
 }

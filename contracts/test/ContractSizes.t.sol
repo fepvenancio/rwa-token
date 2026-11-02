@@ -45,6 +45,7 @@ import {Gated7540Vault} from 'contracts/vaults/Gated7540Vault.sol';
  */
 contract ContractSizesTest is Test {
   uint256 internal constant _EIP170_LIMIT = 24_576;
+  uint256 internal constant _EIP3860_LIMIT = 49_152;
 
   /// @dev Hardhat's coverage instrumentation calls this address from every instrumented contract (EDR's
   ///      `__NomicFoundationCoverage` library), so its 20 bytes appear in instrumented bytecode and never in a real build
@@ -57,7 +58,10 @@ contract ContractSizesTest is Test {
     _assertFits('GatedToken', address(new GatedToken()));
     _assertFits('IntentToken', address(new IntentToken()));
     _assertFits('Gated4626Vault', address(new Gated4626Vault()));
-    _assertFits('Gated7540Vault', address(new Gated7540Vault()));
+    Gated7540Vault _asyncVault = new Gated7540Vault();
+    _assertFits('Gated7540Vault', address(_asyncVault));
+    assertGt(_asyncVault.SETTLEMENT_LOGIC().code.length, 0, 'Gated7540Settlement has no code');
+    _assertFits('Gated7540Settlement', _asyncVault.SETTLEMENT_LOGIC());
     _assertFits('PolicyRegistry', _registry);
     _assertFits('ComplianceHook', address(new ComplianceHook(IPolicyRegistry(_registry))));
     _assertFits('IntentExecutor', address(new IntentExecutor(address(this), address(this))));
@@ -91,6 +95,12 @@ contract ContractSizesTest is Test {
       'GovernanceTimelock',
       address(new GovernanceTimelock(1 days, new address[](0), new address[](0), address(this), address(this)))
     );
+  }
+
+  /// @dev The 7540's creation code carries its second contract's, so it is the one close to this limit
+  function test_WhenDeployed_TheVaultWithASecondContractFitsTheEip3860Limit() external {
+    vm.skip(_isInstrumented(address(new IntentToken()).code));
+    assertLe(type(Gated7540Vault).creationCode.length, _EIP3860_LIMIT);
   }
 
   function _isInstrumented(

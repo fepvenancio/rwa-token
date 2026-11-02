@@ -121,7 +121,8 @@ contract InterfaceFreezeTest is Test {
     // Re-pinned in v0.2.0 (2026-10-17): recoverClaimable added, the one post-freeze change (owner decision M-3)
     // Re-pinned in S1 of the review items (2026-10-24): `initialize` takes the token's initial rules (was 0x75f5b0db)
     // Re-pinned 2026-10-31 on owner instruction: dealing periods replace per-investor fulfilment.
-    assertEq(type(IGated7540Vault).interfaceId, bytes4(0xc6a5eee9), 'IGated7540Vault');
+    // Re-pinned 2026-11-02 on owner instruction: `SETTLEMENT_LOGIC` added (was 0xc6a5eee9)
+    assertEq(type(IGated7540Vault).interfaceId, bytes4(0xa17876dd), 'IGated7540Vault');
     assertEq(type(INavDesk).interfaceId, bytes4(0x6d2f4b62), 'INavDesk');
     assertEq(type(ISignedEntry).interfaceId, bytes4(0x05cc4f78), 'ISignedEntry');
     assertEq(type(ISupplyCapRule).interfaceId, bytes4(0x52c89ff1), 'ISupplyCapRule');

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 
+import hre from "hardhat";
 import type { NetworkConnection } from "hardhat/types/network";
 import {
   BaseError,
@@ -10,6 +11,7 @@ import {
   hashTypedData,
   isAddressEqual,
   keccak256,
+  pad,
   toHex,
   type Abi,
   type Account,
@@ -99,6 +101,7 @@ const LEGO_ABI = parseAbi([
   "function portfolio() view returns (address)",
   "function feeModel() view returns (address)",
   "function adapters() view returns (address[])",
+  "function SETTLEMENT_LOGIC() view returns (address)",
 ]);
 const SAFE_ABI = parseAbi(["function getThreshold() view returns (uint256)"]);
 const ATTEST = { HOOK: 1, RULE: 2, IMPLEMENTATION: 3, PORTFOLIO: 4, ADAPTER: 5, VALIDATOR: 6, FEE_MODEL: 7 } as const;
@@ -453,6 +456,7 @@ async function stages(connection: NetworkConnection, profile: Profile) {
  * - each fund is owned by the timelock, runs the attested rule that points back at it, has the intended cap, and holds the
  *   classes it opened with, in order, each intact (its hook lists the fund's rule: `firstBrokenClass()` is the zero
  *   address);
+ * - a 7540's second contract is the code the release says, as an implementation's attestation pins only its address;
  * - a product's legos are wired as its profile says and name this product: its desk holds SETTLER_ROLE and no account
  *   does, the reporter, the checker and the allocator are different accounts, and the council attested what needs it;
  * - MINTER_ROLE, BURNER_ROLE, AGENT_ROLE and a desk-less vault's SETTLER_ROLE sit with a Safe of at least two signers,
@@ -612,7 +616,7 @@ export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
 
   // A product's legos. Their roles live outside the vault's role scan, so they are asked by name.
   const named = s.parameters as Record<string, Address>;
-  const read = <T>(address: Address, functionName: "VAULT" | "portfolio" | "feeModel" | "adapters") =>
+  const read = <T>(address: Address, functionName: "VAULT" | "portfolio" | "feeModel" | "adapters" | "SETTLEMENT_LOGIC") =>
     s.publicClient.readContract({ address, abi: LEGO_ABI, functionName }) as Promise<T>;
   const isSame = async (address: Address, functionName: "VAULT" | "portfolio" | "feeModel", expected: Address) =>
     isAddressEqual(await read<Address>(address, functionName), expected);
@@ -630,6 +634,17 @@ export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
       ...(product.portfolio === undefined ? [] : [named.allocator]),
     ].map((account) => account.toLowerCase());
     assert.equal(new Set(functions).size, functions.length, `the reporter, the checker and the allocator of ${contract.address} are not different accounts`);
+    if (product.template === "Gated7540Vault") {
+      const logic = await read<Address>(contract.address, "SETTLEMENT_LOGIC");
+      const artifact = await hre.artifacts.readArtifact("Gated7540Settlement");
+      // Its one immutable is `__self`, its own address.
+      let expected = artifact.deployedBytecode.slice(2);
+      for (const { start, length } of Object.values(artifact.immutableReferences ?? {}).flat()) {
+        expected = expected.slice(0, start * 2) + pad(logic, { size: length }).slice(2) + expected.slice((start + length) * 2);
+      }
+      const code = await s.publicClient.getCode({ address: logic });
+      assert.equal(code?.toLowerCase(), `0x${expected}`.toLowerCase(), `the second contract of ${contract.address} is not the release's`);
+    }
     if (product.nav !== undefined) {
       assert.ok(await isSame(legos.navDesk, "VAULT", contract.address), `the desk of ${contract.address} names another vault`);
       await heldOnlyBy(ROLES.SETTLER, legos.navDesk, "settler");

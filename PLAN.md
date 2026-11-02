@@ -3259,11 +3259,11 @@ Row 10's pages, written against `60c1de3` and pinned to `babef08` after the fixe
 - The owner chose GitHub Pro, so the repo stays private and Pages publishes `docs/` from `main`. The site itself is public, as GitHub offers private publishing only on Enterprise Cloud. Source links on the site need access to the repo.
 - Three more checks read what the fixes changed on the pages: 11, then 17, then 14 findings, all applied. The last 14 have had the lint and a read by hand, and no further independent check. The last check also found `exitOnly()` reading true through a read of nothing and false again when the value returned, fixed in #22 before these pages landed.
 
-## Redemption gate and a second contract for the 7540 (planned 2026-11-02, awaiting review)
+## Redemption gate and a second contract for the 7540 (planned and approved by the owner 2026-11-02)
 
 The owner said on 2026-11-02 that contract size must not make the code worse: build what the product should have, then decide how to handle the size. P11 left pro-rata gates out over a few hundred bytes. This section reverses that for gates and makes room in the 7540 in a way that keeps its attestation and its role model.
 
-Baseline at `7a03cde`: `1792 passing (1622 solidity, 170 nodejs)`. Nothing below is built. The sizes come from a throwaway copy, in which the gate was built to measure its size and has no tests, and they will be measured again in the build.
+Baseline at `7a03cde`: `1792 passing (1622 solidity, 170 nodejs)`. The sizes under "What was measured instead" come from a throwaway copy, in which the gate was built to measure its size and had no tests. What the build measured is in "As built" at the end of this section.
 
 ### What a fund gets
 
@@ -3341,7 +3341,7 @@ The 7540 keeps every function by name and hands the settlement and recovery func
 
 - `contracts/vaults/Gated7540Common.sol`: abstract, on `GatedVaultBase`. The structs, the constants, the storage accessor, `_request` and `_store`, so the two cannot disagree on the layout.
 - `contracts/vaults/Gated7540Settlement.sol`: `closePeriod`, `settlePeriod`, `rejectDepositRequest`, `rejectRedeemRequest`, `recoverClaimable` and `recoverRedeemRequest`, with `_takePending`, `_strike` and `_net`.
-- `Gated7540Vault`: everything an investor or an operator calls stays here and runs directly. It stays `is IGated7540Vault`, so the compiler still checks the whole interface. Each moved function is one line that delegatecalls `SETTLEMENT_LOGIC`, with the calldata unchanged and the result or the typed error passed back.
+- `Gated7540Vault`: everything an investor or an operator calls stays here and runs directly. It stays `is IGated7540Vault`, so the compiler still checks the whole interface. Each moved function is one line that delegatecalls `SETTLEMENT_LOGIC` through OpenZeppelin's `Address.functionDelegateCall`, with the calldata unchanged and a typed error passed back as it came.
 
 ```solidity
 /// @inheritdoc IGated7540Vault
@@ -3359,14 +3359,14 @@ function recoverClaimable(address, address) external {
 - `scripts/verify-reproducible.ts` adds it to the deployed list and fails unless the 7540's creation code embeds its artifact's creation code, the same check `ProxyDeployer` has for `TokenProxy`.
 - `assertHandedOver` compares its deployed code with the artifact, with its own address in the `__self` slot.
 - `ContractSizes.t.sol` adds its runtime size and the 7540's creation code against EIP-3860's 49,152.
-- `validate:upgrades` needs annotations on the immutable, both constructors, the hand-off and the second contract's missing initializer, each with its reason. On the throwaway copy it passed 5 of 5.
+- `validate:upgrades` needs annotations on the immutable, the vault's constructor, the hand-off and the second contract's missing initializer.
 
 **What it costs, said plainly.**
 
-- This is `delegatecall` inside a UUPS implementation, which OpenZeppelin does not ship (rule 10). The auditors must read the two contracts as one.
+- This is `delegatecall` inside a UUPS implementation, a pattern OpenZeppelin does not ship, though the call itself is its own (rule 10). The auditors must read the two contracts as one.
 - The second contract carries an unreachable copy of the base, about 15 KB.
-- The vault's creation code becomes about 40.5 KB of 49.1 KB, and deploying it about 9 million gas against about 5.3 million today, both by arithmetic. If either ever stops fitting, the second contract is deployed first and its address passed to the constructor, which keeps the same pin at the price of one more deployment step.
-- The moved functions pay about 3,000 more gas, an estimate. Investor paths pay nothing.
+- The vault's creation code becomes about 40 KB of 49.1 KB, and deploying it takes about 8.6 million gas against about 5.3 million today. If either ever stops fitting, the second contract is deployed first and its address passed to the constructor, which keeps the same pin at the price of one more deployment step.
+- The moved functions pay about 3,000 to 3,700 more gas. Investor paths pay at most 35.
 
 ### What was measured instead
 
@@ -3448,7 +3448,31 @@ Each code pull request updates `CLAUDE.md` (§1, §3, §4, §7 and rule 4's reop
 
 **Done means:** `npx hardhat test` in both runners and in isolation, the lint, `forge fmt`, the type check, Slither 0, Aderyn 0 read by hand, Halmos, `validate:upgrades`, `verify:reproducible`, and planted bugs by hand (the rounding direction, the carry dropped or sent to the wrong period, the whole book burned, `taken` not stored, the limit left out of the hash, gross instead of net, `adopt` not copying, a hand-off to the wrong selector). A Halmos proof of the two-controller rounding bound is attempted; if the solver does not finish, the report says so and the fuzz stands.
 
+### As built
+
+**The split, with no change in behaviour.** Tests first: 18 ran against a stub, 11 failed and 7 passed, the 7 describing what the vault already did. No existing test changed apart from the interface id `SETTLEMENT_LOGIC()` re-pins.
+
+Measured against `main` at `7a03cde`, on the node tests of the vaults and legos:
+
+| | `main` | The split |
+|---|---|---|
+| `Gated7540Vault` runtime | 24,320 (256 free) | 21,579 (2,997 free) |
+| `Gated7540Settlement` runtime | none | 17,558 |
+| `Gated7540Vault` creation code | 24,569 | 39,522 of 49,152 |
+| Deploying the implementation | 5,338,964 gas | 8,578,334 gas |
+| `closePeriod` | 37,417 | 40,785 |
+| `settlePeriod` | 121,794 | 125,542 |
+| `rejectDepositRequest` | 55,995 | 58,864 |
+| `rejectRedeemRequest` | 135,519 | 139,011 |
+| `recoverRedeemRequest` | 175,258 | 178,859 |
+| `requestDeposit` | 203,465 | 203,487 |
+| `requestRedeem` | 201,540 | 201,575 |
+| `deposit` claim | 213,892 | 213,914 |
+| `mint` claim, `redeem` claim | 142,403, 120,133 | unchanged |
+
+Two things differ from the plan above, both simpler. The hand-off uses OpenZeppelin's `Address.functionDelegateCall`, which the base already carries through `Multicall`, in place of hand-written assembly. The second contract has no constructor, because with no initializer there is nothing to lock.
+
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
 2. Credential layer: none left. On 2026-10-30 the owner confirmed decisions 11, 12, 13, 15, 16 and 17 as built (17 at the measured +8,179 gas on a transfer). Decision 14 is moot, since `IdentityRule` was removed in the cleanup. Decisions 8 and 9 are recorded in the credential section's table.
-3. Redemption gate and the second contract: awaiting the owner's review of the plan above, which also reopens `INavDesk` and `IGated4626Vault`.
+3. Redemption gate and the second contract: approved by the owner on 2026-11-02, with `INavDesk` and `IGated4626Vault` reopened. No question is open.

@@ -58,7 +58,7 @@ Distributor (one per token, immutable)           pays holders from an approved, 
 | `contracts/nav/` | `NavDesk`, `FeeModel`: a 7540's price and the fee on it |
 | `contracts/distribution/` | `Distributor`: dividends and coupons |
 | `contracts/intents/` | `IntentExecutor`, `DvPExecutor`, `SignedEntry` |
-| `contracts/vaults/` | `Gated4626Vault`, `Gated7540Vault` |
+| `contracts/vaults/` | `Gated4626Vault`, `Gated7540Vault`, and `Gated7540Settlement`, the second contract the 7540 creates and hands its settlement and recovery functions to, with `Gated7540Common`, which the two share |
 | `contracts/test/` | Test helpers and mocks, interface-freeze and contract-size guards, Halmos properties |
 
 Every contract except the abstract `BaseRule` has its `.t.sol` next to it. [`PLAN.md`](PLAN.md) tracks phases and decisions;

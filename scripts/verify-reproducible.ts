@@ -5,7 +5,8 @@
 //   2. production vs Hardhat's default build (files grouped into shared jobs with the tests);
 //   3. production vs forge (different remappings and source paths);
 //   4. the TokenProxy artifact vs the TokenProxy creation code embedded in ProxyDeployer, which fixes every token's
-//      CREATE2 address. With solc's metadata hash on, (2)-(4) differ; this gate is what keeps it off.
+//      CREATE2 address. With solc's metadata hash on, (2)-(4) differ; this gate is what keeps it off;
+//   5. the Gated7540Settlement artifact vs the creation code embedded in Gated7540Vault's, which creates it.
 //
 // Then writes `release-build/`: `manifest.json` (per contract: runtime and creation code hashes, immutable slots) and
 // the production build-info of the in-scope sources only (no tests, mocks or OZ-rooted jobs; the OZ sources a contract
@@ -50,6 +51,7 @@ const DEPLOYED = {
   ProxyDeployer: "deploy",
   Fund: "fund",
   TokenProxy: "deploy",
+  Gated7540Settlement: "vaults",
 } as const;
 const CONTRACTS: Record<string, string> = { ...ATTESTED, ...DEPLOYED };
 
@@ -121,6 +123,10 @@ const proxyCreation = production.TokenProxy.creation.replace(/^0x/, "");
 if (!production.ProxyDeployer.runtime.includes(proxyCreation)) {
   failures.push("ProxyDeployer does not embed the TokenProxy artifact's creation code");
 }
+const settlementCreation = production.Gated7540Settlement.creation.replace(/^0x/, "");
+if (!production.Gated7540Vault.creation.includes(settlementCreation)) {
+  failures.push("Gated7540Vault does not embed the Gated7540Settlement artifact's creation code");
+}
 
 // Leave the production build in place and package it as the release reference.
 hardhatBuild("production");
@@ -163,6 +169,7 @@ if (failures.length > 0) {
 }
 console.log(
   `REPRODUCIBLE: ${Object.keys(CONTRACTS).length} contracts identical across 2 production builds, the default profile ` +
-    `and forge; TokenProxy matches ProxyDeployer. Release reference written to release-build/ ` +
+    `and forge; TokenProxy matches ProxyDeployer and Gated7540Settlement matches Gated7540Vault. Release reference ` +
+    `written to release-build/ ` +
     `(${published} in-scope build-info files).`,
 );
