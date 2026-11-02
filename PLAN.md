@@ -2178,7 +2178,7 @@ The documentation, brought in line with the code of S0 to S4 and the `checkSend`
 | 3. `_takesFrozenTokens` asks `BURNER_ROLE` in the base, duplicated in two rules, and a burner redeeming through a vault can redeem frozen shares | Half true. The role is asked in the base and in both rules. The vault claim is false for frozen tokens: `maxRedeem` stops at the unfrozen balance, so a probe of a burner holding frozen shares failed with `ERC4626ExceededMaxRedeem`. It is true for a lockup and the minimum: the same probe had a locked burner redeem in full. That is now a limit in `SECURITY.md`. A flag announced by `burn()` would also have to reach the rules, which means a new field in `extra` |
 | 4. A balance shortfall reverts with the 7943 error, and `canTransfer` returns false for it; 7943 leaves balance validation to the base | **True.** ERC-7943 Final: `canTransfer` "MUST NOT return false based on token-specific, non-permissioned validations such as balance or allowance checks", and `ERC7943InsufficientUnfrozenBalance` is for an amount at or below the balance, with "more specific errors from the base standard" when the amount exceeds it. Here an amount above the balance reverts with the 7943 error and makes `canTransfer` false. The draft ERC repository adopted the conformant reading on 2026-10-23 (Phase 0.7, `e75e5ee`), so the two now disagree |
 | 5. `MinPositionRule` costs about 9.2k when off | True, and in the plan and the docs. Nothing to change in code |
-| 6. `Gated7540Vault` has 1,028 bytes of headroom, from 3,030 | True. The via-ir fallback stands |
+| 6. `Gated7540Vault` has 1,028 bytes of headroom, from 3,030 | True. The via-ir fallback it leaned on does not exist: measured on 2026-11-02, via-ir makes the 7540 bigger (27,895 bytes against 24,320) |
 | 7. The docs were stale | True before this step; this step |
 | The suppressions are justified by the test that pins them | Mostly: each has its reason on the line above, not all name a test |
 
@@ -2723,7 +2723,7 @@ Source: the owner, 2026-10-30, after an assessment of the code at `0350937`. A c
 
 - Several issuers on one stack: each issuer runs its own (P1).
 - Code from other vault projects. Rule 15 cannot take a copyleft licence and rule 1 keeps us on OpenZeppelin, so everything here is written by us.
-- A lending-market adapter, a tokenised-fund adapter, automatic allocation on deposit, forced or in-kind exit, per-period dealing limits and pro-rata redemption gates (P11), fiat handling inside a vault (clients pay with the cash token, P25), request cancellation, investor-level fee equalisation, proof of reserves.
+- A lending-market adapter, a tokenised-fund adapter, automatic allocation on deposit, forced or in-kind exit, per-period dealing limits (P11) and, until the owner reversed it on 2026-11-02, pro-rata redemption gates, fiat handling inside a vault (clients pay with the cash token, P25), request cancellation, investor-level fee equalisation, proof of reserves.
 - For the NFT: signed intents and DvP, the `Fund` holder cap, `MinPositionRule`, permit, royalties, enumeration.
 
 ### The lego rules
@@ -3088,7 +3088,7 @@ We are the issuer, so this falls on us. The country is not yet known, and the ru
 - **Target liquidity.** A 4626 holder's exit is limited to idle money plus what the liquidity adapter can return, which is nothing against a target that reports no liquidity.
 - **Bad choices within limits.** The desk can pick a poor but allowed allocation. The timelock decides what is allowed.
 - **Who holds `SETTLER_ROLE`.** The timelock can grant it to any address, and that holder sets any price and can name any `cash` account, so it can pull from any wallet that has approved the vault. That is delayed and visible, not prevented, and an upgrade through the timelock could do the same.
-- **The investor cap while requests are open (P27, accepted for the first version).** A full `requestRedeem` frees the investor's slot while the shares are still unburned, and `requestDeposit` reserves none, so a reject or a second claim can revert with `MAX_HOLDERS`. The agent's recovery always works, and then counts the investor above the cap.
+- **The investor cap while requests are open (P27, accepted for the first version).** A full `requestRedeem` frees the investor's slot while the shares are still unburned, and `requestDeposit` reserves none, so a reject or a second claim can revert with `MAX_HOLDERS`. The agent's recovery always works, and then counts the investor above the cap. A redemption gate makes this last longer, because a queued investor stays out of the count until the queue reaches them.
 - **A wrong report inside the checker's approval.** Two people can approve a wrong price, and a correction moves it back. Whoever dealt in between keeps the difference.
 - **`redeem(maxRedeem(o))` with a minimum.** On a 4626 limited by liquidity, with a minimum position set, the remainder can fall below the minimum and the exact call reverts.
 
@@ -3108,7 +3108,7 @@ P2 to P22 were answered by the owner on 2026-10-30, every row as recommended, wi
 | P8 | Reported prices only behind the 7540? | Yes. On an instant vault a stale price is free money for whoever notices first. | None recommended. |
 | P9 | Fees in assets, with a high-water mark and a hurdle, in an immutable `FeeModel`? | Yes. Simple, no policy interaction, and the terms institutions expect. | Fee shares, which need a credentialed recipient and a free holder slot. Or no hurdle, which is less code and fewer terms to offer. |
 | P10 | What happens to an on-chain adapter that can never be priced again? | A timelock write-off, with the delay as public notice. Holders take the loss and the vault deals again. A reported adapter's value is reported and approved by two people, so its write-off only clears the cap it left behind. | Suspension until it answers. Nobody takes a loss they did not choose, and the whole vault may stay frozen forever. |
-| P11 | Left out of the first version: per-period dealing limits, pro-rata redemption gates, a forced exit. Agreed? | Yes. Limits cost 225 of the 7540's 348 spare bytes, and gates need requests that part-settle across periods. | Add limits now and accept 123 spare bytes, before the new getters and event. |
+| P11 | Left out of the first version: per-period dealing limits, pro-rata redemption gates, a forced exit. Agreed? | Yes. Limits cost 225 of the 7540's 348 spare bytes, and gates need requests that part-settle across periods. **Gates reversed by the owner, 2026-11-02:** size must not decide this. See the redemption gate section. Limits and a forced exit stay out until a product asks for them. | Add limits now and accept 123 spare bytes, before the new getters and event. |
 | P12 | One `Portfolio` per vault, or one shared by several? | **Decided by the owner, 2026-10-30: one per vault.** A shared one would need an internal ledger between vaults, one vault's exit would drain another's liquidity, and a 4626 would inherit reported prices, which P8 rules out. Two vaults that want the same on-chain strategy each hold their own position in the target. | Not taken. |
 | P13 | How does the 7540 fit the size limit? | Drop OpenZeppelin's 4626 parent from the 7540 only, as an exception to rule 10. It saves 240 bytes, removes dead inheritance and its 8 compiler warnings, and touches no other contract. | 100 optimizer runs. Saves about 530 and keeps rule 10, but changes every contract's gas and bytecode. |
 | P14 | How does the hurdle work over time? | It compounds from when the mark last moved, and the mark moves only when a performance fee is charged. A slow fund pays no performance fee, and it cannot be gamed by frequent calls. | It restarts each period. Simpler to explain, but a return below the hurdle can still pay a performance fee. |
@@ -3124,7 +3124,7 @@ P2 to P22 were answered by the owner on 2026-10-30, every row as recommended, wi
 | P24 | Who holds clients' keys? | **Decided by the owner, 2026-11-01:** custody by the issuer by default, one address per client, in MPC or HSM. Clients need no wallet or gas. Institutions can bring their own wallet with a credential. A custody compromise is the worst case. | Clients hold their own keys. Less custody risk, but clients need wallets and gas, a lost key becomes a forced-transfer case, and vault entry goes through signed entry. |
 | P25 | What do clients pay with? | **Decided by the owner, 2026-11-01: both, product by product.** Our own cash token, an `IntentToken` limited to customers, whose DvP cash leg settles by signed intent; an external stablecoin where a product calls for one. No code changes: a vault names its asset at deployment, `DvPExecutor` settles either form (`executeDvPGated`, `executeDvP3009`), and `SignedEntry` takes `permit` or ERC-3009. Two limits: a stablecoin without ERC-3009 can be a vault's asset but not a DvP cash leg, and with P23 it has to be bridged or issued on the permissioned chain. Our own token brings the rules on holding client money, and an external one brings another issuer's risk. | Only one of the two. |
 | P26 | How long is the timelock delay, and what waits for it? | **Decided by the owner, 2026-10-30: 24 hours,** replacing 7 days. Set at deployment, with a constant floor of 1 hour so that a compromised governance cannot take it to zero. The guardian has a day to cancel a bad change. A product launch does not wait at all. | 48 hours, for more cancel time. Or keep 7 days for upgrades only, which needs a second timelock. |
-| P27 | Does an investor with an open request count under a fund's investor cap? | **Decided by the owner, 2026-10-30: accept the first version as it is** (outside review, items 3.2 and 3.3). The agent rejects deposits near the cap, a monitor watches the count going over it, and recovery always works. No cheap contract fix exists: the 7540 has almost no room and settlement cannot loop over investors. Whether a redeeming investor still counts as a holder remains a question for counsel, and a different answer reopens this row. | Count an investor until the redemption settles, and reserve a slot at `requestDeposit`. The count is always exact, and it needs its own design in `Fund` and per-request bookkeeping in a vault with no room. |
+| P27 | Does an investor with an open request count under a fund's investor cap? | **Decided by the owner, 2026-10-30: accept the first version as it is** (outside review, items 3.2 and 3.3). The agent rejects deposits near the cap, a monitor watches the count going over it, and recovery always works. No cheap contract fix exists: the 7540 has almost no room and settlement cannot loop over investors. Whether a redeeming investor still counts as a holder remains a question for counsel, and a different answer reopens this row. Since 2026-11-02 the vault's room is no reason on its own (see the redemption gate section); the rest of this answer stands. | Count an investor until the redemption settles, and reserve a slot at `requestDeposit`. The count is always exact, and it needs its own design in `Fund` and per-request bookkeeping in a vault with no room. |
 
 ### Agreed order (owner, 2026-10-30)
 
@@ -3259,6 +3259,196 @@ Row 10's pages, written against `60c1de3` and pinned to `babef08` after the fixe
 - The owner chose GitHub Pro, so the repo stays private and Pages publishes `docs/` from `main`. The site itself is public, as GitHub offers private publishing only on Enterprise Cloud. Source links on the site need access to the repo.
 - Three more checks read what the fixes changed on the pages: 11, then 17, then 14 findings, all applied. The last 14 have had the lint and a read by hand, and no further independent check. The last check also found `exitOnly()` reading true through a read of nothing and false again when the value returned, fixed in #22 before these pages landed.
 
+## Redemption gate and a second contract for the 7540 (planned 2026-11-02, awaiting review)
+
+The owner said on 2026-11-02 that contract size must not make the code worse: build what the product should have, then decide how to handle the size. P11 left pro-rata gates out over a few hundred bytes. This section reverses that for gates and makes room in the 7540 in a way that keeps its attestation and its role model.
+
+Baseline at `7a03cde`: `1792 passing (1622 solidity, 170 nodejs)`. Nothing below is built. The sizes come from a throwaway copy, in which the gate was built to measure its size and has no tests, and they will be measured again in the build.
+
+### What a fund gets
+
+A fund can set the most that may leave in one period, as a share of the fund. When a period's redemptions pass that level, every request in the period is filled at the same fraction. The rest stays in the queue, stays invested, and deals at the next period's price.
+
+An example at a level of 10%, at a flat price, ignoring the virtual shares. The fund has 1,000,000 shares worth 1,000,000, the first period's deposits are 20,000, holder A asks to redeem 200,000 shares and holder B 100,000, and nobody else asks for anything after that.
+
+| Period | Shares in the fund | Limit | Queue | Filled | A and B get out | Carried |
+|---|---|---|---|---|---|---|
+| N | 1,000,000 | 100,000 + 20,000 the deposits buy = 120,000 | 300,000 | 40% | 80,000 and 40,000 | 180,000 |
+| N+1 | 900,000 | 90,000 | 180,000 | 50% | 60,000 and 30,000 | 90,000 |
+| N+2 | 810,000 | 81,000 | 90,000 | 90% | 54,000 and 27,000 | 9,000 |
+| N+3 | 729,000 | 72,900 | 9,000 | 100% | 6,000 and 3,000 | 0 |
+
+In period N the cash account funds 100,000: 120,000 paid out less 20,000 paid in, which is exactly 10% of the fund.
+
+### Why not a rule
+
+The suggestion was a rule of about 40 lines capping the shares that enter the escrow per period. It is first-come: the fastest holders exit in full, and everyone else is refused with no place in a queue. In a run that rewards the race a gate exists to stop. ERC-7540 also asks that requests of one id become claimable at one pro-rata rate, which is what this design does. Not built.
+
+### The vault is told how much, and not why
+
+`settlePeriod` gains a limit. It takes the smaller of the book and the limit, and `type(uint256).max` means no limit, so a settler with no gate deals exactly as today. There is no new revert path and no policy in the vault (rule 11).
+
+```solidity
+_s.redemptions = $.books[_period][false].paid;
+_s.redeemed = Math.min(_s.redemptions, _redeemLimit);
+_s.assets = Math.mulDiv(_s.redeemed, _nav + 1, _s.supply + _VIRTUAL_SHARES);
+$.books[_period][false].taken = _s.redeemed.toUint128();
+// At most one period is closed, so the next one is the open one.
+if (_s.redeemed != _s.redemptions) $.books[_period + 1][false].paid += (_s.redemptions - _s.redeemed).toUint128();
+$.pendingRedeemShares -= _s.redeemed;
+```
+
+`settlePeriod` burns `redeemed`, not the whole book, and `_net` pays on the assets of `redeemed`. `Book` gains `uint128 taken`. The carried shares stay in the escrow, in `totalSupply()` and in `pendingRedeemShares`, so they still count in the price, pay the fund's fees, and stay out of reach of `forcedTransfer`'s surplus.
+
+Every path already reads a controller through `_request`, so only the roll changes. The claims, `_join`, `_takePending`, `recoverClaimable` and every view follow it:
+
+```solidity
+_r = $.requests[_controller][_isDeposit];
+uint64 _settled = $.settledPeriod;
+while (_r.period != 0 && _r.period <= _settled) {
+  Book memory _book = $.books[_r.period][_isDeposit];
+  uint256 _taken = _isDeposit ? _r.pending : Math.mulDiv(_r.pending, _book.taken, _book.paid, Math.Rounding.Ceil);
+  _r.paid += _taken.toUint128();
+  _r.owed += Math.mulDiv(_r.pending, _book.owed, _book.paid).toUint128();
+  _r.pending -= _taken.toUint128();
+  _r.period = _r.pending == 0 ? 0 : _r.period + 1;
+}
+```
+
+A full fill gives today's numbers: `_taken` is the whole pending and the loop ends after one pass. A deposit is always a full fill.
+
+**Rounding.** What is taken rounds up, so what each controller carries, `floor(pending × (paid − taken) / paid)`, sums to no more than the next book holds. A reject of a carried part can therefore never underflow that book. What is owed rounds down and sums to no more than the assets, so `claimableCash` is never short. Each gated period can leave up to (controllers − 1) share units in the next book that nobody owns. They burn at the next full fill, and a share unit is a millionth of the asset's smallest unit at par.
+
+### The desk holds the policy
+
+The level lives in `NavDesk`, because the vault must not know why a limit is what it is, and a later desk can apply a different policy without touching the vault.
+
+- `redemptionGate`: the level in basis points of all shares, unclaimed ones included. `setRedemptionGate` takes the vault's `DEFAULT_ADMIN_ROLE` (the timelock), emits `RedemptionGateSet`, and refuses more than 10,000 with `NavDesk_InvalidGate`. Zero is off, as a minimum position's is.
+- `propose` works out the limit: `supply × level / 10,000 + deposits × (supply + 1e6) / (nav + 1)`, both rounded down. The second part is exactly the shares the period's deposits buy at this price, so the measure is net of deposits: real money coming in pays the exits it allows. With the gate off the limit is `type(uint256).max`.
+- `Proposal` gains `redeemLimit`, `hashOf` covers it, `ProposalMade` carries it, and `execute` passes it to `settlePeriod`. A timelock change inside the cooldown does not move a price on the table, like every other figure in a proposal.
+- The reporter passes nothing for it, so two people cannot starve exits while taking deposits. Nothing moves the inputs while a proposal is on the table: the closed book can only shrink through `refundRequest` and `recoverRequest`, which need no proposal on the table, and neither a claim nor a recovery changes `supply`.
+- `adopt` copies the level from the old desk, because a replacement that forgot it would silently lift a gate. A later timelock call can still change it.
+
+**Decisions taken here, stated to the owner on 2026-11-02 and not objected to:** the gate is net of deposits; a carried part has no priority over new requests. **My decisions:** the gate applies mechanically whenever the level is passed, with no discretion to invoke it, because the level is meant to be fixed in the offering documents. The guardian gets no power over it, because it can already stop dealing by cancelling a proposal. One level per period.
+
+### What an investor sees
+
+No new function. `pendingRedeemRequest` shows the carried part, and `claimableRedeemRequest`, `maxRedeem` and `maxWithdraw` show the part taken, which is how ERC-7540 keeps the two apart. A holder cannot withdraw a carried part themselves, as no request can be cancelled today. The agent's `rejectRedeemRequest` hands it back under the full policy, and `recoverRedeemRequest` is the path if that is blocked. `PeriodSettled` gains `_redeemed`, so the history shows both what was asked and what was taken.
+
+### The second contract
+
+The 7540 keeps every function by name and hands the settlement and recovery functions to a fixed second contract that it creates in its constructor.
+
+- `contracts/vaults/Gated7540Common.sol`: abstract, on `GatedVaultBase`. The structs, the constants, the storage accessor, `_request` and `_store`, so the two cannot disagree on the layout.
+- `contracts/vaults/Gated7540Settlement.sol`: `closePeriod`, `settlePeriod`, `rejectDepositRequest`, `rejectRedeemRequest`, `recoverClaimable` and `recoverRedeemRequest`, with `_takePending`, `_strike` and `_net`.
+- `Gated7540Vault`: everything an investor or an operator calls stays here and runs directly. It stays `is IGated7540Vault`, so the compiler still checks the whole interface. Each moved function is one line that delegatecalls `SETTLEMENT_LOGIC`, with the calldata unchanged and the result or the typed error passed back.
+
+```solidity
+/// @inheritdoc IGated7540Vault
+function recoverClaimable(address, address) external {
+  _toSettlement();
+}
+```
+
+**Why it keeps the attestation.** `SETTLEMENT_LOGIC` is an immutable of the implementation, set by `new` in its constructor. The implementation's codehash therefore pins the address, nobody chooses the contract, and its code cannot change. There is no new role, no new storage and no admin function. An upgrade goes through the same timelock to an attested implementation, and that implementation creates its own second contract. The second contract is not a lego: it is not attested on its own and it cannot be swapped alone.
+
+**Called directly it does nothing.** Its own storage is empty, so no account holds a role there and nobody can be granted one; it has no initializer; `upgradeToAndCall` is `onlyProxy`. It holds no money. The base's functions in it cannot be reached from the vault, because the vault forwards only the six named selectors and has no fallback.
+
+**The checks that must learn about it.**
+
+- `scripts/verify-reproducible.ts` adds it to the deployed list and fails unless the 7540's creation code embeds its artifact's creation code, the same check `ProxyDeployer` has for `TokenProxy`.
+- `assertHandedOver` compares its deployed code with the artifact, with its own address in the `__self` slot.
+- `ContractSizes.t.sol` adds its runtime size and the 7540's creation code against EIP-3860's 49,152.
+- `validate:upgrades` needs annotations on the immutable, both constructors, the hand-off and the second contract's missing initializer, each with its reason. On the throwaway copy it passed 5 of 5.
+
+**What it costs, said plainly.**
+
+- This is `delegatecall` inside a UUPS implementation, which OpenZeppelin does not ship (rule 10). The auditors must read the two contracts as one.
+- The second contract carries an unreachable copy of the base, about 15 KB.
+- The vault's creation code becomes about 40.5 KB of 49.1 KB, and deploying it about 9 million gas against about 5.3 million today, both by arithmetic. If either ever stops fitting, the second contract is deployed first and its address passed to the constructor, which keeps the same pin at the price of one more deployment step.
+- The moved functions pay about 3,000 more gas, an estimate. Investor paths pay nothing.
+
+### What was measured instead
+
+Deployed bytes of the 7540 at `7a03cde`, against 24,576.
+
+| Layout | Vault | Room | Second contract |
+|---|---|---|---|
+| Today, no gate | 24,320 | 256 | none |
+| Gate only | 24,806 | 230 over | none |
+| Gate, IR optimiser | 28,562 | 3,986 over | none |
+| Gate, 100 optimizer runs | 24,318 | 258 | none |
+| Gate, a selector table, recovery moved | 25,582 | 1,006 over | 15,925 |
+| Gate, fixed contract, recovery moved | 23,592 | 984 | 15,925 |
+| **Gate, fixed contract, recovery and settlement moved** | **21,712** | **2,864** | **18,247** |
+
+- **A selector table the admin can edit.** It costs 2,027 bytes, more than moving the recovery functions frees. Adding a function is an upgrade by another name, so it would need its own timelock and attestation path. The attested codehash would stop saying what a proxy runs, and each launch would write one entry per selector. Refused.
+- **100 optimizer runs.** It changes every contract's gas and bytecode, and leaves 258 bytes, so the next feature brings us back here. Refused.
+- **The IR optimiser.** It makes the 7540 bigger, so the "via-ir fallback" noted earlier was wrong. Corrected above.
+- **An external share token (ERC-7575).** Cleaner in the long run, but a far larger rewrite (the escrow's exemptions in the rules, the enforcement special cases, the roles on the token), and it does nothing for the 4626. Keep it for a fund with several assets.
+
+**Evidence for the chosen layout.** On a throwaway copy, without the gate, with both groups moved and no test or deployment module changed: `1792 passing (1622 solidity, 170 nodejs)`, upgrades 5 of 5, Slither 0, Aderyn 0 with two inline annotations. Halmos, the reproducible build and gas were not run on it.
+
+### Interfaces this reopens
+
+The owner's approval of this plan is the instruction rule 4 asks for. `InterfaceFreeze.t.sol` is re-pinned for each.
+
+| Interface | Change |
+|---|---|
+| `IGated7540Vault` | `settlePeriod` gains `_redeemLimit`. `PeriodSettled` gains `_redeemed`. New views `periodBook(_period, _isDeposit)`, which returns paid, owed and taken and lets the desk read a period's deposits, and `SETTLEMENT_LOGIC()`. |
+| `INavDesk` | `Proposal` gains `redeemLimit`, which changes `hashOf`'s selector. `ProposalMade` gains `_redeemLimit`. New `redemptionGate()`, `setRedemptionGate`, `RedemptionGateSet`, `NavDesk_InvalidGate`. |
+| `IGated4626Vault` | New event `DepositsClosed(_counted, _last)`, below. |
+
+**The 4626's closing event.** A count that finds the value fallen by more than half closes deposits for good and emits nothing specific, against rule 16. `_accrue` emits `DepositsClosed` when it flips the flag from false, and only then. The other flip, in `setPortfolio`, needs none: it carries a write-off forward, which already has `AdapterWrittenOff`, and `PortfolioSet` marks the call. About 100 bytes of the 476 free, an estimate.
+
+**Deployment.** The `Nav` profile type gains an optional `redemptionGateBps`, and `Product` calls `setRedemptionGate` when it is set. `managed-fund` takes 1,000 as an example, as its fee terms are examples, so a test covers the wiring. No other profile sets one. `assertHandedOver` pins it. The level is each product's own, from its offering documents.
+
+### Known limits
+
+- **Over-requesting.** A holder who expects a gate can ask for more than they want, to get a bigger slice. Only the agent can hand back a carried part, which is the deterrent, and it is not a complete one.
+- **A dormant controller walks.** The roll passes one period at a time until the first full fill, about 5,000 gas per gated period by arithmetic, so about 6,000 gated periods in a row fit a block of 30 million. A test will measure it. I looked at a running product instead of a walk: it needs no loop, but it loses precision as it shrinks towards zero and needs scale tracking. The walk is simpler and its cost falls only on the controller who waited.
+- **A fund winding down never finishes under a gate.** The level is a share of what remains, so when everyone is leaving the queue shrinks by the same fraction each period. The timelock sets the level to zero for a wind-down.
+- **P27 lasts longer.** See the row above.
+- **A low level slows every exit.** The timelock can set one, delayed and visible, like any other setting. A compromised governance stays out of scope.
+- **A plain settler can pass any limit.** It can already refuse to settle, and the hand-over check refuses that role on a single key unless the profile names the exception.
+
+### What size no longer decides
+
+| Item | Answer now |
+|---|---|
+| P11, pro-rata gates | Reversed, above. |
+| P11, per-period dealing limits and a forced exit | Still out, because no product asks for them, not because of size. |
+| P13, no OpenZeppelin 4626 parent on the 7540 | Stays. The vault would still override almost all of it and claim to be synchronous while its previews revert. |
+| P27, the investor cap while requests are open | The vault's room is no longer a reason. The other one stands: settlement cannot loop over investors, and leaving at the claim would need the vault to reach into `Fund`. Counsel's view decides whether to reopen it. |
+| `dealingState()` in place of three getters | Stays. It reads better, and nothing wants them apart. |
+| The 4626's closing event | Added, above. |
+
+**Counting an entity with several wallets: not built, on its merits.** It costs the vaults nothing, as it would live in a rule, `Fund` and the registry. Under issuer custody (P24) a client has one address. A client with two wallets counts twice, which reaches the cap early and never breaches it. The unsafe case, one shared address holding for many clients, is avoided by that custody and is counsel's otherwise. Build it when a product needs it.
+
+### Not in this work
+
+A gate on the 4626, which has no batch to fill pro rata and whose `maxRedeem` already stops at its liquid assets. Two levels at once, such as monthly and quarterly, which is a new desk with the vault unchanged. Limits on deposits. Priority for carried parts. Cancellation by a holder. Moving anything out of the 4626 or the tokens.
+
+**What does not change.** The base, the rules, `ComplianceHook`, `Fund`, `Portfolio`, `FeeModel`, `SignedEntry`, `Distributor` and the executors. The investor paths of the 7540.
+
+### Build order
+
+Tests first, the failing run shown, in three pull requests, each landed by squash on green.
+
+1. **The split, with no change in behaviour.** New tests: each moved function called directly on the second contract reverts; a moved function through `multicall`; a settlement after an upgrade keeps its state and uses the new contract; the size guards. No existing test changes, apart from the interface id that `SETTLEMENT_LOGIC()` re-pins, so the existing suite is the proof. Gas of the moved functions measured, and the deployment gas.
+2. **The gate, the desk and the 4626 event.** The call sites of `settlePeriod` (about 40) gain the limit, and six `PeriodSettled` expectations gain a field. New tests:
+   - Vault: one fraction across controllers (fuzzed); burn, escrow and cash on `redeemed`; a carried part at the next price; limit zero, equal and above the book; a dormant controller against an active one; a new request on a carried part, and one refused while the carried part sits in a closed period; a reject and a recovery of a carried part, under each role; `recoverClaimable` leaves a carried part alone; every view against the state after a write; carried parts against the next book, and owed against the assets (fuzzed); an invariant run on `pendingRedeemShares`, the escrow and the balance; the gas of a walk.
+   - Desk: the limit formula with the example above; net outflow within the level (fuzzed); a level changed inside the cooldown; a stale hash refused; bounds and role; `adopt`.
+   - Fund: a queued investor's place in the count, pinning what P27 accepts.
+   - 4626: `DepositsClosed` once, at the flip, and not on a fall of half or less.
+   - Node: `managed-fund` end to end through the desk, decoding `PeriodSettled`.
+3. **The pages.** `Gated7540Vault`, `NavDesk`, `Gated4626Vault`, `BaseRule`, `FeeModel`, `Portfolio`, `index`, `money`, `movement`, `deployment`, `review` and `roles` where they say what settlement does, a new page for the second contract, and a new pin across every footer, with a fresh check of the changed claims.
+
+Each code pull request updates `CLAUDE.md` (§1, §3, §4, §7 and rule 4's reopening note), `README.md`, `SECURITY.md` and this file.
+
+**Done means:** `npx hardhat test` in both runners and in isolation, the lint, `forge fmt`, the type check, Slither 0, Aderyn 0 read by hand, Halmos, `validate:upgrades`, `verify:reproducible`, and planted bugs by hand (the rounding direction, the carry dropped or sent to the wrong period, the whole book burned, `taken` not stored, the limit left out of the hash, gross instead of net, `adopt` not copying, a hand-off to the wrong selector). A Halmos proof of the two-controller rounding bound is attempted; if the solver does not finish, the report says so and the fuzz stands.
+
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
 2. Credential layer: none left. On 2026-10-30 the owner confirmed decisions 11, 12, 13, 15, 16 and 17 as built (17 at the measured +8,179 gas on a transfer). Decision 14 is moot, since `IdentityRule` was removed in the cleanup. Decisions 8 and 9 are recorded in the credential section's table.
+3. Redemption gate and the second contract: awaiting the owner's review of the plan above, which also reopens `INavDesk` and `IGated4626Vault`.
