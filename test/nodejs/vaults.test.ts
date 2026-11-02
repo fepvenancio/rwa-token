@@ -157,7 +157,7 @@ describe("vault flows", async function () {
         return (await s.publicClient.getTransactionReceipt({ hash })).gasUsed;
       };
       const perPeriod = ((await claimAfter(21)) - (await claimAfter(1))) / 20n;
-      // 6,541 when written, so about 4,500 gated periods in a row fit a block of 30 million.
+      // 5,979 when written, so about 5,000 gated periods in a row fit a block of 30 million.
       assert.ok(perPeriod < 7_000n, `each gated period walked costs ${perPeriod} gas`);
     });
 

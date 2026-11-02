@@ -3088,7 +3088,7 @@ We are the issuer, so this falls on us. The country is not yet known, and the ru
 - **Target liquidity.** A 4626 holder's exit is limited to idle money plus what the liquidity adapter can return, which is nothing against a target that reports no liquidity.
 - **Bad choices within limits.** The desk can pick a poor but allowed allocation. The timelock decides what is allowed.
 - **Who holds `SETTLER_ROLE`.** The timelock can grant it to any address, and that holder sets any price and can name any `cash` account, so it can pull from any wallet that has approved the vault. That is delayed and visible, not prevented, and an upgrade through the timelock could do the same.
-- **The investor cap while requests are open (P27, accepted for the first version).** A full `requestRedeem` frees the investor's slot while the shares are still unburned, and `requestDeposit` reserves none, so a reject or a second claim can revert with `MAX_HOLDERS`. The agent's recovery always works, and then counts the investor above the cap. A redemption gate makes this last longer, because a queued investor stays out of the count until the queue reaches them.
+- **The investor cap while requests are open (P27, accepted for the first version).** A full `requestRedeem` frees the investor's slot while the shares are still unburned, and `requestDeposit` reserves none, so a reject or a second claim can revert with `MAX_HOLDERS`. The agent's recovery always works, and then counts the investor above the cap. A redemption gate makes this last longer, because a queued investor stays out of the count for as long as they queue.
 - **A wrong report inside the checker's approval.** Two people can approve a wrong price, and a correction moves it back. Whoever dealt in between keeps the difference.
 - **`redeem(maxRedeem(o))` with a minimum.** On a 4626 limited by liquidity, with a minimum position set, the remainder can fall below the minimum and the exact call reverts.
 
@@ -3367,7 +3367,7 @@ function recoverClaimable(address, address) external {
 **What it costs, said plainly.**
 
 - This is `delegatecall` inside a UUPS implementation, a pattern OpenZeppelin does not ship, though the call itself is its own (rule 10). The auditors must read the two contracts as one.
-- The second contract carries an unreachable copy of the base, about 15 KB.
+- The second contract carries a copy of the base no vault can call. A contract with the same parents and no functions of its own is 12,806 bytes.
 - The vault's creation code becomes about 40 KB of 49.1 KB, and deploying it takes about 8.6 million gas against about 5.3 million today. If either ever stops fitting, the second contract is deployed first and its address passed to the constructor, which keeps the same pin at the price of one more deployment step.
 - The moved functions pay about 3,000 to 3,700 more gas. Investor paths pay at most 35.
 
@@ -3409,7 +3409,7 @@ The owner's approval of this plan is the instruction rule 4 asks for. `Interface
 ### Known limits
 
 - **Over-requesting.** A holder who expects a gate can ask for more than they want, to get a bigger slice. Only the agent can hand back a carried part, which is the deterrent, and it is not a complete one.
-- **A dormant controller walks.** The roll passes one period at a time until the first full fill, 6,541 gas per gated period as measured, so about 4,500 gated periods in a row fit a block of 30 million. A test pins it below 7,000. I looked at a running product instead of a walk: it needs no loop, but it loses precision as it shrinks towards zero and needs scale tracking. The walk is simpler and its cost falls only on the controller who waited.
+- **A dormant controller walks.** The roll passes one period at a time until the first full fill, 5,979 gas per gated period as measured, so about 5,000 gated periods in a row fit a block of 30 million. A test pins it below 7,000. I looked at a running product instead of a walk: it needs no loop, but it loses precision as it shrinks towards zero and needs scale tracking. The walk is simpler and its cost falls only on the controller who waited.
 - **A fund winding down never finishes under a gate.** The level is a share of what remains, so when everyone is leaving the queue shrinks by the same fraction each period. The timelock sets the level to zero for a wind-down.
 - **P27 lasts longer.** See the row above.
 - **A low level slows every exit.** The timelock can set one, delayed and visible, like any other setting. A compromised governance stays out of scope.
@@ -3481,7 +3481,7 @@ Two things differ from the plan above, both simpler. The hand-off uses OpenZeppe
 - A book that stored what was `taken` read as "nothing taken" on a period settled before the field existed, so an upgrade in place would have paid settled redemptions twice, or bricked a controller on an empty next book. Nothing is deployed, but the fix is simpler code. The book stores what was `carried`, so zero means filled, the roll needs no branch for the deposit side, and a full fill writes nothing extra. The second contract also reports its own template id, so a proxy cannot be moved onto it even if it were attested by mistake.
 - A fund everyone has left keeps a few share units of rounding dust, so `_supply == 0` is never true again. The reporter must then propose a value of at least 1, and `FeeModel` prices that at about half an asset per share, against par's millionth of one. The mark jumps there and no performance fee is charged for the rest of the fund's life. Investors lose nothing. This is on `main` too, and it is not part of this work.
 
-Two things differ from the plan above. No shipped profile sets a level. The walk costs 6,541 gas per period, not the 5,000 I worked out.
+Two things differ from the plan above. No shipped profile sets a level. The walk costs 5,979 gas per period, not the 5,000 I worked out.
 
 Measured against the split, on the node tests of the vaults and legos with the new tests left out, so with no gate in play:
 
@@ -3500,7 +3500,15 @@ Measured against the split, on the node tests of the vaults and legos with the n
 
 `npx hardhat test`: `1851 passing (1678 solidity, 173 nodejs)`. Isolated 1678 passing, Slither 0, Aderyn 0, Halmos 22 of 22, `validate:upgrades` 5 of 5, `verify:reproducible` 30 contracts. Planted bugs by hand: 29 of 29 caught on the first version, and 11 of 11 on the lines the `carried` change rewrote. No Halmos proof of the rounding bound was attempted: the two-controller bound is plain algebra and is fuzzed, and the plan's earlier Halmos property on the sum of a period's claims was dropped because no solver finishes it.
 
+## HTML pages at `d903344` (2026-11-02)
+
+The third pull request of the section above: 41 pages, 2 of them new (`Gated7540Settlement`, `Gated7540Common`), pinned to `d903344`. The contracts have not changed since that commit.
+
+- One agent wrote from the code and ran both worked examples. A different agent then checked about 320 claims by hand, by script all 302 cited test names and every link and anchor, and re-ran the worked examples, the test count, the sizes and the deployment gas in a copy. It found 3 wrong, 6 misleading, 1 unsupported and 2 that described history, all applied.
+- One of those was the walk's cost. The 6,541 gas measured earlier was on the version of the book that stored `taken`. On the final code it is 5,979, measured again, so about 5,000 gated periods in a row fit a block of 30 million. The plan, the brief and the test's comment are corrected with the pages. Another was the second contract's copy of the base, which is 12,806 bytes, not about 15 KB.
+- The lint outside the repo and the headless check at phone width were run on the result. These fixes have had no further independent check.
+
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
 2. Credential layer: none left. On 2026-10-30 the owner confirmed decisions 11, 12, 13, 15, 16 and 17 as built (17 at the measured +8,179 gas on a transfer). Decision 14 is moot, since `IdentityRule` was removed in the cleanup. Decisions 8 and 9 are recorded in the credential section's table.
-3. Redemption gate and the second contract: approved by the owner on 2026-11-02, with `INavDesk` and `IGated4626Vault` reopened. No question is open.
+3. Redemption gate and the second contract: built and landed in #24 and #25. Open from its review: dust in a fund everyone has left ends the performance fee (`docs/review.html`, under open items). A proposed fix waits for the owner to start it.

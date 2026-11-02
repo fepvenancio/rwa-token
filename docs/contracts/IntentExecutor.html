@@ -290,14 +290,14 @@
   <div class="prose">
     <h2>Source and tests</h2>
     <ul class="plain">
-      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/intents/IntentExecutor.sol"><code>contracts/intents/IntentExecutor.sol</code></a>, interfaces <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/IIntentExecutor.sol"><code>IIntentExecutor.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/IIntentExecutorBatch.sol"><code>IIntentExecutorBatch.sol</code></a></li>
-      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/intents/IntentExecutor.t.sol"><code>IntentExecutor.t.sol</code></a> (unit tests with a mocked token, recovery included, and integration tests on a real <code>IntentToken</code>: the consideration refusal in <code>test_WhenTheIntentNamesTheIntentExecutorAndStatesAPayment_ItIsRefusedAndNothingMoves</code>, batches in <code>test_WhenTheFailingIntentIsDroppedAndResubmitted_TheRestSettles</code>, the pause in <code>test_WhenTheExecutorIsPaused_TheTokenStillSettlesThroughOtherExecutors</code>) and <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/intents.test.ts"><code>test/nodejs/intents.test.ts</code></a> (wallet signatures, the executor binding from each address, the token's pre-flight beside the executor's refusal, a failed batch decoded)</li>
-      <li>The signing helper <code>signIntent</code> is in <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/fixtures.ts"><code>test/nodejs/fixtures.ts</code></a>.</li>
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/intents/IntentExecutor.sol"><code>contracts/intents/IntentExecutor.sol</code></a>, interfaces <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/interfaces/IIntentExecutor.sol"><code>IIntentExecutor.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/interfaces/IIntentExecutorBatch.sol"><code>IIntentExecutorBatch.sol</code></a></li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/intents/IntentExecutor.t.sol"><code>IntentExecutor.t.sol</code></a> (unit tests with a mocked token, recovery included, and integration tests on a real <code>IntentToken</code>: the consideration refusal in <code>test_WhenTheIntentNamesTheIntentExecutorAndStatesAPayment_ItIsRefusedAndNothingMoves</code>, batches in <code>test_WhenTheFailingIntentIsDroppedAndResubmitted_TheRestSettles</code>, the pause in <code>test_WhenTheExecutorIsPaused_TheTokenStillSettlesThroughOtherExecutors</code>) and <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/test/nodejs/intents.test.ts"><code>test/nodejs/intents.test.ts</code></a> (wallet signatures, the executor binding from each address, the token's pre-flight beside the executor's refusal, a failed batch decoded)</li>
+      <li>The signing helper <code>signIntent</code> is in <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/test/nodejs/fixtures.ts"><code>test/nodejs/fixtures.ts</code></a>.</li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>babef08</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>d903344</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

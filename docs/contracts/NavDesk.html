@@ -26,7 +26,7 @@
 <header class="top">
   <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Vaults</div>
   <h1>NavDesk</h1>
-  <p class="lede wrap-any">Sets the price a request-and-claim vault deals at. Once a period has ended, one account proposes a value, a different account accepts it, and after a cooldown anyone can put it through. If no price can be approved, dealing waits and the requests can go back.</p>
+  <p class="lede wrap-any">Sets the price a request-and-claim vault deals at. Once a period has ended, one account proposes a value, a different account accepts it, and after a cooldown anyone can put it through. If no price can be approved, dealing waits and the requests can go back. It also holds the fund's redemption gate, if the fund has one.</p>
   <div class="facts">
     <span class="fact"><b>contracts/nav/NavDesk.sol</b></span>
     <span class="fact">immutable code, <b>not a proxy</b></span>
@@ -43,6 +43,7 @@
     <p>A <a href="Gated7540Vault.html">Gated7540Vault</a> deals in periods: requests collect during a period, then all of them deal at one price, worked out from the fund's net asset value (NAV). The vault takes whatever value its <code>SETTLER_ROLE</code> holder gives it, so that role goes to this contract, which puts a process around the number.</p>
     <p>The cut-off comes on a schedule, not when someone decides. One account proposes a value, with a stated date that may not be before requests closed, and a different one accepts it, the numbers are fixed at the proposal, and a cooldown gives the guardian time to cancel. If nothing can be approved, the period stays closed and nobody deals, and after a while the agent can send the requests back.</p>
     <p>Money does not pass through the desk, and it keeps no list of roles: it asks the vault each time. A price is still a claim. The contract proves which report was used, not that the money exists.</p>
+    <p>The desk can also hold a <a href="#gate">redemption gate</a>: the most of the fund that may leave in one period, net of what comes in. The timelock sets the level, the desk works out a limit from it when a price is proposed, and the limit is frozen with the price. Past it, every request is filled at the same fraction and the rest waits for the next period.</p>
   </div>
 </section>
 
@@ -89,7 +90,7 @@
 
         <rect class="act" x="40" y="438" width="340" height="46" rx="8"/>
         <text x="56" y="457" class="bold">Period settled at one price</text>
-        <text x="56" y="474" class="mono sm">settlePeriod(nav, fee, cash, feeRecipient)</text>
+        <text x="56" y="474" class="sm"><tspan class="mono sm">settlePeriod</tspan>, with the frozen numbers</text>
 
         <rect class="b" x="470" y="14" width="290" height="118" rx="8"/>
         <text x="484" y="34" class="bold">Nothing approved: dealing waits</text>
@@ -121,7 +122,7 @@
   </figure>
   <ol class="steps wrap-any">
     <li><div><b>Cut-off.</b> Anyone can call <code>closePeriod()</code> once <code>periodLength</code> has passed since <code>lastCutoff</code>. Before that it reverts with <code>NavDesk_PeriodNotOver</code>. It records the current time as <code>lastCutoff</code>, emits <code>CutOff</code> and closes the vault's open period, which opens the next, so requests made from then on join the next period. The vault reverts with <code>Gated7540Vault_PeriodUnsettled</code> while an earlier closed period is unsettled, so at most one period is closed at a time.</div></li>
-    <li><div><b>Proposal.</b> A holder of the vault's <code>REPORTER_ROLE</code> calls <code>propose(_reported, _reportHash, _asOf, _moves)</code>. Only one proposal can be on the table (<code>NavDesk_ProposalPending</code>), and there must be a closed period to price (<code>NavDesk_NoClosedPeriod</code>). The desk works out the value and the fee and freezes everything in a <code>Proposal</code>. It emits <code>ProposalMade</code> with the reported part, the on-chain part, the value, the fee, the report hash and <code>asOf</code>.</div></li>
+    <li><div><b>Proposal.</b> A holder of the vault's <code>REPORTER_ROLE</code> calls <code>propose(_reported, _reportHash, _asOf, _moves)</code>. Only one proposal can be on the table (<code>NavDesk_ProposalPending</code>), and there must be a closed period to price (<code>NavDesk_NoClosedPeriod</code>). The desk works out the value, the fee and the <a href="#gate">redemption limit</a>, and freezes everything in a <code>Proposal</code>. It emits <code>ProposalMade</code> with the reported part, the on-chain part, the value, the fee, the report hash, <code>asOf</code> and the limit.</div></li>
     <li><div><b>Acceptance.</b> A holder of <code>CHECKER_ROLE</code> calls <code>accept(_proposalHash)</code>. It reverts for the account that proposed (<code>NavDesk_SelfAccept</code>), for a hash that is not the one on the table (<code>NavDesk_ProposalMismatch</code>), with nothing on the table (<code>NavDesk_NoProposal</code>) and on a second acceptance (<code>NavDesk_AcceptanceWrong</code>). It emits <code>ProposalAccepted</code>.</div></li>
     <li><div><b>Cooldown.</b> <code>execute</code> reverts until <code>proposedAt + cooldown</code>. The clock starts at the proposal, not at the acceptance. Until execution, a holder of <code>GUARDIAN_ROLE</code> or <code>CHECKER_ROLE</code> can call <code>cancel()</code>, accepted or not. That deletes the proposal, emits <code>ProposalCancelled</code> and leaves the mark and the fee clocks where they were. The reporter can then propose again, and the approval does not carry over (<code>test_AnApprovalDoesNotCarryOverToAReplacement</code>).</div></li>
     <li><div><b>Execution.</b> Anyone can call <code>execute()</code> once the proposal is accepted (<code>NavDesk_AcceptanceWrong</code> before that), the cooldown is over (<code>NavDesk_TooEarly</code>), the report is not too old (<code>NavDesk_StaleReport</code>) and the period it priced is still the closed one (<code>NavDesk_WrongPeriod(proposed, closed)</code>, or <code>NavDesk_NoClosedPeriod</code> with none closed). The desk deletes the proposal. If the proposal was made with a fee model, the desk stores its <code>mark</code> and <code>markMovedAt</code> and sets <code>lastFeeAt</code> to <code>proposedAt</code>. Then it emits <code>ProposalExecuted</code> and calls the vault's <code>settlePeriod</code> with the frozen numbers. If that call reverts, all of this is undone and the proposal stays on the table. That happens, for example, when the vault is paused (<code>EnforcedPause</code>), when the cash account is short, and when the desk has lost its role (<code>test_WhenTheDeskLosesTheRole_ExecutionReverts</code>).</div></li>
@@ -144,10 +145,10 @@ nav   = gross - fee</pre>
       <li><b>The reported part</b> is one number for everything not priced on-chain, in the asset's units. Its breakdown is in the off-chain NAV pack, and <code>_reportHash</code> is the hash of that pack. It leaves out what the vault itself holds, because that money belongs to investors with open requests and claims.</li>
       <li><b>The on-chain part</b> comes from the plugged <a href="Portfolio.html">Portfolio</a>: its <code>pricedValue()</code> is its idle money plus every priced adapter. Reported adapters are left out of it, because their value is in the report. A plugged portfolio is also the cash account. With none, <code>custodianAccount</code> is the cash account, and with neither <code>propose</code> reverts with <code>NavDesk_NoCashAccount</code>.</li>
       <li><b>The fee</b> comes from the plugged <a href="FeeModel.html">FeeModel</a>, quoted on the gross value with all shares (unclaimed ones included), the <code>mark</code> and two ages. With no shares there is no fee, the mark restarts at par and both clocks restart when the proposal executes, so the first investors pay neither on their principal nor for time before they arrived (<code>test_WithNoSharesThereIsNoFeeAndTheClocksRestart</code>, <code>test_TheMarkRestartsAtParWhenEveryoneHasLeft</code>).</li>
-      <li><b>No shares, no value.</b> Unclaimed shares count as shares (<code>test_UnclaimedSharesStillHaveAValue</code>). Only when there are none at all, claimed or not, is nothing anyone's. The gross value is zero whatever is reported or sits in the portfolio, so the period strikes at par. The desk does not refuse to propose, as a stranger's donation to the portfolio could then stop the period (<code>test_ADonationToThePortfolioWithNoSharesStrikesAtPar</code>). What is left goes to the investors who come in, in the next price. <code>ProposalMade</code> still shows what was reported and priced.</li>
+      <li><b>No shares, no value.</b> Unclaimed shares count as shares (<code>test_UnclaimedSharesStillHaveAValue</code>). Only when there are none at all, claimed or not, is nothing anyone's. The gross value is zero whatever is reported or sits in the portfolio, so the period strikes at par. The desk does not refuse to propose, as a stranger's donation to the portfolio could then stop the period (<code>test_ADonationToThePortfolioWithNoSharesStrikesAtPar</code>). What is left goes to the investors who come in, in the next price. <code>ProposalMade</code> still shows what was reported and priced. Rounding can leave a few share units unclaimed after everyone has left, and then this case does not run (<a href="#limits">below</a>).</li>
       <li><b>Zero.</b> A value of zero reverts with <code>NavDesk_ZeroNav</code> while shares exist, unclaimed ones included. With no shares it is accepted (<code>test_AValueOfZeroIsFineWithNoShares</code>).</li>
     </ul>
-    <p>The vault then deals the whole period at that value in one transaction. With <code>supply</code> being <code>totalSupply() + unclaimedShares</code>, all deposits buy <code>deposits × (supply + 1e6) / (nav + 1)</code> shares and all redemptions receive <code>redemptions × (nav + 1) / (supply + 1e6)</code> assets, each rounded down. Only the difference between deposits and what must be paid out moves to or from the cash account. The <a href="Gated7540Vault.html">Gated7540Vault</a> page has the rest.</p>
+    <p>The vault then deals the whole period at that value in one transaction. With <code>supply</code> being <code>totalSupply() + unclaimedShares</code>, all deposits buy <code>deposits × (supply + 1e6) / (nav + 1)</code> shares and the redemptions it takes receive <code>redeemed × (nav + 1) / (supply + 1e6)</code> assets, each rounded down. Only the difference between deposits and what must be paid out moves to or from the cash account. The <a href="Gated7540Vault.html">Gated7540Vault</a> page has the rest.</p>
     <h3>The conditions on time and on moves</h3>
   </div>
   <div class="table-wrap">
@@ -198,10 +199,37 @@ nav   = gross - fee</pre>
   </figure>
 </section>
 
+<section id="gate">
+  <div class="prose wrap-any">
+    <h2>The redemption gate</h2>
+    <p>A fund can limit how much leaves in one period. The level is <code>redemptionGate</code>, in basis points of all shares, unclaimed ones included. It starts at zero, which is off: a settlement takes every redemption (<code>test_ItStartsOffAndTakesEverything</code>). <code>setRedemptionGate(_gateBps)</code> takes the vault's <code>DEFAULT_ADMIN_ROLE</code>, which after hand-over is the timelock, so a change is delayed and public. It emits <code>RedemptionGateSet(_gateBps)</code> and refuses more than 10,000, the whole fund, with <code>NavDesk_InvalidGate(_gateBps)</code> (<code>test_TheLevelStopsAtTheWholeFund</code>). The guardian cannot set it (<code>test_TheGuardianCannotSetTheLevel</code>).</p>
+    <p>The vault knows nothing of the level. <code>propose</code> works out a limit in shares, and <code>execute</code> passes it to <code>settlePeriod</code>. Past that limit the vault fills every request at one fraction and carries the rest. <a href="Gated7540Vault.html#part-fills">What a holder sees</a> is on the vault's page, with a worked example that <code>test_AQueueClearsInFourPeriodsAtATenthOfTheFund</code> runs through this desk.</p>
+  </div>
+  <div class="code-block">
+    <div class="code-label">propose, with a level above zero</div>
+    <pre>limit = supply × level / 10,000  +  deposits × (supply + 1e6) / (nav + 1)   <span class="cm">// each part rounded down</span>
+
+<span class="cm">// supply: all shares, unclaimed ones included</span>
+<span class="cm">// deposits: what the closed period's deposits paid, from the vault's periodBook</span>
+<span class="cm">// with the level at zero, the limit is type(uint256).max</span></pre>
+  </div>
+  <div class="prose wrap-any">
+    <ul class="plain wrap-any">
+      <li><b>It is net of deposits.</b> The second part is exactly the shares the period's deposits buy at this price, so real money coming in pays the exits it allows, and the level measures what leaves less what comes in. At 10% of 1,000,000 shares with 20,000 of deposits at par, the limit is 120,000. If the redemptions reach it, the cash account funds 100,000: a tenth of the fund. Measured in shares at one price, what leaves on net never passes the level (<code>testFuzz_NoMoreThanTheLevelLeavesOnNet</code>).</li>
+      <li><b>The reporter has no say.</b> <code>propose</code> takes no limit, so a reporter and a checker cannot shut exits while taking deposits, or open them wider than the level. The value it reports does enter the second part, as the price the deposits buy at, which is the price everyone in the period deals at.</li>
+      <li><b>It applies by itself.</b> Nobody decides to invoke it. When a period's redemptions are below the limit they are filled in full (<code>test_WhenTheRedemptionsAreBelowTheLimit_TheyAreFilled</code>), and when they pass it they are cut back.</li>
+      <li><b>It is frozen with the price.</b> The limit is in the <code>Proposal</code>. A level changed inside the cooldown moves nothing on the table, and the next proposal reads the new level (<code>test_ALevelChangedInsideTheCooldownMovesNothingOnTheTable</code>). Nothing else moves the figures it came from while a proposal is on the table: the closed book changes only through <code>refundRequest</code> and <code>recoverRequest</code>, which need an empty table, and a claim or a recovery leaves the number of shares the same.</li>
+      <li><b>It is in the hash.</b> <code>hashOf</code> covers <code>redeemLimit</code> and <code>ProposalMade</code> carries it, so a checker approves that limit, and an approval of another is refused (<code>test_TheHashCoversTheLimit</code>, <code>test_AnApprovalOfAnotherLimitIsRefused</code>).</li>
+      <li><b>A replacement keeps it.</b> <code>adopt</code> copies the level from the desk it replaces, because a replacement that forgot it would lift a gate with nobody deciding to (<code>test_AReplacementDeskKeepsTheLevel</code>). The timelock can change it afterwards.</li>
+      <li><b>A fund winding down sets it to zero.</b> The level is a share of what remains. When everyone is leaving, the queue shrinks by the same fraction each period and does not finish. Set to zero, the next price takes the whole queue. A level of zero means no limit. It does not mean that nothing may leave.</li>
+    </ul>
+  </div>
+</section>
+
 <section id="frozen">
   <div class="prose wrap-any">
     <h2>What a proposal freezes, and what the hash covers</h2>
-    <p><code>propose</code> writes these fields once. Until <code>execute</code> or <code>cancel</code>, only <code>acceptedAt</code> changes. A later change of settings, fee model or cash account does not reach them, because a timelock change can land inside the cooldown (<code>test_ASettingChangedInTheCooldownDoesNotChangeTheProposal</code>, <code>test_TheFrozenFeeIsTheFeePaid</code>).</p>
+    <p><code>propose</code> writes these fields once. Until <code>execute</code> or <code>cancel</code>, only <code>acceptedAt</code> changes. A later change of settings, fee model, redemption gate or cash account does not reach them, because a timelock change can land inside the cooldown (<code>test_ASettingChangedInTheCooldownDoesNotChangeTheProposal</code>, <code>test_TheFrozenFeeIsTheFeePaid</code>).</p>
   </div>
   <div class="table-wrap">
     <table class="tight">
@@ -216,6 +244,7 @@ nav   = gross - fee</pre>
         <tr><td><code>cash</code></td><td>The cash account: receives net inflow and funds net outflow</td><td class="c ok">yes</td></tr>
         <tr><td><code>feeRecipient</code></td><td>Who the fee goes to, read from the fee model at the proposal</td><td class="c ok">yes</td></tr>
         <tr><td><code>asOf</code></td><td>When the reporter says the report was struck; the report's age runs from here</td><td class="c ok">yes</td></tr>
+        <tr><td><code>redeemLimit</code></td><td>The most shares this period may take from its redemptions; <code>type(uint256).max</code> with the gate off</td><td class="c ok">yes</td></tr>
         <tr><td><code>proposedAt</code></td><td>When it was proposed; the cooldown runs from here</td><td class="c no">no</td></tr>
         <tr><td><code>proposer</code></td><td>The reporter, who may not also accept it</td><td class="c no">no</td></tr>
         <tr><td><code>acceptedAt</code></td><td>When the checker accepted it; 0 until then</td><td class="c no">no</td></tr>
@@ -223,7 +252,7 @@ nav   = gross - fee</pre>
     </table>
   </div>
   <div class="prose wrap-any">
-    <p><code>hashOf(_proposal)</code> is <code>keccak256(abi.encode(...))</code> over the nine fields marked yes, and <code>test_TheHashCoversEveryFrozenField</code> changes each in turn. <code>accept</code> takes that hash, so an approval given for one set of numbers cannot land on another. The reported and on-chain parts are not stored in the proposal: they are in the <code>ProposalMade</code> event.</p>
+    <p><code>hashOf(_proposal)</code> is <code>keccak256(abi.encode(...))</code> over the ten fields marked yes. <code>test_TheHashCoversEveryFrozenField</code> changes nine in turn and <code>test_TheHashCoversTheLimit</code> the tenth. <code>accept</code> takes that hash, so an approval given for one set of numbers cannot land on another. The reported and on-chain parts are not stored in the proposal: they are in the <code>ProposalMade</code> event.</p>
     <p><b>The report's date is in the hash.</b> A proposal cancelled and made again with the same numbers and a later <code>asOf</code> carries another hash, so an acceptance sent for the first cannot land on the second (<code>test_AnApprovalDoesNotCarryOverToALaterReportWithTheSameNumbers</code>). With the same <code>asOf</code> too, the hash is the same, and so is everything it approves.</p>
     <p><b>Not frozen.</b> <code>cooldown</code> and <code>maxReportAge</code> are not part of a proposal. <code>execute</code> reads them when it runs, so a settings change inside the cooldown does reach a proposal on the table: a shorter cooldown lets it run sooner, and a lower <code>maxReportAge</code> can make it stale. No test in the repository pins these two.</p>
   </div>
@@ -259,7 +288,7 @@ nav   = gross - fee</pre>
   </div>
   <ol class="steps wrap-any">
     <li><div><b>Move the role.</b> Revoke <code>SETTLER_ROLE</code> from the outgoing desk and grant it to the successor, on the vault.</div></li>
-    <li><div><b>Take over the clocks.</b> Call <code>adopt(_oldDesk)</code> on the successor. It runs once and refuses a desk that names another vault or has a proposal on the table (<code>NavDesk_CannotAdopt</code>). It reads <code>lastCutoff</code> from the outgoing desk at that moment, <code>mark</code> and <code>markMovedAt</code> if that desk has a mark, and <code>lastFeeAt</code> if it has a fee model, so nothing is charged twice however long the timelock took (<code>test_ADeskThatAdoptsChargesNothingTwice</code>). It emits <code>DeskAdopted</code>.</div></li>
+    <li><div><b>Take over the clocks and the level.</b> Call <code>adopt(_oldDesk)</code> on the successor. It runs once and refuses a desk that names another vault or has a proposal on the table (<code>NavDesk_CannotAdopt</code>). It reads <code>lastCutoff</code> from the outgoing desk at that moment, <code>mark</code> and <code>markMovedAt</code> if that desk has a mark, and <code>lastFeeAt</code> if it has a fee model, so nothing is charged twice however long the timelock took (<code>test_ADeskThatAdoptsChargesNothingTwice</code>). It also copies <code>redemptionGate</code>, over any level set on the successor before it, and emits <code>RedemptionGateSet</code> and <code>DeskAdopted</code>.</div></li>
     <li><div><b>Set what it does not copy.</b> The schedule, the portfolio and the custodian account come from the successor's constructor and <code>setSettings</code>, and the fee model from <code>setFeeModel</code>.</div></li>
   </ol>
   <div class="note wrap-any">
@@ -296,10 +325,11 @@ nav   = gross - fee</pre>
         <tr><td><span class="wrap-any"><code>recoverRequest(_controller, _to)</code></span></td><td><code>AGENT_ROLE</code>, in a stuck period</td><td>Forwards the vault's recovery of one controller's pending redemption. Emits <code>RequestReleased</code>.</td></tr>
         <tr><td><span class="wrap-any"><code>setSettings(_portfolio, _custodianAccount, _periodLength, _cooldown, _maxReportAge)</code></span></td><td><code>DEFAULT_ADMIN_ROLE</code></td><td>Changes the settings, with the bounds above. A portfolio must be attested as <code>PORTFOLIO</code> in the registry the vault names and must name this vault and its asset (<code>NavDesk_PortfolioRefused</code>). Emits <code>SettingsChanged</code>.</td></tr>
         <tr><td><code>setFeeModel(_feeModel)</code></td><td><code>DEFAULT_ADMIN_ROLE</code></td><td>Plugs a fee model, or zero for none. It must be attested as <code>FEE_MODEL</code> (<code>NavDesk_FeeModelRefused(_feeModel)</code>). A first plug restarts <code>lastFeeAt</code> and, with a <code>mark</code> of 0, starts the mark at the vault's <code>convertToAssets(1e18)</code>, or at par if that is lower, so a gain made before the plug is not charged and getting back to par pays no performance fee (<code>test_AFirstPlugBelowParStartsTheMarkAtPar</code>). A swap keeps the mark and the clocks. Emits <code>FeeModelSet</code>.</td></tr>
-        <tr><td><code>adopt(_oldDesk)</code></td><td><code>DEFAULT_ADMIN_ROLE</code>, once</td><td>Takes over the cut-off and, where the outgoing desk has them, the mark and the fee clock. Emits <code>DeskAdopted</code>.</td></tr>
+        <tr><td><code>setRedemptionGate(_gateBps)</code></td><td><code>DEFAULT_ADMIN_ROLE</code></td><td>Sets the <a href="#gate">level</a>, up to 10,000 basis points; zero is off (<code>NavDesk_InvalidGate(_gateBps)</code> above that). A proposal on the table keeps the limit it froze. Emits <code>RedemptionGateSet</code>.</td></tr>
+        <tr><td><code>adopt(_oldDesk)</code></td><td><code>DEFAULT_ADMIN_ROLE</code>, once</td><td>Takes over the cut-off, the redemption gate's level and, where the outgoing desk has them, the mark and the fee clock. Emits <code>RedemptionGateSet</code> and <code>DeskAdopted</code>.</td></tr>
         <tr><td><code>proposal()</code>, <code>hashOf(_proposal)</code></td><td>Anyone (read-only)</td><td>The proposal on the table, and the hash <code>accept</code> takes for a proposal.</td></tr>
         <tr><td><code>isWired()</code></td><td>Anyone (read-only)</td><td>Whether this desk holds the vault's <code>SETTLER_ROLE</code>. It is there for monitors.</td></tr>
-        <tr><td><code>VAULT()</code>, <code>portfolio()</code>, <code>custodianAccount()</code>, <code>periodLength()</code>, <code>cooldown()</code>, <code>maxReportAge()</code>, <code>lastCutoff()</code>, <code>feeModel()</code>, <code>mark()</code>, <code>markMovedAt()</code>, <code>lastFeeAt()</code></td><td>Anyone (read-only)</td><td>The vault, the settings, the last cut-off, and the fee state.</td></tr>
+        <tr><td><code>VAULT()</code>, <code>portfolio()</code>, <code>custodianAccount()</code>, <code>periodLength()</code>, <code>cooldown()</code>, <code>maxReportAge()</code>, <code>lastCutoff()</code>, <code>redemptionGate()</code>, <code>feeModel()</code>, <code>mark()</code>, <code>markMovedAt()</code>, <code>lastFeeAt()</code></td><td>Anyone (read-only)</td><td>The vault, the settings, the last cut-off, the redemption gate's level, and the fee state.</td></tr>
         <tr><td><code>MIN_COOLDOWN()</code>, <code>MAX_COOLDOWN()</code>, <code>REPORTER_ROLE()</code>, <code>CHECKER_ROLE()</code></td><td>Anyone (read-only)</td><td>The cooldown bounds, and the two role ids it defines. The roles are held on the vault.</td></tr>
       </tbody>
     </table>
@@ -317,11 +347,13 @@ nav   = gross - fee</pre>
       <li><b>The price comes after the cut-off.</b> <code>asOf</code> cannot be stated earlier than <code>lastCutoff</code>, so with an honest report an investor who files a request does not know the price it will deal at.</li>
       <li><b>Two accounts on every price.</b> The reporter proposes and a different account accepts, and the acceptance names the exact numbers through the hash.</li>
       <li><b>The numbers freeze at the proposal.</b> A timelock change can land inside the cooldown, and the checker's approval should hold for what the checker saw.</li>
+      <li><b>The level is on the desk, not the vault.</b> The vault is told how many shares to take and has no policy of its own. A later desk can apply another policy with the vault unchanged.</li>
+      <li><b>The level is mechanical.</b> It is meant to be fixed in a fund's offering documents, so applying it needs no decision, and the guardian gets no power over it. The guardian can already stop dealing by cancelling a proposal.</li>
       <li><b>No role table.</b> Asking the vault each time means a revoked reporter stops at once (<code>test_ARevokedReporterStopsAtOnce</code>) and a replaced desk needs no new grants for its people.</li>
       <li><b>The fee clock stops at the proposal, not at execution.</b> <code>lastFeeAt</code> becomes <code>proposedAt</code>, so the time between the proposal and its execution is charged by the next price and not lost. A cancel moves nothing, so nothing is charged twice (<code>test_ACancelledProposalChargesNothing</code>).</li>
       <li><b>It is not attested.</b> Nothing installs it by code hash and money does not pass through it. It acts by the role the vault gives it, and the post-deploy check pins that role.</li>
     </ul>
-    <p>In a deployment, <code>Legos</code> builds the desk against the vault's predicted address. <code>Product</code> grants the desk <code>SETTLER_ROLE</code>, grants <code>REPORTER_ROLE</code> and <code>CHECKER_ROLE</code> on the vault, and plugs the portfolio and the fee model where the profile has them. The <code>vault7540</code> and <code>managed-fund</code> profiles use a period of 1 day, a cooldown of 1 day and a maximum report age of 3 days. See <a href="../deployment.html">Deployment and governance</a>.</p>
+    <p>In a deployment, <code>Legos</code> builds the desk against the vault's predicted address. <code>Product</code> grants the desk <code>SETTLER_ROLE</code>, grants <code>REPORTER_ROLE</code> and <code>CHECKER_ROLE</code> on the vault, plugs the portfolio and the fee model where the profile has them, and sets the level where the product's <code>nav</code> states <code>redemptionGateBps</code>. The <code>vault7540</code> and <code>managed-fund</code> profiles use a period of 1 day, a cooldown of 1 day and a maximum report age of 3 days. No shipped profile states a level: each product takes its own from its documents. See <a href="../deployment.html">Deployment and governance</a>.</p>
   </div>
 </section>
 
@@ -330,7 +362,7 @@ nav   = gross - fee</pre>
     <h2>What it does not do</h2>
     <ul class="plain">
       <li><b>It does not prove the value.</b> <code>reportHash</code> shows which report was used, not that the money exists, and there is no limit on how far a value can move from the last one. A reporter and a checker who collude can approve a wrong price, and whoever dealt in between keeps the difference when it is corrected. The cooldown, the guardian's cancel and the published hash make that harder and traceable.</li>
-      <li><b>It does not stop another settler.</b> The vault takes whatever <code>settlePeriod</code> is given, from any holder of <code>SETTLER_ROLE</code>, and the timelock can grant that role to anyone. The vault does not check the holder. <code>isWired()</code> says only that this desk holds the role, and the post-deploy check asserts that no other account it knows about does.</li>
+      <li><b>It does not stop another settler.</b> The vault takes whatever <code>settlePeriod</code> is given, from any holder of <code>SETTLER_ROLE</code>, and the timelock can grant that role to anyone. The vault does not check the holder. <code>isWired()</code> says only that this desk holds the role, and the post-deploy check asserts that no other account it knows about does. Another settler also names its own <code>redeemLimit</code>, whatever level the desk holds.</li>
       <li><b>It does not settle a period it did not price.</b> A proposal names a period and <code>settlePeriod</code> takes no period number, so <code>execute</code> compares the two. If a second settler has dealt that period, <code>execute</code> reverts with <code>NavDesk_WrongPeriod(proposed, closed)</code> once another is closed (<code>test_WhenAnotherPeriodIsClosedNow_ItReverts</code>), and with <code>NavDesk_NoClosedPeriod</code> until then (<code>test_WhenNoPeriodIsClosedNow_ItReverts</code>). Cancelling is the way out.</li>
       <li><b>It tells two addresses apart, not two people.</b> The check is that the caller is not the proposer. The post-deploy check asserts that the reporter and the checker are different accounts.</li>
       <li><b>The cooldown does not run from the acceptance.</b> A checker who accepts after the cooldown is over allows <code>execute</code> in the same block. The cancel window is the time since the proposal, whoever accepted it and when.</li>
@@ -338,6 +370,10 @@ nav   = gross - fee</pre>
       <li><b>It does not check the cash account in advance.</b> When a settlement needs money from the cash account and the account is short or has not approved the vault, <code>execute</code> reverts, so cash is raised before proposing (<code>test_WhenTheCashAccountIsShort_ThePeriodStaysClosedAndTheRequestsGoBack</code>).</li>
       <li><b>An unexecutable proposal still blocks a release.</b> A stale proposal stays on the table, and the release path reverts with <code>NavDesk_ProposalPending</code> until a guardian or a checker cancels it. The agent cannot cancel.</li>
       <li><b>It does not overwrite a first plug.</b> A proposal made with no fee model froze no fee state, so <code>execute</code> leaves the mark and the clocks alone, a model plugged during the cooldown keeps what its plug set, and the frozen fee of zero is paid (<code>test_AFirstPlugDuringACooldownKeepsItsMarkAndChargesNoPrincipal</code>, <code>test_WithNoModelExecutingLeavesTheFeeStateAlone</code>).</li>
+      <li><b>A gate slows every exit.</b> The timelock can set a low level, delayed and visible, and a low level keeps holders queued. A compromised governance is outside what the code defends against.</li>
+      <li><b>A gate does not stop over-requesting.</b> A holder who expects a gate can ask for more than it wants, to get a bigger slice. Only a role can hand back a carried part, which is the deterrent, and not a complete one.</li>
+      <li><b>One level, per period, on redemptions.</b> There are no two levels at once, such as monthly and quarterly, and no limit on deposits.</li>
+      <li><b>A fund everyone has left can keep dust.</b> Rounding can leave a few share units unclaimed, so <code>propose</code> never sees zero shares again: the reporter must propose at least 1 (<code>NavDesk_ZeroNav</code>), the mark jumps far above par, and no performance fee is charged for the rest of the fund's life. Investors lose nothing. <a href="../review.html#open">The open item on the review page</a> has the figures.</li>
       <li><b>It does not run itself.</b> <code>closePeriod</code> and <code>execute</code> need someone to call them, and the next period counts from the moment of the call, so a late call moves later cut-offs later.</li>
       <li><b>It serves one vault, of one kind.</b> The deployment profiles allow a desk on a 7540 only (<code>assertUsable</code>), and <code>VAULT</code> is fixed at construction.</li>
     </ul>
@@ -360,13 +396,13 @@ nav   = gross - fee</pre>
   <div class="prose wrap-any">
     <h2>Source and tests</h2>
     <ul class="plain">
-      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/nav/NavDesk.sol"><code>contracts/nav/NavDesk.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/INavDesk.sol"><code>INavDesk.sol</code></a></li>
-      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/nav/NavDesk.t.sol"><code>NavDesk.t.sol</code></a> (a real vault behind a real hook, with a desk holding <code>SETTLER_ROLE</code>), and <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/legos.test.ts"><code>test/nodejs/legos.test.ts</code></a> (a deployed desk through whole cycles, and the post-deploy check)</li>
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/nav/NavDesk.sol"><code>contracts/nav/NavDesk.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/interfaces/INavDesk.sol"><code>INavDesk.sol</code></a></li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/nav/NavDesk.t.sol"><code>NavDesk.t.sol</code></a> (a real vault behind a real hook, with a desk holding <code>SETTLER_ROLE</code>), and <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/test/nodejs/legos.test.ts"><code>test/nodejs/legos.test.ts</code></a> (a deployed desk through whole cycles, and the post-deploy check)</li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>babef08</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>d903344</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

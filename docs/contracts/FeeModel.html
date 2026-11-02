@@ -273,6 +273,7 @@ return (fee, newMark, true)</pre>
       <li><b>It does not compound.</b> The management fee and the hurdle are simple, in proportion to the time.</li>
       <li><b>It does not raise an alarm.</b> A figure above <code>type(uint128).max</code> or an age above 20 years gets a smaller fee or none, with no error.</li>
       <li><b>It does not move the mark without a charge.</b> With a performance rate of zero, or a <code>charged</code> that rounds to zero, the mark and its clock stay where they are (<code>test_WithARateOfZeroTheMarkDoesNotMove</code>). A <code>charged</code> above zero can still round to no fee in assets, because the fee adds <code>charged × supply / 1e18</code>. Then no performance fee is owed, the price has not fallen, and the mark moves to the whole price and its clock restarts (<code>test_WhenTheChargeRoundsToNoFeeTheMarkIsThePrice</code>). On a dust position the next investor buys at or below that price, so a mark left below it would be charged on their principal. A gain sliced into calls too small to pay a whole unit therefore pays nothing. That costs the fee recipient a rounding error per call: under 3 raw units while the supply is under 1e18 share units, and about one price unit, supply / 1e18 raw units, above that.</li>
+      <li><b>It does not know a price is dust.</b> It divides the gross value by the shares it is given. A fund everyone has left can keep a few share units of rounding dust, and a desk's reporter must then propose a value of at least 1. One asset unit over one share unit reads as a price of <code>1e18</code>, against par's <code>1e12</code>. The charge rounds to no fee, so the mark moves there, and no real gain reaches it again. <a href="../review.html#open">The open item on the review page</a> has the figures.</li>
       <li><b>It does not pay.</b> On a 4626, <code>collectFees()</code> pays what idle money allows, so holders can leave ahead of fees owed, and a model replaced with fees still owed pays them to the replacement's recipient unless a timelock batch collects first. On a desk, the fee is paid when the proposal executes. A cancelled proposal pays nothing, and the desk's clocks stay where they were, so the next proposal quotes that time again.</li>
     </ul>
   </div>
@@ -292,13 +293,13 @@ return (fee, newMark, true)</pre>
   <div class="prose wrap-any">
     <h2>Source and tests</h2>
     <ul class="plain">
-      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/nav/FeeModel.sol"><code>contracts/nav/FeeModel.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/IFeeModel.sol"><code>IFeeModel.sol</code></a></li>
-      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/nav/FeeModel.t.sol"><code>FeeModel.t.sol</code></a> (the arithmetic and its properties), the fee tests in <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/nav/NavDesk.t.sol"><code>NavDesk.t.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/vaults/Gated4626VaultPortfolio.t.sol">Gated4626VaultPortfolio.t.sol</a> (what each caller keeps and pays), and <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/legos.test.ts"><code>test/nodejs/legos.test.ts</code></a> (a deployed model)</li>
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/nav/FeeModel.sol"><code>contracts/nav/FeeModel.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/interfaces/IFeeModel.sol"><code>IFeeModel.sol</code></a></li>
+      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/nav/FeeModel.t.sol"><code>FeeModel.t.sol</code></a> (the arithmetic and its properties), the fee tests in <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/nav/NavDesk.t.sol"><code>NavDesk.t.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/vaults/Gated4626VaultPortfolio.t.sol">Gated4626VaultPortfolio.t.sol</a> (what each caller keeps and pays), and <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/test/nodejs/legos.test.ts"><code>test/nodejs/legos.test.ts</code></a> (a deployed model)</li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>babef08</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>d903344</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

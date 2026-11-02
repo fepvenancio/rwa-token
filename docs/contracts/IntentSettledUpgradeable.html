@@ -411,14 +411,14 @@
   <div class="prose wrap-any">
     <h2>Source and tests</h2>
     <ul class="plain wrap-any">
-      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/mixins/IntentSettledUpgradeable.sol"><code>contracts/mixins/IntentSettledUpgradeable.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/interfaces/ITransferIntent.sol"><code>ITransferIntent.sol</code></a></li>
-      <li>Unit tests: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/mixins/IntentSettledUpgradeable.t.sol"><code>IntentSettledUpgradeable.t.sol</code></a> (replay, expiry, wrong chain or token, high-<code>s</code> malleability, ERC-1271 wallets, executor binding, start time, consideration, the check order, cancelling, and <code>canExecute</code> parity)</li>
-      <li>Integration: <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/tokens/IntentToken.t.sol"><code>IntentToken.t.sol</code></a> (real registry and hook), <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/intents.test.ts"><code>test/nodejs/intents.test.ts</code></a> (a real wallet's <code>signTypedData</code> settling through the executor), <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/test/nodejs/time.test.ts"><code>test/nodejs/time.test.ts</code></a> (inclusive times), and the Halmos properties in <a href="https://github.com/fepvenancio/rwa-token/blob/babef08/contracts/test/halmos/IntentTokenHalmos.t.sol"><code>IntentTokenHalmos.t.sol</code></a>: <code>check_executedIntentCannotReplay</code>, <code>check_cancelledNonceNeverExecutes</code>, <code>check_intentNamingAnotherExecutorNeverExecutes</code>, <code>check_considerationWithoutExecutorNeverExecutes</code></li>
+      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/mixins/IntentSettledUpgradeable.sol"><code>contracts/mixins/IntentSettledUpgradeable.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/interfaces/ITransferIntent.sol"><code>ITransferIntent.sol</code></a></li>
+      <li>Unit tests: <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/mixins/IntentSettledUpgradeable.t.sol"><code>IntentSettledUpgradeable.t.sol</code></a> (replay, expiry, wrong chain or token, high-<code>s</code> malleability, ERC-1271 wallets, executor binding, start time, consideration, the check order, cancelling, and <code>canExecute</code> parity)</li>
+      <li>Integration: <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/tokens/IntentToken.t.sol"><code>IntentToken.t.sol</code></a> (real registry and hook), <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/test/nodejs/intents.test.ts"><code>test/nodejs/intents.test.ts</code></a> (a real wallet's <code>signTypedData</code> settling through the executor), <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/test/nodejs/time.test.ts"><code>test/nodejs/time.test.ts</code></a> (inclusive times), and the Halmos properties in <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/test/halmos/IntentTokenHalmos.t.sol"><code>IntentTokenHalmos.t.sol</code></a>: <code>check_executedIntentCannotReplay</code>, <code>check_cancelledNonceNeverExecutes</code>, <code>check_intentNamingAnotherExecutorNeverExecutes</code>, <code>check_considerationWithoutExecutorNeverExecutes</code></li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>babef08</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>d903344</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>
