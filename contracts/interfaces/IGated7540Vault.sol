@@ -9,7 +9,9 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
  * @title IGated7540Vault
  * @notice ERC-7540 asynchronous vault whose shares are a policy-gated token, dealt in periods. One period is open and
  *         requests join it. Everyone in a period gets one price, settled in one transaction however many investors there
- *         are, and each claims later. Requests aggregate per controller (`requestId = 0`)
+ *         are, and each claims later. Requests aggregate per controller (`requestId = 0`). A settlement can take only part
+ *         of a period's redemptions: every request is filled at the same fraction, and the rest carries to the next period,
+ *         stays invested, and deals at that period's price
  * @dev Deposit flow: `requestDeposit` takes the assets into the vault (the controller must be able to hold shares);
  *      settlement prices them; the claim MINTs shares to the receiver through the hook. Redeem flow: `requestRedeem`
  *      escrows the shares into the vault as a TRANSFER through the hook (pause, the frozen amount and the rules apply; the
@@ -17,8 +19,8 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
  *      BURNs the escrow and prices it; the claim pays the assets.
  *
  *      The price is the 4626's form, so `decimals()` is the asset's plus 6: with `supply = totalSupply() + unclaimed`,
- *      shares for all deposits are `deposits × (supply + 1e6) / (nav + 1)` and assets for all redemptions are
- *      `redemptions × (nav + 1) / (supply + 1e6)`, both rounded down. The virtual amounts stop a donation inflating the
+ *      shares for all deposits are `deposits × (supply + 1e6) / (nav + 1)` and assets for the redemptions taken are
+ *      `redeemed × (nav + 1) / (supply + 1e6)`, both rounded down. The virtual amounts stop a donation inflating the
  *      price, and across a whole fund they move value by `price − 1` smallest asset units. Given what was paid, a claim
  *      rounds the other side down; given what is owed, it rounds the paid side up; a full claim clears exactly. Rounding
  *      each investor's claim down leaves at most one unit per period in `unclaimedShares`, for good.
@@ -64,8 +66,9 @@ interface IGated7540Vault {
    * @param _supply All shares at that value: the total supply plus unclaimed shares, before the settlement's burn
    * @param _deposits The assets of the period's deposit requests
    * @param _shares The shares they bought
-   * @param _redemptions The shares of the period's redemption requests
-   * @param _assets The assets they pay
+   * @param _redemptions The shares of the period's redemption requests, carried ones included
+   * @param _redeemed The shares taken from them; the rest carry to the next period
+   * @param _assets The assets the shares taken pay
    * @param _fee The fee paid
    */
   event PeriodSettled(
@@ -75,6 +78,7 @@ interface IGated7540Vault {
     uint256 _deposits,
     uint256 _shares,
     uint256 _redemptions,
+    uint256 _redeemed,
     uint256 _assets,
     uint256 _fee
   );
@@ -216,7 +220,8 @@ interface IGated7540Vault {
   ) external;
 
   /**
-   * @notice Recovers a controller's whole pending redemption to a verified account (an enforcement action)
+   * @notice Recovers a controller's whole pending redemption, a carried part included, to a verified account (an
+   *         enforcement action)
    * @dev AGENT_ROLE while the request's period is open, SETTLER_ROLE once it has closed. Clears the controller's pending
    *      bookkeeping and moves the escrowed shares to `_to` internally as FORCED: bypasses pause, lockup and the holder
    *      cap, but `_to` must pass the token's policy (identity, freeze, fund class). The path for a controller that was de-verified, whose reject reverts. Reverts
@@ -240,7 +245,8 @@ interface IGated7540Vault {
   ) external;
 
   /**
-   * @notice Rejects a controller's whole pending redemption and returns the escrowed shares to the controller
+   * @notice Rejects a controller's whole pending redemption, a carried part included, and returns the escrowed shares to
+   *         the controller
    * @dev AGENT_ROLE while the request's period is open, SETTLER_ROLE once it has closed. Returned as a plain TRANSFER, so
    *      the full policy applies to the controller (identity, cap, pause, lockup, and freeze on the escrow). If it is
    *      blocked this reverts and the shares stay escrowed for `recoverRedeemRequest`
@@ -252,7 +258,7 @@ interface IGated7540Vault {
 
   /**
    * @notice Settles the closed period at one price
-   * @dev SETTLER_ROLE, not while paused. Burns the redeemed escrow, then nets: only the difference between deposits and
+   * @dev SETTLER_ROLE, not while paused. Burns the escrow of the shares taken, then nets: only the difference between deposits and
    *      `assets + fee` moves to or from `_cash`, so subscriptions pay redemptions. Pays the fee, then reverts unless the
    *      vault holds at least pending deposits plus claimable redemption cash. Whoever holds the role sets any price and
    *      can name any cash account that approved the vault, so the role belongs to a `NavDesk`
@@ -261,12 +267,15 @@ interface IGated7540Vault {
    * @param _fee The fee to pay, in assets
    * @param _cash The account that receives net inflow and funds net outflow
    * @param _feeRecipient The account that receives the fee
+   * @param _redeemLimit The most shares to take from the period's redemptions. The rest carry to the next period, each
+   *        request being filled at the same fraction. `type(uint256).max` takes them all
    */
   function settlePeriod(
     uint256 _nav,
     uint256 _fee,
     address _cash,
-    address _feeRecipient
+    address _feeRecipient,
+    uint256 _redeemLimit
   ) external;
 
   /**
@@ -295,4 +304,17 @@ interface IGated7540Vault {
    * @return _unclaimedShares Shares bought in settled periods and not yet minted
    */
   function dealingState() external view returns (uint64 _open, uint64 _settled, uint256 _unclaimedShares);
+
+  /**
+   * @notice One side of one period
+   * @param _period The period
+   * @param _isDeposit True for its deposits, false for its redemptions
+   * @return _paid What its requests gave, net of rejects: on the redemption side, carried shares included
+   * @return _owed What that bought, at settlement
+   * @return _carried On the redemption side, what settlement left of `_paid` for the next period
+   */
+  function periodBook(
+    uint256 _period,
+    bool _isDeposit
+  ) external view returns (uint256 _paid, uint256 _owed, uint256 _carried);
 }

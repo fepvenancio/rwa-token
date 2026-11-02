@@ -121,9 +121,12 @@ contract InterfaceFreezeTest is Test {
     // Re-pinned in v0.2.0 (2026-10-17): recoverClaimable added, the one post-freeze change (owner decision M-3)
     // Re-pinned in S1 of the review items (2026-10-24): `initialize` takes the token's initial rules (was 0x75f5b0db)
     // Re-pinned 2026-10-31 on owner instruction: dealing periods replace per-investor fulfilment.
-    // Re-pinned 2026-11-02 on owner instruction: `SETTLEMENT_LOGIC` added (was 0xc6a5eee9)
-    assertEq(type(IGated7540Vault).interfaceId, bytes4(0xa17876dd), 'IGated7540Vault');
-    assertEq(type(INavDesk).interfaceId, bytes4(0x6d2f4b62), 'INavDesk');
+    // Re-pinned 2026-11-02 on owner instruction: `SETTLEMENT_LOGIC` added (was 0xc6a5eee9), then the redemption gate:
+    // `settlePeriod` takes a limit and `periodBook` added (was 0xa17876dd)
+    assertEq(type(IGated7540Vault).interfaceId, bytes4(0xa61d9790), 'IGated7540Vault');
+    // Re-pinned 2026-11-02 on owner instruction: the redemption gate, which adds a field to the struct `hashOf` takes
+    // (was 0x6d2f4b62)
+    assertEq(type(INavDesk).interfaceId, bytes4(0xc98f37f8), 'INavDesk');
     assertEq(type(ISignedEntry).interfaceId, bytes4(0x05cc4f78), 'ISignedEntry');
     assertEq(type(ISupplyCapRule).interfaceId, bytes4(0x52c89ff1), 'ISupplyCapRule');
     assertEq(type(IDistributor).interfaceId, bytes4(0xd75218de), 'IDistributor');
@@ -190,7 +193,11 @@ contract InterfaceFreezeTest is Test {
     );
     // Added in Phase 5b (2026-10-17)
     assertEq(IGated7540Vault.PeriodClosed.selector, 0x5263beccfd97c2947207bf7254d7c0c216431d4b9cea8c9b3371e8187020851b);
-    assertEq(IGated7540Vault.PeriodSettled.selector, 0x59d402dbba7176d35eb7a36b22a3d102e56f927fa636f911d542ce9ddff6677f);
+    assertEq(IGated7540Vault.PeriodSettled.selector, 0x39d3c67674d292704c2851b742b22a1b77d05815087d567f9f88db757d712cf3);
+    assertEq(INavDesk.RedemptionGateSet.selector, 0xfc2be19943a0efc953aac14c4c78a12070a9462eedf09cc83e5ef03dc08dd9e1);
+    assertEq(
+      IGated4626Vault.DepositsClosed.selector, 0xf34c35fcda8d0564587a2d0e666df41b4133820a1793824d4668c285c18b4beb
+    );
     assertEq(INavDesk.FeeModelSet.selector, 0x57e1682cf9947a26bcd0a26e75237738985e93b1cb7b5cff920f48b9e72b0eb7);
     assertEq(IGated4626Vault.Accrued.selector, 0xe0c50b11a6cc6d75470f28bd76d20c8d223c626324486a273eefadf6c6e973a7);
     assertEq(IGated4626Vault.FeeModelSet.selector, 0x57e1682cf9947a26bcd0a26e75237738985e93b1cb7b5cff920f48b9e72b0eb7);
@@ -222,7 +229,7 @@ contract InterfaceFreezeTest is Test {
     assertEq(INavDesk.ProposalAccepted.selector, 0x6931ab328a92d5384b647f50bea59bf9c0154a2c39315df2738ad91bb3c9d769);
     assertEq(INavDesk.ProposalCancelled.selector, 0x56a54393c88fb71d37dc109609d88e0b586637deb2452aef5f41d3eb32adedfc);
     assertEq(INavDesk.ProposalExecuted.selector, 0x120985525cfb78f6c03f96986f9687f49caf81e29350d21fa052e8c0df211ebb);
-    assertEq(INavDesk.ProposalMade.selector, 0xca6ea76bb021cdd518593898b1fcb99c059112c7796b27a1fa5b42edcd08500f);
+    assertEq(INavDesk.ProposalMade.selector, 0x5e920e4fe92ae146d56c6dc3288f9a03dc637430962df1f76ce9c61dc960af39);
     assertEq(INavDesk.RequestReleased.selector, 0x8200f2685c547311254dcb33469a4d5f90fe2a82745d94f07b09838b8e1cb112);
     assertEq(INavDesk.SettingsChanged.selector, 0x036001a16a233eae5020698275f1719506f862029418b8c2e7e8fd0c9fdee5e7);
     assertEq(

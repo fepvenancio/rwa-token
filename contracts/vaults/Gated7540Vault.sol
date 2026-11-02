@@ -148,7 +148,8 @@ contract Gated7540Vault is
     uint256,
     uint256,
     address,
-    address
+    address,
+    uint256
   ) external {
     _toSettlement();
   }
@@ -277,6 +278,15 @@ contract Gated7540Vault is
   function dealingState() external view returns (uint64 _open, uint64 _settled, uint256 _unclaimedShares) {
     Gated7540Storage storage $ = _getGated7540Storage();
     (_open, _settled, _unclaimedShares) = ($.openPeriod, $.settledPeriod, $.unclaimedShares);
+  }
+
+  /// @inheritdoc IGated7540Vault
+  function periodBook(
+    uint256 _period,
+    bool _isDeposit
+  ) external view returns (uint256 _paid, uint256 _owed, uint256 _carried) {
+    Book storage _book = _getGated7540Storage().books[_period][_isDeposit];
+    (_paid, _owed, _carried) = (_book.paid, _book.owed, _book.carried);
   }
 
   /// @inheritdoc IERC7540Operator

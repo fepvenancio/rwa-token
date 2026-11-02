@@ -66,6 +66,84 @@ describe("a fund whose money sits with one custodian", async function () {
   });
 });
 
+describe("a fund with a redemption gate", async function () {
+  const connection = await network.create();
+  const { viem, networkHelpers } = connection;
+  const [product] = PROFILES.vault7540.products;
+  const gated: Profile = {
+    ...PROFILES.vault7540,
+    id: "gatedFund",
+    products: [{ ...product, nav: { ...product.nav!, redemptionGateBps: 1_000n } }],
+  };
+
+  async function funded() {
+    const s = await deployProfile(connection, gated);
+    const vault = await viem.getContractAt("Gated7540Vault", s.products.asyncFund.address);
+    const desk = await viem.getContractAt("NavDesk", s.legos.asyncFund.navDesk);
+    const { alice, bob } = s.holders;
+    const custody = s.wallets.custody.account;
+    await verify(s, alice);
+    await verify(s, bob);
+    for (const holder of [alice, bob]) {
+      await s.asset.write.mint([holder.account.address, usd(1000n)]);
+      await s.asset.write.approve([vault.address, maxUint256], { account: holder.account });
+    }
+    await s.asset.write.mint([custody.address, usd(1000n)]);
+    await s.asset.write.approve([vault.address, maxUint256], { account: custody });
+    await vault.write.requestDeposit([usd(900n), alice.account.address, alice.account.address], { account: alice.account });
+    await vault.write.requestDeposit([usd(100n), bob.account.address, bob.account.address], { account: bob.account });
+    await settleThroughDesk(connection, s, "asyncFund", 0n);
+    await vault.write.mint([usd(900n) * PAR, alice.account.address, alice.account.address], { account: alice.account });
+    await vault.write.mint([usd(100n) * PAR, bob.account.address, bob.account.address], { account: bob.account });
+    return { s, vault, desk, alice, bob, a: alice.account.address, b: bob.account.address };
+  }
+
+  it("is set at launch and pinned by the hand-over check", async function () {
+    const { s, desk } = await networkHelpers.loadFixture(funded);
+    assert.equal(await desk.read.redemptionGate(), 1_000n);
+    await assertHandedOver(s);
+  });
+
+  it("a tenth of the fund leaves in a period, each request filled at one fraction, and the rest deals at the next price", async function () {
+    const { s, vault, alice, bob, a, b } = await networkHelpers.loadFixture(funded);
+    const fromBlock = await s.publicClient.getBlockNumber();
+    await vault.write.requestRedeem([usd(200n) * PAR, a, a], { account: alice.account });
+    await vault.write.requestRedeem([usd(100n) * PAR, b, b], { account: bob.account });
+
+    await settleThroughDesk(connection, s, "asyncFund", usd(1000n));
+    assert.equal(await vault.read.maxRedeem([a]), usd(200n) * PAR / 3n + 1n);
+    assert.equal(await vault.read.pendingRedeemRequest([0n, a]), usd(200n) * PAR - (usd(200n) * PAR / 3n + 1n));
+    assert.equal(await vault.read.maxRedeem([b]), usd(100n) * PAR / 3n + 1n);
+
+    // What was asked and what was taken are both in the history.
+    const [settled] = await s.publicClient.getContractEvents({
+      address: vault.address,
+      abi: vault.abi,
+      eventName: "PeriodSettled",
+      fromBlock,
+      strict: true,
+    });
+    assert.equal(settled.args._redemptions, usd(300n) * PAR);
+    assert.equal(settled.args._redeemed, usd(100n) * PAR);
+
+    // The next period takes a tenth of what remains, from the queue, and the gate off clears it.
+    await settleThroughDesk(connection, s, "asyncFund", usd(900n));
+    assert.equal(await vault.read.pendingRedeemRequest([0n, a]) + await vault.read.pendingRedeemRequest([0n, b]) <= usd(110n) * PAR, true);
+    const desk = await viem.getContractAt("NavDesk", s.legos.asyncFund.navDesk);
+    await networkHelpers.impersonateAccount(s.timelock.address);
+    await networkHelpers.setBalance(s.timelock.address, 10n ** 18n);
+    await desk.write.setRedemptionGate([0n], { account: s.timelock.address });
+    await networkHelpers.stopImpersonatingAccount(s.timelock.address);
+    await settleThroughDesk(connection, s, "asyncFund", usd(810n));
+    assert.equal(await vault.read.pendingRedeemRequest([0n, a]), 0n);
+    assert.equal(await vault.read.maxRedeem([a]), usd(200n) * PAR);
+    assert.equal(await vault.read.maxRedeem([b]), usd(100n) * PAR);
+    await vault.write.redeem([usd(200n) * PAR, a, a], { account: alice.account });
+    const paid = (await s.asset.read.balanceOf([a])) - usd(100n);
+    assert.ok(paid <= usd(200n) && usd(200n) - paid <= 3n, `paid ${paid}`);
+  });
+});
+
 describe("a fund with custodians, a mandate and fees", async function () {
   const connection = await network.create();
   const { viem, networkHelpers } = connection;

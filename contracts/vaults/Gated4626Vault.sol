@@ -458,7 +458,10 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
     Gated4626Storage storage $ = _getGated4626Storage();
     if ($.portfolio == address(0) || _dealingStopped()) return;
     (uint256 _counted, uint256 _fee, uint256 _newMark, bool _markMoved) = _counting();
-    if (_fellTooFar(_counted)) $.exitOnly = true;
+    if (!$.exitOnly && _fellTooFar(_counted)) {
+      $.exitOnly = true;
+      emit DepositsClosed(_counted, $.last);
+    }
     $.last = _counted - _fee;
     $.lastAt = uint64(block.timestamp);
     emit Accrued(_counted, _fee);

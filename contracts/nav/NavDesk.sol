@@ -44,6 +44,12 @@ contract NavDesk is INavDesk {
   /// @notice The vault's admin role
   bytes32 private constant _DEFAULT_ADMIN_ROLE = 0x00;
 
+  /// @notice A share of the fund's scale: 10,000 basis points are the whole fund
+  uint256 private constant _BPS = 1e4;
+
+  /// @notice The vault's virtual shares, in the price it deals at
+  uint256 private constant _VIRTUAL_SHARES = 1e6;
+
   /// @notice A price's scale: assets per this many share units
   uint256 private constant _PRICE_SCALE = 1e18;
 
@@ -83,6 +89,9 @@ contract NavDesk is INavDesk {
 
   /// @inheritdoc INavDesk
   uint256 public lastFeeAt;
+
+  /// @inheritdoc INavDesk
+  uint256 public redemptionGate;
 
   /// @notice Whether `adopt` has run
   bool internal _adopted;
@@ -129,6 +138,14 @@ contract NavDesk is INavDesk {
       ) revert NavDesk_PortfolioRefused();
     }
     _setSettings(_portfolio, _custodianAccount, _periodLength, _cooldown, _maxReportAge);
+  }
+
+  /// @inheritdoc INavDesk
+  function setRedemptionGate(
+    uint256 _gateBps
+  ) external {
+    _onlyRole(_DEFAULT_ADMIN_ROLE);
+    _setRedemptionGate(_gateBps);
   }
 
   /// @inheritdoc INavDesk
@@ -194,8 +211,9 @@ contract NavDesk is INavDesk {
     _p.asOf = uint64(_asOf);
     _p.proposer = msg.sender;
     _p.reportHash = _reportHash;
+    _p.redeemLimit = _redeemLimit(_p.period, _p.nav, _supply);
     _proposal = _p;
-    emit ProposalMade(hashOf(_p), _p.period, _reported, _priced, _p.nav, _p.fee, _reportHash, _asOf);
+    _announce(_p, _reported, _priced);
   }
 
   /// @inheritdoc INavDesk
@@ -244,7 +262,7 @@ contract NavDesk is INavDesk {
       lastFeeAt = _p.proposedAt;
     }
     emit ProposalExecuted(_hash, _p.period);
-    IGated7540Vault(VAULT).settlePeriod(_p.nav, _p.fee, _p.cash, _p.feeRecipient);
+    IGated7540Vault(VAULT).settlePeriod(_p.nav, _p.fee, _p.cash, _p.feeRecipient, _p.redeemLimit);
   }
 
   /// @inheritdoc INavDesk
@@ -291,6 +309,9 @@ contract NavDesk is INavDesk {
     // With its model off the old desk's fee clock stopped, and no fee is due for the time since.
     // aderyn-ignore-next-line(reentrancy-state-change)
     if (_old.feeModel() != address(0)) lastFeeAt = _old.lastFeeAt();
+    // A replacement that forgot the level would lift the gate without anyone deciding to.
+    // aderyn-ignore-next-line(reentrancy-state-change)
+    _setRedemptionGate(_old.redemptionGate());
     emit DeskAdopted(_oldDesk);
   }
 
@@ -309,7 +330,18 @@ contract NavDesk is INavDesk {
     Proposal memory _p
   ) public pure returns (bytes32 _hash) {
     _hash = keccak256(
-      abi.encode(_p.period, _p.nav, _p.fee, _p.mark, _p.markMovedAt, _p.reportHash, _p.cash, _p.feeRecipient, _p.asOf)
+      abi.encode(
+        _p.period,
+        _p.nav,
+        _p.fee,
+        _p.mark,
+        _p.markMovedAt,
+        _p.reportHash,
+        _p.cash,
+        _p.feeRecipient,
+        _p.asOf,
+        _p.redeemLimit
+      )
     );
   }
 
@@ -343,6 +375,32 @@ contract NavDesk is INavDesk {
   }
 
   /**
+   * @notice Stores the redemption gate's level
+   * @param _gateBps The level in basis points; zero is off
+   */
+  function _setRedemptionGate(
+    uint256 _gateBps
+  ) private {
+    if (_gateBps > _BPS) revert NavDesk_InvalidGate(_gateBps);
+    redemptionGate = _gateBps;
+    emit RedemptionGateSet(_gateBps);
+  }
+
+  /**
+   * @notice Announces a proposal
+   * @param _p The proposal
+   * @param _reported What the reporter said of everything not priced on-chain
+   * @param _priced What the portfolio priced on-chain
+   */
+  function _announce(
+    Proposal memory _p,
+    uint256 _reported,
+    uint256 _priced
+  ) private {
+    emit ProposalMade(hashOf(_p), _p.period, _reported, _priced, _p.nav, _p.fee, _p.reportHash, _p.asOf, _p.redeemLimit);
+  }
+
+  /**
    * @notice The period a proposal would price
    * @return _period The closed period
    * @return _supply All shares, unclaimed included
@@ -352,6 +410,29 @@ contract NavDesk is INavDesk {
     _period = _settled + 1;
     if (_period == _open) revert NavDesk_NoClosedPeriod();
     _supply = IERC20(VAULT).totalSupply() + _unclaimed;
+  }
+
+  /**
+   * @notice The most shares a period may take from its redemptions: the level's share of all shares, plus the shares the
+   *         period's deposits buy at this price, so that the level measures what leaves net of what comes in. Nothing moves
+   *         these figures while a proposal is on the table: the closed book changes only through `_onlyStuck` paths, and a
+   *         claim or a recovery leaves the shares the same
+   * @param _period The period
+   * @param _nav The net asset value it deals at
+   * @param _supply All shares
+   * @return _limit The limit; `type(uint256).max` with the gate off
+   */
+  function _redeemLimit(
+    uint64 _period,
+    uint256 _nav,
+    uint256 _supply
+  ) private view returns (uint256 _limit) {
+    uint256 _gate = redemptionGate;
+    if (_gate == 0) return type(uint256).max;
+    // Of the book, only what the deposits paid is wanted.
+    // slither-disable-next-line unused-return
+    (uint256 _deposits,,) = IGated7540Vault(VAULT).periodBook(_period, true);
+    _limit = Math.mulDiv(_supply, _gate, _BPS) + Math.mulDiv(_deposits, _supply + _VIRTUAL_SHARES, _nav + 1);
   }
 
   /**

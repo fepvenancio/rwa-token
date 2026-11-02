@@ -393,7 +393,7 @@ contract SignedEntry_Permit is SignedEntryTest {
     address _cash = makeAddr('cash');
     vm.startPrank(_settler);
     _async.closePeriod();
-    _async.settlePeriod(0, 0, _cash, address(0));
+    _async.settlePeriod(0, 0, _cash, address(0), type(uint256).max);
     vm.stopPrank();
     vm.prank(_investor);
     _async.mint(_ASSETS * _PAR, _investor, _investor);
@@ -423,7 +423,7 @@ contract SignedEntry_Permit is SignedEntryTest {
     _async.grantRole(_async.SETTLER_ROLE(), _settler);
     vm.startPrank(_settler);
     _async.closePeriod();
-    _async.settlePeriod(0, 0, makeAddr('cash'), address(0));
+    _async.settlePeriod(0, 0, makeAddr('cash'), address(0), type(uint256).max);
     vm.stopPrank();
 
     ISignedEntry.Entry memory _e = _entry(address(_async), false);
@@ -482,7 +482,7 @@ contract SignedEntry_ExitsNeedNoLego is SignedEntryTest {
     _vault.grantRole(_vault.SETTLER_ROLE(), _settler);
     vm.startPrank(_settler);
     _vault.closePeriod();
-    _vault.settlePeriod(0, 0, makeAddr('cash'), address(0));
+    _vault.settlePeriod(0, 0, makeAddr('cash'), address(0), type(uint256).max);
     vm.stopPrank();
     uint256 _shares = _ASSETS * _PAR;
     vm.prank(_investor);

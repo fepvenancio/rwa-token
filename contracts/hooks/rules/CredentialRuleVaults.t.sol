@@ -137,7 +137,7 @@ contract CredentialRuleVaults_7540 is CredentialVaultsTest {
     uint256 _nav = (_vault.totalSupply() + _unclaimed) / _PAR;
     vm.startPrank(_settler);
     _vault.closePeriod();
-    _vault.settlePeriod(_nav, 0, _cash, address(0));
+    _vault.settlePeriod(_nav, 0, _cash, address(0), type(uint256).max);
     vm.stopPrank();
   }
 

@@ -246,8 +246,15 @@ Further limits recorded during review:
 - **Who holds `SETTLER_ROLE` sets the price.** The vault takes whatever `settlePeriod` is given, and the holder can name any
   cash account that approved the vault. So the role belongs to a `NavDesk`, where two people approve every price and a
   cooldown gives the guardian time to cancel. The timelock can grant it to anyone: that is delayed and visible, not
-  prevented. The vault does not check the holder, because that would spend its size margin, so `NavDesk.isWired()` shows
-  it to monitors and the hand-over check pins it.
+  prevented. The vault does not check the holder: a desk is not attested, so the vault could not tell one from any other
+  account. `NavDesk.isWired()` shows it to monitors and the hand-over check pins it. The holder also names how many shares
+  a settlement takes from the redemptions, which through a desk is worked out from the level the timelock set.
+- **A redemption gate slows every exit.** The timelock sets the level on the desk, delayed and visible, and a low one keeps
+  holders queued. The level is a share of what remains, so a fund winding down must set it to zero or the queue only
+  shrinks by the same fraction each period. A holder cannot withdraw a carried part: the agent can hand it back. A holder
+  who expects a gate can ask for more than they want, to get a bigger slice. That is the deterrent's limit, not a fault in
+  the arithmetic.
+- **A queued investor is out of a fund's count (P27).** Under a gate this lasts until the queue reaches them.
 - **A price is a claim.** `reportHash` proves which report was used, not that the money exists. A maker and a checker who
   collude can approve a wrong price, and whoever dealt in between keeps the difference when it is corrected. The cooldown,
   the guardian's cancel and the published hash make that harder and traceable.
@@ -353,7 +360,7 @@ Inline suppressions (each carries its reason on the line above, in the source):
 | `HolderRestrictionRule` `setLockup` | `uninitialized-local` | The stored unlock time starts at zero, the value of a cleared lockup |
 | `Gated7540Settlement` `settlePeriod` | `reentrancy-no-eth`, `boolean-cst`, `arbitrary-send-erc20` | The book is written before the burn and `_net` writes no state: what Slither reads as a write is the storage pointer. A boolean mapping key is not a misused constant. The settler names the cash account, and only one that approved the vault can be pulled from; the role belongs to a `NavDesk`, and `SETTLER_ROLE` is timelock-granted |
 | `Distributor.approve` | `arbitrary-send-erc20` | It pulls from the funder a maker named and a different checker approved, and only an account that approved this contract can be pulled from |
-| `NavDesk` | `incorrect-equality`, `unused-return`, `uninitialized-local` | Zero means nothing on the table, nothing accepted or no mark yet, not a balance. The unclaimed shares say nothing about whether a period is stuck, and the supply nothing about which period is closed. A proposal is filled in a field at a time |
+| `NavDesk` | `incorrect-equality`, `unused-return`, `uninitialized-local` | Zero means nothing on the table, nothing accepted or no mark yet, not a balance. The unclaimed shares say nothing about whether a period is stuck, and the supply nothing about which period is closed. Of a period's book, the limit wants only what its deposits paid. A proposal is filled in a field at a time |
 | `ERC4626CallValidator` | `unused-state` | Slither does not see a constant used as a slice's bound |
 | `SignedEntry` | `arbitrary-send-erc20`, `arbitrary-send-erc20-permit`, `reentrancy-events`, `unused-return` | The investor signed the entry naming these assets, checked first. What it bought is known only after the vault's call, and the nonce was spent before it. A 7540 request returns the aggregated id, 0, which says nothing |
 | `GuardedAccount` `execute` | `unused-return` | A permission is a timelock decision and the validator has judged the parameters, so what the call returns is not needed |
@@ -397,6 +404,7 @@ Inline acknowledgements (reason on the line above each `aderyn-ignore`):
 | `storage-array-memory-edit` (high) | `SettlementWindowRule.check`, `isOpen` | False positive: a read-only copy of a storage struct into memory | Window tests |
 | `reentrancy-state-change` | `Gated7540Vault.initialize` (the asset's `decimals()`), `NavDesk.adopt` (the old desk's views), `NavDesk.setFeeModel`, `Distributor.claim`, `SupplyCapRule.setSupplyCap` | View interfaces, compiled to STATICCALL | |
 | `reentrancy-state-change` | `Gated4626Vault` `setPortfolio`, `setFeeModel`, `collectFees` | View interfaces on attested components, compiled to STATICCALL | |
+| `require-revert-in-loop` | `Gated7540Common._request` | The walk is one controller's own request, so a revert in it could only fail that controller's own call | `testFuzz_TheVaultCanPayEveryClaimAfterAGate` |
 | `require-revert-in-loop` | `GuardedAccount.execute` | All or nothing, by design: a batch that moves money must not half-run | `test_AllOrNothing` |
 | `unsafe-erc20-operation` | `ERC20CallValidator.validate` | It only reads the selectors and moves no tokens | |
 | `unsafe-casting` | `Gated7540Vault._claim` | Neither part exceeds what the request holds, each being a share of it at most | `testFuzz_TheSumOfClaimsNeverExceedsTheBookAndFallsShortByAtMostOneUnitEach` |

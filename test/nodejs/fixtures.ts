@@ -11,6 +11,7 @@ import {
   hashTypedData,
   isAddressEqual,
   keccak256,
+  maxUint256,
   pad,
   toHex,
   type Abi,
@@ -102,6 +103,7 @@ const LEGO_ABI = parseAbi([
   "function feeModel() view returns (address)",
   "function adapters() view returns (address[])",
   "function SETTLEMENT_LOGIC() view returns (address)",
+  "function redemptionGate() view returns (uint256)",
 ]);
 const SAFE_ABI = parseAbi(["function getThreshold() view returns (uint256)"]);
 const ATTEST = { HOOK: 1, RULE: 2, IMPLEMENTATION: 3, PORTFOLIO: 4, ADAPTER: 5, VALIDATOR: 6, FEE_MODEL: 7 } as const;
@@ -457,7 +459,8 @@ async function stages(connection: NetworkConnection, profile: Profile) {
  *   classes it opened with, in order, each intact (its hook lists the fund's rule: `firstBrokenClass()` is the zero
  *   address);
  * - a 7540's second contract is the code the release says, as an implementation's attestation pins only its address;
- * - a product's legos are wired as its profile says and name this product: its desk holds SETTLER_ROLE and no account
+ * - a product's legos are wired as its profile says and name this product: its desk has the profile's redemption gate and
+ *   holds SETTLER_ROLE and no account
  *   does, the reporter, the checker and the allocator are different accounts, and the council attested what needs it;
  * - MINTER_ROLE, BURNER_ROLE, AGENT_ROLE and a desk-less vault's SETTLER_ROLE sit with a Safe of at least two signers,
  *   unless the profile names the role as an exception;
@@ -616,7 +619,7 @@ export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
 
   // A product's legos. Their roles live outside the vault's role scan, so they are asked by name.
   const named = s.parameters as Record<string, Address>;
-  const read = <T>(address: Address, functionName: "VAULT" | "portfolio" | "feeModel" | "adapters" | "SETTLEMENT_LOGIC") =>
+  const read = <T>(address: Address, functionName: "VAULT" | "portfolio" | "feeModel" | "adapters" | "SETTLEMENT_LOGIC" | "redemptionGate") =>
     s.publicClient.readContract({ address, abi: LEGO_ABI, functionName }) as Promise<T>;
   const isSame = async (address: Address, functionName: "VAULT" | "portfolio" | "feeModel", expected: Address) =>
     isAddressEqual(await read<Address>(address, functionName), expected);
@@ -647,6 +650,7 @@ export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
     }
     if (product.nav !== undefined) {
       assert.ok(await isSame(legos.navDesk, "VAULT", contract.address), `the desk of ${contract.address} names another vault`);
+      assert.equal(await read<bigint>(legos.navDesk, "redemptionGate"), product.nav.redemptionGateBps ?? 0n, `the redemption gate of ${contract.address}`);
       await heldOnlyBy(ROLES.SETTLER, legos.navDesk, "settler");
       await heldOnlyBy(ROLES.REPORTER, named.reporter, "reporter");
       await heldOnlyBy(ROLES.CHECKER, named.checker, "checker");
@@ -935,7 +939,7 @@ type DealingVault = {
   read: { dealingState: () => Promise<readonly [bigint, bigint, bigint]>; totalSupply: () => Promise<bigint> };
   write: {
     closePeriod: (options: { account: Account }) => Promise<Hex>;
-    settlePeriod: (args: readonly [bigint, bigint, Address, Address], options: { account: Account }) => Promise<Hex>;
+    settlePeriod: (args: readonly [bigint, bigint, Address, Address, bigint], options: { account: Account }) => Promise<Hex>;
   };
 };
 type DealingStack = {
@@ -949,7 +953,7 @@ type DealingStack = {
 };
 
 /** Closes the vault's open period and settles it at `nav`, or at par, with the custody wallet as a funded cash account. */
-export async function settlePeriod(s: DealingStack, vault: DealingVault, nav?: bigint) {
+export async function settlePeriod(s: DealingStack, vault: DealingVault, nav?: bigint, redeemLimit: bigint = maxUint256) {
   const custody = s.wallets.custody.account;
   await s.asset.write.mint([custody.address, 10n ** 30n]);
   await s.asset.write.approve([vault.address, 2n ** 256n - 1n], { account: custody });
@@ -957,7 +961,7 @@ export async function settlePeriod(s: DealingStack, vault: DealingVault, nav?: b
   const value = nav ?? ((await vault.read.totalSupply()) + unclaimed) / PAR;
   const settler = s.wallets.settler.account;
   await vault.write.closePeriod({ account: settler });
-  await vault.write.settlePeriod([value, 0n, custody.address, zeroAddress], { account: settler });
+  await vault.write.settlePeriod([value, 0n, custody.address, zeroAddress, redeemLimit], { account: settler });
 }
 
 /**

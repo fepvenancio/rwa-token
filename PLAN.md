@@ -3292,13 +3292,16 @@ The suggestion was a rule of about 40 lines capping the shares that enter the es
 _s.redemptions = $.books[_period][false].paid;
 _s.redeemed = Math.min(_s.redemptions, _redeemLimit);
 _s.assets = Math.mulDiv(_s.redeemed, _nav + 1, _s.supply + _VIRTUAL_SHARES);
-$.books[_period][false].taken = _s.redeemed.toUint128();
-// At most one period is closed, so the next one is the open one.
-if (_s.redeemed != _s.redemptions) $.books[_period + 1][false].paid += (_s.redemptions - _s.redeemed).toUint128();
+if (_s.redeemed != _s.redemptions) {
+  uint128 _carried = (_s.redemptions - _s.redeemed).toUint128();
+  $.books[_period][false].carried = _carried;
+  // At most one period is closed, so the next one is the open one.
+  $.books[_period + 1][false].paid += _carried;
+}
 $.pendingRedeemShares -= _s.redeemed;
 ```
 
-`settlePeriod` burns `redeemed`, not the whole book, and `_net` pays on the assets of `redeemed`. `Book` gains `uint128 taken`. The carried shares stay in the escrow, in `totalSupply()` and in `pendingRedeemShares`, so they still count in the price, pay the fund's fees, and stay out of reach of `forcedTransfer`'s surplus.
+`settlePeriod` burns `redeemed`, not the whole book, and `_net` pays on the assets of `redeemed`. `Book` gains `uint128 carried`, which a full fill leaves at zero. The carried shares stay in the escrow, in `totalSupply()` and in `pendingRedeemShares`, so they still count in the price, pay the fund's fees, and stay out of reach of `forcedTransfer`'s surplus.
 
 Every path already reads a controller through `_request`, so only the roll changes. The claims, `_join`, `_takePending`, `recoverClaimable` and every view follow it:
 
@@ -3307,17 +3310,17 @@ _r = $.requests[_controller][_isDeposit];
 uint64 _settled = $.settledPeriod;
 while (_r.period != 0 && _r.period <= _settled) {
   Book memory _book = $.books[_r.period][_isDeposit];
-  uint256 _taken = _isDeposit ? _r.pending : Math.mulDiv(_r.pending, _book.taken, _book.paid, Math.Rounding.Ceil);
-  _r.paid += _taken.toUint128();
+  uint128 _carried = Math.mulDiv(_r.pending, _book.carried, _book.paid).toUint128();
+  _r.paid += _r.pending - _carried;
   _r.owed += Math.mulDiv(_r.pending, _book.owed, _book.paid).toUint128();
-  _r.pending -= _taken.toUint128();
-  _r.period = _r.pending == 0 ? 0 : _r.period + 1;
+  _r.pending = _carried;
+  _r.period = _carried == 0 ? 0 : _r.period + 1;
 }
 ```
 
-A full fill gives today's numbers: `_taken` is the whole pending and the loop ends after one pass. A deposit is always a full fill.
+A full fill gives today's numbers: nothing carries and the loop ends after one pass. A deposit is always a full fill. A book written before `carried` existed reads as filled, so an upgrade in place cannot pay a settled redemption twice.
 
-**Rounding.** What is taken rounds up, so what each controller carries, `floor(pending × (paid − taken) / paid)`, sums to no more than the next book holds. A reject of a carried part can therefore never underflow that book. What is owed rounds down and sums to no more than the assets, so `claimableCash` is never short. Each gated period can leave up to (controllers − 1) share units in the next book that nobody owns. They burn at the next full fill, and a share unit is a millionth of the asset's smallest unit at par.
+**Rounding.** What each controller carries, `floor(pending × carried / paid)`, rounds down, so the parts sum to no more than the next book holds. A reject of a carried part can therefore never underflow that book. What is owed rounds down and sums to no more than the assets, so `claimableCash` is never short. Each gated period can leave up to (controllers − 1) share units in the next book that nobody owns. They burn at the next full fill, and a share unit is a millionth of the asset's smallest unit at par.
 
 ### The desk holds the policy
 
@@ -3395,18 +3398,18 @@ The owner's approval of this plan is the instruction rule 4 asks for. `Interface
 
 | Interface | Change |
 |---|---|
-| `IGated7540Vault` | `settlePeriod` gains `_redeemLimit`. `PeriodSettled` gains `_redeemed`. New views `periodBook(_period, _isDeposit)`, which returns paid, owed and taken and lets the desk read a period's deposits, and `SETTLEMENT_LOGIC()`. |
+| `IGated7540Vault` | `settlePeriod` gains `_redeemLimit`. `PeriodSettled` gains `_redeemed`. New views `periodBook(_period, _isDeposit)`, which returns paid, owed and carried and lets the desk read a period's deposits, and `SETTLEMENT_LOGIC()`. |
 | `INavDesk` | `Proposal` gains `redeemLimit`, which changes `hashOf`'s selector. `ProposalMade` gains `_redeemLimit`. New `redemptionGate()`, `setRedemptionGate`, `RedemptionGateSet`, `NavDesk_InvalidGate`. |
 | `IGated4626Vault` | New event `DepositsClosed(_counted, _last)`, below. |
 
 **The 4626's closing event.** A count that finds the value fallen by more than half closes deposits for good and emits nothing specific, against rule 16. `_accrue` emits `DepositsClosed` when it flips the flag from false, and only then. The other flip, in `setPortfolio`, needs none: it carries a write-off forward, which already has `AdapterWrittenOff`, and `PortfolioSet` marks the call. About 100 bytes of the 476 free, an estimate.
 
-**Deployment.** The `Nav` profile type gains an optional `redemptionGateBps`, and `Product` calls `setRedemptionGate` when it is set. `managed-fund` takes 1,000 as an example, as its fee terms are examples, so a test covers the wiring. No other profile sets one. `assertHandedOver` pins it. The level is each product's own, from its offering documents.
+**Deployment.** The `Nav` profile type gains an optional `redemptionGateBps`, and `Product` calls `setRedemptionGate` when it is set. No shipped profile sets one, as the level is each product's own, from its offering documents. A test deploys `vault7540` with one, which covers the wiring. `assertHandedOver` pins it.
 
 ### Known limits
 
 - **Over-requesting.** A holder who expects a gate can ask for more than they want, to get a bigger slice. Only the agent can hand back a carried part, which is the deterrent, and it is not a complete one.
-- **A dormant controller walks.** The roll passes one period at a time until the first full fill, about 5,000 gas per gated period by arithmetic, so about 6,000 gated periods in a row fit a block of 30 million. A test will measure it. I looked at a running product instead of a walk: it needs no loop, but it loses precision as it shrinks towards zero and needs scale tracking. The walk is simpler and its cost falls only on the controller who waited.
+- **A dormant controller walks.** The roll passes one period at a time until the first full fill, 6,541 gas per gated period as measured, so about 4,500 gated periods in a row fit a block of 30 million. A test pins it below 7,000. I looked at a running product instead of a walk: it needs no loop, but it loses precision as it shrinks towards zero and needs scale tracking. The walk is simpler and its cost falls only on the controller who waited.
 - **A fund winding down never finishes under a gate.** The level is a share of what remains, so when everyone is leaving the queue shrinks by the same fraction each period. The timelock sets the level to zero for a wind-down.
 - **P27 lasts longer.** See the row above.
 - **A low level slows every exit.** The timelock can set one, delayed and visible, like any other setting. A compromised governance stays out of scope.
@@ -3421,6 +3424,7 @@ The owner's approval of this plan is the instruction rule 4 asks for. `Interface
 | P13, no OpenZeppelin 4626 parent on the 7540 | Stays. The vault would still override almost all of it and claim to be synchronous while its previews revert. |
 | P27, the investor cap while requests are open | The vault's room is no longer a reason. The other one stands: settlement cannot loop over investors, and leaving at the claim would need the vault to reach into `Fund`. Counsel's view decides whether to reopen it. |
 | `dealingState()` in place of three getters | Stays. It reads better, and nothing wants them apart. |
+| The vault not checking who holds `SETTLER_ROLE`, which `SECURITY.md` put down to size | Stays, for another reason now written there: a desk is not attested, so the vault could not tell one from any other account. Attesting desks would make that check possible, and no product asks for it. |
 | The 4626's closing event | Added, above. |
 
 **Counting an entity with several wallets: not built, on its merits.** It costs the vaults nothing, as it would live in a rule, `Fund` and the registry. Under issuer custody (P24) a client has one address. A client with two wallets counts twice, which reaches the cap early and never breaches it. The unsafe case, one shared address holding for many clients, is avoided by that custody and is counsel's otherwise. Build it when a product needs it.
@@ -3446,7 +3450,7 @@ Tests first, the failing run shown, in three pull requests, each landed by squas
 
 Each code pull request updates `CLAUDE.md` (§1, §3, §4, §7 and rule 4's reopening note), `README.md`, `SECURITY.md` and this file.
 
-**Done means:** `npx hardhat test` in both runners and in isolation, the lint, `forge fmt`, the type check, Slither 0, Aderyn 0 read by hand, Halmos, `validate:upgrades`, `verify:reproducible`, and planted bugs by hand (the rounding direction, the carry dropped or sent to the wrong period, the whole book burned, `taken` not stored, the limit left out of the hash, gross instead of net, `adopt` not copying, a hand-off to the wrong selector). A Halmos proof of the two-controller rounding bound is attempted; if the solver does not finish, the report says so and the fuzz stands.
+**Done means:** `npx hardhat test` in both runners and in isolation, the lint, `forge fmt`, the type check, Slither 0, Aderyn 0 read by hand, Halmos, `validate:upgrades`, `verify:reproducible`, and planted bugs by hand (the rounding direction, the carry dropped or sent to the wrong period, the whole book burned, `carried` not stored, the limit left out of the hash, gross instead of net, `adopt` not copying, a hand-off to the wrong selector). A Halmos proof of the two-controller rounding bound is attempted; if the solver does not finish, the report says so and the fuzz stands.
 
 ### As built
 
@@ -3471,6 +3475,30 @@ Measured against `main` at `7a03cde`, on the node tests of the vaults and legos:
 | `mint` claim, `redeem` claim | 142,403, 120,133 | unchanged |
 
 Two things differ from the plan above, both simpler. The hand-off uses OpenZeppelin's `Address.functionDelegateCall`, which the base already carries through `Multicall`, in place of hand-written assembly. The second contract has no constructor, because with no initializer there is nothing to lock.
+
+**The gate, the desk and the 4626's event.** Tests first: 30 of the new tests failed against stubs. A fresh agent then read the code with no sight of this plan's reasoning, and ran 3,000 random sequences of 48 operations and one of 1,500 steps, with books, escrow and cash checked after every step. It found no fault in the accounting, and two things:
+
+- A book that stored what was `taken` read as "nothing taken" on a period settled before the field existed, so an upgrade in place would have paid settled redemptions twice, or bricked a controller on an empty next book. Nothing is deployed, but the fix is simpler code. The book stores what was `carried`, so zero means filled, the roll needs no branch for the deposit side, and a full fill writes nothing extra. The second contract also reports its own template id, so a proxy cannot be moved onto it even if it were attested by mistake.
+- A fund everyone has left keeps a few share units of rounding dust, so `_supply == 0` is never true again. The reporter must then propose a value of at least 1, and `FeeModel` prices that at about half an asset per share, against par's millionth of one. The mark jumps there and no performance fee is charged for the rest of the fund's life. Investors lose nothing. This is on `main` too, and it is not part of this work.
+
+Two things differ from the plan above. No shipped profile sets a level. The walk costs 6,541 gas per period, not the 5,000 I worked out.
+
+Measured against the split, on the node tests of the vaults and legos with the new tests left out, so with no gate in play:
+
+| | The split | With the gate |
+|---|---|---|
+| `Gated7540Vault` runtime | 21,579 | 21,908 (2,668 free) |
+| `Gated7540Settlement` runtime | 17,558 | 18,001 (6,575 free) |
+| `Gated7540Vault` creation code, limit 49,152 | 39,522 | 40,294 |
+| `Gated4626Vault` runtime | 24,100 | 24,193 (383 free) |
+| `NavDesk` runtime | 10,320 | 11,363 |
+| Deploying the 7540's implementation | 8,578,334 gas | 8,745,154 gas |
+| `settlePeriod` | 125,542 | 126,537 |
+| `requestDeposit`, `requestRedeem` | 203,487, 201,575 | 205,694, 203,712 |
+| `deposit`, `mint`, `redeem` claims | 213,914, 142,403, 120,133 | 216,705, 145,173, 122,899 |
+| `NavDesk.propose`, `execute` | 235,319, 182,062 | 260,117, 185,651 |
+
+`npx hardhat test`: `1851 passing (1678 solidity, 173 nodejs)`. Isolated 1678 passing, Slither 0, Aderyn 0, Halmos 22 of 22, `validate:upgrades` 5 of 5, `verify:reproducible` 30 contracts. Planted bugs by hand: 29 of 29 caught on the first version, and 11 of 11 on the lines the `carried` change rewrote. No Halmos proof of the rounding bound was attempted: the two-controller bound is plain algebra and is fuzzed, and the plan's earlier Halmos property on the sum of a period's claims was dropped because no solver finishes it.
 
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.

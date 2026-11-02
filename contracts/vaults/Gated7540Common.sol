@@ -34,10 +34,13 @@ abstract contract Gated7540Common is GatedVaultBase {
    * @notice One side of one period
    * @param paid What its requests gave, net of rejects
    * @param owed What that bought, at settlement
+   * @param carried On the redemption side, what settlement left of `paid` for the next period. Zero means it took it all,
+   *        so an upgrade in place reads a book written before this field existed as filled
    */
   struct Book {
     uint128 paid;
     uint128 owed;
+    uint128 carried;
   }
 
   /**
@@ -101,7 +104,11 @@ abstract contract Gated7540Common is GatedVaultBase {
   }
 
   /**
-   * @notice A controller's request with any settled part rolled into its claimable amounts
+   * @notice A controller's request with every settled period rolled into its claimable amounts. A settlement that took part
+   *         of a period's redemptions rolls that part, and what is left moves to the next period, so a controller that
+   *         waited walks one period at a time until the first that filled it
+   * @dev What each controller carries rounds down, so the parts sum to no more than the next period's book holds, and a
+   *      reject of one cannot underflow it. What is owed rounds down too, so it sums to no more than the assets
    * @param _controller The controller
    * @param _isDeposit True on the deposit side
    * @return _r The request
@@ -112,12 +119,17 @@ abstract contract Gated7540Common is GatedVaultBase {
   ) internal view returns (Request memory _r) {
     Gated7540Storage storage $ = _getGated7540Storage();
     _r = $.requests[_controller][_isDeposit];
-    if (_r.period == 0 || _r.period > $.settledPeriod) return _r;
-    Book memory _book = $.books[_r.period][_isDeposit];
-    _r.paid += _r.pending;
-    _r.owed += Math.mulDiv(_r.pending, _book.owed, _book.paid).toUint128();
-    _r.pending = 0;
-    _r.period = 0;
+    uint64 _settled = $.settledPeriod;
+    // The walk is one controller's own request, so a revert in it could only fail that controller's own call.
+    // aderyn-ignore-next-line(require-revert-in-loop)
+    while (_r.period != 0 && _r.period <= _settled) {
+      Book memory _book = $.books[_r.period][_isDeposit];
+      uint128 _carried = Math.mulDiv(_r.pending, _book.carried, _book.paid).toUint128();
+      _r.paid += _r.pending - _carried;
+      _r.owed += Math.mulDiv(_r.pending, _book.owed, _book.paid).toUint128();
+      _r.pending = _carried;
+      _r.period = _carried == 0 ? 0 : _r.period + 1;
+    }
   }
 
   /**
