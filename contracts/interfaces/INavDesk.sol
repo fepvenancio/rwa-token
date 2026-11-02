@@ -28,6 +28,7 @@ interface INavDesk {
    * @param reportHash The hash of the off-chain NAV pack
    * @param cash The cash account
    * @param feeRecipient The fee recipient
+   * @param redeemLimit The most shares this period may take from its redemptions; `type(uint256).max` with the gate off
    */
   struct Proposal {
     uint64 period;
@@ -42,6 +43,7 @@ interface INavDesk {
     bytes32 reportHash;
     address cash;
     address feeRecipient;
+    uint256 redeemLimit;
   }
 
   /*///////////////////////////////////////////////////////////////
@@ -79,6 +81,7 @@ interface INavDesk {
    * @param _fee The fee
    * @param _reportHash The hash of the off-chain NAV pack
    * @param _asOf When the report was struck
+   * @param _redeemLimit The most shares the period may take from its redemptions
    */
   event ProposalMade(
     bytes32 indexed _proposalHash,
@@ -88,8 +91,15 @@ interface INavDesk {
     uint256 _nav,
     uint256 _fee,
     bytes32 _reportHash,
-    uint256 _asOf
+    uint256 _asOf,
+    uint256 _redeemLimit
   );
+
+  /**
+   * @notice Emitted when the redemption gate's level changes
+   * @param _gateBps The level, in basis points of all shares; zero is off
+   */
+  event RedemptionGateSet(uint256 _gateBps);
 
   /**
    * @notice Emitted when the agent takes a request out of a stuck period
@@ -148,6 +158,12 @@ interface INavDesk {
    * @param _cooldown The cooldown
    */
   error NavDesk_InvalidCooldown(uint256 _cooldown);
+
+  /**
+   * @notice Thrown when a redemption gate's level is above the whole fund
+   * @param _gateBps The level
+   */
+  error NavDesk_InvalidGate(uint256 _gateBps);
 
   /// @notice Thrown when a price would be proposed with no cash account
   error NavDesk_NoCashAccount();
@@ -234,8 +250,8 @@ interface INavDesk {
   /**
    * @notice Accepts the proposal on the table
    * @dev The vault's CHECKER_ROLE, never the proposer. The hash covers the period, the value, the fee, the mark and its
-   *      clock, the report and its date, the cash account and the fee recipient, so a replaced proposal cannot pick up an
-   *      approval meant for another
+   *      clock, the report and its date, the cash account, the fee recipient and the redemption limit, so a replaced
+   *      proposal cannot pick up an approval meant for another
    * @param _proposalHash The proposal
    */
   function accept(
@@ -244,7 +260,8 @@ interface INavDesk {
 
   /**
    * @notice Takes over from a desk being replaced: its last cut-off and its fee state, read at this moment, so nothing is
-   *         charged twice however long the timelock took
+   *         charged twice however long the timelock took, and its redemption gate, so a replacement cannot lift it by
+   *         forgetting it
    * @dev The vault's DEFAULT_ADMIN_ROLE, once, in the batch that moves SETTLER_ROLE. Plug a fee model before this, as a
    *      first plug after it restarts the fee clock. A desk that never charged passes on no mark, and a desk with its
    *      model off passes on no fee clock, so a plug made here keeps those
@@ -277,7 +294,10 @@ interface INavDesk {
    * @notice Proposes the price of the closed period: `nav = reported + pricedValue() - fee`, the fee being quoted now and
    *         frozen with the rest. With no shares nothing is anyone's: `nav` is zero whatever is reported or sits in the
    *         portfolio, so the period strikes at par, there is no fee, the mark restarts at par, and both fee clocks restart
-   *         when it executes, so the first investors pay neither on their principal nor for time before they arrived
+   *         when it executes, so the first investors pay neither on their principal nor for time before they arrived.
+   *         With a redemption gate on, the limit is worked out here and frozen with the rest:
+   *         `supply × level / 10,000 + deposits × (supply + 1e6) / (nav + 1)`, the second part being the shares the period's
+   *         deposits buy, so the level measures what leaves net of what comes in
    * @dev The vault's REPORTER_ROLE. One at a time
    * @param _reported One number covering everything not priced on-chain; the breakdown is in the NAV pack. It leaves out
    *        what the vault itself holds, which belongs to investors with open requests and claims
@@ -326,6 +346,17 @@ interface INavDesk {
    */
   function setFeeModel(
     address _feeModel
+  ) external;
+
+  /**
+   * @notice Sets the redemption gate's level: the most that may leave in one period, net of deposits, as a share of all
+   *         shares. Past it every request is filled at the same fraction, and the rest carries to the next period
+   * @dev The vault's DEFAULT_ADMIN_ROLE. A proposal on the table keeps the limit it froze. The level is a share of what
+   *      remains, so a fund winding down sets it to zero
+   * @param _gateBps The level in basis points, up to 10,000; zero is off
+   */
+  function setRedemptionGate(
+    uint256 _gateBps
   ) external;
 
   /**
@@ -415,6 +446,12 @@ interface INavDesk {
    * @return _maxReportAge In seconds
    */
   function maxReportAge() external view returns (uint256 _maxReportAge);
+
+  /**
+   * @notice The redemption gate's level
+   * @return _gateBps In basis points of all shares; zero is off
+   */
+  function redemptionGate() external view returns (uint256 _gateBps);
 
   /**
    * @notice The fee model

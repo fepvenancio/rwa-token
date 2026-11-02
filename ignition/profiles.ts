@@ -21,8 +21,8 @@ export type Custodian = Caps & { key: string; maxPerCall: bigint };
 export type Target = Caps & { key: string };
 /** A `FeeModel`'s terms. */
 export type Fees = { managementBps: bigint; performanceBps: bigint; hurdleBps: bigint; softHurdle: boolean };
-/** A `NavDesk`'s schedule, in seconds. */
-export type Nav = { periodLength: bigint; cooldown: bigint; maxReportAge: bigint };
+/** A `NavDesk`'s schedule, in seconds, and the redemption gate's level, in basis points, which each product takes from its own documents. */
+export type Nav = { periodLength: bigint; cooldown: bigint; maxReportAge: bigint; redemptionGateBps?: bigint };
 
 /** One product of the issuer: a proxy over its template's implementation, with its own rule list and policy. */
 export type Product = {

@@ -139,7 +139,7 @@ contract Gated7540VaultUnitTest is Helpers {
   ) internal {
     vm.startPrank(_settler);
     _vault.closePeriod();
-    _vault.settlePeriod(_nav, 0, _cash, address(0));
+    _vault.settlePeriod(_nav, 0, _cash, address(0), type(uint256).max);
     vm.stopPrank();
   }
 
@@ -412,7 +412,7 @@ contract Gated7540VaultUnit_Periods is Gated7540VaultUnitTest {
     _vault.closePeriod();
     vm.expectRevert(_noRole(_caller, _role));
     vm.prank(_caller);
-    _vault.settlePeriod(0, 0, _cash, address(0));
+    _vault.settlePeriod(0, 0, _cash, address(0), type(uint256).max);
   }
 
   function test_WhenThePeriodCloses_TheNextOpensAndItEmits() external {
@@ -436,7 +436,7 @@ contract Gated7540VaultUnit_Periods is Gated7540VaultUnitTest {
   function test_WhenNoPeriodIsClosed_SettlingReverts() external {
     vm.expectRevert(IGated7540Vault.Gated7540Vault_NoClosedPeriod.selector);
     vm.prank(_settler);
-    _vault.settlePeriod(0, 0, _cash, address(0));
+    _vault.settlePeriod(0, 0, _cash, address(0), type(uint256).max);
   }
 
   function test_WhenPaused_SettlingReverts() external {
@@ -446,7 +446,7 @@ contract Gated7540VaultUnit_Periods is Gated7540VaultUnitTest {
     _vault.pause();
     vm.expectRevert(Pausable.EnforcedPause.selector);
     vm.prank(_settler);
-    _vault.settlePeriod(0, 0, _cash, address(0));
+    _vault.settlePeriod(0, 0, _cash, address(0), type(uint256).max);
   }
 
   function test_AWholeCycle() external {
@@ -457,9 +457,9 @@ contract Gated7540VaultUnit_Periods is Gated7540VaultUnitTest {
     assertEq(_vault.pendingDepositRequest(0, _alice), 1000); // still pending until it is priced
 
     vm.expectEmit(address(_vault));
-    emit IGated7540Vault.PeriodSettled(1, 0, 0, 1000, 1000 * _PAR, 0, 0, 0);
+    emit IGated7540Vault.PeriodSettled(1, 0, 0, 1000, 1000 * _PAR, 0, 0, 0, 0);
     vm.prank(_settler);
-    _vault.settlePeriod(0, 0, _cash, address(0));
+    _vault.settlePeriod(0, 0, _cash, address(0), type(uint256).max);
 
     (, uint64 _settled) = _dealing();
     assertEq(_settled, 1);
@@ -513,9 +513,9 @@ contract Gated7540VaultUnit_Periods is Gated7540VaultUnitTest {
     _requestDeposit(_bob, 200);
 
     vm.expectEmit(address(_vault));
-    emit IGated7540Vault.PeriodSettled(1, 0, 0, 100, 100 * _PAR, 0, 0, 0);
+    emit IGated7540Vault.PeriodSettled(1, 0, 0, 100, 100 * _PAR, 0, 0, 0, 0);
     vm.prank(_settler);
-    _vault.settlePeriod(0, 0, _cash, address(0));
+    _vault.settlePeriod(0, 0, _cash, address(0), type(uint256).max);
 
     assertEq(_vault.claimableDepositRequest(0, _alice), 100);
     assertEq(_vault.pendingDepositRequest(0, _bob), 200);
@@ -530,7 +530,7 @@ contract Gated7540VaultUnit_Periods is Gated7540VaultUnitTest {
     _requestDeposit(_alice, 50);
 
     vm.prank(_settler);
-    _vault.settlePeriod(0, 0, _cash, address(0));
+    _vault.settlePeriod(0, 0, _cash, address(0), type(uint256).max);
     _requestDeposit(_alice, 50);
     assertEq(_vault.pendingDepositRequest(0, _alice), 50);
     assertEq(_vault.claimableDepositRequest(0, _alice), 100);
@@ -617,8 +617,8 @@ contract Gated7540VaultUnit_Netting is Gated7540VaultUnitTest {
     vm.startPrank(_settler);
     _vault.closePeriod();
     vm.expectEmit(address(_vault));
-    emit IGated7540Vault.PeriodSettled(3, _nav, _supply(), 500, 500 * _PAR, 0, 0, 7);
-    _vault.settlePeriod(_nav, 7, _cash, _recipient);
+    emit IGated7540Vault.PeriodSettled(3, _nav, _supply(), 500, 500 * _PAR, 0, 0, 0, 7);
+    _vault.settlePeriod(_nav, 7, _cash, _recipient, type(uint256).max);
     vm.stopPrank();
     assertEq(_asset.balanceOf(_recipient), 7);
     assertEq(_asset.balanceOf(_cash), _cashBefore + 493);
@@ -631,7 +631,7 @@ contract Gated7540VaultUnit_Netting is Gated7540VaultUnitTest {
     uint256 _nav = _supply() / _PAR;
     vm.startPrank(_settler);
     _vault.closePeriod();
-    _vault.settlePeriod(_nav, 7, _cash, _recipient);
+    _vault.settlePeriod(_nav, 7, _cash, _recipient, type(uint256).max);
     vm.stopPrank();
     assertEq(_asset.balanceOf(_recipient), 7);
     assertEq(_asset.balanceOf(_cash), _cashBefore - 2);
@@ -647,7 +647,7 @@ contract Gated7540VaultUnit_Netting is Gated7540VaultUnitTest {
     _vault.closePeriod();
     vm.expectRevert(abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, _cash, 0, 500));
     vm.prank(_settler);
-    _vault.settlePeriod(_nav, 0, _cash, address(0));
+    _vault.settlePeriod(_nav, 0, _cash, address(0), type(uint256).max);
     assertEq(_vault.pendingRedeemRequest(0, _bob), 500 * _PAR);
   }
 
@@ -660,7 +660,7 @@ contract Gated7540VaultUnit_Netting is Gated7540VaultUnitTest {
     _vault.closePeriod();
     vm.expectRevert(abi.encodeWithSelector(IERC20Errors.ERC20InsufficientAllowance.selector, address(_vault), 0, 500));
     vm.prank(_settler);
-    _vault.settlePeriod(_nav, 0, _cash, address(0));
+    _vault.settlePeriod(_nav, 0, _cash, address(0), type(uint256).max);
   }
 
   /// @dev An asset that delivers less than it was asked to, or a balance read that falls short: settlement refuses
@@ -673,7 +673,7 @@ contract Gated7540VaultUnit_Netting is Gated7540VaultUnitTest {
     vm.mockCall(address(_asset), abi.encodeCall(IERC20.balanceOf, (address(_vault))), abi.encode(uint256(39)));
     vm.expectRevert(abi.encodeWithSelector(IGated7540Vault.Gated7540Vault_BalanceAudit.selector, 39, 40));
     vm.prank(_settler);
-    _vault.settlePeriod(_nav, 0, _cash, address(0));
+    _vault.settlePeriod(_nav, 0, _cash, address(0), type(uint256).max);
   }
 
   function test_AtExactlyWhatItOwes_TheBalanceAuditPasses() external {
@@ -684,7 +684,7 @@ contract Gated7540VaultUnit_Netting is Gated7540VaultUnitTest {
     uint256 _nav = _supply() / _PAR;
     vm.mockCall(address(_asset), abi.encodeCall(IERC20.balanceOf, (address(_vault))), abi.encode(uint256(40)));
     vm.prank(_settler);
-    _vault.settlePeriod(_nav, 0, _cash, address(0));
+    _vault.settlePeriod(_nav, 0, _cash, address(0), type(uint256).max);
     vm.clearMockedCalls();
   }
 
@@ -701,7 +701,7 @@ contract Gated7540VaultUnit_Netting is Gated7540VaultUnitTest {
       )
     );
     vm.prank(_settler);
-    _vault.settlePeriod(_nav, 0, _cash, address(0));
+    _vault.settlePeriod(_nav, 0, _cash, address(0), type(uint256).max);
     assertEq(_vault.balanceOf(address(_vault)), 0);
   }
 }
@@ -857,7 +857,7 @@ contract Gated7540VaultUnit_Price is Gated7540VaultUnitTest {
     _vault.closePeriod();
     vm.prank(_settler);
     uint256 _before = gasleft();
-    _vault.settlePeriod(0, 0, _cash, address(0));
+    _vault.settlePeriod(0, 0, _cash, address(0), type(uint256).max);
     _gas = _before - gasleft();
     vm.revertToState(_snapshot);
   }
@@ -1433,8 +1433,8 @@ contract Gated7540VaultUnit_Rejects is Gated7540VaultUnitTest {
     vm.startPrank(_settler);
     _vault.closePeriod();
     vm.expectEmit(address(_vault));
-    emit IGated7540Vault.PeriodSettled(1, 0, 0, 60, 60 * _PAR, 0, 0, 0);
-    _vault.settlePeriod(0, 0, _cash, address(0));
+    emit IGated7540Vault.PeriodSettled(1, 0, 0, 60, 60 * _PAR, 0, 0, 0, 0);
+    _vault.settlePeriod(0, 0, _cash, address(0), type(uint256).max);
     vm.stopPrank();
     assertEq(_vault.maxMint(_bob), 60 * _PAR);
     assertEq(_vault.maxMint(_alice), 0);
@@ -1555,8 +1555,8 @@ contract Gated7540VaultUnit_Rejects is Gated7540VaultUnitTest {
     vm.startPrank(_settler);
     _vault.rejectDepositRequest(_alice);
     vm.expectEmit(address(_vault));
-    emit IGated7540Vault.PeriodSettled(1, 0, 0, 60, 60 * _PAR, 0, 0, 0);
-    _vault.settlePeriod(0, 0, _cash, address(0));
+    emit IGated7540Vault.PeriodSettled(1, 0, 0, 60, 60 * _PAR, 0, 0, 0, 0);
+    _vault.settlePeriod(0, 0, _cash, address(0), type(uint256).max);
     vm.stopPrank();
   }
 
@@ -1831,7 +1831,7 @@ contract Gated7540VaultIntegrationTest is Test {
     uint256 _nav = _supply() / _PAR;
     vm.startPrank(_settler);
     _vault.closePeriod();
-    _vault.settlePeriod(_nav, 0, _cash, address(0));
+    _vault.settlePeriod(_nav, 0, _cash, address(0), type(uint256).max);
     vm.stopPrank();
   }
 
@@ -1860,7 +1860,7 @@ contract Gated7540VaultIntegration_Lifecycle is Gated7540VaultIntegrationTest {
     assertEq(_fund.holderCount(), 0); // full escrow: alice left, and the vault, the class itself, never joins
     vm.startPrank(_settler);
     _vault.closePeriod();
-    _vault.settlePeriod(1100, 0, _cash, address(0)); // the value rose 10%
+    _vault.settlePeriod(1100, 0, _cash, address(0), type(uint256).max); // the value rose 10%
     vm.stopPrank();
     assertEq(_vault.totalSupply(), 0);
     uint256 _owed = _vault.maxWithdraw(_alice);
@@ -1937,7 +1937,7 @@ contract Gated7540VaultIntegration_Escrow is Gated7540VaultIntegrationTest {
     vm.startPrank(_settler);
     _vault.closePeriod();
     vm.expectRevert(abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.SENDER_FROZEN));
-    _vault.settlePeriod(_nav, 0, _cash, address(0));
+    _vault.settlePeriod(_nav, 0, _cash, address(0), type(uint256).max);
     vm.stopPrank();
   }
 
@@ -2188,7 +2188,8 @@ contract Gated7540Handler is Test {
   ///      it must pay
   function settlePeriod(
     uint256 _navSeed,
-    uint256 _feeSeed
+    uint256 _feeSeed,
+    uint256 _limitSeed
   ) external {
     (uint64 _open, uint64 _settled, uint256 _unclaimed) = _vault.dealingState();
     if (_open == _settled + 1) {
@@ -2198,9 +2199,12 @@ contract Gated7540Handler is Test {
     uint256 _par = (_vault.totalSupply() + _unclaimed) / 1e6;
     uint256 _nav = bound(_navSeed, _par / 2, 2 * _par + 1);
     uint256 _fee = bound(_feeSeed, 0, 1000);
+    // Half the settlements take the whole book, and the others a fuzzed part of it.
+    (uint256 _book,,) = _vault.periodBook(_settled + 1, false);
+    uint256 _limit = _limitSeed % 2 == 0 ? type(uint256).max : bound(_limitSeed, 0, _book);
     _asset.mint(_cash, _vault.balanceOf(address(_vault)) * 3 / 1e6 + 2000);
     vm.prank(_settler);
-    _vault.settlePeriod(_nav, _fee, _cash, _cash);
+    _vault.settlePeriod(_nav, _fee, _cash, _cash, _limit);
     ++executed['settlePeriod'];
   }
 
@@ -2365,14 +2369,24 @@ contract Gated7540VaultInvariantTest is Gated7540VaultUnitTest {
     assertGe(_asset.balanceOf(address(_vault)), _owed);
   }
 
-  /// @dev The vault's own share balance is exactly the escrowed pending redemptions
+  /// @dev The vault's own share balance is exactly its unsettled redemption books. They hold every controller's pending
+  ///      shares and, for each settlement that took part of a book, at most one unit per controller after the first that
+  ///      nobody owns
   function invariant_EscrowMatchesPendingRedemptions() external view {
     address[3] memory _all = _handler.actors();
     uint256 _pending;
     for (uint256 _i; _i < 3; ++_i) {
       _pending += _vault.pendingRedeemRequest(0, _all[_i]);
     }
-    assertEq(_vault.balanceOf(address(_vault)), _pending);
+    (uint64 _open, uint64 _settled,) = _vault.dealingState();
+    uint256 _books;
+    for (uint256 _period = _settled + 1; _period <= _open; ++_period) {
+      (uint256 _paid,,) = _vault.periodBook(_period, false);
+      _books += _paid;
+    }
+    assertEq(_vault.balanceOf(address(_vault)), _books);
+    assertLe(_pending, _books);
+    assertLe(_books - _pending, 2 * uint256(_settled));
   }
 
   /// @dev Unclaimed shares cover what every controller is owed

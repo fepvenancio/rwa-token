@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {ERC4626Upgradeable} from '@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol';
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {Test} from 'forge-std/Test.sol';
+import {Vm} from 'forge-std/Vm.sol';
 
 import {IAccessControl} from '@openzeppelin/contracts/access/IAccessControl.sol';
 import {Pausable} from '@openzeppelin/contracts/utils/Pausable.sol';
@@ -810,6 +811,37 @@ contract Gated4626VaultPortfolio_LargeFall is Gated4626VaultPortfolioTest {
     assertApproxEqAbs(_vault.totalAssets(), _IN, 2);
     assertTrue(_vault.exitOnly());
     assertEq(_vault.maxDeposit(_bob), 0);
+  }
+
+  /// @dev Whether the last call emitted `DepositsClosed`, recorded since `vm.recordLogs`
+  function _closingWasAnnounced() internal returns (bool _announced) {
+    Vm.Log[] memory _logs = vm.getRecordedLogs();
+    for (uint256 _i; _i < _logs.length; ++_i) {
+      if (_logs[_i].topics[0] == IGated4626Vault.DepositsClosed.selector) _announced = true;
+    }
+  }
+
+  function test_WhenAFallClosesDeposits_TheCountAnnouncesItOnce() external {
+    _allocate(_IN);
+    _target.lose(_IN * 6 / 10);
+    vm.expectEmit(address(_vault));
+    emit IGated4626Vault.DepositsClosed(_portfolio.pricedValue(), _IN);
+    _vault.accrue();
+
+    // A further fall of more than half changes nothing that was not already said.
+    _target.lose(_portfolio.pricedValue() * 6 / 10);
+    vm.recordLogs();
+    _vault.accrue();
+    assertFalse(_closingWasAnnounced());
+    assertTrue(_vault.exitOnly());
+  }
+
+  function test_AFallOfExactlyHalfIsNotAnnounced() external {
+    _allocate(_IN / 2);
+    _target.lose(_asset.balanceOf(address(_target)));
+    vm.recordLogs();
+    _vault.accrue();
+    assertFalse(_closingWasAnnounced());
   }
 
   /// @dev Half is not more than half, and one unit more is

@@ -46,6 +46,13 @@ interface IGated4626Vault {
   event Accrued(uint256 _counted, uint256 _fee);
 
   /**
+   * @notice Emitted when a count finds the value fallen by more than half, which closes deposits for good
+   * @param _counted The value the count found
+   * @param _last The value counted before it
+   */
+  event DepositsClosed(uint256 _counted, uint256 _last);
+
+  /**
    * @notice Emitted when fees owed are paid
    * @param _recipient The fee model's recipient
    * @param _assets The assets paid

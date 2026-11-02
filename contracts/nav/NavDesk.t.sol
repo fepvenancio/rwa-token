@@ -350,10 +350,11 @@ contract NavDesk_Propose is NavDeskTest {
       markMovedAt: block.timestamp,
       reportHash: _REPORT,
       cash: _custodian,
-      feeRecipient: address(0)
+      feeRecipient: address(0),
+      redeemLimit: type(uint256).max
     });
     vm.expectEmit(address(_desk));
-    emit INavDesk.ProposalMade(_desk.hashOf(_expected), 1, 500, 0, 0, 0, _REPORT, block.timestamp);
+    emit INavDesk.ProposalMade(_desk.hashOf(_expected), 1, 500, 0, 0, 0, _REPORT, block.timestamp, type(uint256).max);
     _propose(500);
     assertEq(_hash(), _desk.hashOf(_expected));
     assertEq(_desk.proposal().proposer, _reporter);
@@ -585,7 +586,7 @@ contract NavDesk_Execute is NavDeskTest {
     vm.expectEmit(address(_desk));
     emit INavDesk.ProposalExecuted(_proposalHash, 1);
     vm.expectEmit(address(_vault));
-    emit IGated7540Vault.PeriodSettled(1, 0, 0, 1000, 1000 * _PAR, 0, 0, 0);
+    emit IGated7540Vault.PeriodSettled(1, 0, 0, 1000, 1000 * _PAR, 0, 0, 0, 0);
     _desk.execute();
   }
 
@@ -624,7 +625,7 @@ contract NavDesk_Execute is NavDeskTest {
     address _settler = makeAddr('settler');
     _vault.grantRole(_vault.SETTLER_ROLE(), _settler);
     vm.startPrank(_settler);
-    _vault.settlePeriod(0, 0, _custodian, address(0));
+    _vault.settlePeriod(0, 0, _custodian, address(0), type(uint256).max);
     _vault.closePeriod();
     vm.stopPrank();
     vm.warp(block.timestamp + _COOLDOWN);
@@ -638,7 +639,7 @@ contract NavDesk_Execute is NavDeskTest {
     address _settler = makeAddr('settler');
     _vault.grantRole(_vault.SETTLER_ROLE(), _settler);
     vm.prank(_settler);
-    _vault.settlePeriod(0, 0, _custodian, address(0));
+    _vault.settlePeriod(0, 0, _custodian, address(0), type(uint256).max);
     vm.warp(block.timestamp + _COOLDOWN);
     vm.expectRevert(INavDesk.NavDesk_NoClosedPeriod.selector);
     _desk.execute();
@@ -1479,5 +1480,211 @@ contract NavDesk_WithAPortfolio is NavDeskTest {
     uint256 _total = _portfolio.pricedValue();
     uint256 _victim = _bought * _total / _vault.totalSupply();
     assertGe(_victim, _thousand * 9998 / 10_000);
+  }
+}
+
+/// @notice The desk holds the level, works out the limit when a price is proposed, and freezes it there. A holds 900 and B
+///         100, at par, and the value reported keeps the price there
+contract NavDesk_RedemptionGate is NavDeskTest {
+  uint256 internal constant _TENTH = 1000;
+
+  function setUp() public override {
+    super.setUp();
+    _request(_alice, 900);
+    _request(_bob, 100);
+    _deal(0);
+    vm.prank(_alice);
+    _vault.mint(900 * _PAR, _alice, _alice);
+    vm.prank(_bob);
+    _vault.mint(100 * _PAR, _bob, _bob);
+  }
+
+  function _askToRedeem(
+    address _who,
+    uint256 _shares
+  ) internal {
+    vm.prank(_who);
+    _vault.requestRedeem(_shares, _who, _who);
+  }
+
+  function _supply() internal view returns (uint256 _all) {
+    (,, uint256 _unclaimed) = _vault.dealingState();
+    _all = _vault.totalSupply() + _unclaimed;
+  }
+
+  function _executeAfterCooldown() internal {
+    vm.warp(block.timestamp + _COOLDOWN);
+    _desk.execute();
+  }
+
+  function test_ItStartsOffAndTakesEverything() external {
+    assertEq(_desk.redemptionGate(), 0);
+    _askToRedeem(_alice, 900 * _PAR);
+    _close();
+    _propose(1000);
+    assertEq(_desk.proposal().redeemLimit, type(uint256).max);
+    _accept();
+    _executeAfterCooldown();
+    assertEq(_vault.pendingRedeemRequest(0, _alice), 0);
+    assertEq(_vault.maxRedeem(_alice), 900 * _PAR);
+  }
+
+  function test_WhenTheAdminSetsTheLevel_ItIsAnnounced() external {
+    vm.expectEmit(address(_desk));
+    emit INavDesk.RedemptionGateSet(_TENTH);
+    _desk.setRedemptionGate(_TENTH);
+    assertEq(_desk.redemptionGate(), _TENTH);
+  }
+
+  function test_WhenAStrangerSetsTheLevel_ItReverts() external {
+    vm.expectRevert(_unauthorized(_stranger));
+    vm.prank(_stranger);
+    _desk.setRedemptionGate(_TENTH);
+  }
+
+  function test_TheGuardianCannotSetTheLevel() external {
+    vm.expectRevert(_unauthorized(_guardian));
+    vm.prank(_guardian);
+    _desk.setRedemptionGate(_TENTH);
+  }
+
+  function test_TheLevelStopsAtTheWholeFund() external {
+    vm.expectRevert(abi.encodeWithSelector(INavDesk.NavDesk_InvalidGate.selector, 10_001));
+    _desk.setRedemptionGate(10_001);
+    _desk.setRedemptionGate(10_000);
+    assertEq(_desk.redemptionGate(), 10_000);
+    _desk.setRedemptionGate(0);
+    assertEq(_desk.redemptionGate(), 0);
+  }
+
+  /// @dev The worked example in `PLAN.md`: a queue of 300 clears in four periods at a tenth of the fund
+  function test_AQueueClearsInFourPeriodsAtATenthOfTheFund() external {
+    _desk.setRedemptionGate(_TENTH);
+    _askToRedeem(_alice, 200 * _PAR);
+    _askToRedeem(_bob, 100 * _PAR);
+    _request(_bob, 20);
+
+    uint256 _before = _asset.balanceOf(_custodian);
+    _close();
+    _propose(1000);
+    assertEq(_desk.proposal().redeemLimit, 100 * _PAR + 20 * _PAR, 'a tenth, plus the shares the deposits buy');
+    _accept();
+    _executeAfterCooldown();
+    assertEq(_before - _asset.balanceOf(_custodian), 100, 'a tenth of the fund leaves on net');
+    assertEq(_vault.maxRedeem(_alice), 80 * _PAR);
+    assertEq(_vault.maxRedeem(_bob), 40 * _PAR);
+    assertEq(_vault.pendingRedeemRequest(0, _alice), 120 * _PAR);
+    assertEq(_vault.pendingRedeemRequest(0, _bob), 60 * _PAR);
+    assertEq(_supply(), 900 * _PAR);
+
+    _close();
+    _propose(900);
+    assertEq(_desk.proposal().redeemLimit, 90 * _PAR);
+    _accept();
+    _executeAfterCooldown();
+    assertEq(_vault.pendingRedeemRequest(0, _alice), 60 * _PAR);
+    assertEq(_vault.pendingRedeemRequest(0, _bob), 30 * _PAR);
+    assertEq(_supply(), 810 * _PAR);
+
+    _close();
+    _propose(810);
+    assertEq(_desk.proposal().redeemLimit, 81 * _PAR);
+    _accept();
+    _executeAfterCooldown();
+    assertEq(_vault.pendingRedeemRequest(0, _alice), 6 * _PAR);
+    assertEq(_vault.pendingRedeemRequest(0, _bob), 3 * _PAR);
+    assertEq(_supply(), 729 * _PAR);
+
+    _close();
+    _propose(729);
+    assertEq(_desk.proposal().redeemLimit, 72_900_000);
+    _accept();
+    _executeAfterCooldown();
+    assertEq(_vault.pendingRedeemRequest(0, _alice), 0);
+    assertEq(_vault.pendingRedeemRequest(0, _bob), 0);
+    assertEq(_vault.maxRedeem(_alice), 200 * _PAR);
+    assertEq(_vault.maxRedeem(_bob), 100 * _PAR);
+  }
+
+  /// @dev Measured in shares at one price, what leaves less what the deposits buy never passes the level
+  function testFuzz_NoMoreThanTheLevelLeavesOnNet(
+    uint256 _level,
+    uint256 _deposits,
+    uint256 _redemptions
+  ) external {
+    _level = bound(_level, 1, 10_000);
+    _deposits = bound(_deposits, 0, 2000);
+    _desk.setRedemptionGate(_level);
+    _askToRedeem(_alice, bound(_redemptions, 1, 900 * _PAR));
+    if (_deposits != 0) _request(_bob, _deposits);
+
+    uint256 _before = _supply();
+    _close();
+    _propose(1000);
+    _accept();
+    _executeAfterCooldown();
+    uint256 _after = _supply();
+    if (_after < _before) assertLe(_before - _after, _before * _level / 10_000);
+  }
+
+  function test_WhenTheRedemptionsAreBelowTheLimit_TheyAreFilled() external {
+    _desk.setRedemptionGate(_TENTH);
+    _askToRedeem(_alice, 100 * _PAR);
+    _close();
+    _propose(1000);
+    _accept();
+    _executeAfterCooldown();
+    assertEq(_vault.pendingRedeemRequest(0, _alice), 0);
+    assertEq(_vault.maxRedeem(_alice), 100 * _PAR);
+  }
+
+  function test_ALevelChangedInsideTheCooldownMovesNothingOnTheTable() external {
+    _desk.setRedemptionGate(_TENTH);
+    _askToRedeem(_alice, 300 * _PAR);
+    _close();
+    _propose(1000);
+    _accept();
+    _desk.setRedemptionGate(0);
+    _executeAfterCooldown();
+    assertEq(_vault.maxRedeem(_alice), 100 * _PAR, 'the frozen limit');
+
+    _close();
+    _propose(900);
+    assertEq(_desk.proposal().redeemLimit, type(uint256).max, 'the next price reads the new level');
+  }
+
+  function test_TheHashCoversTheLimit() external {
+    _desk.setRedemptionGate(_TENTH);
+    _close();
+    _propose(1000);
+    INavDesk.Proposal memory _p = _desk.proposal();
+    bytes32 _hashed = _desk.hashOf(_p);
+    _p.redeemLimit = _p.redeemLimit + 1;
+    assertNotEq(_desk.hashOf(_p), _hashed);
+  }
+
+  function test_AnApprovalOfAnotherLimitIsRefused() external {
+    _desk.setRedemptionGate(_TENTH);
+    _close();
+    _propose(1000);
+    bytes32 _stale = _hash();
+    vm.prank(_checker);
+    _desk.cancel();
+    _desk.setRedemptionGate(2 * _TENTH);
+    _propose(1000);
+    vm.expectRevert(INavDesk.NavDesk_ProposalMismatch.selector);
+    vm.prank(_checker);
+    _desk.accept(_stale);
+  }
+
+  function test_AReplacementDeskKeepsTheLevel() external {
+    _desk.setRedemptionGate(_TENTH);
+    NavDesk _next = new NavDesk(address(_vault), _custodian, _LENGTH, _COOLDOWN, _MAX_AGE);
+    vm.expectEmit(address(_next));
+    emit INavDesk.RedemptionGateSet(_TENTH);
+    _next.adopt(address(_desk));
+    assertEq(_next.redemptionGate(), _TENTH);
+    _next.setRedemptionGate(0);
+    assertEq(_next.redemptionGate(), 0);
   }
 }

@@ -207,7 +207,7 @@ contract FundHandler is Test {
     uint256 _nav = (_vault7540.totalSupply() + _unclaimed) / 1e6;
     vm.startPrank(_settler);
     if (_open == _settled + 1) _vault7540.closePeriod();
-    try _vault7540.settlePeriod(_nav, 0, _cash, address(0)) {
+    try _vault7540.settlePeriod(_nav, 0, _cash, address(0), type(uint256).max) {
       ++executed;
     } catch {
       ++rejected;

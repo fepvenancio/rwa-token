@@ -39,7 +39,7 @@ DvPExecutor (immutable)                          role-gated: settles a share tra
 SignedEntry (immutable)                          enters a vault on one signature, a relayer paying the gas
 Portfolio (one per vault, immutable)             where the vault's money may go: idle, or adapters within caps
 GuardedAccount, ERC4626Adapter                   the adapters: a custodian's account with default-deny calls, an outside vault
-NavDesk (one per 7540 vault, immutable)          a reported value becomes a price two people approved, on a schedule
+NavDesk (one per 7540 vault, immutable)          a reported value becomes a price two people approved, on a schedule; holds the redemption gate's level
 FeeModel (immutable)                             one view: the fee on a gross value, with a high-water mark and a hurdle
 Distributor (one per token, immutable)           pays holders from an approved, funded Merkle root
 ```

@@ -113,6 +113,9 @@ export function productModule(product: Product) {
         configured.push(m.call(desk, "setSettings", [portfolio, zeroAddress, periodLength, cooldown, maxReportAge], { after: [deployed] }));
       }
       if (product.fees !== undefined) configured.push(m.call(desk, "setFeeModel", [p("feeModel")], { after: [deployed] }));
+      if (product.nav!.redemptionGateBps !== undefined) {
+        configured.push(m.call(desk, "setRedemptionGate", [product.nav!.redemptionGateBps], { after: [deployed] }));
+      }
     } else if (portfolio !== undefined) {
       const vault = m.contractAt("Gated4626Vault", proxy, { id: "vaultPlugs" });
       const plugged = m.call(vault, "setPortfolio", [portfolio, product.portfolio!.maxRateBps!], { after: [deployed] });

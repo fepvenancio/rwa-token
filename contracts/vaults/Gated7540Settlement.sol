@@ -10,6 +10,8 @@ import {Reasons} from 'interfaces/Errors.sol';
 
 import {IGated7540Vault} from 'interfaces/IGated7540Vault.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
+// Needed by the compiler to resolve `@inheritdoc ITemplated`; solhint does not see NatSpec usage.
+// solhint-disable-next-line no-unused-vars
 import {ITemplated} from 'interfaces/ITemplated.sol';
 
 import {Gated7540Common} from 'contracts/vaults/Gated7540Common.sol';
@@ -33,14 +35,16 @@ contract Gated7540Settlement is Gated7540Common {
   /**
    * @notice What one settlement struck
    * @param deposits The assets of the period's deposit requests
-   * @param redemptions The shares of its redemption requests
+   * @param redemptions The shares of its redemption requests, carried ones included
+   * @param redeemed The shares taken from them
    * @param supply All shares at the period's value
    * @param shares The shares its deposits bought
-   * @param assets The assets its redemptions pay
+   * @param assets The assets the shares taken pay
    */
   struct Settlement {
     uint256 deposits;
     uint256 redemptions;
+    uint256 redeemed;
     uint256 supply;
     uint256 shares;
     uint256 assets;
@@ -62,15 +66,17 @@ contract Gated7540Settlement is Gated7540Common {
    * @param _fee The fee to pay, in assets
    * @param _cash The account that receives net inflow and funds net outflow
    * @param _feeRecipient The account that receives the fee
+   * @param _redeemLimit The most shares to take from the period's redemptions; the rest carry to the next period
    */
   function settlePeriod(
     uint256 _nav,
     uint256 _fee,
     address _cash,
-    address _feeRecipient
+    address _feeRecipient,
+    uint256 _redeemLimit
   ) external onlyRole(_SETTLER_ROLE) whenNotPaused {
-    Settlement memory _s = _strike(_nav, _fee);
-    if (_s.redemptions != 0) _burn(address(this), _s.redemptions);
+    Settlement memory _s = _strike(_nav, _fee, _redeemLimit);
+    if (_s.redeemed != 0) _burn(address(this), _s.redeemed);
     // The book was written before the burn, `_net` writes no state, and what Slither reads as a write here is the storage
     // pointer.
     // slither-disable-next-line reentrancy-no-eth
@@ -160,20 +166,25 @@ contract Gated7540Settlement is Gated7540Common {
     _moveAs(address(this), _to, _shares, IPolicyHook.TransferKind.FORCED, bytes32(0), 0);
   }
 
-  /// @inheritdoc ITemplated
+  /**
+   * @inheritdoc ITemplated
+   * @dev Not the vault's, so a proxy cannot be moved onto this contract even if it were attested by mistake
+   */
   function templateId() public pure override returns (bytes32 _id) {
-    _id = keccak256('Gated7540Vault');
+    _id = keccak256('Gated7540Settlement');
   }
 
   /**
    * @notice Strikes the closed period's price and books it
    * @param _nav The net asset value the period deals at
    * @param _fee The fee, for the event
+   * @param _redeemLimit The most shares to take from the period's redemptions
    * @return _s What was struck
    */
   function _strike(
     uint256 _nav,
-    uint256 _fee
+    uint256 _fee,
+    uint256 _redeemLimit
   ) private returns (Settlement memory _s) {
     Gated7540Storage storage $ = _getGated7540Storage();
     uint64 _period = $.settledPeriod + 1;
@@ -183,23 +194,30 @@ contract Gated7540Settlement is Gated7540Common {
     // slither-disable-start boolean-cst
     _s.deposits = $.books[_period][true].paid;
     _s.redemptions = $.books[_period][false].paid;
+    _s.redeemed = Math.min(_s.redemptions, _redeemLimit);
     _s.supply = totalSupply() + $.unclaimedShares;
     _s.shares = Math.mulDiv(_s.deposits, _s.supply + _VIRTUAL_SHARES, _nav + 1);
-    _s.assets = Math.mulDiv(_s.redemptions, _nav + 1, _s.supply + _VIRTUAL_SHARES);
+    _s.assets = Math.mulDiv(_s.redeemed, _nav + 1, _s.supply + _VIRTUAL_SHARES);
 
     // The casts refuse a period whose claims could not be booked later, so no controller's claim can ever overflow alone.
     $.books[_period][true].owed = _s.shares.toUint128();
     $.books[_period][false].owed = _s.assets.toUint128();
+    if (_s.redeemed != _s.redemptions) {
+      uint128 _carried = (_s.redemptions - _s.redeemed).toUint128();
+      $.books[_period][false].carried = _carried;
+      // At most one period is closed, so the next one is the open one. The shares stay in the escrow and in the supply.
+      $.books[_period + 1][false].paid += _carried;
+    }
     // slither-disable-end boolean-cst
     $.settledPeriod = _period;
     $.lastNav = _nav.toUint128();
     $.lastSupply = _s.supply.toUint128();
     $.unclaimedShares += _s.shares;
     $.pendingDeposits -= _s.deposits;
-    $.pendingRedeemShares -= _s.redemptions;
+    $.pendingRedeemShares -= _s.redeemed;
     $.claimableCash += _s.assets;
     emit IGated7540Vault.PeriodSettled(
-      _period, _nav, _s.supply, _s.deposits, _s.shares, _s.redemptions, _s.assets, _fee
+      _period, _nav, _s.supply, _s.deposits, _s.shares, _s.redemptions, _s.redeemed, _s.assets, _fee
     );
   }
 

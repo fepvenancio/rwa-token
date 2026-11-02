@@ -227,7 +227,7 @@ contract FundIntegrationTest is Test {
     uint256 _nav = (_vault7540.totalSupply() + _unclaimed) / _PAR;
     vm.startPrank(_settler);
     _vault7540.closePeriod();
-    _vault7540.settlePeriod(_nav, 0, _cash, address(0));
+    _vault7540.settlePeriod(_nav, 0, _cash, address(0), type(uint256).max);
     vm.stopPrank();
   }
 
@@ -293,6 +293,29 @@ contract FundIntegration_Counting is FundIntegrationTest {
 
     _mintToken(_bob, 1 ether);
     assertEq(_fund.holderCount(), 2);
+  }
+
+  /// @dev What P27 accepts, and a redemption gate makes last longer: a queued investor is out of the count while its shares
+  ///      wait in the escrow, and is counted again if they are handed back
+  function test_AQueuedInvestorIsOutOfTheCountUntilHandedBack() external {
+    _invest7540(_alice, 7e6);
+    assertEq(_fund.holderCount(), 1);
+    _requestRedeem7540(_alice, 7e6 * _PAR);
+    assertEq(_fund.holderCount(), 0);
+
+    (,, uint256 _unclaimed) = _vault7540.dealingState();
+    uint256 _nav = (_vault7540.totalSupply() + _unclaimed) / _PAR;
+    vm.startPrank(_settler);
+    _vault7540.closePeriod();
+    _vault7540.settlePeriod(_nav, 0, _cash, address(0), 1e6 * _PAR);
+    vm.stopPrank();
+    assertEq(_vault7540.pendingRedeemRequest(0, _alice), 6e6 * _PAR);
+    assertEq(_fund.holderCount(), 0);
+
+    vm.prank(_agent);
+    _vault7540.rejectRedeemRequest(_alice);
+    assertEq(_vault7540.balanceOf(_alice), 6e6 * _PAR);
+    assertEq(_fund.holderCount(), 1);
   }
 
   function test_WhenAnInvestorLeavesEveryClass_TheCountReturnsToZeroOnlyAfterTheLastOne() external {

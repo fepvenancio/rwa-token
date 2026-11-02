@@ -140,6 +140,27 @@ describe("vault flows", async function () {
       assert.equal(await s.vault7540.read.pendingRedeemRequest([0n, alice.address]), 0n);
     });
 
+    it("a controller that waited walks the gated periods at a small cost for each", async function () {
+      /** The gas of a claim after `periods` settlements that each took one share unit, and one that took the rest. */
+      const claimAfter = async (periods: number) => {
+        const s = await networkHelpers.loadFixture(funded);
+        const { alice } = s.holders;
+        const a = alice.account.address;
+        await s.vault7540.write.requestDeposit([usd("1000"), a, a], { account: alice.account });
+        await settlePeriod(s, s.vault7540);
+        await s.vault7540.write.mint([usd("1000") * PAR, a, a], { account: alice.account });
+        await s.vault7540.write.requestRedeem([usd("1000") * PAR, a, a], { account: alice.account });
+        for (let i = 0; i < periods; i++) await settlePeriod(s, s.vault7540, undefined, 1n);
+        await settlePeriod(s, s.vault7540);
+        assert.equal(await s.vault7540.read.maxRedeem([a]), usd("1000") * PAR);
+        const hash = await s.vault7540.write.redeem([usd("1000") * PAR, a, a], { account: alice.account });
+        return (await s.publicClient.getTransactionReceipt({ hash })).gasUsed;
+      };
+      const perPeriod = ((await claimAfter(21)) - (await claimAfter(1))) / 20n;
+      // 6,541 when written, so about 4,500 gated periods in a row fit a block of 30 million.
+      assert.ok(perPeriod < 7_000n, `each gated period walked costs ${perPeriod} gas`);
+    });
+
     it("rebuilds the NAV history from decoded PeriodSettled events", async function () {
       const s = await networkHelpers.loadFixture(funded);
       const { alice, bob } = s.holders;
