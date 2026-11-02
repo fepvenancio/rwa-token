@@ -860,6 +860,54 @@ contract Gated4626VaultPortfolio_LargeFall is Gated4626VaultPortfolioTest {
     assertGt(_vault.maxDeposit(_bob), 0);
   }
 
+  /// @dev A read of nothing is not counted, so it closes nothing and does not read as closed. Dealing stops through it anyway
+  function test_AReadOfNothingDoesNotReadAsClosed() external {
+    _allocate(_IN);
+    _target.lose(_IN);
+    assertFalse(_vault.exitOnly());
+    assertEq(_vault.maxDeposit(_bob), 0);
+    assertEq(_vault.maxMint(_bob), 0);
+    _vault.accrue();
+    assertEq(_vault.lastCounted(), _IN);
+    assertFalse(_vault.exitOnly());
+
+    _asset.mint(address(_target), _IN);
+    assertFalse(_vault.exitOnly());
+    assertGt(_vault.maxDeposit(_bob), 0);
+  }
+
+  /// @dev What has closed stays closed through a read of nothing
+  function test_AClosedVaultStillReadsClosedThroughAReadOfNothing() external {
+    _allocate(_IN);
+    _target.lose(_IN * 6 / 10);
+    _vault.accrue();
+    _target.lose(_asset.balanceOf(address(_target)));
+    assertEq(_portfolio.pricedValue(), 0);
+    assertTrue(_vault.exitOnly());
+  }
+
+  /// @dev A write-off that leaves nothing is a read of nothing, and a write-off is for good
+  function test_AWriteOffThatLeavesNothingStillReadsClosed() external {
+    _allocate(_IN);
+    _target.setBroken(true);
+    _portfolio.writeOffAdapter(address(_adapter));
+    assertEq(_portfolio.pricedValue(), 0);
+    assertTrue(_vault.exitOnly());
+  }
+
+  /// @dev The view answers what a count would do, whatever the fall: with the value back, only what was counted is left
+  function testFuzz_TheViewSaysWhatACountDoes(
+    uint256 _tenths
+  ) external {
+    _allocate(_IN);
+    uint256 _lost = _IN * bound(_tenths, 0, 10) / 10;
+    _target.lose(_lost);
+    bool _said = _vault.exitOnly();
+    _vault.accrue();
+    _asset.mint(address(_target), _lost);
+    assertEq(_vault.exitOnly(), _said);
+  }
+
   /// @dev A holder can still leave at the price the fall left, and that count is what closes deposits
   function test_AHolderLeavingAfterAFallCountsItAndPaysThatPrice() external {
     _allocate(_IN);
@@ -1260,9 +1308,11 @@ contract Gated4626VaultPortfolio_Fees is Gated4626VaultPortfolioTest {
     _vault.accrue();
     assertEq(_vault.lastCounted(), _counted);
     assertEq(_vault.maxDeposit(_bob), 0);
+    assertFalse(_vault.exitOnly());
     _asset.mint(address(_portfolio), 1);
     assertEq(_vault.totalAssets(), 1);
     assertEq(_vault.maxDeposit(_bob), 0, 'one unit above the fees is a fall of more than half');
+    assertTrue(_vault.exitOnly());
     assertGt(_vault.maxRedeem(_alice), 0);
   }
 

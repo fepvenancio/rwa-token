@@ -529,14 +529,15 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
 
   /**
    * @notice Whether a value counted now is less than half of the last, with holders who bore it. Someone depositing at that
-   *         price would take part of any recovery from them, as after a write-off
+   *         price would take part of any recovery from them, as after a write-off. Zero is no such value: it means no shares,
+   *         which nobody bore, or a read of nothing, which a count does not write
    * @param _counted The value counted now
    * @return _fell True when it is
    */
   function _fellTooFar(
     uint256 _counted
   ) private view returns (bool _fell) {
-    _fell = _counted * 2 < _getGated4626Storage().last && totalSupply() != 0;
+    _fell = _counted != 0 && _counted * 2 < _getGated4626Storage().last;
   }
 
   /**
