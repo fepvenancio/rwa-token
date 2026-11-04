@@ -47,7 +47,8 @@ contract NavDesk is INavDesk {
   /// @notice A share of the fund's scale: 10,000 basis points are the whole fund
   uint256 private constant _BPS = 1e4;
 
-  /// @notice The vault's virtual shares, in the price it deals at
+  /// @notice The vault's virtual shares, in the price it deals at: share units per unit of its asset at par. Fewer
+  ///         share units than this count as no shares
   uint256 private constant _VIRTUAL_SHARES = 1e6;
 
   /// @notice A price's scale: assets per this many share units
@@ -201,12 +202,14 @@ contract NavDesk is INavDesk {
     (_p.period, _supply) = _closedPeriod();
     uint256 _priced;
     (_p.cash, _priced) = _cashAndValue(_moves);
-    // With no shares nothing is anyone's. A price struck on what is reported or left in the portfolio would be charged as
-    // a gain on the next investors' principal, and refusing would let a stranger's donation stop the period.
-    uint256 _gross = _supply == 0 ? 0 : _reported + _priced;
+    // With no shares nothing is anyone's. A price struck on what is reported or left in the portfolio would be charged
+    // as a gain on the next investors' principal, and refusing would let a stranger's donation stop the period. Fewer
+    // share units than one unit of the asset buys at par count as none: between them they own less than that unit, and
+    // the least value that could be proposed on them would move the mark beyond any later gain.
+    uint256 _gross = _supply < _VIRTUAL_SHARES ? 0 : _reported + _priced;
     _quote(_p, _gross, _supply);
     _p.nav = _gross - _p.fee;
-    if (_p.nav == 0 && _supply != 0) revert NavDesk_ZeroNav();
+    if (_p.nav == 0 && _supply >= _VIRTUAL_SHARES) revert NavDesk_ZeroNav();
     _p.proposedAt = uint64(block.timestamp);
     _p.asOf = uint64(_asOf);
     _p.proposer = msg.sender;
@@ -466,10 +469,10 @@ contract NavDesk is INavDesk {
     uint256 _gross,
     uint256 _supply
   ) private view {
-    // With no shares the mark starts at the price they strike, and both clocks restart, so the first investors do not pay
-    // for time before they arrived.
-    _p.mark = _supply == 0 ? _PAR_MARK : mark;
-    _p.markMovedAt = _supply == 0 ? block.timestamp : markMovedAt;
+    // With no shares, as `propose` counts them, the mark starts at the price they strike, and both clocks restart, so
+    // the first investors do not pay for time before they arrived.
+    _p.mark = _supply < _VIRTUAL_SHARES ? _PAR_MARK : mark;
+    _p.markMovedAt = _supply < _VIRTUAL_SHARES ? block.timestamp : markMovedAt;
     address _feeModel = feeModel;
     if (_feeModel == address(0)) return;
     bool _moved;

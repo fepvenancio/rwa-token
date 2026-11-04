@@ -67,7 +67,8 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
   /// @notice A price's scale: assets per this many share units
   uint256 private constant _PRICE_SCALE = 1e18;
 
-  /// @notice The virtual shares of the decimals offset: share units per unit of the asset at par
+  /// @notice The virtual shares of the decimals offset: share units per unit of the asset at par. Fewer share units
+  ///         than this count as no shares
   uint256 private constant _VIRTUAL_SHARES = 1e6;
 
   /// @notice The mark at par, the lowest it can be: getting back to par recovers principal, and is no gain
@@ -475,7 +476,7 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
   /**
    * @notice The value to count now, and the fee due on it
    * @return _counted The value: the priced value net of fees owed, up to the rate limit; the last counted while no price;
-   *         zero with no shares
+   *         zero with no shares, or fewer share units than `_VIRTUAL_SHARES`
    * @return _fee The fee due now
    * @return _newMark The mark after that fee
    * @return _markMoved Whether the mark moved
@@ -486,9 +487,11 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
     _counted = $.last;
     _newMark = $.mark;
     if (!_portfolio.priceFresh()) return (_counted, 0, _newMark, false);
-    // With no shares nothing is anyone's. A price struck on what is left would be charged as a gain on the next investor's
-    // principal, so they buy at par, and the mark starts there. What is left counts for them under the limit.
-    if (totalSupply() == 0) return (0, 0, _PAR_MARK, true);
+    // With no shares nothing is anyone's. A price struck on what is left would be charged as a gain on the next
+    // investor's principal, so they buy at par, and the mark starts there. What is left counts for them under the
+    // limit. Fewer share units than one unit of the asset buys at par count as none: between them they own less than
+    // that unit, and a count on them would move the mark beyond any later gain.
+    if (totalSupply() < _VIRTUAL_SHARES) return (0, 0, _PAR_MARK, true);
 
     uint256 _priced = _portfolio.pricedValue();
     uint256 _owed = $.feesOwed;
@@ -504,7 +507,8 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
 
   /**
    * @notice Whether no price can be used, which stops deposits and withdrawals: it cannot be read, or the value net of
-   *         fees reads nothing although holders have a value counted. Nothing is written down, so the value can come back
+   *         fees reads nothing although holders have a value counted. Holders of fewer share units than
+   *         `_VIRTUAL_SHARES` count as none, as in `_counting`. Nothing is written down, so the value can come back
    * @return _stopped True when none can
    */
   function _dealingStopped() private view returns (bool _stopped) {
@@ -512,7 +516,7 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
     IPortfolio _portfolio = IPortfolio($.portfolio);
     if (address(_portfolio) == address(0)) return false;
     if (!_portfolio.priceFresh()) return true;
-    _stopped = $.last != 0 && totalSupply() != 0 && _portfolio.pricedValue() <= $.feesOwed;
+    _stopped = $.last != 0 && totalSupply() >= _VIRTUAL_SHARES && _portfolio.pricedValue() <= $.feesOwed;
   }
 
   /**

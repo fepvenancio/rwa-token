@@ -29,8 +29,9 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
  *      the last counted value and deposits and withdrawals stop. While the value net of fees reads nothing, although
  *      holders have a value counted, `totalAssets()` reads zero, nothing is written down and deposits and withdrawals stop,
  *      so the value can come back under the limit. A count that finds the value fallen by more than half closes deposits for
- *      good, as a write-off does. With no shares nothing is anyone's: `totalAssets()` is zero, so the next
- *      investor buys at par and the mark restarts there, and whatever is left counts for them under the limit.
+ *      good, as a write-off does. With no shares, or fewer share units than one unit of the asset buys at par (`1e6`),
+ *      nothing is anyone's: `totalAssets()` is zero, so the next investor buys at par and the mark restarts there, and
+ *      whatever is left counts for them under the limit.
  *      `maxWithdraw` and `maxRedeem` are limited by what the portfolio can raise
  */
 interface IGated4626Vault {
