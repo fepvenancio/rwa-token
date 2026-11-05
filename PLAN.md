@@ -3508,7 +3508,68 @@ The third pull request of the section above: 41 pages, 2 of them new (`Gated7540
 - One of those was the walk's cost. The 6,541 gas measured earlier was on the version of the book that stored `taken`. On the final code it is 5,979, measured again, so about 5,000 gated periods in a row fit a block of 30 million. The plan, the brief and the test's comment are corrected with the pages. Another was the second contract's copy of the base, which is 12,806 bytes, not about 15 KB.
 - The lint outside the repo and the headless check at phone width were run on the result. These fixes have had no further independent check.
 
+## Dust in a fund everyone has left (planned and approved by the owner 2026-11-04)
+
+The review of #25 found this on the desk, and an outside list on 2026-11-04 confirmed it and showed the same state on the 4626. Baseline at `dced280`: `1851 passing (1678 solidity, 173 nodejs)`. The runs below were on a throwaway copy of `dced280`, with tests that are not in the repository.
+
+### What goes wrong
+
+Each deposit claim on the 7540 rounds down, so a fund whose investors have all left can keep a few share units in `unclaimedShares`. The desk's case for no shares asks for `_supply == 0`, which is then never true again. A value of zero reverts with `NavDesk_ZeroNav`, so the reporter must propose at least 1, and `FeeModel` prices one raw unit over one share unit at `1e18`, against par's `1e12`. The charge rounds to nothing and the mark moves there. In a run with one unit left, the mark went from about `1.09e12` to `1e18`, and a fund that then tripled paid no performance fee at 20%. Plugging the model again keeps the mark. Only a new desk that does not `adopt` the old one starts again, at the current price.
+
+The 4626 reaches the same state through a holder alone in the vault, the very first one included. `redeem(shares - 1)` left one share unit and one raw unit counted, the next count moved the mark to `1e18`, and a fund that then tripled paid no fee. It needs no reporter or checker, as anyone can call `accrue()`, and once others have joined only everyone leaving or an upgrade clears it. Rounding alone is milder there: `withdraw(maxWithdraw)` after a 10% gain left 851,851 units and a mark of 1.17 times par.
+
+Investors lose nothing. The fee recipient loses the performance fee.
+
+### The change
+
+Fewer share units than one raw unit of the asset buys at par (`_VIRTUAL_SHARES`, `1e6`) count as no shares, everywhere the two contracts ask. Below it, all holders together own less than one raw unit at par. At it or above, the least value a reporter can propose, 1, prices at par or below, so the mark cannot jump.
+
+- `NavDesk.propose`: `_supply < _VIRTUAL_SHARES` in place of `_supply == 0` for the gross value, and `_supply >= _VIRTUAL_SHARES` in place of `_supply != 0` for `NavDesk_ZeroNav`. `_quote`: the same test for the mark and its clock.
+- `Gated4626Vault._counting`: `totalSupply() < _VIRTUAL_SHARES` in place of `totalSupply() == 0`. `_dealingStopped`: `totalSupply() >= _VIRTUAL_SHARES` in place of `totalSupply() != 0`, so dust does not stop dealing during a read of nothing, as no shares does not today (`test_WithNoSharesAReadOfNothingDoesNotStopDeposits`).
+
+`FeeModel`, the 7540, its second contract and every storage layout stay as they are. A first plug of a fee model needs nothing: whatever mark it starts with, the 4626's next count, which comes before any deposit, and the desk's next proposal set it to par. A dust holder can still leave: redeeming the last unit on the 4626 paid 0 and burned it.
+
+In the trial (without the `_dealingStopped` line), one unit of dust had the next investor buy at par, and a fund that then tripled paid 400 of fee on 1,000 invested, on the desk and on the 4626. The 465 existing tests in `NavDesk.t.sol`, `Gated4626VaultPortfolio.t.sol`, `Gated4626Vault.t.sol`, `Gated7540Vault.t.sol`, `Gated7540Settlement.t.sol` and `FeeModel.t.sol` still passed. The whole suite was not run.
+
+**Known limit.** A holder who leaves the largest dust on purpose, 999,999 units, has the next investor buy at up to half par with the mark at par, so the first doubling pays no performance fee: in the trial, none at 1.9 times and 200 rather than 400 at 3 times. It costs the fee recipient once, not for the rest of the fund's life. A higher threshold would shrink this and set more aside, and `1e6` is where one raw unit prices at par. A test pins it.
+
+### The 4626's management fee on a small or low-decimal fund: no code change
+
+The same list said `_accrue` restarts `lastFeeAt` on every count, even when the management fee rounds to nothing. That is true. Its example is not: `1e10 × 100 × 12 / (1e4 × 31,536,000)` is 38, not 0, and a count every 12 seconds for a day took `$10,000` from 273,972 raw units of fee to 273,600. The loss is under one raw unit per count, and only one count a block matters, as a second one has no time to charge. For a dollar token with 6 decimals that is at most about `$2.63` a year on 12-second blocks and `$31.54` on 1-second ones. With 2 decimals it is a cent a block, and someone calling `accrue()` every 12 seconds keeps a fund of up to about `$2.6m` at 100 bps from paying any management fee: in the trial, `1e8` raw units paid 0 in a day rather than 2,739.
+
+Its fix, holding the clock while the fee rounds to nothing, is not taken. Time builds up while the fund is small and is charged to whoever arrives next: 1,000 raw units sat for 30 days, `$10m` arrived, and 12 seconds later the fund owed `$8,219` rather than `$0.04`. All 94 existing tests in `Gated4626VaultPortfolio.t.sol` passed with that fix, so nothing pins this today. This work adds the test that does, and a test of the limit as it stands, and writes the limit into `SECURITY.md` and the pages. A product with a management fee on a low-decimal asset should take it into account.
+
+The list's third item, a unit given during a read of nothing, is the owner's decision of 2026-11-01 and is already written down, and the 4626's page already says a pause does not stop `accrue()`. Nothing changes for it.
+
+### Interfaces
+
+NatSpec only, moving no id: `IGated4626Vault`'s description and `INavDesk.propose` say "with no shares", and gain "or fewer than `1e6` share units". The owner's approval of this plan is the instruction rule 4 asks for. `InterfaceFreeze.t.sol` stays as it is.
+
+### Tests, written first
+
+- **Desk** (`NavDesk_NoShares`): one unit of dust after everyone leaves proposes a value of zero with the mark at par, the next investor buys at par, and a later gain pays the performance fee; 999,999 units strike at zero, while 1,000,000 still revert `NavDesk_ZeroNav` on zero and keep the mark; whatever is reported with dust strikes at par (fuzzed); the redemption limit with dust and a gate on; the known limit.
+- **4626** (`Gated4626VaultPortfolio_Fees`, `_Counting`): a holder alone leaving one unit, then a count, keeps the mark at par, and the next investor buys at par and pays on a later gain; the same boundary at 999,999 and 1,000,000; the dust holder can still redeem; a read of nothing with dust does not stop deposits; for any dust below `1e6` and anything left in the portfolio, the next investor buys at par or below and pays no performance fee on principal (fuzzed).
+- **4626 management fee:** new money does not pay for time before it arrived, which passes today and is shown failing against the rejected fix, planted by hand; a count that rounds to no fee restarts the clock, which pins the limit.
+
+### Pull requests
+
+1. **The code**, with its tests, `CLAUDE.md` §7 (the two sentences on no shares, and "above zero while shares exist"), `SECURITY.md` (the bullet on no shares, the management-fee limit, a row of planted bugs) and this file.
+2. **The pages**: `NavDesk`, `Gated4626Vault`, `money` and `review` (the open item becomes fixed, and the management-fee limit joins the open list), re-pinned to the first pull request's commit, with the changed claims checked again.
+
+**Done means:** `npx hardhat test` in both runners and in isolation, the lint, `forge fmt`, the type check, Slither 0, Aderyn 0 read by hand, Halmos, `validate:upgrades`, `verify:reproducible`, the size guards, and planted bugs by hand: `<=` for `<`, the threshold one unit off, the gross value changed without the zero check and the reverse, the mark's clock left on `== 0`, `_dealingStopped` left on `!= 0`, and the 4626's fee clock held while the fee is zero.
+
+**Not in this work.** Clearing a mark already stuck on a 4626 that others have joined, since nothing is deployed. A fee model that prices with the virtual shares, which would close the known limit and needs a new attested model.
+
+### As built
+
+As planned, with one test more than the plan listed: at exactly `1e6` share units a read of nothing still stops dealing, which pins `_dealingStopped`'s boundary. Tests first: 9 of the new tests failed against the unchanged code, and the 5 that describe what the code already did passed (a million units still count on both, the last units can be redeemed, and the two management-fee tests).
+
+`npx hardhat test`: `1866 passing (1693 solidity, 173 nodejs)`. Isolated 1693 passing, Slither 0, Aderyn 0, Halmos 22 of 22, `validate:upgrades` 5 of 5, `verify:reproducible` 30 contracts, lint, format, types. Planted bugs by hand: 13, of which 11 were caught at first. The two survivors, the gross value one unit off and the mark's clock left on `== 0`, were tests that proposed zero and did not read the clock; both are tightened and now catch them.
+
+`Gated4626Vault` is 24,213 bytes, 20 more, with 363 free. `NavDesk` is 11,379, 16 more.
+
+
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
 2. Credential layer: none left. On 2026-10-30 the owner confirmed decisions 11, 12, 13, 15, 16 and 17 as built (17 at the measured +8,179 gas on a transfer). Decision 14 is moot, since `IdentityRule` was removed in the cleanup. Decisions 8 and 9 are recorded in the credential section's table.
-3. Redemption gate and the second contract: built and landed in #24 and #25. Open from its review: dust in a fund everyone has left ends the performance fee (`docs/review.html`, under open items). A proposed fix waits for the owner to start it.
+3. Redemption gate and the second contract: built and landed in #24 and #25. Open from its review: dust in a fund everyone has left ends the performance fee (`docs/review.html`, under open items). The fix is built in the first pull request of "Dust in a fund everyone has left"; the pages follow it.

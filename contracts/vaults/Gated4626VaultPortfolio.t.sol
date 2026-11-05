@@ -602,6 +602,41 @@ contract Gated4626VaultPortfolio_Counting is Gated4626VaultPortfolioTest {
     assertEq(_vault.totalAssets(), _IN);
   }
 
+  /// @dev Dust is not a holder to protect either: with less than a unit of shares left a read of nothing stops nothing
+  function test_WithDustAReadOfNothingDoesNotStopDeposits() external {
+    _allocate(_IN);
+    vm.prank(_allocator);
+    _portfolio.setLiquidityAdapter(address(_adapter));
+    _asset.mint(address(_target), 1e6);
+    vm.warp(block.timestamp + _YEAR);
+    vm.prank(_alice);
+    _vault.redeem(_shares - 1, _alice, _alice);
+    assertEq(_vault.totalSupply(), 1);
+    assertGt(_vault.lastCounted(), 0);
+
+    _target.lose(_asset.balanceOf(address(_target)));
+    assertEq(_portfolio.pricedValue(), 0);
+    assertGt(_vault.maxDeposit(_bob), 0);
+    assertGt(_deposit(_bob, _IN), 0);
+    assertEq(_vault.totalAssets(), _IN);
+  }
+
+  /// @dev A million share units are a holder: a read of nothing still stops dealing for them
+  function test_WithAMillionShareUnitsAReadOfNothingStillStopsDealing() external {
+    _allocate(_IN);
+    vm.prank(_allocator);
+    _portfolio.setLiquidityAdapter(address(_adapter));
+    vm.prank(_alice);
+    _vault.redeem(_shares - 1e6, _alice, _alice);
+    assertEq(_vault.totalSupply(), 1e6);
+    assertGt(_vault.lastCounted(), 0);
+
+    _target.lose(_asset.balanceOf(address(_target)));
+    assertEq(_portfolio.pricedValue(), 0);
+    assertEq(_vault.maxDeposit(_bob), 0);
+    assertEq(_vault.maxRedeem(_alice), 0);
+  }
+
   /// @dev Nothing counted is not a read of nothing: a holder who withdrew everything leaves dust shares behind
   function test_AVaultDrainedToDustSharesKeepsTakingDeposits() external {
     _allocate(_IN);
@@ -1378,6 +1413,118 @@ contract Gated4626VaultPortfolio_Fees is Gated4626VaultPortfolioTest {
     uint256 _bought = _deposit(_bob, _IN);
     assertEq(_bought, _preview);
     assertEq(_vault.feesOwed(), 20e6);
+  }
+
+  function _managementOnly() internal {
+    FeeModel _onlyManagement = new FeeModel(_recipient, 100, 0, 0, false);
+    _registry.attest(address(_onlyManagement).codehash, IPolicyRegistry.AttestKind.FEE_MODEL, '');
+    _vault.setFeeModel(address(_onlyManagement));
+  }
+
+  /// @dev A holder alone leaves one share unit. Priced on it, the mark would go a million times above par, and no later
+  ///      gain would reach it
+  function test_WhenAHolderAloneLeavesOneShareUnitTheMarkStaysAtPar() external {
+    _performanceOnly();
+    vm.prank(_alice);
+    _vault.redeem(_shares - 1, _alice, _alice);
+    assertEq(_vault.totalSupply(), 1);
+    assertGt(_vault.lastCounted(), 0);
+    vm.warp(block.timestamp + 12);
+    _vault.accrue();
+    assertEq(_vault.lastCounted(), 0);
+    assertEq(_vault.mark(), 1e12);
+
+    assertEq(_deposit(_bob, _IN), _IN * (1e6 + 1));
+    _asset.mint(address(_portfolio), 2 * _IN);
+    vm.warp(block.timestamp + 100 * _YEAR);
+    _vault.accrue();
+    assertApproxEqRel(_vault.feesOwed(), 400e6, 0.001e18, 'a fifth of a gain of 2,000');
+  }
+
+  /// @dev One raw unit buys a million share units at par: fewer is less than a unit between all holders
+  function test_FewerThanAMillionShareUnitsCountAsNoShares() external {
+    vm.prank(_alice);
+    _vault.redeem(_shares - (1e6 - 1), _alice, _alice);
+    _vault.accrue();
+    assertEq(_vault.totalAssets(), 0);
+    assertEq(_vault.lastCounted(), 0);
+  }
+
+  function test_AMillionShareUnitsStillCount() external {
+    vm.prank(_alice);
+    _vault.redeem(_shares - 1e6, _alice, _alice);
+    uint256 _left = _vault.lastCounted();
+    assertGt(_left, 0);
+    _vault.accrue();
+    assertEq(_vault.lastCounted(), _left);
+    assertEq(_vault.totalAssets(), _left);
+  }
+
+  function test_TheLastShareUnitsCanStillBeRedeemed() external {
+    vm.prank(_alice);
+    _vault.redeem(_shares - 1, _alice, _alice);
+    _vault.accrue();
+    vm.prank(_alice);
+    assertEq(_vault.redeem(1, _alice, _alice), 0);
+    assertEq(_vault.totalSupply(), 0);
+  }
+
+  /// @dev Whatever dust is left below a million units, and whatever sits in the portfolio, the next investor buys at
+  ///      par or below, is not charged on principal, and pays the performance fee on a real gain
+  function testFuzz_DustBelowAMillionUnitsKeepsThePrincipalAndTheFee(
+    uint256 _dustLeft,
+    uint256 _left
+  ) external {
+    _performanceOnly();
+    vm.prank(_alice);
+    _vault.redeem(_shares - bound(_dustLeft, 1, 1e6 - 1), _alice, _alice);
+    _asset.mint(address(_portfolio), bound(_left, 0, 1e9));
+    vm.warp(block.timestamp + 12);
+    _vault.accrue();
+    assertEq(_vault.mark(), 1e12);
+    uint256 _bought = _deposit(_bob, _IN);
+    assertGe(_bought, _IN * 1e6);
+    vm.warp(block.timestamp + 1 days);
+    _vault.accrue();
+    assertGe(_vault.convertToAssets(_bought) + 2, _IN);
+    _asset.mint(address(_portfolio), 2 * _IN);
+    vm.warp(block.timestamp + 100 * _YEAR);
+    _vault.accrue();
+    assertGt(_vault.feesOwed(), 0);
+  }
+
+  /// @dev A count that rounds to no fee restarts the clock. Holding it instead would charge that time to whoever
+  ///      arrives next: here 1,000 raw units quiet for 30 days at 1% a year, then 1e13 arriving
+  function test_NewMoneyDoesNotPayForTimeBeforeItArrived() external {
+    vm.prank(_alice);
+    _vault.redeem(_shares - 1e9, _alice, _alice);
+    _managementOnly();
+    vm.warp(block.timestamp + 30 days);
+    _vault.accrue();
+    assertEq(_vault.feesOwed(), 0);
+    _deposit(_bob, 1e13);
+    vm.warp(block.timestamp + 12);
+    _vault.accrue();
+    assertLe(_vault.feesOwed(), uint256(1e13 + 1e3) * 100 * 12 / (1e4 * 365 days) + 1);
+  }
+
+  /// @dev The cost of restarting it: a fee too small to pay a unit at each count is not paid. Here 1e8 raw units at 1%
+  ///      a year, counted every 12 seconds for an hour, against one count at the end
+  function test_ACountThatRoundsToNoFeeStillRestartsTheClock() external {
+    vm.prank(_alice);
+    _vault.redeem(_shares - 1e14, _alice, _alice);
+    assertEq(_vault.lastCounted(), 1e8);
+    _managementOnly();
+    uint256 _snapshot = vm.snapshotState();
+    vm.warp(block.timestamp + 1 hours);
+    _vault.accrue();
+    assertEq(_vault.feesOwed(), uint256(1e8) * 100 * 1 hours / (1e4 * 365 days));
+    vm.revertToState(_snapshot);
+    for (uint256 _i; _i < 300; ++_i) {
+      vm.warp(block.timestamp + 12);
+      _vault.accrue();
+    }
+    assertEq(_vault.feesOwed(), 0);
   }
 }
 

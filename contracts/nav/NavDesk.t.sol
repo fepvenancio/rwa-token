@@ -1345,6 +1345,124 @@ contract NavDesk_NoShares is NavDeskTest {
     _propose(_IN);
     assertEq(_desk.proposal().fee, 0);
   }
+
+  /// @dev Everyone in at a price that does not divide evenly, and everyone out: the claims' rounding leaves dust nobody
+  ///      owns
+  function _everyoneLeaves() internal returns (uint256 _dust) {
+    _request(_alice, _IN);
+    _deal(0);
+    uint256 _a = _claim(_alice);
+    _request(_alice, 333_333_333);
+    _request(_bob, 777_777_777);
+    _deal(1100e6 + 7);
+    _a += _claim(_alice);
+    uint256 _b = _claim(_bob);
+    vm.prank(_alice);
+    _vault.requestRedeem(_a, _alice, _alice);
+    vm.prank(_bob);
+    _vault.requestRedeem(_b, _bob, _bob);
+    _deal(2211e6);
+    assertEq(_vault.totalSupply(), 0);
+    (,, _dust) = _vault.dealingState();
+    assertGt(_dust, 0);
+    assertLt(_dust, _PAR);
+  }
+
+  /// @dev One raw unit in at par, and one share unit out, leaves the most that still counts as no shares
+  function _leaveJustUnderAMillionUnits() internal {
+    _request(_alice, 1);
+    _deal(0);
+    assertEq(_claim(_alice), _PAR);
+    vm.prank(_alice);
+    _vault.requestRedeem(1, _alice, _alice);
+    _deal(1);
+    assertEq(_vault.totalSupply(), _PAR - 1);
+  }
+
+  /// @dev Dust nobody owns is not a holder. A value proposed on it would price it far above par, move the mark there,
+  ///      and no later gain would reach it
+  function test_DustLeftByTheClaimsStrikesAtParAndTheFeeStillWorks() external {
+    uint256 _dust = _everyoneLeaves();
+    _request(_bob, _IN);
+    _close();
+    _propose(5000e6);
+    assertEq(_desk.proposal().nav, 0);
+    assertEq(_desk.proposal().fee, 0);
+    assertEq(_desk.proposal().mark, _PAR_MARK);
+    assertEq(_desk.proposal().markMovedAt, block.timestamp, 'the mark and its clock restart');
+    _settle();
+    assertEq(_claim(_bob), _IN * (_PAR + _dust));
+    assertEq(_desk.mark(), _PAR_MARK);
+
+    _close();
+    _propose(3 * _IN);
+    assertApproxEqRel(_desk.proposal().fee, 400e6, 0.001e18, 'a fifth of a gain of 2,000');
+  }
+
+  /// @dev Whatever is reported, dust strikes at par with no fee
+  function testFuzz_WhateverIsReportedOnDustStrikesAtPar(
+    uint256 _reported
+  ) external {
+    _everyoneLeaves();
+    _request(_bob, _IN);
+    _close();
+    _propose(bound(_reported, 0, 1e18));
+    assertEq(_desk.proposal().nav, 0);
+    assertEq(_desk.proposal().fee, 0);
+    assertEq(_desk.proposal().mark, _PAR_MARK);
+  }
+
+  /// @dev One raw unit buys a million share units at par: fewer is less than a unit between all holders
+  function test_FewerThanAMillionShareUnitsCountAsNoShares() external {
+    _leaveJustUnderAMillionUnits();
+    _request(_bob, _IN);
+    _close();
+    _propose(_IN);
+    assertEq(_desk.proposal().nav, 0);
+    assertEq(_desk.proposal().mark, _PAR_MARK);
+    assertEq(_desk.proposal().markMovedAt, block.timestamp);
+  }
+
+  /// @dev At a million share units the least value that can be proposed prices at par, so the mark cannot jump
+  function test_AMillionShareUnitsStillHaveAValue() external {
+    _request(_alice, 1);
+    _deal(0);
+    assertEq(_claim(_alice), _PAR);
+    _request(_bob, _IN);
+    _close();
+    vm.expectRevert(INavDesk.NavDesk_ZeroNav.selector);
+    _propose(0);
+    _propose(1);
+    assertEq(_desk.proposal().nav, 1);
+    assertEq(_desk.proposal().mark, _PAR_MARK);
+  }
+
+  /// @dev The limit: just under a million units left on purpose has the next investor buy at up to half par with the
+  ///      mark at par, so the first doubling pays no performance fee. It costs the fee recipient once
+  function test_TheLargestDustCostsTheFeeOnTheFirstDoubling() external {
+    _leaveJustUnderAMillionUnits();
+    _request(_bob, _IN);
+    _close();
+    _propose(0);
+    _settle();
+    assertEq(_claim(_bob), _IN * (2 * _PAR - 1));
+    _close();
+    _propose(19 * _IN / 10);
+    assertEq(_desk.proposal().fee, 0);
+    vm.prank(_checker);
+    _desk.cancel();
+    _propose(3 * _IN);
+    assertApproxEqRel(_desk.proposal().fee, 200e6, 0.001e18, 'a fifth of the gain above twice what was paid');
+  }
+
+  function test_WithDustAndAGateTheLimitIsTheSharesTheDepositsBuy() external {
+    uint256 _dust = _everyoneLeaves();
+    _desk.setRedemptionGate(1000);
+    _request(_bob, _IN);
+    _close();
+    _propose(0);
+    assertEq(_desk.proposal().redeemLimit, _dust * 1000 / 10_000 + _IN * (_dust + _PAR));
+  }
 }
 
 /// @notice With a `Portfolio` plugged it is both the cash account and the source of on-chain value

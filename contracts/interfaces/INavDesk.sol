@@ -181,7 +181,7 @@ interface INavDesk {
    */
   error NavDesk_MovesChanged(uint256 _expected, uint256 _actual);
 
-  /// @notice Thrown when a value of zero would price shares that exist
+  /// @notice Thrown when a value of zero would price shares that count: a million share units or more
   error NavDesk_ZeroNav();
 
   /// @notice Thrown when executing a proposal not yet accepted, or accepting one twice
@@ -292,9 +292,10 @@ interface INavDesk {
 
   /**
    * @notice Proposes the price of the closed period: `nav = reported + pricedValue() - fee`, the fee being quoted now and
-   *         frozen with the rest. With no shares nothing is anyone's: `nav` is zero whatever is reported or sits in the
-   *         portfolio, so the period strikes at par, there is no fee, the mark restarts at par, and both fee clocks restart
-   *         when it executes, so the first investors pay neither on their principal nor for time before they arrived.
+   *         frozen with the rest. With no shares, or fewer share units than one unit of the asset buys at par (`1e6`),
+   *         nothing is anyone's: `nav` is zero whatever is reported or sits in the portfolio, so the period strikes at
+   *         par, there is no fee, the mark restarts at par, and both fee clocks restart when it executes, so the first
+   *         investors pay neither on their principal nor for time before they arrived.
    *         With a redemption gate on, the limit is worked out here and frozen with the rest:
    *         `supply × level / 10,000 + deposits × (supply + 1e6) / (nav + 1)`, the second part being the shares the period's
    *         deposits buy, so the level measures what leaves net of what comes in
