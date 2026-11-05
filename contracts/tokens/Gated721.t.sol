@@ -254,6 +254,25 @@ contract Gated721Unit_Initialize is Gated721UnitTest {
     assertEq(_token.templateId(), keccak256('Gated721'));
   }
 
+  /// @dev The freezes live at the ERC-7201 location the constant names: the formula equals it, and a freeze set through
+  ///      the token is the word the mapping puts there
+  function test_TheErc7201LocationHoldsTheFreezes() external {
+    bytes32 _location =
+      keccak256(abi.encode(uint256(keccak256('gated.storage.Gated721')) - 1)) & ~bytes32(uint256(0xff));
+    assertEq(_location, 0xe2e6a0763355f0c539395516a687d1cc0bc64d7e84611f8f6d2274edd1a6f900);
+    _freeze(_alice, _ID);
+    bytes32 _slot = keccak256(abi.encode(_ID, keccak256(abi.encode(_alice, _location))));
+    assertEq(uint256(vm.load(address(_token), _slot)), 1);
+  }
+
+  /// @dev No receive or payable function, so ether sent to the token is refused
+  function test_WhenEtherIsSent_ItReverts() external {
+    vm.deal(address(this), 1 ether);
+    (bool _ok,) = address(_token).call{value: 1 ether}('');
+    assertFalse(_ok);
+    assertEq(address(_token).balance, 0);
+  }
+
   function test_WhenTheImplementationIsInitializedDirectly_ItReverts() external {
     Gated721 _impl = new Gated721();
     vm.expectRevert(Initializable.InvalidInitialization.selector);

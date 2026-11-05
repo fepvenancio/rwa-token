@@ -30,7 +30,7 @@
     <span class="fact">one path: <b>_move</b> in the base</span>
     <span class="fact"><b>5</b> kinds of movement</span>
     <span class="fact">up to <b>16</b> rules per token, first no wins</span>
-    <span class="fact"><b>27</b> reason codes in Errors.sol</span>
+    <span class="fact"><b>28</b> reason codes in Errors.sol</span>
   </div>
 </header>
 
@@ -347,7 +347,7 @@
       </tbody>
     </table>
   </div>
-  <p class="small wrap-any">Each token passes its list to its initialiser, which installs it on the hook, and <code>ProxyDeployer</code> refuses to finish unless the hook holds exactly that list. Later, the token's <code>DEFAULT_ADMIN_ROLE</code> holder (the main timelock) can replace a list with <code>setRules</code>, using rules attested as <code>RULE</code> and no two with the same <code>ruleId</code>. The token's own code calls <code>setRules</code> only in its initialiser. The hook accepts any attested list. What stops a poor combination is <code>assertUsable</code> in <code>ignition/profiles.ts</code>, off-chain when a module is built: it refuses <code>SupplyCapRule</code> on a vault, and <code>SettlementWindowRule</code> or <code>ExecutedOnlyRule</code> on anything but an <code>IntentToken</code>.</p>
+  <p class="small wrap-any">Each token passes its list to its initialiser, which installs it on the hook, and <code>ProxyDeployer</code> refuses to finish unless the hook holds exactly that list. Later, the token's <code>DEFAULT_ADMIN_ROLE</code> holder (the main timelock) can replace a list with <code>setRules</code>, using rules attested as <code>RULE</code> and no two with the same <code>ruleId</code>. The token's own code calls <code>setRules</code> only in its initialiser. The hook accepts any attested list. What stops a poor combination is <code>assertUsable</code> in <code>ignition/profiles.ts</code>, off-chain when a module is built: it refuses <code>SupplyCapRule</code> on a vault, <code>SettlementWindowRule</code> or <code>ExecutedOnlyRule</code> on anything but an <code>IntentToken</code>, and <code>MinPositionRule</code>, <code>FundHoldersRule</code> or <code>SupplyCapRule</code> on a <code>Gated721</code>.</p>
 </section>
 
 <section id="matrix">
