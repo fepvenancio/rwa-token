@@ -19,6 +19,7 @@ import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IERC7943Fungible} from 'interfaces/IERC7943Fungible.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
+import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {ITemplated} from 'interfaces/ITemplated.sol';
@@ -159,14 +160,14 @@ contract PolicyGatedUnitTest is Helpers {
   function _rejected(
     bytes32 _reason
   ) internal pure returns (bytes memory _revertData) {
-    _revertData = abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, _reason);
+    _revertData = abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, _reason);
   }
 }
 
 contract PolicyGatedUnit_Initialize is PolicyGatedUnitTest {
   function test_WhenAdminIsZero_ItReverts() external {
     PolicyGatedHarness _impl = new PolicyGatedHarness();
-    vm.expectRevert(IPolicyGated.PolicyGated_ZeroAddress.selector);
+    vm.expectRevert(IPolicyGatedCore.PolicyGated_ZeroAddress.selector);
     new ERC1967Proxy(
       address(_impl),
       abi.encodeCall(PolicyGatedHarness.initialize, ('G', 'G', address(0), _guardian, _registry, _hook, _noRules()))
@@ -175,7 +176,7 @@ contract PolicyGatedUnit_Initialize is PolicyGatedUnitTest {
 
   function test_WhenGuardianIsZero_ItReverts() external {
     PolicyGatedHarness _impl = new PolicyGatedHarness();
-    vm.expectRevert(IPolicyGated.PolicyGated_ZeroAddress.selector);
+    vm.expectRevert(IPolicyGatedCore.PolicyGated_ZeroAddress.selector);
     new ERC1967Proxy(
       address(_impl),
       abi.encodeCall(PolicyGatedHarness.initialize, ('G', 'G', _admin, address(0), _registry, _hook, _noRules()))
@@ -184,7 +185,7 @@ contract PolicyGatedUnit_Initialize is PolicyGatedUnitTest {
 
   function test_WhenRegistryIsZero_ItReverts() external {
     PolicyGatedHarness _impl = new PolicyGatedHarness();
-    vm.expectRevert(IPolicyGated.PolicyGated_ZeroAddress.selector);
+    vm.expectRevert(IPolicyGatedCore.PolicyGated_ZeroAddress.selector);
     new ERC1967Proxy(
       address(_impl),
       abi.encodeCall(PolicyGatedHarness.initialize, ('G', 'G', _admin, _guardian, address(0), _hook, _noRules()))
@@ -193,7 +194,7 @@ contract PolicyGatedUnit_Initialize is PolicyGatedUnitTest {
 
   function test_WhenHookIsZero_ItReverts() external {
     PolicyGatedHarness _impl = new PolicyGatedHarness();
-    vm.expectRevert(IPolicyGated.PolicyGated_ZeroAddress.selector);
+    vm.expectRevert(IPolicyGatedCore.PolicyGated_ZeroAddress.selector);
     new ERC1967Proxy(
       address(_impl),
       abi.encodeCall(PolicyGatedHarness.initialize, ('G', 'G', _admin, _guardian, _registry, address(0), _noRules()))
@@ -205,7 +206,7 @@ contract PolicyGatedUnit_Initialize is PolicyGatedUnitTest {
     _attested(_rogue, IPolicyRegistry.AttestKind.HOOK, false);
     PolicyGatedHarness _impl = new PolicyGatedHarness();
     vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGated.PolicyGated_NotAttested.selector, _rogue, IPolicyRegistry.AttestKind.HOOK)
+      abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_NotAttested.selector, _rogue, IPolicyRegistry.AttestKind.HOOK)
     );
     new ERC1967Proxy(
       address(_impl),
@@ -703,7 +704,7 @@ contract PolicyGatedUnit_SetPolicyHook is PolicyGatedUnitTest {
   }
 
   function test_WhenHookIsZero_ItReverts() external {
-    vm.expectRevert(IPolicyGated.PolicyGated_ZeroAddress.selector);
+    vm.expectRevert(IPolicyGatedCore.PolicyGated_ZeroAddress.selector);
     vm.prank(_admin);
     _token.setPolicyHook(address(0));
   }
@@ -712,7 +713,7 @@ contract PolicyGatedUnit_SetPolicyHook is PolicyGatedUnitTest {
     address _rogue = _mockContract('rogue');
     _attested(_rogue, IPolicyRegistry.AttestKind.HOOK, false);
     vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGated.PolicyGated_NotAttested.selector, _rogue, IPolicyRegistry.AttestKind.HOOK)
+      abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_NotAttested.selector, _rogue, IPolicyRegistry.AttestKind.HOOK)
     );
     vm.prank(_admin);
     _token.setPolicyHook(_rogue);
@@ -723,7 +724,7 @@ contract PolicyGatedUnit_SetPolicyHook is PolicyGatedUnitTest {
     _attested(_next, IPolicyRegistry.AttestKind.HOOK, true);
     _hookNamesRegistry(_next, _registry);
     vm.expectEmit(address(_token));
-    emit IPolicyGated.PolicyHookChanged(_hook, _next);
+    emit IPolicyGatedCore.PolicyHookChanged(_hook, _next);
     vm.prank(_admin);
     _token.setPolicyHook(_next);
     assertEq(_token.policyHook(), _next);
@@ -950,8 +951,8 @@ contract PolicyGatedUnit_CanSendAndCanReceive is PolicyGatedUnitTest {
   ///      zero address), so the hook slot is cleared to prove the guard that answers instead of calling address(0)
   function test_WhenThereIsNoHook_BothAreFalseAndThePreflightSaysNoHook() external {
     bytes32 _location =
-      keccak256(abi.encode(uint256(keccak256('gated.storage.PolicyGatedERC20')) - 1)) & ~bytes32(uint256(0xff));
-    vm.store(address(_token), bytes32(uint256(_location) + 1), bytes32(0)); // PolicyGatedStorage.hook
+      keccak256(abi.encode(uint256(keccak256('gated.storage.PolicyGatedCore')) - 1)) & ~bytes32(uint256(0xff));
+    vm.store(address(_token), bytes32(uint256(_location) + 1), bytes32(0)); // PolicyGatedCoreStorage.hook
     assertEq(_token.policyHook(), address(0));
 
     assertFalse(_token.canSend(_bob));
@@ -997,7 +998,7 @@ contract PolicyGatedUnit_Upgrade is PolicyGatedUnitTest {
     _attested(_impl, IPolicyRegistry.AttestKind.IMPLEMENTATION, false);
     vm.expectRevert(
       abi.encodeWithSelector(
-        IPolicyGated.PolicyGated_NotAttested.selector, _impl, IPolicyRegistry.AttestKind.IMPLEMENTATION
+        IPolicyGatedCore.PolicyGated_NotAttested.selector, _impl, IPolicyRegistry.AttestKind.IMPLEMENTATION
       )
     );
     vm.prank(_upgrader);
@@ -1058,7 +1059,7 @@ contract PolicyGatedUnit_TemplateId is PolicyGatedUnitTest {
     _attested(_impl, IPolicyRegistry.AttestKind.IMPLEMENTATION, false);
     vm.expectRevert(
       abi.encodeWithSelector(
-        IPolicyGated.PolicyGated_NotAttested.selector, _impl, IPolicyRegistry.AttestKind.IMPLEMENTATION
+        IPolicyGatedCore.PolicyGated_NotAttested.selector, _impl, IPolicyRegistry.AttestKind.IMPLEMENTATION
       )
     );
     vm.prank(_upgrader);
@@ -1088,6 +1089,7 @@ contract PolicyGatedUnit_Permit is PolicyGatedUnitTest {
 contract PolicyGatedUnit_SupportsInterface is PolicyGatedUnitTest {
   function test_WhenQueried_ItSupportsItsInterfaces() external view {
     assertTrue(_token.supportsInterface(type(IPolicyGated).interfaceId));
+    assertTrue(_token.supportsInterface(type(IPolicyGatedCore).interfaceId));
     // ERC-7943 Final, fungible: the standard's own id, as a literal
     assertTrue(_token.supportsInterface(0x3edbb4c4));
     assertTrue(_token.supportsInterface(type(IERC7943Fungible).interfaceId));
@@ -1500,7 +1502,7 @@ contract PolicyGatedUnit_SharedHook is PolicyGatedUnitTest {
     _attested(_next, IPolicyRegistry.AttestKind.HOOK, true);
     _hookNamesRegistry(_next, _otherRegistry);
     vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGated.PolicyGated_HookRegistryMismatch.selector, _otherRegistry, _registry)
+      abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_HookRegistryMismatch.selector, _otherRegistry, _registry)
     );
     vm.prank(_admin);
     _token.setPolicyHook(_next);
@@ -1513,7 +1515,7 @@ contract PolicyGatedUnit_SharedHook is PolicyGatedUnitTest {
     _hookNamesRegistry(_next, _otherRegistry);
     PolicyGatedHarness _impl = new PolicyGatedHarness();
     vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGated.PolicyGated_HookRegistryMismatch.selector, _otherRegistry, _registry)
+      abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_HookRegistryMismatch.selector, _otherRegistry, _registry)
     );
     new ERC1967Proxy(
       address(_impl),

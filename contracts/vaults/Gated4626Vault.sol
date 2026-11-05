@@ -100,14 +100,14 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
     address _hook,
     IComplianceRule[] memory _initialRules
   ) external initializer {
-    // Parent initializers in linearized order (OZ upgrades-core): the base's composite init is expanded around ERC4626.
+    // Parent initializers in linearized order (OZ upgrades-core), with ERC4626's between ERC20's and ERC20Permit's.
     __ERC20_init(_name, _symbol);
     __ERC4626_init(_asset);
     __ERC20Permit_init(_name);
     __AccessControl_init();
     __Pausable_init();
     __Multicall_init();
-    __PolicyGatedERC20_init_unchained(_admin, _guardian, _registry, _hook, _initialRules);
+    __PolicyGatedCore_init_unchained(_admin, _guardian, _registry, _hook, _initialRules);
   }
 
   /// @inheritdoc IGated4626Vault

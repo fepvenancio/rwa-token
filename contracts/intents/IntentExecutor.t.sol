@@ -10,7 +10,7 @@ import {Reasons} from 'interfaces/Errors.sol';
 
 import {IIntentExecutor} from 'interfaces/IIntentExecutor.sol';
 import {IIntentExecutorBatch} from 'interfaces/IIntentExecutorBatch.sol';
-import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
+import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
 import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
 
 import {IntentExecutor} from 'contracts/intents/IntentExecutor.sol';
@@ -86,7 +86,7 @@ contract IntentExecutorUnitTest is Helpers {
   function _rejected(
     bytes32 _reason
   ) internal pure returns (bytes memory _revertData) {
-    _revertData = abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, _reason);
+    _revertData = abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, _reason);
   }
 }
 

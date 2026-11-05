@@ -12,7 +12,7 @@ import {Reasons} from 'interfaces/Errors.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IERC7943Fungible} from 'interfaces/IERC7943Fungible.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
-import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
+import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {ITemplated} from 'interfaces/ITemplated.sol';
 import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
@@ -138,7 +138,7 @@ contract IntentTokenIntegrationTest is Test {
   function _rejected(
     bytes32 _reason
   ) internal pure returns (bytes memory _revertData) {
-    _revertData = abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, _reason);
+    _revertData = abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, _reason);
   }
 
   function _signedIntent(
@@ -199,7 +199,7 @@ contract IntentTokenIntegration_Deployment is IntentTokenIntegrationTest {
     assertFalse(_registry.isAttested(address(_clone), IPolicyRegistry.AttestKind.HOOK));
     vm.expectRevert(
       abi.encodeWithSelector(
-        IPolicyGated.PolicyGated_NotAttested.selector, address(_clone), IPolicyRegistry.AttestKind.HOOK
+        IPolicyGatedCore.PolicyGated_NotAttested.selector, address(_clone), IPolicyRegistry.AttestKind.HOOK
       )
     );
     vm.prank(_admin);

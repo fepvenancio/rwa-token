@@ -39,7 +39,9 @@ contract PolicyGatedHarness is PolicyGatedERC20Upgradeable {
     address _hook,
     IComplianceRule[] calldata _initialRules
   ) external initializer {
-    __PolicyGatedERC20_init(_name, _symbol, _admin, _guardian, _registry, _hook, _initialRules);
+    __ERC20_init(_name, _symbol);
+    __ERC20Permit_init(_name);
+    __PolicyGatedCore_init(_admin, _guardian, _registry, _hook, _initialRules);
   }
 
   /// @inheritdoc ITemplated

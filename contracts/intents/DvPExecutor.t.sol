@@ -14,7 +14,7 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IDvPExecutor} from 'interfaces/IDvPExecutor.sol';
 import {IERC3009} from 'interfaces/IERC3009.sol';
 import {IERC7943Fungible} from 'interfaces/IERC7943Fungible.sol';
-import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
+import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
 
@@ -162,7 +162,7 @@ contract DvPExecutorUnitTest is Helpers {
   function _rejected(
     bytes32 _reason
   ) internal pure returns (bytes memory _revertData) {
-    _revertData = abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, _reason);
+    _revertData = abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, _reason);
   }
 
   function _unauthorized(

@@ -12,6 +12,7 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IFund} from 'interfaces/IFund.sol';
 import {IFundHoldersRule} from 'interfaces/IFundHoldersRule.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
+import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 
 import {Fund} from 'contracts/fund/Fund.sol';
@@ -69,7 +70,7 @@ contract FundUnitTest is Helpers {
     _token = _mockContract(_name);
     address _hook = _mockContract(string.concat(_name, 'Hook'));
     _mockErc165(_token, true);
-    vm.mockCall(_token, abi.encodeCall(IPolicyGated.policyHook, ()), abi.encode(_hook));
+    vm.mockCall(_token, abi.encodeCall(IPolicyGatedCore.policyHook, ()), abi.encode(_hook));
     vm.mockCall(_token, abi.encodeCall(IERC20.totalSupply, ()), abi.encode(0));
     _hookLists(_hook, _rule);
   }
@@ -1034,17 +1035,17 @@ contract FundUnit_ClassIntegrity is FundUnitTest {
 
   function test_WhenTheTokenCannotNameItsHook_TheClassIsNotIntactAndTheViewDoesNotRevert() external {
     address _token = _registered('alpha');
-    vm.mockCallRevert(_token, abi.encodeCall(IPolicyGated.policyHook, ()), 'no hook');
+    vm.mockCallRevert(_token, abi.encodeCall(IPolicyGatedCore.policyHook, ()), 'no hook');
     assertFalse(_fund.isClassIntact(_token));
     assertEq(_fund.firstBrokenClass(), _token);
   }
 
   function test_WhenTheHookHasNoCode_TheClassIsNotIntactAndTheViewDoesNotRevert() external {
     address _token = _registered('alpha');
-    vm.mockCall(_token, abi.encodeCall(IPolicyGated.policyHook, ()), abi.encode(address(0)));
+    vm.mockCall(_token, abi.encodeCall(IPolicyGatedCore.policyHook, ()), abi.encode(address(0)));
     assertFalse(_fund.isClassIntact(_token));
     assertEq(_fund.firstBrokenClass(), _token);
-    vm.mockCall(_token, abi.encodeCall(IPolicyGated.policyHook, ()), abi.encode(makeAddr('no code')));
+    vm.mockCall(_token, abi.encodeCall(IPolicyGatedCore.policyHook, ()), abi.encode(makeAddr('no code')));
     assertFalse(_fund.isClassIntact(_token));
   }
 

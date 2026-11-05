@@ -59,7 +59,9 @@ contract IntentToken is IntentSettledUpgradeable {
     IComplianceRule[] memory _initialRules
   ) external initializer {
     _getIntentTokenStorage().decimals = _decimals;
-    __PolicyGatedERC20_init(_name, _symbol, _admin, _guardian, _registry, _hook, _initialRules);
+    __ERC20_init(_name, _symbol);
+    __ERC20Permit_init(_name);
+    __PolicyGatedCore_init(_admin, _guardian, _registry, _hook, _initialRules);
     __IntentSettled_init();
   }
 

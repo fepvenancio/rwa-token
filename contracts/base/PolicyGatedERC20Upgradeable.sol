@@ -1,73 +1,39 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import {AccessControlUpgradeable} from '@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol';
-import {UUPSUpgradeable} from '@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol';
 import {
   ERC20PermitUpgradeable
 } from '@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol';
-import {MulticallUpgradeable} from '@openzeppelin/contracts-upgradeable/utils/MulticallUpgradeable.sol';
-import {PausableUpgradeable} from '@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol';
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {IERC20Permit} from '@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol';
-import {ReentrancyGuardTransient} from '@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol';
 import {IERC165} from '@openzeppelin/contracts/utils/introspection/IERC165.sol';
 
 import {Reasons} from 'interfaces/Errors.sol';
 
-import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
-import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IERC7943Fungible} from 'interfaces/IERC7943Fungible.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
-import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
-import {ITemplated} from 'interfaces/ITemplated.sol';
+
+import {PolicyGatedCoreUpgradeable} from 'contracts/base/PolicyGatedCoreUpgradeable.sol';
 
 /**
  * @title PolicyGatedERC20Upgradeable
- * @notice Base for every gated template. Owns accounting, roles, the enforcement primitives (mint, burn, forced
- *         transfer, freeze, pause), the guardian and the hook pointer. Every policy decision is delegated to the hook
- *         through the single `_move` path; the base holds no business logic about who, where or when
+ * @notice Base for every fungible gated template. Owns accounting and the enforcement primitives that move amounts
+ *         (mint, burn, forced transfer, freeze) over the shared core, which holds the roles, pause, the guardian and the
+ *         hook pointer. Every policy decision is delegated to the hook through the single `_move` path; the base holds
+ *         no business logic about who, where or when
  * @dev DEFAULT_ADMIN_ROLE is the timelock and administers every role. GUARDIAN_ROLE can only stop things: it pauses,
  *      and cannot unpause, change the hook, grant roles or upgrade
  */
-abstract contract PolicyGatedERC20Upgradeable is
-  ERC20PermitUpgradeable,
-  AccessControlUpgradeable,
-  PausableUpgradeable,
-  MulticallUpgradeable,
-  UUPSUpgradeable,
-  ReentrancyGuardTransient,
-  IPolicyGated,
-  ITemplated
-{
+abstract contract PolicyGatedERC20Upgradeable is ERC20PermitUpgradeable, PolicyGatedCoreUpgradeable, IPolicyGated {
   /**
    * @notice ERC-7201 namespaced storage of the base
-   * @param registry The policy registry, fixed at initialization
-   * @param hook The current policy hook
    * @param frozen The absolute frozen amount of each account; it may exceed the balance (ERC-7943)
    * @custom:storage-location erc7201:gated.storage.PolicyGatedERC20
    */
   struct PolicyGatedStorage {
-    IPolicyRegistry registry;
-    IPolicyHook hook;
     mapping(address _user => uint256 _amount) frozen;
   }
-
-  /// @notice Role allowed to mint
-  bytes32 public constant MINTER_ROLE = keccak256('MINTER_ROLE');
-  /// @notice Role allowed to burn from any account
-  bytes32 public constant BURNER_ROLE = keccak256('BURNER_ROLE');
-  /// @notice Role allowed to force transfers and set frozen amounts
-  bytes32 public constant AGENT_ROLE = keccak256('AGENT_ROLE');
-  /// @notice Role allowed to pause, with no delay
-  bytes32 public constant GUARDIAN_ROLE = keccak256('GUARDIAN_ROLE');
-  /// @notice Role allowed to upgrade to an attested implementation
-  bytes32 public constant UPGRADER_ROLE = keccak256('UPGRADER_ROLE');
-
-  /// @notice Role of the recovery timelock: may only `unpause` and revoke GUARDIAN_ROLE, a path the guardian cannot
-  ///         cancel. Granted and revoked by DEFAULT_ADMIN_ROLE like any role
-  bytes32 public constant RECOVERY_ROLE = keccak256('RECOVERY_ROLE');
 
   /// @notice keccak256(abi.encode(uint256(keccak256('gated.storage.PolicyGatedERC20')) - 1)) & ~bytes32(uint256(0xff))
   bytes32 private constant _POLICY_GATED_STORAGE_LOCATION =
@@ -92,31 +58,6 @@ abstract contract PolicyGatedERC20Upgradeable is
   ) external virtual onlyRole(BURNER_ROLE) {
     _releaseFrozen(_from, _amount);
     _burn(_from, _amount);
-  }
-
-  /// @inheritdoc IPolicyGated
-  function pause() external onlyRole(GUARDIAN_ROLE) {
-    _pause();
-  }
-
-  /**
-   * @inheritdoc IPolicyGated
-   * @dev DEFAULT_ADMIN_ROLE (the main timelock) or RECOVERY_ROLE (the recovery timelock, which the guardian cannot
-   *      cancel). Anyone else gets the usual AccessControl error for DEFAULT_ADMIN_ROLE
-   */
-  function unpause() external {
-    address _sender = _msgSender();
-    if (!hasRole(DEFAULT_ADMIN_ROLE, _sender) && !hasRole(RECOVERY_ROLE, _sender)) {
-      revert AccessControlUnauthorizedAccount(_sender, DEFAULT_ADMIN_ROLE);
-    }
-    _unpause();
-  }
-
-  /// @inheritdoc IPolicyGated
-  function setPolicyHook(
-    address _newHook
-  ) external onlyRole(DEFAULT_ADMIN_ROLE) {
-    _setHook(_newHook);
   }
 
   /// @inheritdoc IPolicyGated
@@ -164,16 +105,6 @@ abstract contract PolicyGatedERC20Upgradeable is
     _allowed = _canTransfer(_from, _to, _amount, false) == Reasons.TRANSFER_OK;
   }
 
-  /// @inheritdoc IPolicyGated
-  function policyHook() external view returns (address _hook) {
-    _hook = address(_policyHook());
-  }
-
-  /// @inheritdoc IPolicyGated
-  function registry() external view returns (address _registry) {
-    _registry = address(_getPolicyGatedStorage().registry);
-  }
-
   /// @inheritdoc IERC7943Fungible
   function forcedTransfer(
     address _from,
@@ -200,23 +131,6 @@ abstract contract PolicyGatedERC20Upgradeable is
     _result = true;
   }
 
-  /**
-   * @inheritdoc AccessControlUpgradeable
-   * @dev RECOVERY_ROLE may revoke GUARDIAN_ROLE and nothing else; every other revocation needs the role's admin
-   */
-  function revokeRole(
-    bytes32 _role,
-    address _account
-  ) public override {
-    if (_role == GUARDIAN_ROLE && hasRole(RECOVERY_ROLE, _msgSender())) {
-      // _revokeRole returns false only if the role was not held; either way the account ends up without it.
-      // aderyn-ignore-next-line(unchecked-return)
-      _revokeRole(_role, _account);
-      return;
-    }
-    super.revokeRole(_role, _account);
-  }
-
   /// @inheritdoc IERC7943Fungible
   function getFrozenTokens(
     address _account
@@ -224,74 +138,13 @@ abstract contract PolicyGatedERC20Upgradeable is
     _amount = _getPolicyGatedStorage().frozen[_account];
   }
 
-  /// @inheritdoc AccessControlUpgradeable
+  /// @inheritdoc PolicyGatedCoreUpgradeable
   function supportsInterface(
     bytes4 _interfaceId
-  ) public view virtual override(AccessControlUpgradeable, IERC165) returns (bool _supported) {
+  ) public view virtual override(PolicyGatedCoreUpgradeable, IERC165) returns (bool _supported) {
     _supported = _interfaceId == type(IPolicyGated).interfaceId || _interfaceId == type(IERC7943Fungible).interfaceId
       || _interfaceId == type(IERC20).interfaceId || _interfaceId == type(IERC20Permit).interfaceId
       || super.supportsInterface(_interfaceId);
-  }
-
-  /// @inheritdoc ITemplated
-  function templateId() public pure virtual override returns (bytes32 _id);
-
-  /**
-   * @notice Initializes the base and its OpenZeppelin parents
-   * @param _name The token name, also the EIP-712 domain name
-   * @param _symbol The token symbol
-   * @param _admin The first admin, granted DEFAULT_ADMIN_ROLE: the operations account in a launch, which hands it to the timelock
-   * @param _guardian The guardian multisig, granted GUARDIAN_ROLE
-   * @param _registry The policy registry
-   * @param _hook The initial policy hook; must be attested as HOOK and name the same registry
-   * @param _initialRules The rule set installed on the hook for this token in the same call; empty installs none
-   */
-  // solhint-disable-next-line style-guide-casing
-  function __PolicyGatedERC20_init(
-    string memory _name,
-    string memory _symbol,
-    address _admin,
-    address _guardian,
-    address _registry,
-    address _hook,
-    IComplianceRule[] memory _initialRules
-  ) internal onlyInitializing {
-    __ERC20_init(_name, _symbol);
-    __ERC20Permit_init(_name);
-    __AccessControl_init();
-    __Pausable_init();
-    __Multicall_init();
-    __PolicyGatedERC20_init_unchained(_admin, _guardian, _registry, _hook, _initialRules);
-  }
-
-  /**
-   * @notice Initializes the base's own state
-   * @param _admin The first admin, granted DEFAULT_ADMIN_ROLE: the operations account in a launch, which hands it to the timelock
-   * @param _guardian The guardian multisig, granted GUARDIAN_ROLE
-   * @param _registry The policy registry
-   * @param _hook The initial policy hook; must be attested as HOOK and name the same registry
-   * @param _initialRules The rule set installed on the hook for this token in the same call; empty installs none
-   */
-  // solhint-disable-next-line style-guide-casing
-  function __PolicyGatedERC20_init_unchained(
-    address _admin,
-    address _guardian,
-    address _registry,
-    address _hook,
-    IComplianceRule[] memory _initialRules
-  ) internal onlyInitializing {
-    if (_admin == address(0) || _guardian == address(0) || _registry == address(0)) revert PolicyGated_ZeroAddress();
-    _getPolicyGatedStorage().registry = IPolicyRegistry(_registry);
-    // _grantRole returns false only if the role is already held; either way the account ends up holding it.
-    // aderyn-ignore-next-line(unchecked-return)
-    _grantRole(DEFAULT_ADMIN_ROLE, _admin);
-    // As above.
-    // aderyn-ignore-next-line(unchecked-return)
-    _grantRole(GUARDIAN_ROLE, _guardian);
-    _setHook(_hook);
-    // A shared hook accepts the rules of a token from the token itself, so the token is live with its policy as soon as
-    // it is initialised. Nothing to install means the hook's own state stands: no rules, every movement rejected.
-    if (_initialRules.length != 0) IComplianceHook(_hook).setRules(address(this), _initialRules);
   }
 
   /**
@@ -430,23 +283,6 @@ abstract contract PolicyGatedERC20Upgradeable is
   }
 
   /**
-   * @notice Authorizes a UUPS upgrade
-   * @dev Only UPGRADER_ROLE; the new implementation must be attested as IMPLEMENTATION and must belong to the same
-   *      template: an implementation that reports another template id, or none, is refused
-   * @param _newImplementation The new implementation
-   */
-  function _authorizeUpgrade(
-    address _newImplementation
-  ) internal view override onlyRole(UPGRADER_ROLE) {
-    if (!_getPolicyGatedStorage().registry.isAttested(_newImplementation, IPolicyRegistry.AttestKind.IMPLEMENTATION)) {
-      revert PolicyGated_NotAttested(_newImplementation, IPolicyRegistry.AttestKind.IMPLEMENTATION);
-    }
-    bytes32 _expected = templateId();
-    bytes32 _actual = ITemplated(_newImplementation).templateId();
-    if (_actual != _expected) revert Templated_WrongTemplate(_newImplementation, _expected, _actual);
-  }
-
-  /**
    * @notice The pre-flight behind `canTransferWithReason`, shared with templates (e.g. vault `max*`)
    * @dev Simulates a holder-driven movement: the operator is `_from`, or the caller for a mint. Every shortfall counts
    * @param _from The sender, or address(0) for a mint
@@ -545,14 +381,6 @@ abstract contract PolicyGatedERC20Upgradeable is
   }
 
   /**
-   * @notice The current policy hook
-   * @return _hook The hook
-   */
-  function _policyHook() internal view returns (IPolicyHook _hook) {
-    _hook = _getPolicyGatedStorage().hook;
-  }
-
-  /**
    * @notice Builds a movement context for this token
    * @param _from The sender
    * @param _to The receiver
@@ -588,63 +416,6 @@ abstract contract PolicyGatedERC20Upgradeable is
         ? abi.encode(_fromBalance, _toBalance, _ref, _deadline)
         : abi.encode(_fromBalance, _toBalance)
     });
-  }
-
-  /**
-   * @notice Infers MINT, BURN or TRANSFER from the addresses
-   * @param _from The sender
-   * @param _to The receiver
-   * @return _kind The inferred kind
-   */
-  function _inferKind(
-    address _from,
-    address _to
-  ) internal pure returns (IPolicyHook.TransferKind _kind) {
-    if (_from == address(0)) return IPolicyHook.TransferKind.MINT;
-    if (_to == address(0)) return IPolicyHook.TransferKind.BURN;
-    _kind = IPolicyHook.TransferKind.TRANSFER;
-  }
-
-  /**
-   * @notice Installs a hook after checking its attestation
-   * @param _newHook The new hook
-   */
-  function _setHook(
-    address _newHook
-  ) private {
-    if (_newHook == address(0)) revert PolicyGated_ZeroAddress();
-    PolicyGatedStorage storage $ = _getPolicyGatedStorage();
-    if (!$.registry.isAttested(_newHook, IPolicyRegistry.AttestKind.HOOK)) {
-      revert PolicyGated_NotAttested(_newHook, IPolicyRegistry.AttestKind.HOOK);
-    }
-    // A hook shared by several tokens vets their rules against its own registry, so it must be the token's.
-    address _hookRegistry = address(IComplianceHook(_newHook).REGISTRY());
-    if (_hookRegistry != address($.registry)) {
-      revert PolicyGated_HookRegistryMismatch(_hookRegistry, address($.registry));
-    }
-    address _oldHook = address($.hook);
-    $.hook = IPolicyHook(_newHook);
-    emit PolicyHookChanged(_oldHook, _newHook);
-  }
-
-  /**
-   * @notice Whether the hook lets an account send, or receive, at all; the account-level question of ERC-7943
-   * @dev False while paused and when the token has no hook. Never reverts of its own: a reverting hook or rule, which
-   *      attested ones do not, would revert it
-   * @param _account The account
-   * @param _sending True to ask about sending, false about receiving
-   * @return _allowed True if the account may
-   */
-  function _accountAllowed(
-    address _account,
-    bool _sending
-  ) private view returns (bool _allowed) {
-    IPolicyHook _hook = _policyHook();
-    if (paused() || address(_hook) == address(0)) return false;
-    bytes32 _reason = _sending ? _hook.checkSend(address(this), _account) : _hook.checkReceive(address(this), _account);
-    // Compares a reason code with a constant, not a balance.
-    // slither-disable-next-line incorrect-equality
-    _allowed = _reason == Reasons.TRANSFER_OK;
   }
 
   /**

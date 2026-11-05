@@ -12,6 +12,7 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IFund} from 'interfaces/IFund.sol';
 import {IFundHoldersRule} from 'interfaces/IFundHoldersRule.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
+import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 
@@ -39,7 +40,7 @@ contract FundHoldersRuleUnitTest is Helpers {
     _fund = _mockContract('fund');
     _token = _mockContract('token');
     vm.etch(_hook, hex'01');
-    vm.mockCall(_token, abi.encodeCall(IPolicyGated.policyHook, ()), abi.encode(_hook));
+    vm.mockCall(_token, abi.encodeCall(IPolicyGatedCore.policyHook, ()), abi.encode(_hook));
     _rule = new FundHoldersRule(IFund(_fund));
   }
 
@@ -603,7 +604,7 @@ contract FundHoldersRuleGate is Helpers {
     vm.mockCall(
       _realClass, abi.encodeCall(IERC165.supportsInterface, (type(IPolicyGated).interfaceId)), abi.encode(true)
     );
-    vm.mockCall(_realClass, abi.encodeCall(IPolicyGated.policyHook, ()), abi.encode(_realHook));
+    vm.mockCall(_realClass, abi.encodeCall(IPolicyGatedCore.policyHook, ()), abi.encode(_realHook));
     vm.mockCall(_realClass, abi.encodeCall(IERC20.totalSupply, ()), abi.encode(0));
     IComplianceRule[] memory _list = new IComplianceRule[](1);
     _list[0] = _rule;
@@ -612,7 +613,7 @@ contract FundHoldersRuleGate is Helpers {
 
     // A token nobody registered, whose "hook" is the attacker.
     _fake = _mockContract('fake');
-    vm.mockCall(_fake, abi.encodeCall(IPolicyGated.policyHook, ()), abi.encode(_attacker));
+    vm.mockCall(_fake, abi.encodeCall(IPolicyGatedCore.policyHook, ()), abi.encode(_attacker));
   }
 
   function _ctx(
