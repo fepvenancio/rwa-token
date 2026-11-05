@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PolicyGatedCoreUpgradeable · Gated Token Stack</title>
+<meta name="description" content="What every gated template shares, whatever it counts: the roles, the guardian and the recovery path, the pause, the hook pointer, the registry and the upgrade checks.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="../index.html">Gated Token Stack</a>
+  <a href="../index.html">Overview</a>
+  <a href="../index.html#contracts">Contracts</a>
+  <a href="../roles.html">Who can do what</a>
+  <a href="../movement.html">One movement</a>
+  <a href="../deployment.html">Deployment and governance</a>
+  <a href="../money.html">Where the money sits</a>
+</nav>
+<main class="page">
+
+<header class="top">
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Token</div>
+  <h1 class="wrap-any">PolicyGatedCoreUpgradeable</h1>
+  <p class="lede">The part of every template that does not depend on what the token counts. It holds the roles, the guardian and the recovery path, the pause, the hook pointer and the upgrade checks, so the fungible templates and the NFT run the same code for them.</p>
+  <div class="facts">
+    <span class="fact"><b>contracts/base/PolicyGatedCoreUpgradeable.sol</b></span>
+    <span class="fact">abstract: <b>runs inside each token</b>, behind its proxy</span>
+    <span class="fact">extended by <b>PolicyGatedERC20Upgradeable</b> and <b>Gated721</b></span>
+    <span class="fact">attested as part of <b>each template implementation</b></span>
+  </div>
+</header>
+
+<section id="in-one-minute">
+  <div class="callout wrap-any">
+    <h3>In one minute</h3>
+    <p>Every token in the stack has the same governance: a timelock that administers the roles, a guardian that can only stop things, a recovery timelock the guardian cannot block, one attested hook, and upgrades only to reviewed code of the same template. That code lives here, once. <a href="PolicyGatedERC20Upgradeable.html"><code>PolicyGatedERC20Upgradeable</code></a>, the base of the four fungible templates, extends it with balances and frozen amounts. <a href="Gated721.html"><code>Gated721</code></a> extends it with tokens and a freeze per token.</p>
+    <p>The core moves nothing itself. Each template has its own movement path, which reads the hook from here and asks it about every movement. A fix to the core reaches each template through that template's own attested upgrade.</p>
+  </div>
+</section>
+
+<section id="split">
+  <div class="prose wrap-any">
+    <h2>What is in the core, and what each template adds</h2>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th></th><th>The core</th><th><code>PolicyGatedERC20Upgradeable</code></th><th><code>Gated721</code></th></tr></thead>
+      <tbody>
+        <tr><td>What is counted</td><td>Nothing</td><td>Balances and a supply (ERC-20, with <code>permit</code>)</td><td>Tokens, each with an owner and a metadata URI (ERC-721)</td></tr>
+        <tr><td>Roles</td><td>The six role ids, <code>revokeRole</code> with the recovery exception, and OpenZeppelin <code>AccessControl</code></td><td colspan="2">The core's</td></tr>
+        <tr><td>Pause</td><td><code>pause</code> by the guardian, <code>unpause</code> by either timelock</td><td colspan="2">The core's; each template's own path decides what a pause refuses</td></tr>
+        <tr><td>Hook and registry</td><td>The hook pointer, <code>setPolicyHook</code> with its checks, and the registry fixed at setup</td><td colspan="2">The core's</td></tr>
+        <tr><td>Upgrades</td><td><code>_authorizeUpgrade</code>: the role, the attestation and the template id</td><td colspan="2">The core's; each template names its own <code>templateId()</code></td></tr>
+        <tr><td>Account answers</td><td>The logic behind <code>canSend</code> and <code>canReceive</code></td><td colspan="2">Each declares the two functions, as both ERC-7943 interfaces do, and calls the core</td></tr>
+        <tr><td>Freezes</td><td>None</td><td>An amount per account</td><td>A yes or no per account and token</td></tr>
+        <tr><td>Movement path and pre-flights</td><td>None</td><td><code>_move</code>, <code>canTransfer</code>, <code>canTransferWithReason</code></td><td>Its own <code>_move</code> and pre-flights</td></tr>
+        <tr><td>Issuance and enforcement</td><td>None</td><td><code>mint(to, amount)</code>, <code>burn(from, amount)</code>, <code>forcedTransfer</code>, <code>setFrozenTokens</code></td><td><code>mint(to, tokenId, uri)</code>, <code>burn(tokenId)</code>, <code>forcedTransfer</code>, <code>setFrozenTokens</code>, <code>setTokenURI</code></td></tr>
+        <tr><td>Interfaces it reports</td><td><code>IPolicyGatedCore</code> (<code>0xcc8e18aa</code>), <code>IAccessControl</code>, <code>IERC165</code></td><td>Adds <code>IPolicyGated</code>, <code>IERC7943Fungible</code> (<code>0x3edbb4c4</code>), <code>IERC20</code>, <code>IERC20Permit</code></td><td>Adds <code>IGated721</code>, <code>IERC7943NonFungible</code> (<code>0xbf1ef5fe</code>), ERC-721, its metadata extension, and ERC-4906</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose wrap-any">
+    <p><code>IPolicyGated</code> and <code>IGated721</code> both inherit <code>IPolicyGatedCore</code>. So <code>PolicyHookChanged</code> and the errors <code>PolicyGated_NotAttested</code>, <code>PolicyGated_HookRegistryMismatch</code>, <code>PolicyGated_TransferRejected</code> and <code>PolicyGated_ZeroAddress</code> have the same topic and selectors on every template, and an integrator decodes them the same way.</p>
+  </div>
+</section>
+
+<section id="setup">
+  <div class="prose wrap-any">
+    <h2>Setup</h2>
+    <p>A template's <code>initialize</code> first sets up its token parent, then calls <code>__PolicyGatedCore_init(admin, guardian, registry, hook, rules)</code>. That function sets up OpenZeppelin's <code>AccessControl</code>, <code>Pausable</code> and <code>Multicall</code>, then the core's own state:</p>
+  </div>
+  <ol class="steps wrap-any">
+    <li><div>A zero <code>admin</code>, <code>guardian</code> or <code>registry</code> reverts with <code>PolicyGated_ZeroAddress</code>.</div></li>
+    <li><div>The registry is stored. There is no setter, so it is fixed from here on.</div></li>
+    <li><div><code>DEFAULT_ADMIN_ROLE</code> goes to <code>admin</code>, the operations account in a launch, which later hands it to the main timelock. <code>GUARDIAN_ROLE</code> goes to <code>guardian</code>.</div></li>
+    <li><div>The hook is installed with the checks of <a href="#hook">Replacing the hook</a>, and <code>PolicyHookChanged(0, hook)</code> is emitted.</div></li>
+    <li><div>If the rule list is not empty, the token calls <code>setRules(token, rules)</code> on the hook, so it is live with its policy from the transaction that creates it. An empty list installs none, and the hook then refuses every movement.</div></li>
+  </ol>
+  <div class="prose wrap-any">
+    <p><code>Gated4626Vault</code> calls the parents' setup functions one by one, because ERC-4626's setup sits between ERC-20's and <code>permit</code>'s, and ends with <code>__PolicyGatedCore_init_unchained</code>, the last step above alone. <code>npm run validate:upgrades</code> fails on a missing or repeated parent setup call, and warns on one out of order.</p>
+  </div>
+</section>
+
+<section id="roles">
+  <div class="prose wrap-any">
+    <h2>Roles, the guardian and recovery</h2>
+    <p>No role has an admin of its own, so <code>DEFAULT_ADMIN_ROLE</code> grants and revokes every role; after hand-over that is the main timelock. The table gives what the core itself gates. Each template gates its own functions with the same ids.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Role</th><th>In the core</th><th>In the templates</th></tr></thead>
+      <tbody>
+        <tr><td><code>DEFAULT_ADMIN_ROLE</code></td><td>Grant and revoke roles, <code>setPolicyHook</code>, <code>unpause</code></td><td>The hook and the rules ask a token whether a caller holds it before they accept that token's rule list or settings. On <code>Gated4626Vault</code> it also plugs a portfolio and a fee model and raises the rate limit, and a vault's portfolio, guarded accounts and desk ask the vault for it</td></tr>
+        <tr><td><code>GUARDIAN_ROLE</code></td><td><code>pause</code>, at once, and nothing else here</td><td><code>Gated4626Vault</code> also lets it lower the rate limit</td></tr>
+        <tr><td><code>RECOVERY_ROLE</code></td><td>Exactly <code>unpause</code> and <code>revokeRole(GUARDIAN_ROLE, account)</code></td><td>Nothing more</td></tr>
+        <tr><td><code>UPGRADER_ROLE</code></td><td>Upgrades, to attested code of the same template</td><td>Nothing more</td></tr>
+        <tr><td><code>AGENT_ROLE</code>, <code>MINTER_ROLE</code>, <code>BURNER_ROLE</code></td><td>Defined here, gate nothing here</td><td>Forced transfers and freezes, mint, burn, and on <code>Gated721</code> the metadata URI. On <code>Gated7540Vault</code> the agent also rejects and recovers requests. <a href="../roles.html#tokens">Who can do what</a> lists every function</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose wrap-any">
+    <p><b>The guardian can only stop things.</b> It cannot unpause, change the hook, grant a role or upgrade. <b>The recovery timelock</b> exists because a guardian that cancels governance operations could cancel its own removal: <code>revokeRole</code> lets a <code>RECOVERY_ROLE</code> holder revoke <code>GUARDIAN_ROLE</code>, passes every other revocation to the role's admin, and <code>unpause</code> accepts it beside the admin. The tests pin it on both families: <code>test_WhenRecoveryRevokesAnyOtherRole_ItReverts</code> on the ERC-20 base and <code>test_WhenTheRecoveryTimelockRevokesTheGuardian_ItCanRevokeNothingElse</code> on <code>Gated721</code>. See <a href="../roles.html">Who can do what</a>.</p>
+  </div>
+</section>
+
+<section id="hook">
+  <div class="prose wrap-any">
+    <h2>Replacing the hook</h2>
+    <p><code>setPolicyHook(_newHook)</code> needs <code>DEFAULT_ADMIN_ROLE</code>. The hook must not be zero (<code>PolicyGated_ZeroAddress</code>), its code hash must be attested as <code>HOOK</code> in the token's registry (<code>PolicyGated_NotAttested</code>), and it must name the same registry (<code>PolicyGated_HookRegistryMismatch</code>), because a hook shared by several tokens checks their rules against its own registry. The swap does not copy the token's rule list: the timelock sets it on the new hook with <code>setRules</code>, and until then that hook refuses the token's movements with <code>NO_RULES</code>.</p>
+    <p>Each template's movement path reads the hook once per movement, so the hook that approves a movement is the one that sees its <code>afterTransfer</code>.</p>
+  </div>
+</section>
+
+<section id="upgrades">
+  <div class="prose wrap-any">
+    <h2>Upgrades</h2>
+    <p>Each token is a UUPS proxy. <code>_authorizeUpgrade</code> checks, in order: the caller holds <code>UPGRADER_ROLE</code>; the target's code hash is attested as <code>IMPLEMENTATION</code> (<code>PolicyGated_NotAttested</code>); and the target reports the same <code>templateId()</code> (<code>Templated_WrongTemplate</code>). So a <code>Gated721</code> cannot be moved onto a fungible template's code even when that code is attested (<code>test_WhenTheImplementationIsAnotherTemplate_TheUpgradeIsRefused</code>), and the reverse holds too. OpenZeppelin then checks that the target is a UUPS implementation and emits <code>Upgraded</code>.</p>
+  </div>
+</section>
+
+<section id="functions">
+  <div class="prose wrap-any"><h2>What it can do</h2></div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>pause()</code></td><td><code>GUARDIAN_ROLE</code></td><td>Pauses the token. Each template's movement path then refuses every kind except <span class="k k-forced">FORCED</span>, and a template can refuse other functions while paused too, such as a vault's settlement, its fee collection or a 7540 claim. See <a href="../roles.html#pause">what a pause leaves possible</a>.</td></tr>
+        <tr><td><code>unpause()</code></td><td><code>DEFAULT_ADMIN_ROLE</code> or <code>RECOVERY_ROLE</code></td><td>Lifts the pause. Anyone else gets <code>AccessControlUnauthorizedAccount(caller, DEFAULT_ADMIN_ROLE)</code>.</td></tr>
+        <tr><td><code>setPolicyHook(_newHook)</code></td><td><code>DEFAULT_ADMIN_ROLE</code></td><td>Replaces the hook after the checks above.</td></tr>
+        <tr><td><code>policyHook()</code>, <code>registry()</code></td><td>Anyone (read-only)</td><td>The current hook, and the registry fixed at setup.</td></tr>
+        <tr><td><code>revokeRole(role, account)</code></td><td>The role's admin; <code>RECOVERY_ROLE</code> for <code>GUARDIAN_ROLE</code></td><td>OpenZeppelin's, with the recovery exception. <code>grantRole</code>, <code>renounceRole</code>, <code>hasRole</code> and <code>getRoleAdmin</code> are OpenZeppelin's.</td></tr>
+        <tr><td><code>upgradeToAndCall(newImplementation, data)</code></td><td><code>UPGRADER_ROLE</code></td><td>Points the proxy at other code, after the checks above.</td></tr>
+        <tr><td><code>multicall(data)</code></td><td>Anyone; each inner call keeps the caller's roles</td><td>Several calls on the token in one transaction, all or none. Not payable.</td></tr>
+        <tr><td><code>supportsInterface(interfaceId)</code></td><td>Anyone (read-only)</td><td>True for <code>IPolicyGatedCore</code>, <code>IAccessControl</code> and <code>IERC165</code>; each template adds its own.</td></tr>
+        <tr><td><code>templateId()</code></td><td>Anyone (read-only)</td><td>Declared here, defined by each template: <code>keccak256</code> of its name.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Event or error</th><th>When</th></tr></thead>
+      <tbody>
+        <tr><td><code>PolicyHookChanged(_oldHook, _newHook)</code></td><td>At setup, with <code>_oldHook</code> zero, and on <code>setPolicyHook</code></td></tr>
+        <tr><td><code>Paused</code>, <code>Unpaused</code>, <code>RoleGranted</code>, <code>RoleRevoked</code>, <code>Upgraded</code></td><td>OpenZeppelin's events</td></tr>
+        <tr><td><code>PolicyGated_ZeroAddress()</code></td><td>A zero admin, guardian, registry or hook at setup, or a zero hook in <code>setPolicyHook</code></td></tr>
+        <tr><td><code>PolicyGated_NotAttested(target, kind)</code></td><td>A hook not attested as <code>HOOK</code>, or an upgrade target not attested as <code>IMPLEMENTATION</code></td></tr>
+        <tr><td><code>PolicyGated_HookRegistryMismatch(_hookRegistry, _tokenRegistry)</code></td><td>A hook that names another registry</td></tr>
+        <tr><td><code>PolicyGated_TransferRejected(reason)</code></td><td>Declared here; each template's movement path reverts with it when the pause or the hook refuses</td></tr>
+        <tr><td><code>Templated_WrongTemplate(newImplementation, expected, actual)</code></td><td>An upgrade target of another template</td></tr>
+        <tr><td><code>AccessControlUnauthorizedAccount</code>, <code>EnforcedPause</code>, <code>ExpectedPause</code>, <code>InvalidInitialization</code></td><td>OpenZeppelin's errors for a missing role, a pause while paused, an unpause while not paused, and a second setup</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="why">
+  <div class="prose wrap-any">
+    <h2>Why it is built this way</h2>
+    <ul class="plain wrap-any">
+      <li><b>One copy of the governance code.</b> The paths that let the guardian stop things and the recovery timelock undo it are the ones an attacker would aim at. Keeping them in one contract means one review, and a fix that every template takes.</li>
+      <li><b>The movement path stays in the template.</b> What a movement is differs: an amount with a frozen part, or one token with a yes or no freeze. Each template builds its own context and checks, and asks the one hook the core points to.</li>
+      <li><b>Namespaced storage.</b> The registry and the hook pointer live in the core's ERC-7201 namespace, <code>gated.storage.PolicyGatedCore</code>. The frozen amounts live in <code>gated.storage.PolicyGatedERC20</code>, and the NFT's freezes in <code>gated.storage.Gated721</code>.</li>
+      <li><b>The registry is asked at install time.</b> A hook is checked when it is installed, an implementation when it is upgraded to. A later withdrawal of an attestation does not change a running token: governance removes the component, and the guardian can pause meanwhile.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="prose wrap-any">
+    <h2>What it does not do</h2>
+    <ul class="plain wrap-any">
+      <li><b>It cannot be deployed on its own.</b> It is abstract: there is no core proxy, only templates that contain it.</li>
+      <li><b>It holds no policy.</b> Who may hold a token, and when, is the hook's rules. The core only knows which hook to ask.</li>
+      <li><b>It does not look at who holds a role.</b> A single key can hold any role unless the deployment's checks refuse it. See <a href="../deployment.html">Deployment and governance</a>.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="connected">
+  <div class="prose wrap-any"><h2>Connected to</h2></div>
+  <div class="cards">
+    <a class="card" href="PolicyGatedERC20Upgradeable.html"><span class="name">PolicyGatedERC20Upgradeable</span><p>The fungible base built on the core.</p></a>
+    <a class="card" href="Gated721.html"><span class="name">Gated721</span><p>The NFT template built on the core.</p></a>
+    <a class="card" href="ComplianceHook.html"><span class="name">ComplianceHook</span><p>The hook the core points to.</p></a>
+    <a class="card" href="PolicyRegistry.html"><span class="name">PolicyRegistry</span><p>Asked when a hook or an implementation is installed.</p></a>
+    <a class="card" href="GovernanceTimelock.html"><span class="name">GovernanceTimelock</span><p>Both timelocks that administer the roles.</p></a>
+    <a class="card" href="../roles.html"><span class="name">Who can do what</span><p>Every role holder after hand-over.</p></a>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose wrap-any">
+    <h2>Source and tests</h2>
+    <ul class="plain wrap-any">
+      <li>Contract: <code>contracts/base/PolicyGatedCoreUpgradeable.sol</code>; interfaces <code>IPolicyGatedCore.sol</code>, <code>ITemplated.sol</code></li>
+      <li>Tests: through each template, in <code>PolicyGatedERC20Upgradeable.t.sol</code> (role gates, the guardian and recovery, the hook checks, upgrades, multicall) and <code>Gated721.t.sol</code> (the same for the NFT); the ids are pinned in <code>InterfaceFreeze.t.sol</code></li>
+    </ul>
+  </div>
+</section>
+
+<footer>Describes the contracts at commit <code>9526fc7</code> on <code>main</code>.</footer>
+</main>
+</body>
+</html>

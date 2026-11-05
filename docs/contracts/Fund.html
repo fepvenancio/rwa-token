@@ -160,7 +160,7 @@
 <section id="register">
   <div class="prose">
     <h2>Registering a class</h2>
-    <p>Four conditions decide whether a token can become a class: the caller is the owner, the token reports ERC-165 support for <code>IPolicyGated</code>, the interface of a gated token, its current hook lists the fund's installed rule, and its total supply is zero. <code>registerClass(token)</code> runs them with the housekeeping checks, in this order:</p>
+    <p>Four conditions decide whether a token can become a class: the caller is the owner, the token reports ERC-165 support for <code>IPolicyGated</code>, the interface of a fungible gated token (a <code>Gated721</code> does not report it), its current hook lists the fund's installed rule, and its total supply is zero. <code>registerClass(token)</code> runs them with the housekeeping checks, in this order:</p>
   </div>
   <ol class="steps">
     <li><div>The caller is the owner (<code>OwnableUnauthorizedAccount</code>).</div></li>
@@ -344,7 +344,7 @@
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>ce7c6c4</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>9526fc7</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>
