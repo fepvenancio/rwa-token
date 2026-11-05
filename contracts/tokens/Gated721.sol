@@ -276,7 +276,9 @@ contract Gated721 is ERC721URIStorageUpgradeable, PolicyGatedCoreUpgradeable, IG
 
   /**
    * @notice The pre-flight behind `canTransfer` and `canTransferWithReason`
-   * @dev Simulates a holder-driven movement: the operator is `_from`, or the caller for a mint
+   * @dev A transfer is simulated as one by its owner, so the operator is `_from`. A mint and a burn are driven only by
+   *      a role holder, so their operator is the caller, whose role is not judged: asked by the burner, a burn's
+   *      pre-flight answers for `burn`, which takes a frozen token and passes a holder's lockup
    * @param _from The sender, or address(0) for a mint
    * @param _to The receiver, or address(0) for a burn
    * @param _tokenId The token
@@ -292,7 +294,7 @@ contract Gated721 is ERC721URIStorageUpgradeable, PolicyGatedCoreUpgradeable, IG
     // A mint to the zero address cannot happen, so the hook is not asked about one.
     if (_from == address(0) && _to == address(0)) return Reasons.ZERO_RECEIVER;
     if (_ownershipCounts && _ownerOf(_tokenId) != _from) return Reasons.NOT_TOKEN_OWNER;
-    address _operator = _from == address(0) ? _msgSender() : _from;
+    address _operator = _from == address(0) || _to == address(0) ? _msgSender() : _from;
     _reason = _check(_context(_from, _to, _tokenId, _operator, _inferKind(_from, _to)), _policyHook());
   }
 

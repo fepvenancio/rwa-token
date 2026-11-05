@@ -67,9 +67,10 @@ interface IGated721 is IERC7943NonFungible, IPolicyGatedCore {
   /**
    * @notice Pre-flight for a plain transfer by `_from`, a mint (`_from` == 0) or a burn (`_to` == 0), with the reason
    * @dev Runs the same checks and hook call as the state-changing path, minus the write. The operator in the context is
-   *      `_from`, or the caller for a mint. A burn is simulated as one by the owner, so a frozen token counts unless
-   *      `_from` holds BURNER_ROLE. Unlike `canTransfer`, ownership counts: `NOT_TOKEN_OWNER` when `_from` is not the
-   *      token's owner, which for a mint means the token exists. Approval is not judged
+   *      `_from` for a transfer, and the caller for a mint or a burn, which only a role holder drives; the caller's role
+   *      is not judged, so a burn is asked about from the burner's address, and then a frozen token or a holder's
+   *      lockup does not stop it, as it does not stop `burn`. Unlike `canTransfer`, ownership counts: `NOT_TOKEN_OWNER`
+   *      when `_from` is not the token's owner, which for a mint means the token exists. Approval is not judged
    * @param _from The sender, or address(0) for a mint
    * @param _to The receiver, or address(0) for a burn
    * @param _tokenId The token

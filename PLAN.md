@@ -3819,6 +3819,16 @@ Checks: `npx hardhat test` `1973 passing (1794 solidity, 179 nodejs)`; lint, for
 
 Left: the HTML pages for the core and `Gated721`, pinned to the merged commit, in their own pull request.
 
+### Outside review of `Gated721` (2026-11-05)
+
+The owner passed on three findings and said to fix the first.
+
+1. **Burn pre-flight: fixed.** `_canTransfer` took the sender as a burn's operator, as the ERC-20 base does, where holders and vaults burn their own shares. The NFT has no holder burn, so the burner's pre-flight about a frozen or locked holder's token said `INSUFFICIENT_UNFROZEN` or `LOCKED` while `burn` succeeded. A burn's operator is now the caller, as a mint's is, and the caller's role is not judged, as for a mint. Asked from the burner's address, the pre-flight agrees with `burn`. The ERC-20 base is unchanged: the vaults' `maxRedeem` asks about a holder's own burn. NatSpec only in `IGated721`; its id did not move. Tests first: 3 failing, among them a new fuzz of the burn pre-flight against `burn`.
+2. **Balance rules on the NFT: no change.** The context carries `amount = 1` and the balances in `extra`, and `MinPositionRule` compares before it subtracts, so nothing underflows. What holds is that only the profile check refuses `MinPositionRule`, `FundHoldersRule` and `SupplyCapRule` on a `Gated721`; a timelock `setRules` could still list them. The first then counts tokens, the second refuses every movement with `NOT_FUND_CLASS`, and the third reverts every mint and its pre-flight, as the NFT has no `totalSupply`. Each fails closed or means nothing.
+3. **`IPolicyGated` casts in `BaseRule` and `ProxyDeployer`: not changed.** The selectors are those of `IPolicyGatedCore`, so behaviour is the same, and changing the source would change every rule's codehash for readability alone.
+
+Checks: `npx hardhat test` `1975 passing (1796 solidity, 179 nodejs)`; lint, format and types; `validate:upgrades` 6 of 6; Slither 0; Aderyn 0; Halmos 22 of 22; `verify:reproducible` 31 contracts. `Gated721` is 15,639 bytes.
+
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
 2. Credential layer: none left. On 2026-10-30 the owner confirmed decisions 11, 12, 13, 15, 16 and 17 as built (17 at the measured +8,179 gas on a transfer). Decision 14 is moot, since `IdentityRule` was removed in the cleanup. Decisions 8 and 9 are recorded in the credential section's table.

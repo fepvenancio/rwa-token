@@ -674,16 +674,34 @@ contract Gated721Unit_Preflight is Gated721UnitTest {
     assertEq(_reason, Reasons.ZERO_RECEIVER);
   }
 
-  function test_WhenABurnOfAFrozenTokenIsAskedAbout_ItCountsUnlessTheSenderIsTheBurner() external {
+  /// @dev The only burn is the burner's, so a burn's operator is the caller, as a mint's is: asked by the burner, the
+  ///      pre-flight answers for `burn`, which takes a frozen token
+  function test_WhenTheBurnerAsksAboutBurningAFrozenToken_ThePreflightAgreesWithTheBurn() external {
     _freeze(_alice, _ID);
+    vm.expectCall(
+      _hook,
+      abi.encodeCall(
+        IPolicyHook.beforeTransfer, (_ctx(_alice, address(0), _ID, _burner, IPolicyHook.TransferKind.BURN))
+      )
+    );
+    vm.prank(_burner);
+    (bool _ok, bytes32 _reason) = _token.canTransferWithReason(_alice, address(0), _ID);
+    assertTrue(_ok);
+    assertEq(_reason, Reasons.TRANSFER_OK);
+    vm.prank(_burner);
+    assertTrue(_token.canTransfer(_alice, address(0), _ID));
+
+    vm.prank(_burner);
+    _token.burn(_ID);
+  }
+
+  /// @dev As for a mint, the caller's role is not judged: asked by an account without BURNER_ROLE, the pre-flight
+  ///      models a burn that account drives, which a frozen token stops
+  function test_WhenAnAccountWithoutTheRoleAsksAboutBurningAFrozenToken_TheFreezeCounts() external {
+    _freeze(_alice, _ID);
+    vm.prank(_alice);
     (, bytes32 _reason) = _token.canTransferWithReason(_alice, address(0), _ID);
     assertEq(_reason, Reasons.INSUFFICIENT_UNFROZEN);
-
-    vm.prank(_agent);
-    _token.forcedTransfer(_alice, _burner, _ID);
-    _freeze(_burner, _ID);
-    (bool _ok,) = _token.canTransferWithReason(_burner, address(0), _ID);
-    assertTrue(_ok);
   }
 
   function test_WhenTheTokenHasNoHook_TheAnswersAreNoHookAndFalse() external {
@@ -703,6 +721,27 @@ contract Gated721Unit_Preflight is Gated721UnitTest {
     _hookAccountChecksDecide(Reasons.TRANSFER_OK, Reasons.TRANSFER_OK);
     assertTrue(_token.canSend(_alice));
     assertTrue(_token.canReceive(_bob));
+  }
+
+  /// @dev Asked by the burner, the burn pre-flight agrees with `burn` for any freeze, pause and hook answer
+  function testFuzz_TheBurnPreflightAgreesWithTheBurn(
+    bool _frozen,
+    bool _paused,
+    uint256 _reasonSeed
+  ) external {
+    bytes32[3] memory _answers = [Reasons.TRANSFER_OK, Reasons.LOCKED, Reasons.SENDER_FROZEN];
+    _hookDecides(_answers[bound(_reasonSeed, 0, 2)]);
+    if (_frozen) _freeze(_alice, _ID);
+    if (_paused) {
+      vm.prank(_guardian);
+      _token.pause();
+    }
+
+    vm.prank(_burner);
+    (bool _ok,) = _token.canTransferWithReason(_alice, address(0), _ID);
+    vm.prank(_burner);
+    (bool _wrote,) = address(_token).call(abi.encodeCall(Gated721.burn, (_ID)));
+    assertEq(_wrote, _ok);
   }
 
   /// @dev Pre-flight never lies: for any owner, freeze, pause and hook answer, it agrees with the write
@@ -1087,6 +1126,12 @@ contract Gated721Integration_Rules is Gated721IntegrationTest {
   function test_WhenTheHolderIsLocked_TheBurnerCanStillBurn() external {
     vm.prank(_agent);
     _restrictionRule.setLockup(address(_nft), _alice, block.timestamp + 30 days);
+    vm.prank(_burner);
+    (bool _ok,) = _nft.canTransferWithReason(_alice, address(0), _ID);
+    assertTrue(_ok, 'the burner is the operator of the burn it asks about');
+    vm.prank(_alice);
+    (, bytes32 _reason) = _nft.canTransferWithReason(_alice, address(0), _ID);
+    assertEq(_reason, Reasons.LOCKED);
     vm.prank(_burner);
     _nft.burn(_ID);
     assertEq(_nft.balanceOf(_alice), 0);
