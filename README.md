@@ -49,7 +49,7 @@ Distributor (one per token, immutable)           pays holders from an approved, 
 
 | Path | Contents |
 |---|---|
-| `contracts/interfaces/` | Frozen ABI: `IPolicyGatedCore`, `IPolicyGated`, `IERC7943Fungible`, `IERC7943NonFungible`, `IGated721`, `ITemplated`, `IPolicyHook`, `IComplianceRule`, `IComplianceHook`, `IPolicyRegistry`, `ITransferIntent`, `IIntentExecutor`, `IIntentExecutorBatch`, `IDvPExecutor`, `IERC3009`, `IIdentityRegistry`, `ICredentialRegistry`, `ICredentialRule`, `Quals`, `IMinPositionRule`, `IHolderRestrictionRule`, `ISettlementWindowRule`, `IFund`, `IFundHoldersRule`, `IProxyDeployer`, `IGovernanceTimelock`, `IGated4626Vault`, `IGated7540Vault`, `IERC7540Operator` / `IERC7540Deposit` / `IERC7540Redeem` / `IERC7575` (spec-exact ids), `Errors.sol` (reason codes) |
+| `contracts/interfaces/` | Frozen ABI: `IPolicyGatedCore`, `IPolicyGated`, `IERC7943Fungible`, `IERC7943NonFungible`, `IGated721`, `ITemplated`, `IPolicyHook`, `IComplianceRule`, `IComplianceHook`, `IPolicyRegistry`, `ITransferIntent`, `IIntentExecutor`, `IIntentExecutorBatch`, `IDvPExecutor`, `IERC3009`, `IIdentityRegistry`, `ICredentialRegistry`, `ICredentialRule`, `Quals`, `IMinPositionRule`, `IHolderRestrictionRule`, `ISettlementWindowRule`, `ISupplyCapRule`, `IExecutedOnlyRule`, `IFund`, `IFundHoldersRule`, `IProxyDeployer`, `IGovernanceTimelock`, `IGatedVaultBase`, `IGated4626Vault`, `IGated7540Vault`, `IPortfolio`, `IAdapter`, `IERC4626Adapter`, `IGuardedAccount`, `ICallValidator`, `IERC20CallValidator`, `INavDesk`, `IFeeModel`, `ISignedEntry`, `IDistributor`, `IERC7540Operator` / `IERC7540Deposit` / `IERC7540Redeem` / `IERC7575` (spec-exact ids), `Errors.sol` (reason codes) |
 | `contracts/base/` | `PolicyGatedCoreUpgradeable`, `PolicyGatedERC20Upgradeable` |
 | `contracts/governance/` | `PolicyRegistry`, `GovernanceTimelock` |
 | `contracts/identity/` | `CredentialRegistry` |
@@ -61,10 +61,10 @@ Distributor (one per token, immutable)           pays holders from an approved, 
 | `contracts/nav/` | `NavDesk`, `FeeModel`: a 7540's price and the fee on it |
 | `contracts/distribution/` | `Distributor`: dividends and coupons |
 | `contracts/intents/` | `IntentExecutor`, `DvPExecutor`, `SignedEntry` |
-| `contracts/vaults/` | `Gated4626Vault`, `Gated7540Vault`, and `Gated7540Settlement`, the second contract the 7540 creates and hands its settlement and recovery functions to, with `Gated7540Common`, which the two share |
+| `contracts/vaults/` | `GatedVaultBase`, which both vaults inherit, `Gated4626Vault`, `Gated7540Vault`, and `Gated7540Settlement`, the second contract the 7540 creates and hands its settlement and recovery functions to, with `Gated7540Common`, which the two share |
 | `contracts/test/` | Test helpers and mocks, interface-freeze and contract-size guards, Halmos properties |
 
-Every contract except the abstract `BaseRule` has its `.t.sol` next to it. [`PLAN.md`](PLAN.md) tracks phases and decisions;
+Every contract except the abstract `BaseRule`, `PolicyGatedCoreUpgradeable` and `Gated7540Common` has its `.t.sol` next to it; those three are tested through the contracts that inherit them. [`PLAN.md`](PLAN.md) tracks phases and decisions;
 [`CLAUDE.md`](CLAUDE.md) is the build brief.
 
 ## Security model
@@ -131,7 +131,7 @@ two run the same code.
   says `LOCKED`. The vaults' `maxDeposit` and `maxMint` probe a mint of a very large amount instead.
 - **Pause.** A guardian pause blocks every balance movement except FORCED ones (`forcedTransfer`, and the 7540 vault's `recoverRedeemRequest` and `recoverClaimable`), so the issuer's mint and burn too. Enforcement
   during a pause is `forcedTransfer` to a quarantine account, and the burn waits for the unpause. This differs from the
-  ERC-3643 reference token, whose agents can mint, burn and force while paused (see [Deployment and governance](docs/deployment.html)).
+  ERC-3643 reference token, whose agents can mint, burn and force while paused (the incident runbook in [Deployment and governance](docs/deployment.html) shows what a pause stops here).
   A vault's pause also stops `Portfolio.allocate` and `GuardedAccount.execute`, and `deallocate` still brings money back.
 - **Fund monitor.** `Fund.firstBrokenClass()` names the first class whose hook no longer lists the fund's rule, which the
   hook cannot know; the post-deploy check asserts it is the zero address. Alert too when `holderCount()` is above
@@ -203,7 +203,7 @@ exact sequence on the local network, playing the council and the KYC attester, a
    build at the tag, and `verify:reproducible` checks that `ProxyDeployer` embeds exactly it.
 3. **`CoreHandover`** (deployer):
    - configure the credential layer (parameter `kycAttester`, the KYC function's account, and optionally `kycAllowedQuals`,
-     255 by default): add it to the registry as attester 0;
+     1023 by default, the ten named qualification bits): add it to the registry as attester 0;
    - grant the core's roles: CANCELLER on the timelock to the guardian, RECOVERY on the credential registry and on each
      executor to the recovery timelock, OPERATOR on each executor to the relayer;
    - hand over: DEFAULT_ADMIN_ROLE to the timelock on the credential registry and on each executor; the deployer renounces it
@@ -352,8 +352,8 @@ The brief is in [`CLAUDE.md`](CLAUDE.md). Where the code intentionally differs, 
   contract an interface. Structs and enums live inside their interfaces, so there is no `Types.sol`.
 - **Interfaces reopened.** The owner has reopened `contracts/interfaces/` on instruction several times, and
   `InterfaceFreeze.t.sol` dates each re-pin. The largest was the review items (2026-10-23 to 24: a shared hook, balances
-  in `TransferContext.extra`, ERC-7943 Final, the template id, two new rules); the latest is `IProxyDeployer.REGISTRY()`
-  (2026-10-27). They are frozen again at the ids and topics pinned there; [`PLAN.md`](PLAN.md) records each change.
+  in `TransferContext.extra`, ERC-7943 Final, the template id, two new rules); the latest is the shared core and the ERC-721
+  template (2026-11-05). They are frozen again at the ids and topics pinned there; [`PLAN.md`](PLAN.md) records each change.
 - **Error naming.** Errors follow `<Contract>_<Name>`, e.g. `PolicyGated_TransferRejected(bytes32)`. Event
   parameters are `_camelCase`; topics are unaffected.
 - **ERC-7943 Final.** `IPolicyGated` inherits `IERC7943Fungible` and the token advertises its id (`0x3edbb4c4`). The

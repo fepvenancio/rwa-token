@@ -37,7 +37,7 @@
 <section id="in-one-minute">
   <div class="callout wrap-any">
     <h3>In one minute</h3>
-    <p>A fund charges two kinds of fee: a management fee for the time that has passed, and a performance fee on gains above a high-water mark, which starts at the vault's price and moves up when a performance fee is charged, except inside a soft hurdle's catch-up, where it waits until the catch-up is complete. This contract is the arithmetic. One function, <code>quote</code>, takes the numbers and returns the fee, the mark after that fee, whether the mark moved, and the performance fee paid since it last moved.</p>
+    <p>A fund charges two kinds of fee: a management fee for the time that has passed, and a performance fee on gains above a high-water mark, which the caller starts at the vault's price, or at par if that is higher, and restarts at par when fewer than <code>1e6</code> share units are left. It moves up when a performance fee is charged, except inside a soft hurdle's catch-up, where it waits until the catch-up is complete. This contract is the arithmetic. One function, <code>quote</code>, takes the numbers and returns the fee, the mark after that fee, whether the mark moved, and the performance fee paid since it last moved.</p>
     <p>It stores nothing. The rates and the recipient are immutables, which sit in its code, so the security council's attestation of the code hash covers them. Changing the fees means deploying another model, attesting it, and swapping through the timelock. It does not pay anyone: a <a href="NavDesk.html">NavDesk</a> or a <a href="Gated4626Vault.html">Gated4626Vault</a> calls it, keeps the mark, the clocks and what was paid since the mark moved, and moves the money.</p>
   </div>
 </section>

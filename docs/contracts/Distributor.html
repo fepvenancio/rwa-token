@@ -112,7 +112,7 @@
     <h2>What the root must contain</h2>
     <p>The contract never sees the list. These are what the list has to be for the claims to work as intended, and only the first is checked, line by line, when someone claims.</p>
     <ul class="plain">
-      <li><b>The right leaf format.</b> Each line is one <code>address</code> and one <code>uint256</code>, the holder and its amount in the asset's smallest unit. The leaf is <code>keccak256(bytes.concat(keccak256(abi.encode(holder, amount))))</code>, the double hash of OpenZeppelin's <code>StandardMerkleTree</code>, and a claim checks it with <code>MerkleProof.verify</code>.</li>
+      <li><b>The right leaf format.</b> Each line is one <code>address</code> and one <code>uint256</code>, the holder and its amount in the asset's smallest unit. The leaf is <code>keccak256(bytes.concat(keccak256(abi.encode(holder, amount))))</code>, the double hash of OpenZeppelin's <code>StandardMerkleTree</code>, and a claim checks it with <code>MerkleProof.verifyCalldata</code>.</li>
       <li><b>One line per holder.</b> <code>hasClaimed</code> is kept per distribution and holder, so a second line for the same holder cannot be claimed (<code>Distributor_AlreadyClaimed</code>).</li>
       <li><b>Amounts that add up to the total.</b> A list that sums above the total pays first come, first served, and the claim that would pass the total reverts (<code>test_ClaimsCannotPassTheFunding</code>). A list that sums below it leaves the rest to be swept back.</li>
       <li><b>The address that should be paid.</b> The money goes to the address in the line. A line that names a custodian or another contract pays that account.</li>
@@ -145,7 +145,7 @@
   <div class="prose wrap-any">
     <p>On a fund class, <code>FundHoldersRule</code> answers too: false for every holder on a token that is not a registered class. The investor cap is not part of the answer, so a full fund does not stop a claim.</p>
     <p><b>A block delays, and the expiry does not wait.</b> A holder who is blocked can claim once the block is lifted (<code>test_AHolderWhoMayNotReceiveCannotClaim</code>). After the expiry the claim reverts with <code>Distributor_Expired</code>, and <code>sweep</code> sends that holder's share back to the funder with the rest, including when the block was a pause that outlasted the expiry. Paying that holder is then a matter for a further distribution or for the issuer off-chain.</p>
-    <p><code>Distributor.t.sol</code> mocks the token's <code>canReceive</code>. So this table rests on the code of the base and the rules, and on a run of these cases against a real <code>GatedToken</code> at this commit, and not on a test in the repository.</p>
+    <p><code>Distributor.t.sol</code> mocks the token's <code>canReceive</code>. So this table rests on the code of the base and the rules, and not on a test in the repository.</p>
   </div>
 </section>
 

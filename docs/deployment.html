@@ -415,7 +415,7 @@
     </table>
   </div>
   <div class="prose">
-    <p>Tests pin that it refuses: a deployer left holding a role, a twin hook on the same registry ("runs another hook"), a recovery timelock running other code, <code>RECOVERY_ROLE</code> granted on the recovery timelock, a stray <code>EXECUTOR_ROLE</code>, a stray settler beside a desk, a desk that names another vault or does not hold the role, a reporter who is also the checker, a sensitive role on a single key, a Safe of one signer, a portfolio, fee model or validator whose attestation was revoked, a custodian's permission or a risk's caps not as the profile says, a timelock role held by the zero address, and a proposer or executor role held by a named account other than governance. It also throws when a delay is below 24 hours, although the contract accepts anything from 1 hour.</p>
+    <p>Tests pin that it refuses: a deployer left holding a role, a twin hook on the same registry ("runs another hook"), a recovery timelock running other code, <code>RECOVERY_ROLE</code> granted on the recovery timelock, a stray <code>EXECUTOR_ROLE</code>, a stray settler beside a desk, a desk that names another vault or does not hold the role, a reporter who is also the checker, a sensitive role on a single key, a Safe of one signer, a portfolio, fee model or validator whose attestation was revoked, a custodian's permission or a risk's caps not as the profile says, a timelock role held by the zero address, and a proposer role held by a named account other than governance. It also throws when a delay is below 24 hours, although the contract accepts anything from 1 hour.</p>
     <h3>What it does not check</h3>
     <ul class="plain">
       <li>A role held by an address it was not told about, as above.</li>
@@ -562,7 +562,7 @@
   </div>
   <figure>
     <div class="fig-scroll">
-      <svg class="d" viewBox="0 0 780 470" role="img" aria-label="Incident sequence. 1, the guardian pauses the token at once; only FORCED moves pass. 2, the agent force-transfers the holder's tokens to the quarantine account. 3, governance schedules unpause on the main timelock. The delay passes, and the guardian could cancel. 4, governance executes. 5, the main timelock unpauses the token. 6, on a GatedToken or IntentToken, the burner burns from the quarantine account.">
+      <svg class="d" viewBox="0 0 780 470" role="img" aria-label="Incident sequence. 1, the guardian pauses the token at once; only FORCED moves pass. 2, the agent force-transfers the holder's tokens to the quarantine account. 3, governance schedules unpause on the main timelock. The delay passes, and the guardian could cancel. 4, governance executes. 5, the main timelock unpauses the token. 6, on a GatedToken, IntentToken or Gated721, the burner burns from the quarantine account.">
         <defs>
           <marker id="dp-a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
         </defs>
@@ -611,7 +611,7 @@
         <text x="332" y="422" class="m">6  burn(quarantine, amount)</text>
       </svg>
     </div>
-    <figcaption><b>Enforcement happens during the pause, destruction after it.</b> A <span class="k k-forced">FORCED</span> movement is the one kind a pause lets through: <code>forcedTransfer</code>, and on the 7540 vault <code>recoverRedeemRequest</code> and <code>recoverClaimable</code>. Step 6 exists on <code>GatedToken</code> and <code>IntentToken</code>: the vaults' role <code>burn</code> always reverts (<code>GatedVault_Unsupported</code>), so their shares leave the quarantine account by an ordinary redemption.</figcaption>
+    <figcaption><b>Enforcement happens during the pause, destruction after it.</b> A <span class="k k-forced">FORCED</span> movement is the one kind a pause lets through: <code>forcedTransfer</code>, and on the 7540 vault <code>recoverRedeemRequest</code> and <code>recoverClaimable</code>. Step 6 exists on <code>GatedToken</code> and <code>IntentToken</code>, and on <code>Gated721</code>, where <code>forcedTransfer</code> and <code>burn</code> take a token id instead of an amount; the vaults' role <code>burn</code> always reverts (<code>GatedVault_Unsupported</code>), so their shares leave the quarantine account by an ordinary redemption.</figcaption>
   </figure>
   <ol class="steps">
     <li><div><b>Pause.</b> The guardian calls <code>pause()</code> on the product, with no delay. Every movement except <span class="k k-forced">FORCED</span> is rejected with <code>PAUSED</code>, the issuer's <code>mint</code> and <code>burn</code> included, and a vault's <code>max*</code> functions return 0. Calls that move no balance still work: <code>setFrozenTokens</code>, and the agent's <code>setLockup</code> and <code>setFrozen</code>. Each product and each executor has its own <code>pause()</code>. <a href="roles.html#pause">Every entry point while paused</a>.</div></li>
