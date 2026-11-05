@@ -3531,7 +3531,7 @@ Fewer share units than one raw unit of the asset buys at par (`_VIRTUAL_SHARES`,
 
 In the trial (without the `_dealingStopped` line), one unit of dust had the next investor buy at par, and a fund that then tripled paid 400 of fee on 1,000 invested, on the desk and on the 4626. The 465 existing tests in `NavDesk.t.sol`, `Gated4626VaultPortfolio.t.sol`, `Gated4626Vault.t.sol`, `Gated7540Vault.t.sol`, `Gated7540Settlement.t.sol` and `FeeModel.t.sol` still passed. The whole suite was not run.
 
-**Known limit.** A holder who leaves the largest dust on purpose, 999,999 units, has the next investor buy at up to half par with the mark at par, so the first doubling pays no performance fee: in the trial, none at 1.9 times and 200 rather than 400 at 3 times. It costs the fee recipient once, not for the rest of the fund's life. A higher threshold would shrink this and set more aside, and `1e6` is where one raw unit prices at par. A test pins it.
+**Known limit.** A holder who leaves the largest dust on purpose, 999,999 units, or on a 4626 mints that many into an empty vault for one raw unit, has the next investor pay as little as about half par with the mark at par, so the first doubling pays no performance fee: in the trial, none at 1.9 times and 200 rather than 400 at 3 times. It costs the fee recipient once, not for the rest of the fund's life. A higher threshold would shrink this and set more aside, and `1e6` is where one raw unit prices at par. A test pins it.
 
 ### The 4626's management fee on a small or low-decimal fund: no code change
 
@@ -3569,7 +3569,14 @@ As planned, with one test more than the plan listed: at exactly `1e6` share unit
 `Gated4626Vault` is 24,213 bytes, 20 more, with 363 free. `NavDesk` is 11,379, 16 more.
 
 
+## HTML pages at `bfb424e` (2026-11-05)
+
+The second pull request of the section above. The 41 pages are pinned to `bfb424e`. `NavDesk`, `Gated4626Vault`, `FeeModel`, `money` and `review` changed where they described the case of no shares, and `review` records the outside list of 2026-11-04 and the two limits it leaves open.
+
+- One agent checked about 95 changed claims against the code and found 8 problems: three places that said the next investor buys at par where dust has them pay as little as about half par; a jump overstated for large dust, also in two code comments and `SECURITY.md`; "up to half par", which reads the wrong way; the 4626's mint route to the same dust, as one raw unit buys 999,999 share units in an empty vault (run by hand); the source of the first open row; three claims about the list that nothing recorded; the CI runs still naming `d903344`'s; and a claim about the 4626's clocks that its tests did not show. Each was checked by hand and applied. These fixes have had the lint and no further independent check.
+- The contracts change only in those two comments, so the pin holds.
+
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
 2. Credential layer: none left. On 2026-10-30 the owner confirmed decisions 11, 12, 13, 15, 16 and 17 as built (17 at the measured +8,179 gas on a transfer). Decision 14 is moot, since `IdentityRule` was removed in the cleanup. Decisions 8 and 9 are recorded in the credential section's table.
-3. Redemption gate and the second contract: built and landed in #24 and #25. Open from its review: dust in a fund everyone has left ends the performance fee (`docs/review.html`, under open items). The fix is built in the first pull request of "Dust in a fund everyone has left"; the pages follow it.
+3. Redemption gate and the second contract: built and landed in #24 and #25. Open from its review: dust in a fund everyone has left ends the performance fee (`docs/review.html`, under open items). Fixed in #27; the pages at `bfb424e` describe it. What it leaves, dust left on purpose and the 4626's management fee on a small or low-decimal fund, is in the open items of `docs/review.html`.
