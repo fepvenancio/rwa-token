@@ -135,9 +135,11 @@ contract Portfolio is ReentrancyGuardTransient, IPortfolio {
     _requireAdmin();
     _requireInstalled(_adapter);
     IAdapter _plug = IAdapter(_adapter);
-    // View interface: compiled to STATICCALL, so the adapter cannot change state or re-enter before the writes below.
+    // View interface: compiled to STATICCALL, so the adapter cannot change state or re-enter before the writes below. A
+    // priced adapter that reads but cannot pay out what it reads, as when its target stops withdrawals, would otherwise
+    // stay on the list for good.
     // aderyn-ignore-next-line(reentrancy-state-change)
-    if (!_plug.reported() && _plug.fresh()) revert Portfolio_StillPriced(_adapter);
+    if (!_plug.reported() && _plug.fresh() && _plug.liquid() >= _plug.value()) revert Portfolio_StillPriced(_adapter);
     uint256 _cleared = allocationOf[_adapter];
     writtenOff = true;
     _takeOff(_adapter);

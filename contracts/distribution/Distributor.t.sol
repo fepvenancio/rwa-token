@@ -182,6 +182,23 @@ contract Distributor_Approve is DistributorTest {
     _distributor.approve(99);
   }
 
+  function test_AfterTheExpiryNothingIsApproved() external {
+    uint256 _id = _proposed();
+    vm.warp(_distributor.distributionOf(_id).expiry + 1);
+    vm.expectRevert(IDistributor.Distributor_Expired.selector);
+    vm.prank(_checker);
+    _distributor.approve(_id);
+    assertEq(_asset.balanceOf(address(_distributor)), 0, 'no funding pulled');
+  }
+
+  function test_AtTheExpiryItCanStillBeApproved() external {
+    uint256 _id = _proposed();
+    vm.warp(_distributor.distributionOf(_id).expiry);
+    vm.prank(_checker);
+    _distributor.approve(_id);
+    assertTrue(_distributor.distributionOf(_id).approved);
+  }
+
   function test_AFunderShortOfMoneyStopsTheApproval() external {
     uint256 _id = _proposed();
     vm.prank(_funder);

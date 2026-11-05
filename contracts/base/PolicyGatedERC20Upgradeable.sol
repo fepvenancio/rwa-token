@@ -477,6 +477,8 @@ abstract contract PolicyGatedERC20Upgradeable is
     uint256 _amount,
     bool _balanceCounts
   ) internal view returns (bytes32 _reason) {
+    // A mint to the zero address cannot happen, so the hook is not asked about one.
+    if (_from == address(0) && _to == address(0)) return Reasons.ZERO_RECEIVER;
     address _operator = _from == address(0) ? _msgSender() : _from;
     _reason = _check(
       _context(_from, _to, _amount, _operator, _inferKind(_from, _to), bytes32(0), 0), _policyHook(), _balanceCounts

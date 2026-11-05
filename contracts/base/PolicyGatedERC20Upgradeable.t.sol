@@ -1623,3 +1623,21 @@ contract PolicyGatedUnit_Multicall is PolicyGatedUnitTest {
     _token.multicall(_calls);
   }
 }
+
+/// @notice A mint to the zero address cannot happen, so the pre-flight does not offer it to the hook
+contract PolicyGatedUnit_ZeroToZero is PolicyGatedUnitTest {
+  function testFuzz_AMintToTheZeroAddressReadsAsRefused(
+    uint256 _amount
+  ) external {
+    assertFalse(_token.canTransfer(address(0), address(0), _amount));
+    (bool _ok, bytes32 _reason) = _token.canTransferWithReason(address(0), address(0), _amount);
+    assertFalse(_ok);
+    assertEq(_reason, Reasons.ZERO_RECEIVER);
+  }
+
+  function test_TheWriteRevertsAsThePreFlightSays() external {
+    vm.prank(_minter);
+    vm.expectRevert(abi.encodeWithSelector(IERC20Errors.ERC20InvalidReceiver.selector, address(0)));
+    _token.mint(address(0), 1);
+  }
+}

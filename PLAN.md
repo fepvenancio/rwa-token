@@ -3603,6 +3603,73 @@ Left as they are:
 
 Checks: the page lint at 40 pages with no errors; `npx hardhat test`, lint and format; and `git grep` for the name and the handle finding only `LICENSE`.
 
+## The outside list of 2026-11-05 (planned 2026-11-05; approved by the owner the same day: "A, build it")
+
+An outside list, author not recorded, named eleven findings and five optimizations at `11f8ca5`. Each was read against the code, and the ones a reading could not settle were run as throwaway tests, not committed.
+
+### What holds
+
+| # | Finding | Verdict | Evidence |
+|---|---|---|---|
+| F1 | A soft hurdle's catch-up is lost when a count lands inside the band | True | Mark 1.00, a 10% hurdle after a year, 20% rate: one count at 1.125 charges 0.025e12; a count at 1.1001 then one at 1.125 charge 0.00508e12 in all, 80% less. A hard hurdle charges 0.005e12 either way. On a 4626 `accrue()` is anyone's and every deposit and withdrawal counts, so a soft hurdle there works as a hard one. Investors lose nothing; the fee recipient does. Not documented. |
+| F2 | A priced adapter whose target answers but does not pay is stuck | True | A target that refuses `withdraw` and still answers `previewRedeem`: `deallocate` reverts, `removeAdapter` is `Portfolio_NotEmpty`, `writeOffAdapter` is `Portfolio_StillPriced`, and with the adapter on the list the portfolio cannot be replaced. |
+| F3 | `adopt` and the fee model, in either order | Partly | The order is documented in `INavDesk` (plug first). The list's fix, `if (lastFeeAt == 0)`, would charge for time a model was switched off, so it is not taken. New and true: a proposal made on the new desk before `adopt`, executed after it, writes its own mark over the adopted one; with a lower mark the same gain is charged twice. |
+| F5 | The mark moves when the performance fee rounds to nothing | True, bounded | A 3-unit gain on a 10,000 vault moves the mark and charges 0. The loss is under one raw unit per count, the bound `SECURITY.md` gives the management fee, which it does not say for this one. The mark moves on purpose (`FeeModel.sol`'s comment). |
+| F6 | The 7540's `maxDeposit` and `maxRedeem` overstate a request that rounds to nothing | True | With `owed == 0` and `paid > 0` both return `paid`, and claiming it reverts with `Gated7540Vault_ZeroAmount`, which ERC-4626 forbids of a `max*`. |
+| F8 | `canTransfer(0, 0, x)` reads true on a list without `CredentialRule` | True in the base | With a hook that accepts everything it is true and `TRANSFER_OK`, while `mint(address(0))` reverts. Every shipped profile lists `CredentialRule` first, which refuses it. |
+| F9 | `Fund`'s monitor reverts on a class whose hook has no code | True | A class whose `policyHook()` returns zero makes `isClassIntact` and `firstBrokenClass` revert, though the comment says a failing hook answers false. Shipped code cannot install such a hook. |
+| F10 | `Distributor.approve` after expiry; `cancelEntry` of a used nonce | True, minor | The late approval pulls the funding, which anyone can then sweep back to the funder. The cancel emits `EntryCancelled` for an entry that already ran. |
+| F11 | Gaps in `assertHandedOver` | True | It does not ask that no known account and not the zero address hold `PROPOSER_ROLE` or `EXECUTOR_ROLE` on either timelock beyond governance, nor that the validators are attested, the accounts' permissions and the portfolio's caps are what the profile names. |
+
+### What does not
+
+- **F7** is false: `bytes4` of calldata shorter than four bytes pads with zeros, and `ERC4626CallValidator.validate` returns false for empty, 1-byte and 3-byte data (run).
+- **F4** is the documented design: with no shares the next investor buys at par and what is left counts for them under the rate limit; a 1-unit first deposit only keeps that release slow until real money arrives, and nobody gains.
+- **The optimizations.** `MerkleProof.verifyCalldata` in `Distributor.claim` is taken. Not taken: the `Distribution` packing, which is false (three addresses, a `uint64` and a `bool` need six slots however they are ordered); `this.registry()`, as `registry()` is external and an internal getter in the base would change every template for two timelock-only setters; skipping the second count in a deposit, whose suggested form changes what the `maxDeposit` view answers after an earlier count in the block; packing `NavDesk` and the two short cuts in `Portfolio` and `ComplianceHook`, all on paths that run once a period or less.
+
+### What changes, in two pull requests and then the pages
+
+**First pull request: the small fixes.** Tests first; each failing run shown.
+
+1. **F2.** A priced adapter qualifies for `writeOffAdapter` when it cannot be priced or cannot pay out what it is priced at: `!fresh() || liquid() < value()`. ERC-4626 has `maxWithdraw` read 0 while withdrawals are disabled, so a paused or blocking target qualifies, and a healthy one still does not. A target that answers `maxWithdraw` wrongly is still stuck, which goes in `SECURITY.md`. NatSpec in `IPortfolio`.
+2. **F3.** `adopt` refuses while this desk has a proposal on the table (`NavDesk_CannotAdopt`). And the order stops mattering: `adopt` records that it took the old desk's fee clock, and a first plug after it keeps that clock instead of restarting it; any later plug, after the model was switched off, restarts it as now. One private flag beside `_adopted`. NatSpec in `INavDesk`.
+3. **F6.** `maxDeposit` and `maxRedeem` return 0 when what is owed is 0.
+4. **F8.** The pre-flight refuses a mint to the zero address with `ZERO_RECEIVER`, an existing reason, so `canTransfer` is false and `canTransferWithReason` names it.
+5. **F9.** `_listsInstalledRule` answers false for a token or a hook with no code.
+6. **F10.** `Distributor.approve` refuses after the expiry (`Distributor_Expired`); `cancelEntry` refuses a used nonce (`SignedEntry_NonceUsed`), as `cancelIntent` does. Both errors exist.
+7. **F11.** `assertHandedOver` asks the timelock roles of the zero address and every known account, that each validator is attested as `VALIDATOR`, and that the accounts' permissions and the portfolio's caps are the profile's.
+8. **`verifyCalldata`** in `Distributor.claim`.
+9. **F5** goes in `SECURITY.md` beside the management fee, with its bound.
+
+**Second pull request: F1.** A full catch-up needs to know what was already paid inside the band. The fix that follows the list (move the mark by the gain settled) restarts the hurdle's clock, so the next count would charge the whole catch-up with the price at the hurdle; it is not taken. The options:
+
+- **A. Carry what was paid (recommended).** The caller keeps `paidSince`, the performance fee per `1e18` share units since the mark last moved, and passes it to `quote`. A soft hurdle's target is `min(rate × (price + paidSince − mark), price + paidSince − hurdled)`, and it charges the target less `paidSince`. While the catch-up is incomplete the mark and its clock stay and `paidSince` grows; once complete the mark moves to the price after fees, its clock restarts and `paidSince` returns to 0. Worked on the list's figures: 0.0001 at 1.1001, then about 0.0249 at 1.125, about 0.025 in all, as one count would charge (less only the hurdle's growth between the two counts). A price that falls back keeps what was paid, and a later rise charges only the rest. A hard hurdle is unchanged. Cost: `IFeeModel.quote` takes and returns one more value, so its id moves and `InterfaceFreeze.t.sol` is re-pinned; the 4626 appends one field to its ERC-7201 storage (upgrade-safe) with a getter; `NavDesk` stores it, freezes it in `Proposal` (so the proposal hash covers it), and `adopt` copies it; `FeeModel` gets a new codehash for the council. `CLAUDE.md` §7 describes the new rule.
+- **B. Charge the catch-up only once it completes.** No new state and no interface change: inside the band a soft hurdle charges nothing and leaves the mark, and at the first count where `rate × (price − mark) ≤ price − hurdled` it charges `rate × (price − mark)`. The list's path then charges 0.025. A holder who leaves inside the band pays no performance fee, and a fund that never clears the band pays none on that gain.
+- **C. Drop the soft hurdle.** The constructor refuses it. Smallest, and it removes a product feature.
+
+**Then the pages**, pinned to the second pull request's commit: `FeeModel`, `Portfolio`, `NavDesk`, `Gated7540Vault`, `Fund`, `Distributor`, `SignedEntry`, `PolicyGatedERC20Upgradeable` and `deployment` where they describe what changes.
+
+### For the owner
+
+1. F1: A, B or C.
+2. Rule 4: NatSpec in `IPortfolio` and `INavDesk` for the first pull request, no id moving; with A, also `IFeeModel` (its id moves), `INavDesk.Proposal` and one getter in `IGated4626Vault`.
+
+Checks for each pull request: the full suite, the isolated run, lint and format, Slither, Aderyn, Halmos, `validate:upgrades`, `verify:reproducible`, planted bugs by hand, and the sizes of the contracts that change.
+
+The owner chose A and said to build it, which is read as the rule 4 instruction for the interface edits listed above.
+
+### As built: the small fixes
+
+As planned, with these differences:
+
+- **F3.** A first plug keeps the adopted clock only in the block of the adoption, the batch the timelock runs, in either order. With the clock kept until any later plug, the time the new desk dealt with no model, and the periods it settled meanwhile, would have been charged. A plug in a later operation starts the clock, as before.
+- **F2.** `test_APricedAdapterThatCanStillBeReadCannotBeWrittenOff` read a mock whose liquidity defaults to zero, which now qualifies; it sets the liquidity to the value and is renamed for what it shows.
+- **F6.** `test_WhenOwedRoundedToNothing_TheAmountsStillClear` pinned `maxDeposit` at the amount that bought nothing; it now reads the booked amount from `claimableDepositRequest`, before and after `recoverClaimable`.
+- **F11.** The account's permission is asked by its target and function; a `GuardedAccount` keeps no list of its permissions, so the check cannot show there is no other. The custodian's address is a deployment parameter the profile does not name, so it is not compared.
+- `ISignedEntry` and `IDistributor` are unchanged: both errors existed, and their NatSpec still holds.
+
+Tests first: 9 failing for F2, F6, F9 and F10, 3 for F3 and F8, 4 for F11; three desk tests describing what it already did passed, and pin it. The same-block form of the adopt-then-plug test came after that run; the planted bug that restores the old plug, which always restarts the clock, fails it. `npx hardhat test`: `1888 passing (1711 solidity, 177 nodejs)`. Isolated 1711 passing; lint, format and types; Slither 0; Aderyn 0; Halmos 22 of 22; `validate:upgrades` 5 of 5; `verify:reproducible` 30 contracts. Planted bugs: 23 of 23 caught (`SECURITY.md`, section 5). Sizes: `Gated4626Vault` 24,287 bytes (289 free), `Gated7540Vault` 22,015, `NavDesk` 11,457, `Portfolio` 12,062, `IntentToken` 17,990.
+
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
 2. Credential layer: none left. On 2026-10-30 the owner confirmed decisions 11, 12, 13, 15, 16 and 17 as built (17 at the measured +8,179 gas on a transfer). Decision 14 is moot, since `IdentityRule` was removed in the cleanup. Decisions 8 and 9 are recorded in the credential section's table.

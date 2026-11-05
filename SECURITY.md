@@ -243,6 +243,10 @@ Further limits recorded during review:
 - **A `GuardedAccount` is the most dangerous lego in the stack.** It makes whatever calls its permissions allow. Default deny, one narrow validator per call and a timelock on every grant reduce that, and only a review of each permission set closes it. An `approve` gives the spender up to what it allows, and a validator's codehash covers its settings, not the target's behaviour. A custodian that does not return money is an off-chain risk no contract covers.
 - **Fees on a 4626 are charged on the counted value,** so a gain pays only once it has passed the rate limit, and a holder can drain idle money ahead of fees owed: `collectFees` pays what idle money allows, not while paused, and holders come first. A loss below the fees owed reads as zero. A fee model replaced with fees still owed pays them to the new model's recipient, so a timelock batch collects first.
 - **A management fee too small to pay a unit at each count is not paid.** Every count on a 4626 restarts the fee clock and the fee rounds down, so under one raw unit is lost per count, and only one count a block matters, as a second has no time to charge. For a dollar token with 6 decimals that is at most about 2.63 a year on 12-second blocks and 31.54 on 1-second ones. With 2 decimals it is a cent a block: anyone calling `accrue()` every 12 seconds keeps a fund of up to about 2.6 million at 1% a year from paying any management fee, at the cost of the gas. Holding the clock while the fee rounds to nothing is not the fix: the time would build up while the fund is small and be charged to whoever arrives next, in a run 8,219 on 10 million arriving after 1,000 raw units sat for 30 days, where 12 seconds of fee is 0.04. A product with a management fee on a low-decimal asset should take this into account. Pinned by `test_NewMoneyDoesNotPayForTimeBeforeItArrived` and `test_ACountThatRoundsToNoFeeStillRestartsTheClock`.
+- **A performance fee too small to pay a unit at a count is not paid.** The mark moves to the price after what a count
+  actually charges, so a charge that rounds down moves it to the whole price, for the reason under "With no shares nothing
+  is anyone's" below. Under one raw unit of fee is lost per count, the management fee's bound, and on a 4626 anyone can
+  count. Pinned by `FeeModel.t.sol::test_WhenTheChargeRoundsToNoFeeTheMarkIsThePrice`.
 - **A signed entry's minimum protects only on a 4626.** A 7540 request has no price yet, so `SignedEntry` refuses a request that names one, and the investor's protection is the period's approved price. A permit is not bound to one entry the way an ERC-3009 authorization is: a permit left unspent can pay for another entry of the same investor, which that investor also signed. A relayer can hold a signed entry back until its deadline, so a short deadline is the investor's control; `cancelEntry` needs a transaction.
 - **Who holds `SETTLER_ROLE` sets the price.** The vault takes whatever `settlePeriod` is given, and the holder can name any
   cash account that approved the vault. So the role belongs to a `NavDesk`, where two people approve every price and a
@@ -266,7 +270,8 @@ Further limits recorded during review:
 - **Rounding each claim leaves dust.** Each claim on a period's shares rounds down, so at most one share unit per investor per
   period stays in `unclaimedShares`, for good: 3.65m units for 1,000 investors dealing daily for 10 years, under a billionth
   of a basis point of 100m shares at 12 decimals. A controller whose whole request rounds to nothing keeps a claimable
-  amount that buys nothing; `recoverClaimable` clears it.
+  amount that buys nothing; `maxDeposit` and `maxRedeem` read 0 for it, as a claim of it would revert, and
+  `recoverClaimable` clears it.
 
 - **A credential holds no country.** A record has qualification bits, a validity and a standing. A jurisdiction group is a
   bit (`Quals.US_PERSON`, `Quals.EEA`), which a token's `requireAny` and `forbidAny` already read, so an offering restriction
@@ -293,7 +298,7 @@ Further limits recorded during review:
 - **A 4626's portfolio is replaced in one batch: `migrateTo`, then `setPortfolio`.** Nothing forces the batch, so a portfolio
   that has sent its money on gives no price from then on, and the vault holds its price and stops dealing until the plug.
   `setPortfolio` refuses while the old portfolio has an adapter on its list or holds anything, so a position that cannot be
-  read must be written off first, which leaves the vault exit-only. A replacement keeps the limit's clock, so the next count
+  read, or that its target will not pay out, must be written off first, which leaves the vault exit-only. A replacement keeps the limit's clock, so the next count
   allows what it would have allowed anyway, at the rate the call names. Pinned by
   `Gated4626VaultPortfolio.t.sol::Gated4626VaultPortfolio_Replacement`.
 - **A read of nothing stops a 4626, and a fall of more than half closes its deposits.** While the value net of fees reads nothing although holders
@@ -320,6 +325,13 @@ Further limits recorded during review:
   back from a write-off outside its caps (`test_AddingAPositionBackCannotTakeExposurePastTheCap`). A reported adapter's money
   can be off-chain, so it comes back at zero, and caps cannot see what a custodian still holds: the timelock must set them
   knowing that when it adds one back (`test_AReportedAdapterStartsAtZeroWhateverItHolds`).
+- **A priced adapter whose target stops paying can be written off.** `writeOffAdapter` takes a priced adapter while it
+  cannot be read, or while what it can return (`liquid()`, the target's `maxWithdraw`) is below what it reads. ERC-4626 has
+  `maxWithdraw` read 0 while withdrawals are disabled, so a paused target, or one that blocks the adapter, qualifies while its
+  price still reads. A target that keeps answering `maxWithdraw` with what it will not pay leaves the adapter on the list,
+  and the vault's portfolio cannot be replaced, until it pays; the council reads each target before attesting its adapter.
+  The write-off is the timelock's and leaves the vault exit-only for good. Pinned by
+  `test_AnAdapterOverATargetThatStopsPayingCanBeWrittenOff` and `test_APricedAdapterThatCannotPayWhatItIsWorthCanBeWrittenOff`.
 - **A pause stops money going out of a portfolio, not coming back.** While the vault is paused `Portfolio.allocate` and
   `GuardedAccount.execute` revert, and `deallocate` still works, for the guardian too. So a permission that pulls money back
   through `execute`, such as a target's `redeem`, waits for the unpause; no deployment profile grants one. Money a custodian
@@ -482,6 +494,7 @@ Each row is a bug deliberately planted, the tests that caught it, then the file 
 | A large fall closes deposits (2026-11-01) | a count not closing them; the views not looking; half counted as more than half; a limit of a quarter or of three quarters; no shares read as a fall; never a fall; the stored close or a write-off forgotten by the view | 9 planted, 8 caught at first. The survivor, a write-off forgotten by the view, was a missing test, written and now caught |
 | A read of nothing does not read as closed (2026-11-02) | zero read as a fall; the old condition back; a value of one read as no fall; half counted as more than half; never a fall; the stored close or a write-off hidden by a read of nothing; a count writing through one; deposits open through one | 9 planted, all caught |
 | Dust counted as no shares (2026-11-04) | on the desk the gross value at `<=`, one unit off or back on `== 0`; the zero check back on `!= 0` or at `>`; the mark or its clock left on `== 0`; on the 4626 the count at `<=`, one unit off or back on `== 0`; the stop left on `!= 0` or at `>`; the fee clock held while the fee rounds to nothing | 13 planted, 11 caught at first. The survivors, the gross value one unit off and the mark's clock left, were tests that proposed zero and did not read the clock, now tightened and caught |
+| The outside list of 2026-11-05, small fixes (2026-11-05) | a priced write-off without the liquidity term, at `>` or against zero; the 7540's `maxDeposit` or `maxRedeem` back on what was paid, or always zero; `Fund`'s token or hook code check dropped; `Distributor.approve`'s expiry dropped or at `>=`; `cancelEntry`'s used-nonce check dropped; `adopt` without its own proposal check, a first plug that always or never restarts the clock, the adopted clock not recorded; the zero-to-zero pre-flight dropped or on `||`; in the hand-over check each new question skipped: the zero address, the known accounts, the validator's attestation, the permission, the caps, the targets | 23 of 23 caught |
 
 ## 6. Toolchain supply chain
 

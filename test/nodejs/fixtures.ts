@@ -13,6 +13,7 @@ import {
   keccak256,
   maxUint256,
   pad,
+  toFunctionSelector,
   toHex,
   type Abi,
   type Account,
@@ -106,6 +107,14 @@ const LEGO_ABI = parseAbi([
   "function redemptionGate() view returns (uint256)",
 ]);
 const SAFE_ABI = parseAbi(["function getThreshold() view returns (uint256)"]);
+const ACCOUNT_ABI = parseAbi([
+  "function RISK_ID() view returns (bytes32)",
+  "function validatorOf(address, bytes4) view returns (address)",
+  "function MAX_PER_CALL() view returns (uint256)",
+  "function riskOf(bytes32) view returns ((uint120 allocation, uint120 absoluteCap, uint16 relativeCapBps))",
+]);
+/** The one function a custodian's account may call on the asset. */
+const TRANSFER = toFunctionSelector("transfer(address,uint256)");
 const ATTEST = { HOOK: 1, RULE: 2, IMPLEMENTATION: 3, PORTFOLIO: 4, ADAPTER: 5, VALIDATOR: 6, FEE_MODEL: 7 } as const;
 /** The timelocks' delay: the least the hand-over check accepts. */
 const DAY = 86_400n;
@@ -453,7 +462,8 @@ async function stages(connection: NetworkConnection, profile: Profile) {
  * - every product runs the one shared hook the council reviewed, which names the stack's registry and holds the intended
  *   ordered rule list for that product; rules have no access control of their own;
  * - the guardian can cancel timelock operations but cannot propose or execute them, and both timelocks wait at least 24
- *   hours;
+ *   hours; on each, no known account but governance proposes or executes, and the zero address, which would open the role
+ *   to anyone, holds no proposer, executor or canceller role;
  * - `ProxyDeployer` is owned by the operations account, so products launch without waiting;
  * - each fund is owned by the timelock, runs the attested rule that points back at it, has the intended cap, and holds the
  *   classes it opened with, in order, each intact (its hook lists the fund's rule: `firstBrokenClass()` is the zero
@@ -461,7 +471,9 @@ async function stages(connection: NetworkConnection, profile: Profile) {
  * - a 7540's second contract is the code the release says, as an implementation's attestation pins only its address;
  * - a product's legos are wired as its profile says and name this product: its desk has the profile's redemption gate and
  *   holds SETTLER_ROLE and no account
- *   does, the reporter, the checker and the allocator are different accounts, and the council attested what needs it;
+ *   does, the reporter, the checker and the allocator are different accounts, the council attested what needs it, each
+ *   custodian's account lets its attested validator judge the asset's `transfer`, up to the profile's amount, and every
+ *   risk has the profile's caps;
  * - MINTER_ROLE, BURNER_ROLE, AGENT_ROLE and a desk-less vault's SETTLER_ROLE sit with a Safe of at least two signers,
  *   unless the profile names the role as an exception;
  * - the recovery timelock holds exactly RECOVERY_ROLE on each product, the executors, the credential registry and the
@@ -616,6 +628,23 @@ export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
   assert.equal(await s.timelock.read.hasRole([await s.timelock.read.PROPOSER_ROLE(), guardian]), false);
   assert.equal(await s.timelock.read.hasRole([await s.timelock.read.EXECUTOR_ROLE(), guardian]), false);
   assert.ok((await s.timelock.read.getMinDelay()) >= DAY, "timelock delay below 24 hours");
+  // Governance alone proposes and executes on each timelock. The zero address holding a role opens it to anyone.
+  for (const [label, tl] of [["timelock", s.timelock], ["recovery timelock", s.recoveryTimelock]] as const) {
+    const roles = [
+      ["PROPOSER_ROLE", await tl.read.PROPOSER_ROLE()],
+      ["EXECUTOR_ROLE", await tl.read.EXECUTOR_ROLE()],
+      ["CANCELLER_ROLE", await tl.read.CANCELLER_ROLE()],
+    ] as const;
+    for (const [name, role] of roles) {
+      assert.equal(await tl.read.hasRole([role, zeroAddress]), false, `the zero address holds ${name} on the ${label}`);
+    }
+    for (const account of known) {
+      if (isAddressEqual(account, governance)) continue;
+      for (const [name, role] of roles.slice(0, 2)) {
+        assert.equal(await tl.read.hasRole([role, account]), false, `${account} holds ${name} on the ${label}`);
+      }
+    }
+  }
 
   // A product's legos. Their roles live outside the vault's role scan, so they are asked by name.
   const named = s.parameters as Record<string, Address>;
@@ -665,6 +694,22 @@ export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
       const lowered = (list: readonly Address[]) => list.map((account) => account.toLowerCase()).sort();
       assert.deepEqual(lowered(await read<Address[]>(portfolio, "adapters")), lowered(adapters), `the adapters of ${contract.address}`);
       for (const adapter of adapters) assert.equal(await s.registry.read.isAttested([adapter, ATTEST.ADAPTER]), true, `adapter ${adapter} is not attested`);
+      const readAs = <T>(address: Address, functionName: "RISK_ID" | "validatorOf" | "MAX_PER_CALL" | "riskOf", args?: readonly unknown[]) =>
+        s.publicClient.readContract({ address, abi: ACCOUNT_ABI, functionName, args } as never) as Promise<T>;
+      const capsAre = async (adapter: Address, caps: { absoluteCap: bigint; relativeCapBps: bigint }, label: string) => {
+        const risk = await readAs<{ absoluteCap: bigint; relativeCapBps: number }>(portfolio, "riskOf", [await readAs<Hex>(adapter, "RISK_ID")]);
+        assert.deepEqual([risk.absoluteCap, BigInt(risk.relativeCapBps)], [caps.absoluteCap, caps.relativeCapBps], `the caps of ${label} are not the profile's`);
+      };
+      for (const custodian of product.portfolio.custodians ?? []) {
+        const account = legos[`account_${custodian.key}`];
+        const validator = legos[`validator_${custodian.key}`];
+        assert.equal(await s.registry.read.isAttested([validator, ATTEST.VALIDATOR]), true, `validator_${custodian.key} is not attested`);
+        const judge = await readAs<Address>(account, "validatorOf", [named.asset, TRANSFER]);
+        assert.ok(isAddressEqual(judge, validator), `the permission of account_${custodian.key} is not the profile's`);
+        assert.equal(await readAs<bigint>(validator, "MAX_PER_CALL"), custodian.maxPerCall, `validator_${custodian.key} allows another amount per call`);
+        await capsAre(account, custodian, `account_${custodian.key}`);
+      }
+      for (const target of product.portfolio.targets ?? []) await capsAre(legos[`adapter_${target.key}`], target, `adapter_${target.key}`);
     }
     if (product.fees !== undefined) {
       assert.ok(await isSame(legos.navDesk ?? contract.address, "feeModel", legos.feeModel), `the fee model of ${contract.address} is not plugged in`);

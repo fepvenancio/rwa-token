@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { network } from "hardhat";
-import { encodeFunctionData, erc20Abi, isAddressEqual, keccak256, maxUint256, toHex } from "viem";
+import { encodeFunctionData, erc20Abi, isAddressEqual, keccak256, maxUint256, toFunctionSelector, toHex } from "viem";
 
 import { productModule } from "../../ignition/modules/Product.js";
 import { ROLES } from "../../ignition/modules/roles.js";
@@ -387,6 +387,41 @@ describe("the hand-over check", async function () {
     await assert.rejects(assertHandedOver(s), /the fee model is not attested/);
     await s.registry.write.revoke([keccak256((await s.publicClient.getCode({ address: legos.portfolio }))!)], { account: s.wallets.attester.account });
     await assert.rejects(assertHandedOver(s), /the portfolio is not attested/);
+  });
+
+  it("refuses a custodian's validator the council no longer vouches for, or a permission or caps not the profile's", async function () {
+    const s = await deployProfile(connection, PROFILES["managed-fund"]);
+    const legos = s.legos.managedFund;
+    const portfolio = await viem.getContractAt("Portfolio", legos.portfolio);
+    const account = await viem.getContractAt("GuardedAccount", legos.account_firstCustodian);
+    const asset = s.parameters.asset as `0x${string}`;
+    const transfer = toFunctionSelector("transfer(address,uint256)");
+
+    const validatorCode = keccak256((await s.publicClient.getCode({ address: legos.validator_firstCustodian }))!);
+    await s.registry.write.revoke([validatorCode], { account: s.wallets.attester.account });
+    await assert.rejects(assertHandedOver(s), /validator_firstCustodian is not attested/);
+    await s.registry.write.attest([validatorCode, 6, "ipfs://review"], { account: s.wallets.attester.account });
+    await assertHandedOver(s);
+
+    const riskId = await account.read.RISK_ID();
+    const caps = await portfolio.read.riskOf([riskId]);
+    await asTimelock(s, () => portfolio.write.setCaps([riskId, caps.absoluteCap - 1n, BigInt(caps.relativeCapBps)], { account: s.timelock.address }));
+    await assert.rejects(assertHandedOver(s), /the caps of account_firstCustodian/);
+    await asTimelock(s, () => portfolio.write.setCaps([riskId, caps.absoluteCap, BigInt(caps.relativeCapBps)], { account: s.timelock.address }));
+    await assertHandedOver(s);
+
+    await account.write.revokePermission([asset, transfer], { account: s.wallets.guardian.account });
+    await assert.rejects(assertHandedOver(s), /the permission of account_firstCustodian/);
+  });
+
+  it("refuses an on-chain target whose caps are not the profile's", async function () {
+    const s = await deployProfile(connection, PROFILES["vault4626-invest"]);
+    const legos = s.legos.investFund;
+    const portfolio = await viem.getContractAt("Portfolio", legos.portfolio);
+    const adapter = await viem.getContractAt("ERC4626Adapter", legos.adapter_onChainVault);
+    const riskId = await adapter.read.RISK_ID();
+    await asTimelock(s, () => portfolio.write.setCaps([riskId, 1n, 10_000n], { account: s.timelock.address }));
+    await assert.rejects(assertHandedOver(s), /the caps of adapter_onChainVault/);
   });
 
   it("every profile passes it as written: deploying one runs the check", async function () {
