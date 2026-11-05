@@ -28,6 +28,7 @@ const ATTESTED = {
   ComplianceHook: "hooks",
   GatedToken: "tokens",
   IntentToken: "tokens",
+  Gated721: "tokens",
   Gated4626Vault: "vaults",
   Gated7540Vault: "vaults",
   Portfolio: "portfolio",

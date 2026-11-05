@@ -3801,8 +3801,26 @@ Checks: `npx hardhat test` `1904 passing (1727 solidity, 177 nodejs)`, the same 
 | `Gated7540Vault` | 22,015 | 22,054 |
 | `Gated7540Settlement` | 18,075 | 18,118 |
 
+### As built: `Gated721`
+
+As planned, with these differences and details:
+
+- **`ERC721Upgradeable._update` is overridden to check approval before the policy.** OpenZeppelin checks it inside the same function, so the override reads the owner, checks approval, then takes `_move`, which calls the parent's `_update` with no caller once the checks pass. An unapproved caller gets ERC-721's error and the hook is never asked.
+- **`mint` and `burn` check existence before the move.** OpenZeppelin's `_mint` reports an existing token only after the update, which would ask the hook about a transfer, and its `_burn` reports a missing one only after asking about a mint to the zero address.
+- **`canTransfer` leaves ownership to ERC-721.** The Final text says it must not return false for non-permissioned checks such as a balance or an allowance, and it does check the frozen status, so `canTransfer(stranger, …)` reads true while `canTransferWithReason` says `NOT_TOKEN_OWNER`.
+- **Events.** `ForcedTransferBy` and the standard's `ForcedTransfer` have the fungible templates' signatures and topics; the standard's NFT `ForcedTransfer` indexes the token id. `Frozen(account, tokenId, frozenStatus)` has its own topic.
+- **Interfaces.** `IERC7943NonFungible` (`0xbf1ef5fe`, from the standard's selectors) and `IGated721` (`0x94f4fff1`) are new, and `NOT_TOKEN_OWNER` is appended to `Errors.sol`, all pinned in `InterfaceFreeze.t.sol`.
+- **Four Aderyn lows are suppressed inline with their reasons:** the storage constant read in assembly, the plain `_mint` (no receiver callback on issuance), `_requireOwned` called for its revert, and the previous owner `super._update` returns, which the caller already read.
+- **Deployment.** `Gated721` joined `Template` (`nftImpl`), the `nft` profile, `Product`'s minter and burner grants, the fixtures and `verify-reproducible`'s list. The profile check refuses `minPositionRule`, `fundHoldersRule` and `supplyCapRule` on it, as well as the two rules that need intents. `legos.test.ts` deploys every profile, so `nft` passes the hand-over check there too.
+
+Tests first: against a stub that skipped every check, 29 of the 74 tests in `Gated721.t.sol`, `InterfaceFreeze.t.sol` and `ContractSizes.t.sol` failed: every policy, freeze and pre-flight case. The 45 that passed were role gates, ERC-721's own checks and the pins. The three deployment tests failed before the profile existed. Three planted bugs were each caught: the burner's freeze exemption removed (1 failing), approval checked after the hook (2 failing), and `canTransfer` counting ownership (1 failing).
+
+Checks: `npx hardhat test` `1973 passing (1794 solidity, 179 nodejs)`; lint, format and types; `validate:upgrades` 6 of 6; Slither 0; Aderyn 0; Halmos 22 of 22; `verify:reproducible` 31 contracts. `Gated721` is 15,621 bytes; no other contract changed in this step.
+
+Left: the HTML pages for the core and `Gated721`, pinned to the merged commit, in their own pull request.
+
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
 2. Credential layer: none left. On 2026-10-30 the owner confirmed decisions 11, 12, 13, 15, 16 and 17 as built (17 at the measured +8,179 gas on a transfer). Decision 14 is moot, since `IdentityRule` was removed in the cleanup. Decisions 8 and 9 are recorded in the credential section's table.
 3. Redemption gate and the second contract: built and landed in #24 and #25. Open from its review: dust in a fund everyone has left ends the performance fee. Fixed in #27; the pages at `bfb424e` describe it. What it leaves, dust left on purpose and the 4626's management fee on a small or low-decimal fund, is in `SECURITY.md`.
-4. The NFT template: answered 2026-11-05, A. Being built.
+4. The NFT template: answered 2026-11-05, A, and built (the core split and `Gated721`). The HTML pages follow.

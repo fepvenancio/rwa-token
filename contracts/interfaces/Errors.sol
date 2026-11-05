@@ -66,5 +66,7 @@ library Reasons {
   bytes32 internal constant ABOVE_SUPPLY_CAP = keccak256('ABOVE_SUPPLY_CAP');
   /// @notice The token's movements between holders must be signed intents, and this one is a plain transfer
   bytes32 internal constant TRANSFER_NOT_EXECUTED = keccak256('TRANSFER_NOT_EXECUTED');
+  /// @notice An ERC-721 movement names a sender that does not own the token; for a mint, the token already exists
+  bytes32 internal constant NOT_TOKEN_OWNER = keccak256('NOT_TOKEN_OWNER');
 }
 // solhint-enable private-vars-leading-underscore

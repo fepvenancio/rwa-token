@@ -296,6 +296,8 @@ async function stages(connection: NetworkConnection, profile: Profile) {
         return viem.getContractAt("GatedToken", target);
       case "IntentToken":
         return viem.getContractAt("IntentToken", target);
+      case "Gated721":
+        return viem.getContractAt("Gated721", target);
       case "Gated4626Vault":
         return viem.getContractAt("Gated4626Vault", target);
       case "Gated7540Vault":

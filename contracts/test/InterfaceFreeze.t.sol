@@ -21,10 +21,12 @@ import {IERC7540Operator} from 'interfaces/IERC7540Operator.sol';
 import {IERC7540Redeem} from 'interfaces/IERC7540Redeem.sol';
 import {IERC7575} from 'interfaces/IERC7575.sol';
 import {IERC7943Fungible} from 'interfaces/IERC7943Fungible.sol';
+import {IERC7943NonFungible} from 'interfaces/IERC7943NonFungible.sol';
 import {IFeeModel} from 'interfaces/IFeeModel.sol';
 import {IFund} from 'interfaces/IFund.sol';
 import {IFundHoldersRule} from 'interfaces/IFundHoldersRule.sol';
 import {IGated4626Vault} from 'interfaces/IGated4626Vault.sol';
+import {IGated721} from 'interfaces/IGated721.sol';
 import {IGated7540Vault} from 'interfaces/IGated7540Vault.sol';
 import {IGovernanceTimelock} from 'interfaces/IGovernanceTimelock.sol';
 import {IGuardedAccount} from 'interfaces/IGuardedAccount.sol';
@@ -92,6 +94,10 @@ contract InterfaceFreezeTest is Test {
     // is mint, burn and canTransferWithReason (was 0x02331726, the XOR of the two ids below). No topic or selector moved
     assertEq(type(IPolicyGated).interfaceId, bytes4(0xcebd0f8c), 'IPolicyGated');
     assertEq(type(IPolicyGatedCore).interfaceId, bytes4(0xcc8e18aa), 'IPolicyGatedCore');
+    // Added 2026-11-05 on owner instruction, for the ERC-721 template. ERC-7943's non-fungible id is the standard's own;
+    // `IGated721` is mint, burn, setTokenURI and canTransferWithReason
+    assertEq(type(IERC7943NonFungible).interfaceId, bytes4(0xbf1ef5fe), 'IERC7943NonFungible');
+    assertEq(type(IGated721).interfaceId, bytes4(0x94f4fff1), 'IGated721');
     // Re-pinned in S1 of the review items (2026-10-24) on owner instruction (RD1 to RD3): `TransferContext` lost `ref` and
     // `deadline`, `IPolicyHook` and `IComplianceRule` gained `checkSend` and `checkReceive`, and `IComplianceHook` became
     // the shared hook (per-token `setRules`, `rules` and `ruleCount`; no `ADMIN` or `TOKEN`). Ids computed from the
@@ -173,6 +179,13 @@ contract InterfaceFreezeTest is Test {
     // replaced by the standard's three-argument one (pinned below) and `ForcedTransferBy`, which keeps the agent;
     // `Frozen` is the standard's, with the same topic as before
     assertEq(IPolicyGated.ForcedTransferBy.selector, 0x9820680c613c6b8b74bedc929c1ffd105ced2cf11b34457bb8b06bd8ecb15978);
+    // The ERC-721 template's events, added 2026-11-05: `ForcedTransferBy` and the standard's `ForcedTransfer` share the
+    // fungible signatures and topics (the standard indexes the token id); `Frozen` carries the token and a bool
+    assertEq(IGated721.ForcedTransferBy.selector, 0x9820680c613c6b8b74bedc929c1ffd105ced2cf11b34457bb8b06bd8ecb15978);
+    assertEq(
+      IERC7943NonFungible.ForcedTransfer.selector, 0x7b3ce50c216d2ccf9919c6b9f1bfb33f0350a33010f188750b4af38e00448138
+    );
+    assertEq(IERC7943NonFungible.Frozen.selector, 0x110a31ef32e319c921a388ad15b3fcbf2dd8f62ab35795b611151ab36ed5b2af);
     assertEq(
       IPolicyGatedCore.PolicyHookChanged.selector, 0x964de01ec9270e869e61cc2efab9db5a19eac89859423a5963b19266cef000ca
     );
@@ -351,6 +364,8 @@ contract InterfaceFreezeTest is Test {
     assertEq(Reasons.ZERO_RECEIVER, keccak256('ZERO_RECEIVER'));
     assertEq(Reasons.ABOVE_SUPPLY_CAP, keccak256('ABOVE_SUPPLY_CAP'));
     assertEq(Reasons.TRANSFER_NOT_EXECUTED, keccak256('TRANSFER_NOT_EXECUTED'));
+    // Appended 2026-11-05 on owner instruction, for the ERC-721 template.
+    assertEq(Reasons.NOT_TOKEN_OWNER, keccak256('NOT_TOKEN_OWNER'));
   }
 
   /// @dev The qualification bits are part of the frozen vocabulary: a record written under one meaning must never be read

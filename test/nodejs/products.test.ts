@@ -43,6 +43,31 @@ describe("one product alone: the core and that product, and nothing else", async
     );
   });
 
+  it("an NFT", async function () {
+    const s = await networkHelpers.loadFixture(async function nft() {
+      return deployProfile(connection, PROFILES.nft);
+    });
+    assert.deepEqual(Object.keys(s.components).sort(), [...CORE, "nftImpl"].sort());
+    assert.equal(s.fund, undefined);
+
+    const nft = await viem.getContractAt("Gated721", s.products.nft.address);
+    const [alice, bob, eve] = [s.holders.alice, s.holders.bob, s.holders.eve];
+    assert.equal(await nft.read.supportsInterface(["0xbf1ef5fe"]), true);
+    await verify(s, alice);
+    await verify(s, bob);
+    await nft.write.mint([alice.account.address, 1n, "ipfs://note-1"], { account: s.wallets.minter.account });
+    await nft.write.transferFrom([alice.account.address, bob.account.address, 1n], { account: alice.account });
+    assert.ok(isAddressEqual(await nft.read.ownerOf([1n]), bob.account.address));
+    assert.equal(await nft.read.tokenURI([1n]), "ipfs://note-1");
+    assert.deepEqual(await nft.read.canTransferWithReason([bob.account.address, eve.account.address, 1n]), [false, REASONS.RECEIVER_NOT_VERIFIED]);
+    await viem.assertions.revertWithCustomErrorWithArgs(
+      nft.write.transferFrom([bob.account.address, eve.account.address, 1n], { account: bob.account }),
+      nft,
+      "PolicyGated_TransferRejected",
+      [REASONS.RECEIVER_NOT_VERIFIED],
+    );
+  });
+
   it("an instant vault", async function () {
     const s = await networkHelpers.loadFixture(async function vault4626() {
       return deployProfile(connection, PROFILES.vault4626);
@@ -146,6 +171,10 @@ describe("one core, many products", async function () {
   it("a rule list a template cannot use throws when the module is built", function () {
     const unusable: Product = { key: "x", template: "Gated4626Vault", name: "X", symbol: "X", rules: ["credentialRule", "windowRule"] };
     assert.throws(() => productModule(unusable), /x: Gated4626Vault cannot use windowRule/);
+    for (const rule of ["minPositionRule", "fundHoldersRule", "supplyCapRule", "windowRule", "executedOnlyRule"] as const) {
+      const note: Product = { key: "n", template: "Gated721", name: "N", symbol: "N", rules: ["credentialRule", rule], fund: "main" };
+      assert.throws(() => productModule(note), new RegExp(`n: Gated721 cannot use ${rule}`));
+    }
   });
 });
 
@@ -209,6 +238,40 @@ describe("a vault whose asset is a gated cash token", async function () {
       cash,
       "PolicyGated_TransferRejected",
     );
+  });
+});
+
+describe("a client verified once holds a token and an NFT of the same issuer", async function () {
+  const connection = await network.create();
+  const { viem, networkHelpers } = connection;
+
+  const tokenAndNote: Profile = {
+    id: "tokenAndNote",
+    singleSigners: DEMO_SIGNERS,
+    products: [
+      { key: "token", template: "GatedToken", name: "Gated Token", symbol: "GTK", rules: PLAIN },
+      { key: "nft", template: "Gated721", name: "Gated Note", symbol: "gNOTE", rules: PLAIN },
+    ],
+  };
+
+  it("one credential admits the client to both, and one block stops both", async function () {
+    const s = await networkHelpers.loadFixture(async function both() {
+      return deployProfile(connection, tokenAndNote);
+    });
+    const token = await viem.getContractAt("GatedToken", s.products.token.address);
+    const nft = await viem.getContractAt("Gated721", s.products.nft.address);
+    const alice = s.holders.alice;
+    const a = alice.account.address;
+
+    await verify(s, alice);
+    await token.write.mint([a, 100n], { account: s.wallets.minter.account });
+    await nft.write.mint([a, 1n, "ipfs://note-1"], { account: s.wallets.minter.account });
+    assert.equal(await token.read.balanceOf([a]), 100n);
+    assert.ok(isAddressEqual(await nft.read.ownerOf([1n]), a));
+
+    await deverify(s, alice);
+    assert.equal(await token.read.canReceive([a]), false);
+    assert.equal(await nft.read.canReceive([a]), false);
   });
 });
 
