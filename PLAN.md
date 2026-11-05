@@ -3829,6 +3829,17 @@ The owner passed on three findings and said to fix the first.
 
 Checks: `npx hardhat test` `1975 passing (1796 solidity, 179 nodejs)`; lint, format and types; `validate:upgrades` 6 of 6; Slither 0; Aderyn 0; Halmos 22 of 22; `verify:reproducible` 31 contracts. `Gated721` is 15,639 bytes.
 
+### Pages and the follow-up list (2026-11-05)
+
+The pages landed in #36 (`379db88`), with two new ones, `PolicyGatedCoreUpgradeable` and `Gated721`. An outside list after it found stale counts and gaps, and the follow-up pull request fixes the ones that hold:
+
+- **The pages.** The number of reason codes and profiles; the `nft` row of the hook's rule lists; `assertUsable`'s refusals on an NFT in two more places; five templates in `TokenProxy`, whose upgrade check is the core's; the money page's "every template is an ERC-20".
+- **The Markdown files.** In `README.md`, the architecture, the file table, the grants and the NFT's burn pre-flight; in `SECURITY.md`, the scope, the reopening of the interfaces, the suppressions and a mutation row for `Gated721`; in the brief, `NOT_TOKEN_OWNER` among the appended reason codes.
+- **Two tests, so `SECURITY.md`'s evidence holds.** `Gated721.t.sol` gains `test_WhenEtherIsSent_ItReverts` and `test_TheErc7201LocationHoldsTheFreezes`, which every other template already has in its own form. A wrong location constant planted in the contract fails the second.
+- **Not taken from the list:** a mutation count of 56 for `Gated721`, which no run here produced. The mutation row records the planted bugs that were run. The list also named a `PolicyGatedCoreUpgradeable.t.sol`, which does not exist: the core is tested through each template.
+
+A separate check of the follow-up's 35 changed claims found 1 wrong and 2 unsupported, all applied.
+
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
 2. Credential layer: none left. On 2026-10-30 the owner confirmed decisions 11, 12, 13, 15, 16 and 17 as built (17 at the measured +8,179 gas on a transfer). Decision 14 is moot, since `IdentityRule` was removed in the cleanup. Decisions 8 and 9 are recorded in the credential section's table.

@@ -15,12 +15,16 @@ a single movement, deployment and governance, and where the money sits.
 ## Architecture
 
 ```
-PolicyGatedERC20Upgradeable        base: accounting, roles, enforcement, guardian, hook pointer (UUPS)
-        ▲                                 every movement → TransferContext → hook.beforeTransfer → balances → afterTransfer
+PolicyGatedCoreUpgradeable         core: roles, guardian and recovery, pause, hook pointer, registry, upgrade checks (UUPS)
+        ▲
+        ├── PolicyGatedERC20Upgradeable   fungible base: accounting, frozen amounts, enforcement
+        │        ▲                        every movement → TransferContext → hook.beforeTransfer → balances → afterTransfer
+        │        │
+        │   GatedToken                                the base and nothing else
+        │   IntentToken (+ IntentSettledUpgradeable)  holder-signed EIP-712 TransferIntent, settled by EXECUTOR_ROLE
+        │   Gated4626Vault (ERC-4626, gated max*, decimals offset 6), Gated7540Vault (ERC-7540 async, dealt in periods, escrow, settled by a NavDesk)
         │
-GatedToken                                the base and nothing else
-IntentToken (+ IntentSettledUpgradeable)  holder-signed EIP-712 TransferIntent, settled by EXECUTOR_ROLE
-Gated4626Vault (ERC-4626, gated max*, decimals offset 6), Gated7540Vault (ERC-7540 async, dealt in periods, escrow, settled by a NavDesk)
+        └── Gated721                      ERC-721, a metadata URI per token; ERC-7943 freeze per account and token
 
 ComplianceHook (one per deployment, immutable) ──► per token, an ordered list of ≤16 attested IComplianceRule (first
                                                  rejection wins); a token installs its own list when it is initialised
@@ -45,12 +49,12 @@ Distributor (one per token, immutable)           pays holders from an approved, 
 
 | Path | Contents |
 |---|---|
-| `contracts/interfaces/` | Frozen ABI: `IPolicyGated`, `IERC7943Fungible`, `ITemplated`, `IPolicyHook`, `IComplianceRule`, `IComplianceHook`, `IPolicyRegistry`, `ITransferIntent`, `IIntentExecutor`, `IIntentExecutorBatch`, `IDvPExecutor`, `IERC3009`, `IIdentityRegistry`, `ICredentialRegistry`, `ICredentialRule`, `Quals`, `IMinPositionRule`, `IHolderRestrictionRule`, `ISettlementWindowRule`, `IFund`, `IFundHoldersRule`, `IProxyDeployer`, `IGovernanceTimelock`, `IGated4626Vault`, `IGated7540Vault`, `IERC7540Operator` / `IERC7540Deposit` / `IERC7540Redeem` / `IERC7575` (spec-exact ids), `Errors.sol` (reason codes) |
-| `contracts/base/` | `PolicyGatedERC20Upgradeable` |
+| `contracts/interfaces/` | Frozen ABI: `IPolicyGatedCore`, `IPolicyGated`, `IERC7943Fungible`, `IERC7943NonFungible`, `IGated721`, `ITemplated`, `IPolicyHook`, `IComplianceRule`, `IComplianceHook`, `IPolicyRegistry`, `ITransferIntent`, `IIntentExecutor`, `IIntentExecutorBatch`, `IDvPExecutor`, `IERC3009`, `IIdentityRegistry`, `ICredentialRegistry`, `ICredentialRule`, `Quals`, `IMinPositionRule`, `IHolderRestrictionRule`, `ISettlementWindowRule`, `IFund`, `IFundHoldersRule`, `IProxyDeployer`, `IGovernanceTimelock`, `IGated4626Vault`, `IGated7540Vault`, `IERC7540Operator` / `IERC7540Deposit` / `IERC7540Redeem` / `IERC7575` (spec-exact ids), `Errors.sol` (reason codes) |
+| `contracts/base/` | `PolicyGatedCoreUpgradeable`, `PolicyGatedERC20Upgradeable` |
 | `contracts/governance/` | `PolicyRegistry`, `GovernanceTimelock` |
 | `contracts/identity/` | `CredentialRegistry` |
 | `contracts/deploy/` | `ProxyDeployer`, `TokenProxy` |
-| `contracts/mixins/`, `contracts/tokens/` | `IntentSettledUpgradeable`, `GatedToken`, `IntentToken` |
+| `contracts/mixins/`, `contracts/tokens/` | `IntentSettledUpgradeable`, `GatedToken`, `IntentToken`, `Gated721` |
 | `contracts/hooks/` | `ComplianceHook`, `BaseRule`, `rules/` `CredentialRule`, `MinPositionRule`, `HolderRestrictionRule`, `SettlementWindowRule`, `FundHoldersRule` (in the recommended order), `SupplyCapRule`, `ExecutedOnlyRule` |
 | `contracts/fund/` | `Fund` |
 | `contracts/portfolio/` | `Portfolio`, `ERC4626Adapter`, `GuardedAccount`, `ERC20CallValidator`, `ERC4626CallValidator`: where one vault's money may go |
@@ -232,7 +236,7 @@ exact sequence on the local network, playing the council and the KYC attester, a
      fund's rule as the parameter `fundHoldersRule`, but never touches the fund, so a launch cannot fail on one. Nothing is set
      for the escrow: the 7540 vault is the token itself, which neither the fund rule nor the minimum counts;
    - grant roles: AGENT to the issuer's account, **UPGRADER to the timelock only**, RECOVERY to the recovery timelock; MINTER and
-     BURNER on a `GatedToken` or `IntentToken`; EXECUTOR on an `IntentToken` to the executors the product names; SETTLER on a
+     BURNER on a `GatedToken`, `IntentToken` or `Gated721`; EXECUTOR on an `IntentToken` to the executors the product names; SETTLER on a
      7540 vault to its `NavDesk`, and REPORTER and CHECKER to two different accounts; ALLOCATOR on a vault with a portfolio to
      the fund manager;
    - hand over: DEFAULT_ADMIN_ROLE to the timelock, and the operations account renounces it.
@@ -370,7 +374,8 @@ The brief is in [`CLAUDE.md`](CLAUDE.md). Where the code intentionally differs, 
   not. [`PLAN.md`](PLAN.md) records the decision.
 - **`canTransferWithReason` scope.** It, and the boolean `canTransfer`, model holder-driven movements, with the operator
   set to `from`. A simulated burn respects frozen tokens, except that a sender holding `BURNER_ROLE` is bounded by its
-  balance in the reasoned answer, as the write is. The enforcement paths `burn` and `forcedTransfer` release frozen tokens first.
+  balance in the reasoned answer, as the write is. The enforcement paths `burn` and `forcedTransfer` release frozen tokens first. `Gated721` has no holder burn, so
+  its pre-flight takes the caller as a mint's or a burn's operator: asked from the burner's address, it answers for `burn`.
 - **Duplicate rules.** A duplicate `ruleId` reuses `ComplianceHook_DuplicateRule`, so the frozen ABI is unchanged.
 - **7540 operators are full delegates** (review L-5, owner decision): the code follows ERC-7540, so an approved
   operator can also create requests that pull the owner's assets or shares under any controller. Owners should approve
