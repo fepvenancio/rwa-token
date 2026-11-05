@@ -111,7 +111,7 @@ contract InterfaceFreezeTest is Test {
     // Added in Phase 5a (2026-10-17)
     // Re-pinned in S1 of the review items (2026-10-24): `initialize` takes the token's initial rules (was 0xb008690c)
     // Re-pinned 2026-11-01 on owner instruction: the portfolio plug.
-    assertEq(type(IGated4626Vault).interfaceId, bytes4(0x56f3979a), 'IGated4626Vault');
+    assertEq(type(IGated4626Vault).interfaceId, bytes4(0x7c5d7975), 'IGated4626Vault');
     // Added in Phase 5b (2026-10-17). The four ERC-7540 / ERC-7575 ids are the standard's own values.
     assertEq(type(IERC7540Operator).interfaceId, bytes4(0xe3bc4e65), 'IERC7540Operator');
     assertEq(type(IERC7540Deposit).interfaceId, bytes4(0xce3bbe50), 'IERC7540Deposit');
@@ -126,14 +126,14 @@ contract InterfaceFreezeTest is Test {
     assertEq(type(IGated7540Vault).interfaceId, bytes4(0xa61d9790), 'IGated7540Vault');
     // Re-pinned 2026-11-02 on owner instruction: the redemption gate, which adds a field to the struct `hashOf` takes
     // (was 0x6d2f4b62)
-    assertEq(type(INavDesk).interfaceId, bytes4(0xc98f37f8), 'INavDesk');
+    assertEq(type(INavDesk).interfaceId, bytes4(0x17066f0f), 'INavDesk');
     assertEq(type(ISignedEntry).interfaceId, bytes4(0x05cc4f78), 'ISignedEntry');
     assertEq(type(ISupplyCapRule).interfaceId, bytes4(0x52c89ff1), 'ISupplyCapRule');
     assertEq(type(IDistributor).interfaceId, bytes4(0xd75218de), 'IDistributor');
     assertEq(type(IGuardedAccount).interfaceId, bytes4(0x30444861), 'IGuardedAccount');
     assertEq(type(ICallValidator).interfaceId, bytes4(0x9e8d53da), 'ICallValidator');
     assertEq(type(IERC20CallValidator).interfaceId, bytes4(0x4095b410), 'IERC20CallValidator');
-    assertEq(type(IFeeModel).interfaceId, bytes4(0xb7b102a7), 'IFeeModel');
+    assertEq(type(IFeeModel).interfaceId, bytes4(0xefb71fde), 'IFeeModel');
     assertEq(type(IIdentityRegistry).interfaceId, bytes4(0xb9209e33), 'IIdentityRegistry');
     // Added in Phase 7 (2026-10-17), after ProxyDeployer moved to OZ Ownable
     // Re-pinned in S1 of the review items (2026-10-24): `deploy` takes and checks the expected rules (was 0x886d8cd8)

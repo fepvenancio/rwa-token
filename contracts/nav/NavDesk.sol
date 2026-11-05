@@ -89,6 +89,9 @@ contract NavDesk is INavDesk {
   uint256 public markMovedAt;
 
   /// @inheritdoc INavDesk
+  uint256 public paidSinceMark;
+
+  /// @inheritdoc INavDesk
   uint256 public lastFeeAt;
 
   /// @inheritdoc INavDesk
@@ -267,6 +270,7 @@ contract NavDesk is INavDesk {
     if (_p.feeRecipient != address(0)) {
       mark = _p.mark;
       markMovedAt = _p.markMovedAt;
+      paidSinceMark = _p.paidSinceMark;
       lastFeeAt = _p.proposedAt;
     }
     emit ProposalExecuted(_hash, _p.period);
@@ -316,6 +320,8 @@ contract NavDesk is INavDesk {
       mark = _oldMark;
       // aderyn-ignore-next-line(reentrancy-state-change)
       markMovedAt = _old.markMovedAt();
+      // aderyn-ignore-next-line(reentrancy-state-change)
+      paidSinceMark = _old.paidSinceMark();
     }
     // With its model off the old desk's fee clock stopped, and no fee is due for the time since.
     // aderyn-ignore-next-line(reentrancy-state-change)
@@ -351,6 +357,7 @@ contract NavDesk is INavDesk {
         _p.fee,
         _p.mark,
         _p.markMovedAt,
+        _p.paidSinceMark,
         _p.reportHash,
         _p.cash,
         _p.feeRecipient,
@@ -485,11 +492,12 @@ contract NavDesk is INavDesk {
     // the first investors do not pay for time before they arrived.
     _p.mark = _supply < _VIRTUAL_SHARES ? _PAR_MARK : mark;
     _p.markMovedAt = _supply < _VIRTUAL_SHARES ? block.timestamp : markMovedAt;
+    _p.paidSinceMark = _supply < _VIRTUAL_SHARES ? 0 : paidSinceMark;
     address _feeModel = feeModel;
     if (_feeModel == address(0)) return;
     bool _moved;
-    (_p.fee, _p.mark, _moved) =
-      IFeeModel(_feeModel).quote(_gross, _supply, _p.mark, block.timestamp - markMovedAt, block.timestamp - lastFeeAt);
+    (_p.fee, _p.mark, _moved, _p.paidSinceMark) = IFeeModel(_feeModel)
+      .quote(_gross, _supply, _p.mark, block.timestamp - markMovedAt, block.timestamp - lastFeeAt, _p.paidSinceMark);
     if (_moved) _p.markMovedAt = block.timestamp;
     _p.feeRecipient = IFeeModel(_feeModel).RECIPIENT();
   }

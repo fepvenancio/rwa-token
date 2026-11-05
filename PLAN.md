@@ -3670,6 +3670,16 @@ As planned, with these differences:
 
 Tests first: 9 failing for F2, F6, F9 and F10, 3 for F3 and F8, 4 for F11; three desk tests describing what it already did passed, and pin it. The same-block form of the adopt-then-plug test came after that run; the planted bug that restores the old plug, which always restarts the clock, fails it. `npx hardhat test`: `1888 passing (1711 solidity, 177 nodejs)`. Isolated 1711 passing; lint, format and types; Slither 0; Aderyn 0; Halmos 22 of 22; `validate:upgrades` 5 of 5; `verify:reproducible` 30 contracts. Planted bugs: 23 of 23 caught (`SECURITY.md`, section 5). Sizes: `Gated4626Vault` 24,287 bytes (289 free), `Gated7540Vault` 22,015, `NavDesk` 11,457, `Portfolio` 12,062, `IntentToken` 17,990.
 
+### As built: the soft hurdle's catch-up (option A)
+
+As planned. `IFeeModel.quote` takes `paidSince` and returns `newPaidSince`; the 4626 appends `paidSinceMark` to its ERC-7201 storage with a getter, and the desk stores it, freezes it in `Proposal` after `markMovedAt`, hashes it and adopts it with the mark. Both restart it at zero with the mark when fewer than `1e6` share units are left.
+
+- **A hard hurdle uses the same rule.** What was paid since the mark moved comes off what is due. It is zero unless a soft model was swapped for a hard one inside its band, and then the hard one does not charge again for what the soft one took.
+- **A band charge that rounds to nothing changes nothing**, where a completed one still moves the mark to the price, as `SECURITY.md` explains.
+- `FeeModel.quote` was too deep for the stack with the new value, so the performance fee moved to `_performanceFee`, and the due amount to `_dueSinceTheMark`.
+
+Tests first: the signature changed first with the old behaviour (153 passing), then 7 model tests failed, then 3 desk tests and the 4626 test failed with the getters in place and nothing stored. One desk test failed for the wrong reason first: the suite's `_close` warps to a day after the last cut-off, back from the year the test had advanced, so those tests close the period directly. `npx hardhat test`: `1904 passing (1727 solidity, 177 nodejs)`. Isolated, lint, format, types, Slither 0, Aderyn 0, Halmos 22 of 22, `validate:upgrades` 5 of 5 and `verify:reproducible` 30 contracts ran at 1,902 tests, before the two tests for the planted bugs' survivors, which touch only test files. Planted bugs: 17, 14 caught at first; two survivors are now caught and one is equivalent (`SECURITY.md`, section 5). Interface ids re-pinned: `IFeeModel` `0xefb71fde`, `INavDesk` `0x17066f0f`, `IGated4626Vault` `0x7c5d7975`. Sizes: `Gated4626Vault` 24,384 bytes (192 free), `NavDesk` 11,792, `FeeModel` 1,580.
+
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
 2. Credential layer: none left. On 2026-10-30 the owner confirmed decisions 11, 12, 13, 15, 16 and 17 as built (17 at the measured +8,179 gas on a transfer). Decision 14 is moot, since `IdentityRule` was removed in the cleanup. Decisions 8 and 9 are recorded in the credential section's table.

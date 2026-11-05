@@ -79,40 +79,79 @@ contract FeeModel is IFeeModel {
     uint256 _supply,
     uint256 _mark,
     uint256 _markAge,
-    uint256 _feeAge
-  ) external view returns (uint256 _fee, uint256 _newMark, bool _markMoved) {
+    uint256 _feeAge,
+    uint256 _paidSince
+  ) external view returns (uint256 _fee, uint256 _newMark, bool _markMoved, uint256 _newPaidSince) {
     _newMark = _mark;
-    if (_supply == 0 || _supply > _MAX_FIGURE || _gross > _MAX_FIGURE || _mark > _MAX_FIGURE) return (0, _mark, false);
+    _newPaidSince = _paidSince;
+    if (
+      _supply == 0 || _supply > _MAX_FIGURE || _gross > _MAX_FIGURE || _mark > _MAX_FIGURE || _paidSince > _MAX_FIGURE
+    ) return (0, _mark, false, _paidSince);
 
     _fee = Math.mulDiv(_gross, MANAGEMENT_BPS * Math.min(_feeAge, _MAX_AGE), _BPS * _YEAR);
-    uint256 _price = Math.mulDiv(_gross - _fee, _PRICE_SCALE, _supply);
-    uint256 _hurdled = _mark + Math.mulDiv(_mark, HURDLE_BPS * Math.min(_markAge, _MAX_AGE), _BPS * _YEAR);
-    if (_price <= _hurdled) return (_fee, _mark, false);
-
-    uint256 _charged = _performance(_price, _mark, _hurdled);
-    if (_charged == 0) return (_fee, _mark, false);
-    uint256 _paid = Math.mulDiv(_charged, _supply, _PRICE_SCALE);
+    uint256 _paid;
+    (_paid, _newMark, _markMoved, _newPaidSince) =
+      _performanceFee(Math.mulDiv(_gross - _fee, _PRICE_SCALE, _supply), _supply, _mark, _markAge, _paidSince);
     _fee += _paid;
-    // The price after what is actually paid, never below the hurdle: what is charged never exceeds what is above it. A
-    // charge that rounds down stays in the price, and a mark below that would be charged on the next investor's principal.
-    _newMark = _price - Math.mulDiv(_paid, _PRICE_SCALE, _supply);
-    _markMoved = true;
   }
 
   /**
-   * @notice The performance fee per `_PRICE_SCALE` share units
-   * @param _price The price after the management fee
+   * @notice The performance fee this count pays, and where it leaves the mark
+   * @param _price The price after the management fee: assets per `_PRICE_SCALE` share units
+   * @param _supply All shares
+   * @param _mark The high-water mark
+   * @param _markAge The seconds since the mark last moved
+   * @param _paidSince The performance fee paid since the mark last moved, per `_PRICE_SCALE` share units
+   * @return _paid The fee, in assets
+   * @return _newMark The mark after this fee
+   * @return _markMoved Whether the mark moved
+   * @return _newPaidSince The performance fee paid since the mark last moved, after this fee
+   */
+  function _performanceFee(
+    uint256 _price,
+    uint256 _supply,
+    uint256 _mark,
+    uint256 _markAge,
+    uint256 _paidSince
+  ) private view returns (uint256 _paid, uint256 _newMark, bool _markMoved, uint256 _newPaidSince) {
+    _newMark = _mark;
+    _newPaidSince = _paidSince;
+    uint256 _hurdled = _mark + Math.mulDiv(_mark, HURDLE_BPS * Math.min(_markAge, _MAX_AGE), _BPS * _YEAR);
+    // What the price would be had nothing been paid since the mark moved.
+    uint256 _before = _price + _paidSince;
+    if (_before <= _hurdled) return (0, _mark, false, _paidSince);
+    (uint256 _due, bool _caughtUp) = _dueSinceTheMark(_before, _mark, _hurdled);
+    if (_due <= _paidSince) return (0, _mark, false, _paidSince);
+    _paid = Math.mulDiv(_due - _paidSince, _supply, _PRICE_SCALE);
+    uint256 _paidPerUnit = Math.mulDiv(_paid, _PRICE_SCALE, _supply);
+    // Inside a soft hurdle's catch-up the mark and its clock wait, and what is paid is carried.
+    if (!_caughtUp) return (_paid, _mark, false, _paidSince + _paidPerUnit);
+    // The price after what is actually paid, never below the hurdle: what is charged never exceeds what is above it. A
+    // charge that rounds down stays in the price, and a mark below that would be charged on the next investor's principal.
+    _newMark = _price - _paidPerUnit;
+    _markMoved = true;
+    _newPaidSince = 0;
+  }
+
+  /**
+   * @notice The performance fee due since the mark moved, per `_PRICE_SCALE` share units
+   * @dev A soft hurdle is still catching up while the rate on the whole gain exceeds what is above the hurdle: then all of
+   *      that is due, and the mark waits. A hard hurdle has no catch-up
+   * @param _before The price after the management fee, with what was paid since the mark moved added back
    * @param _mark The high-water mark
    * @param _hurdled The mark with the hurdle added
-   * @return _charged The fee in assets per `_PRICE_SCALE` share units
+   * @return _due The fee due since the mark moved, in assets per `_PRICE_SCALE` share units
+   * @return _caughtUp Whether the catch-up is complete, so the mark moves
    */
-  function _performance(
-    uint256 _price,
+  function _dueSinceTheMark(
+    uint256 _before,
     uint256 _mark,
     uint256 _hurdled
-  ) private view returns (uint256 _charged) {
-    uint256 _above = _price - _hurdled;
-    if (!SOFT_HURDLE) return Math.mulDiv(_above, PERFORMANCE_BPS, _BPS);
-    _charged = Math.min(Math.mulDiv(_price - _mark, PERFORMANCE_BPS, _BPS), _above);
+  ) private view returns (uint256 _due, bool _caughtUp) {
+    uint256 _above = _before - _hurdled;
+    if (!SOFT_HURDLE) return (Math.mulDiv(_above, PERFORMANCE_BPS, _BPS), true);
+    uint256 _onTheWholeGain = Math.mulDiv(_before - _mark, PERFORMANCE_BPS, _BPS);
+    _caughtUp = _onTheWholeGain <= _above;
+    _due = _caughtUp ? _onTheWholeGain : _above;
   }
 }

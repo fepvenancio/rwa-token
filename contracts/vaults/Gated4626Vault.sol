@@ -56,6 +56,7 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
     uint256 maxRateBps;
     uint256 feesOwed;
     uint256 mark;
+    uint256 paidSinceMark;
   }
 
   /// @notice A year's worth of the rate's denominator: basis points per year, in seconds
@@ -252,6 +253,11 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
   }
 
   /// @inheritdoc IGated4626Vault
+  function paidSinceMark() external view returns (uint256 _paid) {
+    _paid = _getGated4626Storage().paidSinceMark;
+  }
+
+  /// @inheritdoc IGated4626Vault
   function exitOnly() external view returns (bool _exitOnly) {
     _exitOnly = _closedForGood();
   }
@@ -312,7 +318,7 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
    */
   function totalAssets() public view override returns (uint256 _total) {
     if (_getGated4626Storage().portfolio == address(0)) return super.totalAssets();
-    (uint256 _counted, uint256 _fee,,) = _counting();
+    (uint256 _counted, uint256 _fee,,,) = _counting();
     _total = _counted - _fee;
   }
 
@@ -458,7 +464,7 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
   function _accrue() private {
     Gated4626Storage storage $ = _getGated4626Storage();
     if ($.portfolio == address(0) || _dealingStopped()) return;
-    (uint256 _counted, uint256 _fee, uint256 _newMark, bool _markMoved) = _counting();
+    (uint256 _counted, uint256 _fee, uint256 _newMark, bool _markMoved, uint256 _paidSince) = _counting();
     if (!$.exitOnly && _fellTooFar(_counted)) {
       $.exitOnly = true;
       emit DepositsClosed(_counted, $.last);
@@ -469,6 +475,7 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
     if ($.feeModel == address(0)) return;
     $.feesOwed += _fee;
     $.mark = _newMark;
+    $.paidSinceMark = _paidSince;
     $.lastFeeAt = uint64(block.timestamp);
     if (_markMoved) $.markMovedAt = uint64(block.timestamp);
   }
@@ -480,18 +487,24 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
    * @return _fee The fee due now
    * @return _newMark The mark after that fee
    * @return _markMoved Whether the mark moved
+   * @return _paidSince The performance fee charged since the mark last moved, after that fee
    */
-  function _counting() private view returns (uint256 _counted, uint256 _fee, uint256 _newMark, bool _markMoved) {
+  function _counting()
+    private
+    view
+    returns (uint256 _counted, uint256 _fee, uint256 _newMark, bool _markMoved, uint256 _paidSince)
+  {
     Gated4626Storage storage $ = _getGated4626Storage();
     IPortfolio _portfolio = IPortfolio($.portfolio);
     _counted = $.last;
     _newMark = $.mark;
-    if (!_portfolio.priceFresh()) return (_counted, 0, _newMark, false);
+    _paidSince = $.paidSinceMark;
+    if (!_portfolio.priceFresh()) return (_counted, 0, _newMark, false, _paidSince);
     // With no shares nothing is anyone's. A price struck on what is left would be charged as a gain on the next
     // investor's principal, so they buy at par, and the mark starts there. What is left counts for them under the
     // limit. Fewer share units than one unit of the asset buys at par count as none: between them they own less than
     // that unit, and a count on a few of them could move the mark beyond any later gain.
-    if (totalSupply() < _VIRTUAL_SHARES) return (0, 0, _PAR_MARK, true);
+    if (totalSupply() < _VIRTUAL_SHARES) return (0, 0, _PAR_MARK, true, 0);
 
     uint256 _priced = _portfolio.pricedValue();
     uint256 _owed = $.feesOwed;
@@ -500,8 +513,10 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
     _counted = Math.min(_net, _limit);
     address _feeModel = $.feeModel;
     if (_feeModel != address(0)) {
-      (_fee, _newMark, _markMoved) = IFeeModel(_feeModel)
-        .quote(_counted, totalSupply(), _newMark, block.timestamp - $.markMovedAt, block.timestamp - $.lastFeeAt);
+      (_fee, _newMark, _markMoved, _paidSince) = IFeeModel(_feeModel)
+        .quote(
+          _counted, totalSupply(), _newMark, block.timestamp - $.markMovedAt, block.timestamp - $.lastFeeAt, _paidSince
+        );
     }
   }
 
@@ -530,7 +545,7 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
     if ($.exitOnly) return true;
     if (_portfolio == address(0)) return false;
     if (IPortfolio(_portfolio).writtenOff()) return true;
-    (uint256 _counted,,,) = _counting();
+    (uint256 _counted,,,,) = _counting();
     _closed = _fellTooFar(_counted);
   }
 

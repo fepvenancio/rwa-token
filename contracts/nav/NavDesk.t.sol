@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {IERC20Errors} from '@openzeppelin/contracts/interfaces/draft-IERC6093.sol';
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {Pausable} from '@openzeppelin/contracts/utils/Pausable.sol';
+import {Math} from '@openzeppelin/contracts/utils/math/Math.sol';
 import {Test} from 'forge-std/Test.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
@@ -348,6 +349,7 @@ contract NavDesk_Propose is NavDeskTest {
       fee: 0,
       mark: 1e12,
       markMovedAt: block.timestamp,
+      paidSinceMark: 0,
       reportHash: _REPORT,
       cash: _custodian,
       feeRecipient: address(0),
@@ -1031,8 +1033,8 @@ contract NavDesk_Fees is NavDeskTest {
     _close();
     uint256 _at = block.timestamp;
     uint256 _gross = 1000e6;
-    (uint256 _quoted,,) =
-      _model.quote(_gross, _vault.totalSupply(), _desk.mark(), _at - _desk.markMovedAt(), _at - _desk.lastFeeAt());
+    (uint256 _quoted,,,) =
+      _model.quote(_gross, _vault.totalSupply(), _desk.mark(), _at - _desk.markMovedAt(), _at - _desk.lastFeeAt(), 0);
     _propose(_gross);
     INavDesk.Proposal memory _p = _desk.proposal();
     assertEq(_p.fee, _quoted);
@@ -1291,6 +1293,103 @@ contract NavDesk_Fees is NavDeskTest {
     assertEq(_next.mark(), _mark);
     assertEq(_next.markMovedAt(), _movedAt);
     assertEq(_next.lastFeeAt(), _at);
+  }
+}
+
+/// @notice A soft hurdle's catch-up survives a period that ends inside it: the desk carries what was paid
+contract NavDesk_SoftHurdle is NavDeskTest {
+  uint256 internal constant _YEAR = 365 days;
+  address internal _recipient = makeAddr('recipient');
+  FeeModel internal _model;
+
+  function setUp() public override {
+    super.setUp();
+    _model = new FeeModel(_recipient, 0, 2000, 1000, true);
+    _registry.attest(address(_model).codehash, IPolicyRegistry.AttestKind.FEE_MODEL, '');
+    _request(_alice, 1000e6);
+    _deal(0);
+    vm.prank(_alice);
+    _vault.mint(1000e6 * _PAR, _alice, _alice);
+    _desk.setFeeModel(address(_model));
+  }
+
+  /// @dev A year on, a period priced just above the hurdle leaves the mark and carries what it charged
+  function _periodInsideTheBand() internal returns (uint256 _fee) {
+    // A year on; the suite's `_close` would warp back to a day after the last cut-off.
+    vm.warp(block.timestamp + _YEAR);
+    _desk.closePeriod();
+    _propose(1100.1e6);
+    _fee = _desk.proposal().fee;
+    _accept();
+    vm.warp(block.timestamp + _COOLDOWN);
+    _desk.execute();
+  }
+
+  function test_APeriodInsideTheBandLeavesTheMarkAndCarriesWhatItCharged() external {
+    uint256 _mark = _desk.mark();
+    uint256 _movedAt = _desk.markMovedAt();
+    uint256 _fee = _periodInsideTheBand();
+    assertGt(_fee, 0);
+    assertEq(_desk.mark(), _mark);
+    assertEq(_desk.markMovedAt(), _movedAt);
+    assertEq(_desk.paidSinceMark(), Math.mulDiv(_fee, 1e18, _vault.totalSupply()));
+  }
+
+  function test_TheNextPeriodChargesWhatOnePeriodWould() external {
+    uint256 _mark = _desk.mark();
+    uint256 _movedAt = _desk.markMovedAt();
+    uint256 _first = _periodInsideTheBand();
+    _close();
+    uint256 _supply = _vault.totalSupply();
+    (uint256 _once,,,) = _model.quote(1200e6, _supply, _mark, block.timestamp - _movedAt, 0, 0);
+    _propose(1200e6 - _first);
+    INavDesk.Proposal memory _p = _desk.proposal();
+    assertApproxEqAbs(_first + _p.fee, _once, 1);
+    assertEq(_p.paidSinceMark, 0);
+    _accept();
+    vm.warp(block.timestamp + _COOLDOWN);
+    _desk.execute();
+    assertGt(_desk.mark(), _mark);
+    assertEq(_desk.paidSinceMark(), 0);
+  }
+
+  function test_TheProposalHashCoversWhatWasPaid() external {
+    // A year on; the suite's `_close` would warp back to a day after the last cut-off.
+    vm.warp(block.timestamp + _YEAR);
+    _desk.closePeriod();
+    _propose(1100.1e6);
+    INavDesk.Proposal memory _p = _desk.proposal();
+    bytes32 _hash = _desk.hashOf(_p);
+    _p.paidSinceMark += 1;
+    assertTrue(_desk.hashOf(_p) != _hash);
+  }
+
+  /// @dev Once everyone has left, what the last holders paid into the catch-up is nobody's, and the next investors must
+  ///      not pay catch-up on their principal
+  function test_WhenEveryoneHasLeftWhatWasPaidRestarts() external {
+    _periodInsideTheBand();
+    assertGt(_desk.paidSinceMark(), 0);
+    vm.prank(_alice);
+    _vault.requestRedeem(1000e6 * _PAR, _alice, _alice);
+    _deal(1100e6);
+    assertEq(_vault.totalSupply(), 0);
+    _close();
+    _propose(0);
+    assertEq(_desk.proposal().paidSinceMark, 0);
+    _accept();
+    vm.warp(block.timestamp + _COOLDOWN);
+    _desk.execute();
+    assertEq(_desk.paidSinceMark(), 0);
+  }
+
+  function test_ADeskThatAdoptsTakesWhatWasPaid() external {
+    _periodInsideTheBand();
+    uint256 _paid = _desk.paidSinceMark();
+    assertGt(_paid, 0);
+    NavDesk _next = new NavDesk(address(_vault), _custodian, _LENGTH, _COOLDOWN, _MAX_AGE);
+    _next.setFeeModel(address(_model));
+    _next.adopt(address(_desk));
+    assertEq(_next.paidSinceMark(), _paid);
   }
 }
 
