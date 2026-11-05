@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gated721 · Gated Token Stack</title>
+<meta name="description" content="The NFT template: an ERC-721 with a metadata URI per token, judged by the same hook and rules as the other tokens, with a freeze per account and token.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="../index.html">Gated Token Stack</a>
+  <a href="../index.html">Overview</a>
+  <a href="../index.html#contracts">Contracts</a>
+  <a href="../roles.html">Who can do what</a>
+  <a href="../movement.html">One movement</a>
+  <a href="../deployment.html">Deployment and governance</a>
+  <a href="../money.html">Where the money sits</a>
+</nav>
+<main class="page">
+
+<header class="top">
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Token</div>
+  <h1>Gated721</h1>
+  <p class="lede">The NFT template. Each token is one item, with its own owner and its own metadata URI. Every movement of a token asks the same policy hook and rules as the other templates before it happens.</p>
+  <div class="facts">
+    <span class="fact"><b>contracts/tokens/Gated721.sol</b></span>
+    <span class="fact">upgradeable: <b>UUPS</b>, behind a <b>TokenProxy</b></span>
+    <span class="fact">admin: <b>the main timelock</b>, after hand-over</span>
+    <span class="fact">implementation attested as <b>IMPLEMENTATION</b></span>
+  </div>
+</header>
+
+<section id="in-one-minute">
+  <div class="callout wrap-any">
+    <h3>In one minute</h3>
+    <p>A product for unique items: a certificate, a note with its own terms, a receipt for something held elsewhere. The terms live in the metadata the URI points to; the token records who owns each item and lets the issuer correct the URI.</p>
+    <p>It is an ERC-721 built on <a href="PolicyGatedCoreUpgradeable.html"><code>PolicyGatedCoreUpgradeable</code></a>, so its roles, guardian, pause, hook and upgrade checks are the same code as every other template's. Who may hold an item, and each holder's lockup and freeze, come from the rules the product lists, as on a fungible token. It also speaks ERC-7943's interface for NFTs: the agent can force an item to another holder and freeze one item for one account.</p>
+  </div>
+</section>
+
+<section id="how">
+  <div class="prose wrap-any">
+    <h2>How a movement is decided</h2>
+    <p>Transfers, mints and burns reach OpenZeppelin's <code>_update</code>, which the token overrides. A forced transfer goes straight to the token's movement path, <code>_move</code>, with its kind. The checks run in this order:</p>
+  </div>
+  <ol class="steps wrap-any">
+    <li><div><b>ERC-721's own checks.</b> On a transfer, the caller must be the owner or approved for the item (<code>ERC721InsufficientApproval</code>, or <code>ERC721NonexistentToken</code> for a token that does not exist), and the hook is not asked (<code>test_WhenTheCallerIsNotApproved_ErcSevenTwentyOneRevertsBeforeTheHookIsAsked</code>). A transfer to the zero address reverts with <code>ERC721InvalidReceiver</code>. <code>mint</code> refuses an id that exists, and <code>burn</code> one that does not, before the hook is asked. On a transfer, a <code>from</code> that is not the owner reverts with <code>ERC721IncorrectOwner</code>, which OpenZeppelin checks after the move: when the pause, the freeze or the hook refuses first, that is the revert, judged against the real owner. <code>forcedTransfer</code> checks <code>from</code> up front, before the pause, the freeze and the hook.</div></li>
+    <li><div><b>Pause.</b> While paused, every kind except <span class="k k-forced">FORCED</span> is refused with <code>PolicyGated_TransferRejected(PAUSED)</code>.</div></li>
+    <li><div><b>The freeze.</b> An item frozen for its owner cannot be moved by the owner or an approved operator: <code>ERC7943InsufficientUnfrozenBalance(owner, tokenId)</code>. A forced transfer and a burn by a <code>BURNER_ROLE</code> holder may take it. See <a href="#freeze">Freezes</a>.</div></li>
+    <li><div><b>The hook decides.</b> <code>beforeTransfer(ctx)</code> returns <code>TRANSFER_OK</code> or a reason, and anything else reverts with <code>PolicyGated_TransferRejected(reason)</code>.</div></li>
+    <li><div><b>The item moves</b> with OpenZeppelin's logic, which clears its approval and emits <code>Transfer</code>.</div></li>
+    <li><div><b>After the move,</b> <code>afterTransfer(ctx)</code> runs if the hook wants it, inside the token's reentrancy guard: a hook or rule that starts another movement reverts with <code>ReentrancyGuardReentrantCall</code> (<code>test_WhenTheHookCallsBackIntoTheToken_TheGuardRefusesIt</code>).</div></li>
+  </ol>
+  <div class="prose wrap-any">
+    <p><code>safeTransferFrom</code> calls the receiver's <code>onERC721Received</code> after all of that, outside the guard. A receiver that moves the item on from there takes the same path as anyone, and a refusal of that second move undoes both (<code>test_WhenTheReceiverForwardsTheTokenFromItsCallback_ThePolicyJudgesThatMoveToo</code>). <code>mint</code> calls no receiver.</p>
+  </div>
+</section>
+
+<section id="context">
+  <div class="prose wrap-any">
+    <h2>What the hook is told</h2>
+    <p>The same <code>TransferContext</code> as a fungible token's, so the same hook and the same rule instances serve both.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Field</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td><code>token</code></td><td>The NFT's own address</td></tr>
+        <tr><td><code>from</code>, <code>to</code></td><td>Owner and receiver; zero on a mint and a burn respectively</td></tr>
+        <tr><td><code>id</code></td><td>The token id</td></tr>
+        <tr><td><code>amount</code></td><td>Always 1</td></tr>
+        <tr><td><code>operator</code></td><td>The caller: the owner or an approved operator, the minter, the burner, or the agent</td></tr>
+        <tr><td><code>kind</code></td><td><span class="k k-transfer">TRANSFER</span> from <code>transferFrom</code> and <code>safeTransferFrom</code>, <span class="k k-mint">MINT</span>, <span class="k k-burn">BURN</span>, <span class="k k-forced">FORCED</span> from <code>forcedTransfer</code>. There is no <span class="k k-executed">EXECUTED</span>: the NFT has no signed intents.</td></tr>
+        <tr><td><code>extra</code></td><td><code>abi.encode(fromCount, toCount)</code>: how many items each side held before the move, zero for the zero address</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose wrap-any">
+    <p>The tests compare the context with what each route sends: <code>test_WhenTheOwnerTransfers_TheHookSeesATransferWithTheHoldings</code>, <code>test_WhenAnApprovedOperatorTransfers_TheOperatorIsInTheContext</code>, <code>test_WhenTheMinterMints_TheHookSeesAMintOfOneAndTheTokenHasItsUri</code>, <code>test_WhenTheBurnerBurns_TheHookSeesABurnAndTheTokenIsGone</code> and <code>test_WhenTheAgentForces_TheHookSeesAForcedMoveAndBothEventsCarryTheToken</code>.</p>
+  </div>
+</section>
+
+<section id="rules">
+  <div class="prose wrap-any">
+    <h2>Which rules fit an NFT</h2>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Rule</th><th>On a <code>Gated721</code></th></tr></thead>
+      <tbody>
+        <tr><td><a href="CredentialRule.html"><code>CredentialRule</code></a></td><td>Works as on any token: who may receive an item, and that a sender may leave. The <code>nft</code> profile lists it.</td></tr>
+        <tr><td><a href="HolderRestrictionRule.html"><code>HolderRestrictionRule</code></a></td><td>Works as on any token: a holder's lockup and an address freeze. The <code>nft</code> profile lists it.</td></tr>
+        <tr><td><a href="MinPositionRule.html"><code>MinPositionRule</code></a></td><td>Refused by the profile check. On chain it would count items, which means nothing for unique ones.</td></tr>
+        <tr><td><a href="FundHoldersRule.html"><code>FundHoldersRule</code></a></td><td>Refused by the profile check. A <code>Fund</code> registers only a token that reports <code>IPolicyGated</code>, which the NFT does not, so on chain the rule would refuse every movement with <code>NOT_FUND_CLASS</code>.</td></tr>
+        <tr><td><a href="SupplyCapRule.html"><code>SupplyCapRule</code></a></td><td>Refused by the profile check. It reads an ERC-20 <code>totalSupply</code>, which the NFT does not have, so on chain every mint, and the pre-flight of one, would revert with no reason.</td></tr>
+        <tr><td><a href="SettlementWindowRule.html"><code>SettlementWindowRule</code></a>, <a href="ExecutedOnlyRule.html"><code>ExecutedOnlyRule</code></a></td><td>Refused, as on every template without signed intents.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="freeze">
+  <div class="prose wrap-any">
+    <h2>Freezes</h2>
+    <p>ERC-7943's freeze for NFTs is a yes or no for one account and one token id. The agent sets it with <code>setFrozenTokens(account, tokenId, frozenStatus)</code>, which overwrites the previous value and emits <code>Frozen(account, tokenId, frozenStatus)</code>. It may name an item the account does not hold (<code>test_WhenTheAccountDoesNotHoldTheToken_TheFreezeIsStillRecorded</code>), and an item that later reaches that account arrives frozen (<code>test_WhenTheTokenReachesAnAccountFrozenForIt_ItArrivesFrozen</code>). A freeze for another account does not stop the owner.</p>
+  </div>
+  <ul class="plain wrap-any">
+    <li><b>The owner and approved operators</b> cannot move a frozen item (<code>test_WhenFrozen_NeitherTheOwnerNorAnApprovedOperatorCanMoveIt</code>).</li>
+    <li><b>Enforcement clears it.</b> <code>forcedTransfer</code> and <code>burn</code> clear the owner's freeze of that item before the move, emitting <code>Frozen(owner, tokenId, false)</code> before <code>Transfer</code>, as ERC-7943 asks. If the hook then refuses, the whole call reverts and the freeze stays (for <code>burn</code>: <code>test_WhenTheHookRejects_TheTokenAndItsFreezeStay</code>).</li>
+    <li><b>The invariant</b> <code>invariant_AHolderMovesExactlyItsUnfrozenTokens</code> drives random transfers, freezes, forced transfers and burns, and checks that an owner's transfer succeeds exactly when the item is not frozen for it, and that enforcement always clears the freeze it takes.</li>
+    <li><b>An address freeze is a different tool:</b> it is <code>HolderRestrictionRule</code>'s, in the hook, and stops an account sending or receiving any item. It also stops the burner's burn, so the route out of an address-frozen account is <code>forcedTransfer</code>.</li>
+  </ul>
+</section>
+
+<section id="preflight">
+  <div class="prose wrap-any">
+    <h2>Asking before moving</h2>
+    <p><code>canTransferWithReason(from, to, tokenId)</code> runs the checks of the path without moving anything. A zero <code>from</code> reads as a mint and a zero <code>to</code> as a burn; both zero reads <code>ZERO_RECEIVER</code>. The operator is <code>from</code> for a transfer, and the caller for a mint or a burn, because only a role holder drives those. The caller's role is not judged, so a burn is asked about from the burner's address: then a frozen item or a holder's lockup does not stop it, as it does not stop <code>burn</code> (<code>test_WhenTheBurnerAsksAboutBurningAFrozenToken_ThePreflightAgreesWithTheBurn</code>, <code>testFuzz_TheBurnPreflightAgreesWithTheBurn</code>). Approval is not judged.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Situation</th><th><code>canTransferWithReason</code></th><th><code>canTransfer</code></th></tr></thead>
+      <tbody>
+        <tr><td>The owner, nothing frozen, hook accepts</td><td class="ok">true, <code>TRANSFER_OK</code></td><td class="ok">true</td></tr>
+        <tr><td><code>from</code> is not the owner (for a mint: the id exists)</td><td class="no">false, <code>NOT_TOKEN_OWNER</code></td><td class="ok">true, if nothing else refuses</td></tr>
+        <tr><td>The item is frozen for <code>from</code></td><td class="no">false, <code>INSUFFICIENT_UNFROZEN</code></td><td class="no">false</td></tr>
+        <tr><td>Paused</td><td class="no">false, <code>PAUSED</code></td><td class="no">false</td></tr>
+        <tr><td>A rule refuses</td><td class="no">false, the rule's reason</td><td class="no">false</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose wrap-any">
+    <p><code>canTransfer</code> is ERC-7943's yes or no. The standard says it must not answer no for a non-permissioned check such as a balance or an allowance, so it leaves ownership to ERC-721, while it does count the freeze (<code>test_WhenFromIsNotTheOwner_OnlyTheReasonedPreflightSaysSo</code>, <code>test_WhenFrozen_NeitherTheOwnerNorAnApprovedOperatorCanMoveIt</code>). <code>testFuzz_ThePreflightAgreesWithTheWrite</code> fuzzes the sender, the freeze, the pause and the hook's answer, and compares <code>canTransferWithReason</code> with a real transfer.</p>
+    <p><code>canSend(account)</code> and <code>canReceive(account)</code> are the account questions: false while paused or with no hook, otherwise the hook's account answers.</p>
+  </div>
+</section>
+
+<section id="functions">
+  <div class="prose wrap-any"><h2>What it can do</h2></div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>initialize(name, symbol, admin, guardian, registry, hook, _initialRules)</code></td><td>Once per proxy; <code>ProxyDeployer</code> runs it in the transaction that creates the proxy</td><td>Sets the name and symbol, then the core: roles, registry, hook and the rule list. See <a href="PolicyGatedCoreUpgradeable.html#setup">the core's setup</a>.</td></tr>
+        <tr><td><code>mint(to, tokenId, uri)</code></td><td><code>MINTER_ROLE</code></td><td>Creates the item for <code>to</code> with its URI, decided as <span class="k k-mint">MINT</span>. An existing id reverts with <code>ERC721InvalidSender(0)</code>, a zero receiver with <code>ERC721InvalidReceiver</code>. Emits <code>Transfer</code>, then ERC-4906's <code>MetadataUpdate</code>.</td></tr>
+        <tr><td><code>burn(tokenId)</code></td><td><code>BURNER_ROLE</code></td><td>Destroys the item without approval, clearing its owner's freeze first. Decided as <span class="k k-burn">BURN</span>. A missing id reverts with <code>ERC721NonexistentToken</code>.</td></tr>
+        <tr><td><code>forcedTransfer(from, to, tokenId)</code></td><td><code>AGENT_ROLE</code></td><td>Moves the item without the owner's consent, also while paused, clearing its freeze first. Decided as <span class="k k-forced">FORCED</span>, so the rules still judge the receiver. Emits <code>Transfer</code>, then <code>ForcedTransfer(from, to, tokenId)</code> and <code>ForcedTransferBy(from, to, tokenId, agent)</code>. Returns <code>true</code>.</td></tr>
+        <tr><td><code>setFrozenTokens(account, tokenId, frozenStatus)</code></td><td><code>AGENT_ROLE</code></td><td>Sets the freeze of one item for one account. Returns <code>true</code>. Works while paused.</td></tr>
+        <tr><td><code>setTokenURI(tokenId, uri)</code></td><td><code>AGENT_ROLE</code></td><td>Replaces an existing item's URI and emits <code>MetadataUpdate</code>. A missing id reverts with <code>ERC721NonexistentToken</code>.</td></tr>
+        <tr><td><code>transferFrom</code>, <code>safeTransferFrom</code></td><td>The owner, or an operator approved for the item or for all</td><td>OpenZeppelin's ERC-721, decided as <span class="k k-transfer">TRANSFER</span>.</td></tr>
+        <tr><td><code>approve</code>, <code>setApprovalForAll</code></td><td><code>approve</code>: the owner, or an operator approved for all (anyone else gets <code>ERC721InvalidApprover</code>). <code>setApprovalForAll</code>: any account, for itself</td><td>OpenZeppelin's ERC-721. Approvals move nothing, so the hook is not asked.</td></tr>
+        <tr><td><code>getFrozenTokens(account, tokenId)</code>, <code>canTransfer</code>, <code>canTransferWithReason</code>, <code>canSend</code>, <code>canReceive</code></td><td>Anyone (read-only)</td><td>The freeze and the pre-flight answers above.</td></tr>
+        <tr><td><code>ownerOf</code>, <code>balanceOf</code>, <code>tokenURI</code>, <code>getApproved</code>, <code>isApprovedForAll</code>, <code>name</code>, <code>symbol</code></td><td>Anyone (read-only)</td><td>OpenZeppelin's ERC-721 reads.</td></tr>
+        <tr><td><code>templateId()</code></td><td>Anyone (read-only)</td><td><code>keccak256('Gated721')</code></td></tr>
+        <tr><td>Pause, hook, roles, upgrades, <code>multicall</code></td><td colspan="2">From <a href="PolicyGatedCoreUpgradeable.html#functions">the core</a>. An agent can freeze and force in one <code>multicall</code> (<code>test_WhenTheAgentBatchesCalls_MulticallRunsThemAsTheAgent</code>).</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose wrap-any">
+    <p class="small"><code>supportsInterface</code> answers true for <code>IGated721</code> (<code>0x94f4fff1</code>), <code>IERC7943NonFungible</code> (<code>0xbf1ef5fe</code>), <code>IPolicyGatedCore</code>, ERC-721, its metadata extension, ERC-4906, <code>IAccessControl</code> and <code>IERC165</code>, and false for <code>IPolicyGated</code> and the fungible <code>0x3edbb4c4</code> (<code>test_WhenQueried_ItSupportsItsInterfacesAndNotTheFungibleOnes</code>). <code>ForcedTransferBy</code> has the fungible templates' signature and topic. The standard's NFT <code>ForcedTransfer</code> has the fungible one's topic, but indexes the token id.</p>
+  </div>
+</section>
+
+<section id="why">
+  <div class="prose wrap-any">
+    <h2>Why it is built this way</h2>
+    <ul class="plain wrap-any">
+      <li><b>The same hook, not a second one.</b> One attested hook serves every token of a deployment, with a rule list per token. The rules read who, which kind and who is driving, so the account-based ones serve an NFT unchanged.</li>
+      <li><b>ERC-721 checks first.</b> An unapproved caller gets ERC-721's error, and the policy is asked only about the real owner's movement.</li>
+      <li><b>A plain mint.</b> Issuance calls no receiver, so nothing runs between the mint and the URI being set.</li>
+      <li><b>Pre-flights that match the routes.</b> A transfer is driven by its owner, a mint and a burn by a role holder, so the pre-flight takes the operator each route has.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="prose wrap-any">
+    <h2>What it does not do</h2>
+    <ul class="plain wrap-any">
+      <li><b>No signed transfers and no delivery versus payment.</b> An item moves by a transaction of its owner or an approved operator, or by the agent.</li>
+      <li><b>No holder burn.</b> <code>burn</code> needs <code>BURNER_ROLE</code>.</li>
+      <li><b>No enumeration, no supply, no royalties, no <code>permit</code>.</b> A list of items is read from the <code>Transfer</code> events.</li>
+      <li><b>The refusal of an unusable rule is off-chain.</b> <code>assertUsable</code> in <code>ignition/profiles.ts</code> stops it when the module is built. <code>ComplianceHook.setRules</code> accepts any attested rule, so a timelock operation could still list one, with the effects in <a href="#rules">the table above</a>.</li>
+      <li><b>It cannot be a fund class.</b> <code>Fund</code> registers fungible gated tokens only.</li>
+      <li><b>The metadata is off-chain.</b> The token stores a URI and checks nothing about what it points to.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="connected">
+  <div class="prose wrap-any"><h2>Connected to</h2></div>
+  <div class="cards">
+    <a class="card" href="PolicyGatedCoreUpgradeable.html"><span class="name">PolicyGatedCoreUpgradeable</span><p>The roles, pause, hook and upgrade checks it shares.</p></a>
+    <a class="card" href="GatedToken.html"><span class="name">GatedToken</span><p>The plain fungible template on the same core.</p></a>
+    <a class="card" href="ComplianceHook.html"><span class="name">ComplianceHook</span><p>Runs this token's rules on every movement.</p></a>
+    <a class="card" href="CredentialRule.html"><span class="name">CredentialRule</span><p>Who may hold an item.</p></a>
+    <a class="card" href="HolderRestrictionRule.html"><span class="name">HolderRestrictionRule</span><p>Each holder's lockup and address freeze.</p></a>
+    <a class="card" href="ProxyDeployer.html"><span class="name">ProxyDeployer</span><p>Places the NFT and checks it came up as expected.</p></a>
+    <a class="card" href="../deployment.html"><span class="name">Deployment and governance</span><p>The <code>nft</code> profile, and how a product is handed over.</p></a>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose wrap-any">
+    <h2>Source and tests</h2>
+    <ul class="plain wrap-any">
+      <li>Contract: <code>contracts/tokens/Gated721.sol</code>; interfaces <code>IGated721.sol</code>, <code>IERC7943NonFungible.sol</code>, <code>IPolicyGatedCore.sol</code>; the reason <code>NOT_TOKEN_OWNER</code> in <code>Errors.sol</code></li>
+      <li>Deployment: <code>ignition/profiles.ts</code> (the <code>nft</code> profile, <code>assertUsable</code>), <code>ignition/modules/Product.ts</code></li>
+      <li>Tests: <code>Gated721.t.sol</code> (unit tests with a mocked hook, the invariant, and an integration on the real hook, <code>CredentialRule</code> and <code>HolderRestrictionRule</code> through <code>ProxyDeployer</code>), <code>test/nodejs/products.test.ts</code> (the deployed <code>nft</code> profile, a client verified once holding a token and an NFT, the refused rules)</li>
+    </ul>
+  </div>
+</section>
+
+<footer>Describes the contracts at commit <code>9526fc7</code> on <code>main</code>.</footer>
+</main>
+</body>
+</html>

@@ -25,7 +25,7 @@
 <header class="top">
   <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Token</div>
   <h1 class="wrap-any">PolicyGatedERC20Upgradeable</h1>
-  <p class="lede">The base every token in the stack is built on. It keeps the balances, the roles and the enforcement tools, and it sends every balance movement through one internal function that asks the policy hook before anything moves.</p>
+  <p class="lede">The base every fungible token in the stack is built on. It keeps the balances and the enforcement tools, takes its roles, pause and hook pointer from the shared core, and sends every balance movement through one internal function that asks the policy hook before anything moves.</p>
   <div class="facts">
     <span class="fact"><b>contracts/base/PolicyGatedERC20Upgradeable.sol</b></span>
     <span class="fact">abstract: <b>runs inside each token</b>, behind its proxy</span>
@@ -37,7 +37,7 @@
 <section id="in-one-minute">
   <div class="callout wrap-any">
     <h3>In one minute</h3>
-    <p><code>GatedToken</code>, <code>IntentToken</code> and both vaults share this code. It does the bookkeeping of an ordinary ERC-20 token, plus what a regulated issuer needs: create and destroy tokens, move tokens without the holder's consent (a forced transfer), freeze part of a holder's balance, and pause the token in an emergency.</p>
+    <p><code>GatedToken</code>, <code>IntentToken</code> and both vaults share this code. It extends <a href="PolicyGatedCoreUpgradeable.html"><code>PolicyGatedCoreUpgradeable</code></a>, which holds the roles, the guardian and recovery, the pause, the hook pointer and the upgrade checks, and which the NFT template, <a href="Gated721.html"><code>Gated721</code></a>, shares too. This page describes them as they apply to a fungible token. It does the bookkeeping of an ordinary ERC-20 token, plus what a regulated issuer needs: create and destroy tokens, move tokens without the holder's consent (a forced transfer), freeze part of a holder's balance, and pause the token in an emergency.</p>
     <p>It does not decide who may hold the token, where or when. For every movement it asks a separate contract, the <b>policy hook</b>, which runs a list of small checks called <b>rules</b> (identity, lockups, settlement hours, a fund's investor cap). The hook and its rules can be changed through governance without touching the token. Changing this base takes an upgrade to code the security council has reviewed and recorded in the registry (code that is <b>attested</b>).</p>
   </div>
 </section>
@@ -350,7 +350,7 @@
     <h2>Standards it speaks, and multicall</h2>
     <ul class="plain wrap-any">
       <li><b>ERC-7943</b> (uRWA, the fungible interface): <code>forcedTransfer</code>, <code>setFrozenTokens</code>, <code>getFrozenTokens</code>, <code>canSend</code>, <code>canReceive</code>, <code>canTransfer</code>, with the events <code>ForcedTransfer</code> and <code>Frozen</code> and the error <code>ERC7943InsufficientUnfrozenBalance</code>. The interface also declares the optional errors <code>ERC7943CannotSend</code>, <code>ERC7943CannotReceive</code> and <code>ERC7943CannotTransfer</code>. The token does not use them and rejects with <code>PolicyGated_TransferRejected(reason)</code>, which carries the reason.</li>
-      <li><b>ERC-165</b>: <code>supportsInterface</code> answers true for <code>IPolicyGated</code>, <code>IERC7943Fungible</code> (<code>0x3edbb4c4</code>), <code>IERC20</code>, <code>IERC20Permit</code>, <code>IAccessControl</code> and <code>IERC165</code>. An <code>IntentToken</code> adds <code>ITransferIntent</code>.</li>
+      <li><b>ERC-165</b>: <code>supportsInterface</code> answers true for <code>IPolicyGated</code>, <code>IPolicyGatedCore</code>, <code>IERC7943Fungible</code> (<code>0x3edbb4c4</code>), <code>IERC20</code>, <code>IERC20Permit</code>, <code>IAccessControl</code> and <code>IERC165</code>. An <code>IntentToken</code> adds <code>ITransferIntent</code>.</li>
       <li><b>ERC-2612</b> <code>permit</code>: approval by signature. Its EIP-712 domain is the token name, version <code>"1"</code>, the chain and the token address, the same domain as signed intents.</li>
       <li><b>Multicall</b>: <code>multicall(data)</code> runs each call on the token itself, so the caller stays the sender and its roles apply to each call. A minter can mint to several accounts, or an agent can set a frozen amount and force a transfer, in one transaction; the tokens have no batch functions of their own. If one call fails, all are undone (<code>test_WhenALaterCallFails_TheEarlierOnesAreUndone</code>). Each movement inside goes through <code>_move</code> on its own, with its own kind and the balances the previous call left (<code>test_WhenAForcedTransferIsFollowedByAPlainTransferInOneBatch_TheSecondIsPlain</code>). It is not payable, and it cannot initialise the token again (<code>test_WhenABatchCallsInitialize_ItReverts</code>). A contract that filters which functions an account may call on the token has to treat <code>multicall</code> as a way in.</li>
     </ul>
@@ -429,8 +429,9 @@
       <li><b>Kinds travel as arguments.</b> A forced transfer and an intent need a kind the addresses cannot show. <code>_moveAs</code> and <code>_mintAs</code> pass it straight to <code>_move</code>, so no later movement can pick up a stale kind. The one transient value is the reentrancy guard, from OpenZeppelin's <code>ReentrancyGuardTransient</code>.</li>
       <li><b>The registry is asked at install time.</b> A hook is checked when it is installed and an implementation when it is upgraded to. A later withdrawal of an attestation does not change a running token: governance removes the component and the guardian can pause meanwhile, so a revocation does not silently drop a check or block every transfer.</li>
       <li><b>The registry is fixed at setup.</b> The initialiser takes it once, and there is no setter.</li>
+      <li><b>No setup function of its own.</b> Its only state, the frozen amounts, starts at zero. Each template sets up ERC-20, <code>permit</code> and the core itself. <code>GatedToken</code>, <code>IntentToken</code> and <code>Gated7540Vault</code> call <code>__ERC20_init</code>, <code>__ERC20Permit_init</code> and <code>__PolicyGatedCore_init</code>. <code>Gated4626Vault</code> calls each parent's setup one by one, ending with <code>__PolicyGatedCore_init_unchained</code>, so that ERC-4626's sits between ERC-20's and <code>permit</code>'s.</li>
       <li><b>Reason codes do not default to yes.</b> A hook or rule that forgets to set its answer returns zero, which is not <code>TRANSFER_OK</code>, so it refuses.</li>
-      <li><b>Namespaced storage.</b> The registry, the hook pointer and the frozen amounts live in one ERC-7201 namespace (<code>gated.storage.PolicyGatedERC20</code>), apart from the OpenZeppelin parents and the templates.</li>
+      <li><b>Namespaced storage.</b> The frozen amounts live in their own ERC-7201 namespace (<code>gated.storage.PolicyGatedERC20</code>), and the registry and the hook pointer in the core's (<code>gated.storage.PolicyGatedCore</code>), apart from the OpenZeppelin parents and the templates.</li>
     </ul>
   </div>
 </section>
@@ -458,6 +459,7 @@
 <section id="connected">
   <div class="prose wrap-any"><h2>Connected to</h2></div>
   <div class="cards">
+    <a class="card" href="PolicyGatedCoreUpgradeable.html"><span class="name">PolicyGatedCoreUpgradeable</span><p>The roles, pause, hook pointer and upgrade checks this base extends.</p></a>
     <a class="card" href="GatedToken.html"><span class="name">GatedToken</span><p>The base and nothing else, as a template.</p></a>
     <a class="card" href="IntentSettledUpgradeable.html"><span class="name">IntentSettledUpgradeable</span><p>Adds signed transfers on top of this base, as the EXECUTED kind.</p></a>
     <a class="card" href="IntentToken.html"><span class="name">IntentToken</span><p>The template with signed transfers.</p></a>
@@ -474,15 +476,15 @@
   <div class="prose wrap-any">
     <h2>Source and tests</h2>
     <ul class="plain wrap-any">
-      <li>Contract: <code>contracts/base/PolicyGatedERC20Upgradeable.sol</code></li>
-      <li>Interfaces: <code>IPolicyGated.sol</code>, <code>IERC7943Fungible.sol</code>, <code>ITemplated.sol</code>, <code>IPolicyHook.sol</code> (the context and the kinds), <code>Errors.sol</code> (the reason codes)</li>
+      <li>Contract: <code>contracts/base/PolicyGatedERC20Upgradeable.sol</code>, over <code>contracts/base/PolicyGatedCoreUpgradeable.sol</code></li>
+      <li>Interfaces: <code>IPolicyGated.sol</code>, <code>IPolicyGatedCore.sol</code>, <code>IERC7943Fungible.sol</code>, <code>ITemplated.sol</code>, <code>IPolicyHook.sol</code> (the context and the kinds), <code>Errors.sol</code> (the reason codes)</li>
       <li>Unit tests: <code>PolicyGatedERC20Upgradeable.t.sol</code> (the role gates, frozen maths, pre-flight answers, recovery, upgrades, multicall, the context per kind, and the invariants <code>invariant_SumOfBalancesEqualsTotalSupply</code> and <code>invariant_TheUnfrozenBalanceIsExactlyWhatCanBeSent</code>)</li>
       <li>Integration: <code>GatedToken.t.sol</code> and <code>IntentToken.t.sol</code> (real registry and hook), <code>RuleSetIntegration.t.sol</code> (the shipped rules together), <code>test/nodejs/erc7943.test.ts</code> and <code>test/nodejs/parity.test.ts</code> (the deployed stack), and the Halmos properties <code>check_frozenBalanceInvariants</code> and <code>check_enforcementCanTakeFrozenTokens</code> in <code>IntentTokenHalmos.t.sol</code></li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>ce7c6c4</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>9526fc7</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

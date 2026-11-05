@@ -190,7 +190,7 @@
         <tr><td><a href="contracts/ProxyDeployer.html"><code>ProxyDeployer</code></a></td><td><code>deployer, registry</code></td><td>Places each product at a predictable address. The deployer owns it until <code>CoreHandover</code>.</td></tr>
         <tr><td><a href="contracts/CredentialRegistry.html"><code>CredentialRegistry</code></a>, <a href="contracts/CredentialRule.html"><code>CredentialRule</code></a></td><td><code>deployer, guardian</code>; <code>credentialRegistry</code></td><td>If a product lists the credential rule. The registry has no attester yet.</td></tr>
         <tr><td><a href="contracts/MinPositionRule.html"><code>MinPositionRule</code></a>, <a href="contracts/HolderRestrictionRule.html"><code>HolderRestrictionRule</code></a>, <a href="contracts/SettlementWindowRule.html"><code>SettlementWindowRule</code></a>, <a href="contracts/SupplyCapRule.html"><code>SupplyCapRule</code></a>, <a href="contracts/ExecutedOnlyRule.html"><code>ExecutedOnlyRule</code></a></td><td>none</td><td>Each one that a product lists, one instance shared by every product that lists it. Settings are kept per token.</td></tr>
-        <tr><td><a href="contracts/GatedToken.html"><code>GatedToken</code></a>, <a href="contracts/IntentToken.html"><code>IntentToken</code></a>, <a href="contracts/Gated4626Vault.html"><code>Gated4626Vault</code></a>, <a href="contracts/Gated7540Vault.html"><code>Gated7540Vault</code></a></td><td>none</td><td>One implementation per template used: the shared code behind every product of that template. Their constructors lock them, so only proxies can be initialised. The 7540's constructor also creates its second contract, <a href="contracts/Gated7540Settlement.html"><code>Gated7540Settlement</code></a>, so that needs no step of its own.</td></tr>
+        <tr><td><a href="contracts/GatedToken.html"><code>GatedToken</code></a>, <a href="contracts/IntentToken.html"><code>IntentToken</code></a>, <a href="contracts/Gated721.html"><code>Gated721</code></a>, <a href="contracts/Gated4626Vault.html"><code>Gated4626Vault</code></a>, <a href="contracts/Gated7540Vault.html"><code>Gated7540Vault</code></a></td><td>none</td><td>One implementation per template used: the shared code behind every product of that template. Their constructors lock them, so only proxies can be initialised. The 7540's constructor also creates its second contract, <a href="contracts/Gated7540Settlement.html"><code>Gated7540Settlement</code></a>, so that needs no step of its own.</td></tr>
         <tr><td><a href="contracts/IntentExecutor.html"><code>IntentExecutor</code></a>, <a href="contracts/DvPExecutor.html"><code>DvPExecutor</code></a></td><td><code>deployer, guardian</code></td><td>Each one that a product names. Not attested: neither is a hook, a rule or an implementation. A token authorises an executor by granting it <code>EXECUTOR_ROLE</code>.</td></tr>
       </tbody>
     </table>
@@ -314,7 +314,7 @@
       <tbody>
         <tr><td>Deploy</td><td><code>ProxyDeployer.deploy(symbol, implementation, initData, hook, rules)</code>. <code>initData</code> is the token's <code>initialize</code> with the operations account as admin, the guardian, the registry, the hook and the rule list. A vault also takes the <code>asset</code>, and a token its <code>decimals</code> (18 unless stated).</td><td>The token installs its own rules on the shared hook while it is initialised. <code>ProxyDeployer</code> refuses an unattested implementation (<code>ProxyDeployer_ImplementationNotAttested</code>), and afterwards a wrong registry, hook, rule list or symbol (<code>ProxyDeployer_RegistryMismatch</code>, <code>ProxyDeployer_HookNotInstalled</code>, <code>ProxyDeployer_RulesMismatch</code>, <code>ProxyDeployer_SymbolMismatch</code>). A symbol works once (<code>ProxyDeployer_SaltUsed</code>).</td></tr>
         <tr><td>Configure</td><td>For each rule the product lists: <code>CredentialRule.setPolicy</code> (<code>KYC</code> from attester 0 unless the profile states a policy), <code>MinPositionRule.setMinPosition</code> (parameter <code>minPosition</code>, 0 unless stated), <code>SupplyCapRule.setSupplyCap</code> (parameter <code>supplyCap</code>), <code>SettlementWindowRule.setWindow</code>. For its legos: <code>Portfolio.addAdapter</code> and <code>setCaps</code>, <code>GuardedAccount.setPermission</code> for the asset's <code>transfer</code>, then <code>NavDesk.setSettings</code>, <code>setFeeModel</code> and, where the product's <code>nav</code> states <code>redemptionGateBps</code>, <code>setRedemptionGate</code>, or <code>Gated4626Vault.setPortfolio</code> and <code>setFeeModel</code>.</td><td>Rules and legos ask the token whether the caller is its admin, which the operations account still is. Until a token has a policy its credential rule admits no receiver (<code>RECEIVER_NOT_ELIGIBLE</code>). The plugs refuse what the council has not attested.</td></tr>
-        <tr><td>Grant</td><td><code>AGENT_ROLE</code> to the <code>agent</code>, <code>UPGRADER_ROLE</code> to the main timelock, <code>RECOVERY_ROLE</code> to the recovery timelock. <code>MINTER_ROLE</code> and <code>BURNER_ROLE</code> on a <code>GatedToken</code> or <code>IntentToken</code>. <code>SETTLER_ROLE</code> on a 7540, to its desk, or to the <code>settler</code> account if it has none. <code>REPORTER_ROLE</code> and <code>CHECKER_ROLE</code> with a desk. <code>ALLOCATOR_ROLE</code> with a portfolio. <code>EXECUTOR_ROLE</code> to the executors the product names.</td><td>Operational roles exist only on tokens that came up as reviewed.</td></tr>
+        <tr><td>Grant</td><td><code>AGENT_ROLE</code> to the <code>agent</code>, <code>UPGRADER_ROLE</code> to the main timelock, <code>RECOVERY_ROLE</code> to the recovery timelock. <code>MINTER_ROLE</code> and <code>BURNER_ROLE</code> on a <code>GatedToken</code>, an <code>IntentToken</code> or a <code>Gated721</code>. <code>SETTLER_ROLE</code> on a 7540, to its desk, or to the <code>settler</code> account if it has none. <code>REPORTER_ROLE</code> and <code>CHECKER_ROLE</code> with a desk. <code>ALLOCATOR_ROLE</code> with a portfolio. <code>EXECUTOR_ROLE</code> to the executors the product names.</td><td>Operational roles exist only on tokens that came up as reviewed.</td></tr>
         <tr><td>Hand over</td><td><code>grantRole(DEFAULT_ADMIN_ROLE, timelock)</code>, then <code>renounceRole(DEFAULT_ADMIN_ROLE, operations)</code>.</td><td>After this the operations account can change nothing on the product.</td></tr>
       </tbody>
     </table>
@@ -355,13 +355,14 @@
 <section id="profiles">
   <div class="prose">
     <h2>The profiles</h2>
-    <p><code>ignition/profiles.ts</code> names six combinations, and what <code>Core</code> deploys follows from the profile. Every profile deploys the two timelocks, the policy registry, the hook, <code>ProxyDeployer</code> and the credential registry, then the rules its products list and one implementation per template they use, and what the last column says.</p>
+    <p><code>ignition/profiles.ts</code> names seven combinations, and what <code>Core</code> deploys follows from the profile. Every profile deploys the two timelocks, the policy registry, the hook, <code>ProxyDeployer</code> and the credential registry, then the rules its products list and one implementation per template they use, and what the last column says.</p>
   </div>
   <div class="table-wrap">
     <table class="tight">
       <thead><tr><th>Profile</th><th>Products</th><th>Rules</th><th>Legos and the rest</th></tr></thead>
       <tbody>
         <tr><td><code>token</code></td><td>One <code>GatedToken</code>, <code>GTK</code></td><td><code>CredentialRule</code>, <code>HolderRestrictionRule</code></td><td>No legos, no fund, no executor.</td></tr>
+        <tr><td><code>nft</code></td><td>One <code>Gated721</code>, <code>gNOTE</code></td><td>The same two</td><td>No legos, no fund, no executor.</td></tr>
         <tr><td><code>vault4626</code></td><td>One <code>Gated4626Vault</code>, <code>gFUND</code></td><td>The same two</td><td>No legos. The vault keeps its own money.</td></tr>
         <tr><td><code>vault7540</code></td><td>One <code>Gated7540Vault</code>, <code>gASYNC</code></td><td>The same two</td><td>A <code>NavDesk</code> with a daily period, a one-day cooldown and a report good for three days. Its cash account is the <code>custodianAccount</code> parameter: a fund with one custodian.</td></tr>
         <tr><td><code>managed-fund</code></td><td>One <code>Gated7540Vault</code>, <code>mFUND</code></td><td>The same two</td><td>The same desk schedule. A <code>Portfolio</code> that accepts reported adapters. Two <code>GuardedAccount</code>s, each with an <code>ERC20CallValidator</code> and its own caps. A <code>FeeModel</code>: 1% management, 10% performance, a hard 3% hurdle. It sets <code>custodyOnly</code>, which refuses an outside vault at build time.</td></tr>
@@ -372,10 +373,10 @@
   </div>
   <div class="prose">
     <p>No profile states a <code>redemptionGateBps</code>, as the level is each product's own, from its documents. <code>test/nodejs/legos.test.ts</code> deploys <code>vault7540</code> with one, which covers the wiring.</p>
-    <p>All six set <code>singleSigners</code> to <code>DEMO_SIGNERS</code>, which names all four sensitive roles as exceptions to the post-deploy check's refusal of a single key (<a href="#check">see below</a>). They are demo stacks: a real deployment has to state its own.</p>
+    <p>All seven set <code>singleSigners</code> to <code>DEMO_SIGNERS</code>, which names all four sensitive roles as exceptions to the post-deploy check's refusal of a single key (<a href="#check">see below</a>). They are demo stacks: a real deployment has to state its own.</p>
     <p>A product that makes no sense throws when its <code>Legos</code> or <code>Product</code> module is built, before that module sends a transaction (<code>assertUsable</code>). <code>Core</code>, <code>CoreHandover</code> and <code>Fund</code> do not call it, so they can already have run. It refuses:</p>
     <ul class="plain">
-      <li><code>windowRule</code> or <code>executedOnlyRule</code> on anything but an <code>IntentToken</code>, and <code>supplyCapRule</code> on a vault;</li>
+      <li><code>windowRule</code> or <code>executedOnlyRule</code> on anything but an <code>IntentToken</code>, <code>supplyCapRule</code> on a vault, and <code>minPositionRule</code>, <code>fundHoldersRule</code> or <code>supplyCapRule</code> on a <code>Gated721</code>;</li>
       <li>a desk on anything but a 7540, and a portfolio on anything but a vault;</li>
       <li>a portfolio behind a 7540 with no desk to price it;</li>
       <li>on a 4626 with a portfolio, a custodian, or no rate limit;</li>
@@ -689,7 +690,7 @@
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>ce7c6c4</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>9526fc7</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

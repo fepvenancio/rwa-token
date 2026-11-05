@@ -59,7 +59,7 @@
   </div>
   <figure>
     <div class="fig-scroll">
-      <svg class="d" viewBox="0 0 780 666" role="img" aria-label="How the contracts connect. Above the tokens: Distributor asks a token hasRole and canReceive. IntentExecutor and DvPExecutor call executeTransfer on IntentToken. SignedEntry calls deposit on Gated4626Vault and requestDeposit on Gated7540Vault. NavDesk calls closePeriod and settlePeriod on Gated7540Vault, and quote on FeeModel. The tokens are four templates, GatedToken, IntentToken, Gated4626Vault and Gated7540Vault, on one base, PolicyGatedERC20Upgradeable; IntentToken adds the mixin IntentSettledUpgradeable and both vaults add GatedVaultBase. Each product is a TokenProxy over one template, placed by ProxyDeployer. Below the tokens: a token calls beforeTransfer and afterTransfer on the shared ComplianceHook, which calls check and after_ on the rules in the token's list: CredentialRule, MinPositionRule, HolderRestrictionRule, SettlementWindowRule, FundHoldersRule, SupplyCapRule and ExecutedOnlyRule, all extending BaseRule. CredentialRule calls profileOf on CredentialRegistry. FundHoldersRule calls admission, join and leave on Fund. A vault's money goes in and out of its Portfolio, which calls allocate and deallocate on ERC4626Adapter and GuardedAccount; GuardedAccount calls validate on ERC20CallValidator or ERC4626CallValidator. At the bottom, governance and deployment: PolicyRegistry, GovernanceTimelock as main and recovery timelock, ProxyDeployer and TokenProxy.">
+      <svg class="d" viewBox="0 0 780 666" role="img" aria-label="How the contracts connect. Above the tokens: Distributor asks a token hasRole and canReceive. IntentExecutor and DvPExecutor call executeTransfer on IntentToken. SignedEntry calls deposit on Gated4626Vault and requestDeposit on Gated7540Vault. NavDesk calls closePeriod and settlePeriod on Gated7540Vault, and quote on FeeModel. The tokens are five templates. Four are fungible, GatedToken, IntentToken, Gated4626Vault and Gated7540Vault, on one base, PolicyGatedERC20Upgradeable; IntentToken adds the mixin IntentSettledUpgradeable and both vaults add GatedVaultBase. The fifth, Gated721, is an NFT. All five share PolicyGatedCoreUpgradeable, which holds the roles, the pause, the hook pointer and the upgrade checks. Each product is a TokenProxy over one template, placed by ProxyDeployer. Below the tokens: a token calls beforeTransfer and afterTransfer on the shared ComplianceHook, which calls check and after_ on the rules in the token's list: CredentialRule, MinPositionRule, HolderRestrictionRule, SettlementWindowRule, FundHoldersRule, SupplyCapRule and ExecutedOnlyRule, all extending BaseRule. CredentialRule calls profileOf on CredentialRegistry. FundHoldersRule calls admission, join and leave on Fund. A vault's money goes in and out of its Portfolio, which calls allocate and deallocate on ERC4626Adapter and GuardedAccount; GuardedAccount calls validate on ERC20CallValidator or ERC4626CallValidator. At the bottom, governance and deployment: PolicyRegistry, GovernanceTimelock as main and recovery timelock, ProxyDeployer and TokenProxy.">
         <defs>
           <marker id="ov-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
         </defs>
@@ -140,11 +140,15 @@
         <text x="438" y="194" class="mono sm">GatedVaultBase</text>
         <text x="540" y="194" class="m sm">both vaults: no refused third party</text>
 
-        <rect class="act" x="26" y="214" width="728" height="46" rx="7"/>
+        <rect class="act" x="26" y="214" width="560" height="46" rx="7"/>
         <text x="38" y="233" class="mono bold">PolicyGatedERC20Upgradeable</text>
-        <text x="38" y="250" class="m sm">balances, roles, pause, frozen amounts, forced transfers, permit, multicall, and one path for every balance change</text>
+        <text x="38" y="250" class="m sm">balances, frozen amounts, forced transfers, permit, and one path for every balance change</text>
 
-        <text x="26" y="278" class="m sm">Each product is a TokenProxy over one template, placed by ProxyDeployer.</text>
+        <rect class="b" x="594" y="214" width="160" height="46" rx="7"/>
+        <text x="606" y="233" class="mono bold">Gated721</text>
+        <text x="606" y="250" class="m sm">an NFT on the core</text>
+
+        <text x="26" y="278" class="m sm">All five share PolicyGatedCoreUpgradeable: roles, pause, hook, upgrades. Each product is a TokenProxy.</text>
 
         <!-- From the tokens downward -->
         <line class="ln" x1="124" y1="288" x2="124" y2="363" marker-end="url(#ov-arrow)"/>
@@ -241,7 +245,7 @@
     <table>
       <thead><tr><th>Layer</th><th>Contracts</th><th>What it does</th></tr></thead>
       <tbody>
-        <tr><td>Token</td><td><code>PolicyGatedERC20Upgradeable</code>, <code>IntentSettledUpgradeable</code>, <code>GatedToken</code>, <code>IntentToken</code></td><td>Keeps balances, roles, the pause, frozen amounts and forced transfers. Every balance change goes through one internal function, <code>_move</code>, which asks the hook. <code>GatedToken</code> is the base alone. <code>IntentToken</code> adds the mixin that runs transfers a holder signed.</td></tr>
+        <tr><td>Token</td><td><code>PolicyGatedCoreUpgradeable</code>, <code>PolicyGatedERC20Upgradeable</code>, <code>IntentSettledUpgradeable</code>, <code>GatedToken</code>, <code>IntentToken</code>, <code>Gated721</code></td><td>Keeps balances, roles, the pause, frozen amounts and forced transfers. Every balance change goes through one internal function, <code>_move</code>, which asks the hook. <code>GatedToken</code> is the fungible base alone. <code>IntentToken</code> adds the mixin that runs transfers a holder signed. <code>Gated721</code> is an NFT with a metadata URI per token. It shares the core with the others, so the roles, the pause, the hook and the upgrade checks are the same code.</td></tr>
         <tr><td>Vaults</td><td><code>GatedVaultBase</code>, <code>Gated4626Vault</code>, <code>Gated7540Vault</code>, <code>Gated7540Settlement</code>, <code>Gated7540Common</code>, <code>NavDesk</code>, <code>FeeModel</code></td><td>Vault shares are gated tokens too. The 4626 deposits and redeems at once. The 7540 deals in periods, one price for everyone in a period, and hands settlement and recovery to a second contract its implementation creates. <code>NavDesk</code> turns a reported value into that price and can hold a redemption gate, and <code>FeeModel</code> works out a fee for a desk or a 4626.</td></tr>
         <tr><td>Portfolio</td><td><code>Portfolio</code>, <code>ERC4626Adapter</code>, <code>GuardedAccount</code>, <code>ERC20CallValidator</code>, <code>ERC4626CallValidator</code></td><td>Where one vault's money may go. The portfolio holds the idle money and sends it to installed adapters, under caps on their allocation. An adapter is an on-chain vault position or a guarded account for a custodian or a strategy, whose calls are limited by validators.</td></tr>
         <tr><td>Policy</td><td><code>ComplianceHook</code>, <code>BaseRule</code>, <code>CredentialRule</code>, <code>MinPositionRule</code>, <code>HolderRestrictionRule</code>, <code>SettlementWindowRule</code>, <code>FundHoldersRule</code>, <code>SupplyCapRule</code>, <code>ExecutedOnlyRule</code></td><td>Decides whether a movement may happen. One hook for the whole deployment, an ordered list of at most 16 rules per token. Each rule returns a reason code. A token with no rules has every movement refused.</td></tr>
@@ -335,13 +339,13 @@
     <h2>Glossary</h2>
   </div>
   <dl class="kv">
-    <dt>token</dt><dd>An ERC-20 contract that holds balances and asks its hook before each balance change. The stack has four templates: <code>GatedToken</code>, <code>IntentToken</code>, <code>Gated4626Vault</code> and <code>Gated7540Vault</code>.</dd>
+    <dt>token</dt><dd>A contract that holds balances and asks its hook before each movement. The stack has five templates: four ERC-20s, <code>GatedToken</code>, <code>IntentToken</code>, <code>Gated4626Vault</code> and <code>Gated7540Vault</code>, and one ERC-721, <code>Gated721</code>.</dd>
     <dt>template</dt><dd>One kind of token, with its own implementation and its own <code>templateId</code>. An upgrade to an implementation that reports another template is refused.</dd>
     <dt>mixin</dt><dd>A contract that adds one ability to a template. <code>IntentSettledUpgradeable</code> adds signed intents, and <code>IntentToken</code> is the template that uses it.</dd>
     <dt>proxy</dt><dd>A small contract that keeps a token's address and storage and runs the code of another contract, the implementation, for each call. Each token is a <code>TokenProxy</code> (OpenZeppelin's <code>ERC1967Proxy</code>). The upgrade function sits in the implementation (the UUPS pattern).</dd>
     <dt>implementation</dt><dd>The shared code of one template, deployed once per core and used by each proxy of that template. Its constructor disables setup, so a proxy is what gets set up.</dd>
     <dt>product</dt><dd>One token an issuer launches: a proxy over a template, with its own rule list and policy.</dd>
-    <dt>profile</dt><dd>A named combination of products in <code>ignition/profiles.ts</code>, from one plain token (<code>token</code>) to the demo (<code>full</code>): an intent token and both vaults as three classes of one fund, with both executors. The demo has no desk, portfolio or fee model; <code>managed-fund</code> and <code>vault4626-invest</code> show those.</dd>
+    <dt>profile</dt><dd>A named combination of products in <code>ignition/profiles.ts</code>, from one plain token (<code>token</code>) or one NFT (<code>nft</code>) to the demo (<code>full</code>): an intent token and both vaults as three classes of one fund, with both executors. The demo has no desk, portfolio or fee model; <code>managed-fund</code> and <code>vault4626-invest</code> show those.</dd>
     <dt>hook</dt><dd>The contract a token asks before each balance change. Here it is <code>ComplianceHook</code>, one per deployment, holding an ordered rule list for each token.</dd>
     <dt>rule</dt><dd>A small contract that answers one policy question about a movement with a reason code, such as <code>TRANSFER_OK</code> or <code>RECEIVER_FROZEN</code>. One instance serves each token whose list names it, and any setting it keeps is kept per token.</dd>
     <dt>reason code</dt><dd>A <code>bytes32</code> answer, the hash of a name like <code>LOCKED</code>. They are listed in <code>contracts/interfaces/Errors.sol</code> and on <a href="movement.html">One movement</a>.</dd>
@@ -383,10 +387,12 @@
   <div class="group">
     <h3>Token</h3>
     <div class="cards">
-      <a class="card" href="contracts/PolicyGatedERC20Upgradeable.html"><span class="name">PolicyGatedERC20Upgradeable</span><p>The base every token and vault extends: balances, roles, pause, frozen amounts, forced transfers, and the one path that asks the hook.</p></a>
+      <a class="card" href="contracts/PolicyGatedCoreUpgradeable.html"><span class="name">PolicyGatedCoreUpgradeable</span><p>What every template shares, whatever it counts: the roles, the guardian and recovery, the pause, the hook pointer and the upgrade checks.</p></a>
+      <a class="card" href="contracts/PolicyGatedERC20Upgradeable.html"><span class="name">PolicyGatedERC20Upgradeable</span><p>The base every fungible token and vault extends: balances, frozen amounts, forced transfers, and the one path that asks the hook.</p></a>
       <a class="card" href="contracts/IntentSettledUpgradeable.html"><span class="name">IntentSettledUpgradeable</span><p>The mixin for transfers a holder signs and an account with <code>EXECUTOR_ROLE</code> runs.</p></a>
       <a class="card" href="contracts/GatedToken.html"><span class="name">GatedToken</span><p>The base and nothing else: a gated ERC-20 at the decimals its ledger uses, with no signed intents.</p></a>
       <a class="card" href="contracts/IntentToken.html"><span class="name">IntentToken</span><p>A gated ERC-20 with signed intents, at the decimals its ledger uses.</p></a>
+      <a class="card" href="contracts/Gated721.html"><span class="name">Gated721</span><p>A gated NFT: a certificate or a note per token, judged by the same hook and rules, with a freeze per token.</p></a>
     </div>
   </div>
   <div class="group">
@@ -472,7 +478,7 @@
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>ce7c6c4</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>9526fc7</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

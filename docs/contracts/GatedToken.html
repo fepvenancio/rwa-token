@@ -37,7 +37,7 @@
 <section id="in-one-minute">
   <div class="callout wrap-any">
     <h3>In one minute</h3>
-    <p>This is the simplest token in the stack. Everything it does comes from <a href="PolicyGatedERC20Upgradeable.html"><code>PolicyGatedERC20Upgradeable</code></a>: balances, roles, mint, burn, forced transfer, frozen amounts, pause, and one movement path that asks the policy hook about each movement. The contract itself adds a setup function, its decimals and the name of its template.</p>
+    <p>This is the simplest token in the stack. Everything it does comes from <a href="PolicyGatedERC20Upgradeable.html"><code>PolicyGatedERC20Upgradeable</code></a> and the core it extends: balances, roles, mint, burn, forced transfer, frozen amounts, pause, and one movement path that asks the policy hook about each movement. The contract itself adds a setup function, its decimals and the name of its template.</p>
     <p>It suits a product whose holders send their own transactions: a bond or a note, a fund share class, or a cash token that a vault takes as its asset. Compared with <a href="IntentToken.html"><code>IntentToken</code></a> it has no signed intents, no executor role and nothing extra to operate. What it gives up is settlement by the issuer: signed transfers, settlement hours and delivery versus payment.</p>
   </div>
 </section>
@@ -49,7 +49,7 @@
   </div>
   <ol class="steps wrap-any">
     <li><div><b><a href="TokenProxy.html"><code>TokenProxy</code></a></b> is the proxy. <a href="ProxyDeployer.html"><code>ProxyDeployer</code></a> places it at an address that follows from the deployer, the symbol and the implementation, and sets it up in the same transaction.</div></li>
-    <li><div><b><code>initialize</code></b> takes the name and symbol, the decimals, the admin, the guardian, the registry, the hook and the initial rule list. The rest of the setup is the base's: it grants the admin and guardian roles, fixes the registry, checks and installs the hook, and installs the rules on it for this token.</div></li>
+    <li><div><b><code>initialize</code></b> takes the name and symbol, the decimals, the admin, the guardian, the registry, the hook and the initial rule list. It sets up OpenZeppelin's ERC-20 and <code>permit</code>, then the <a href="PolicyGatedCoreUpgradeable.html#setup">shared core</a>, which grants the admin and guardian roles, fixes the registry, checks and installs the hook, and installs the rules on it for this token.</div></li>
     <li><div><b><code>decimals()</code></b> returns the value given at setup, kept in the token's own ERC-7201 namespace (<code>gated.storage.GatedToken</code>). No function changes it. For a cash token it is the precision of its ledger. Any <code>uint8</code> is accepted (<code>testFuzz_ItReportsTheDecimalsItWasGiven</code>), and the <code>Product</code> deployment module uses 18 when a product states none.</div></li>
     <li><div><b><code>templateId()</code></b> returns <code>keccak256('GatedToken')</code>. An upgrade must target attested code that reports the same id, so a <code>GatedToken</code> cannot be moved onto another template's code (<code>test_WhenUpgradedToAnotherTemplate_ItReverts</code>).</div></li>
   </ol>
@@ -169,7 +169,7 @@
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>ce7c6c4</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>9526fc7</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>
