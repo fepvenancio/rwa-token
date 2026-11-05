@@ -622,7 +622,7 @@
   <div class="prose"><h2>Connected to</h2></div>
   <div class="cards">
     <a class="card" href="contracts/GovernanceTimelock.html"><span class="name">GovernanceTimelock</span><p>Both timelocks: a one-hour floor on the delay, and one recovery power.</p></a>
-    <a class="card" href="contracts/PolicyGatedERC20Upgradeable.html"><span class="name">PolicyGatedERC20Upgradeable</span><p>The base that defines the token roles, the pause and <code>unpause</code>.</p></a>
+    <a class="card" href="contracts/PolicyGatedCoreUpgradeable.html"><span class="name">PolicyGatedCoreUpgradeable</span><p>The core every template shares, which defines the token roles, the pause and <code>unpause</code>.</p></a>
     <a class="card" href="contracts/CredentialRegistry.html"><span class="name">CredentialRegistry</span><p>Attesters, the guardian's block and kill, and the recovery calls.</p></a>
     <a class="card" href="contracts/IntentExecutor.html"><span class="name">IntentExecutor</span><p>The operator's route to <code>executeTransfer</code>, with its own pause.</p></a>
     <a class="card" href="contracts/NavDesk.html"><span class="name">NavDesk</span><p>Where the reporter, the checker and the guardian meet over a price.</p></a>
@@ -637,7 +637,7 @@
     <ul class="plain">
       <li>Role grants: <code>Core.ts</code>, <code>CoreHandover.ts</code>, <code>Product.ts</code>, <code>FundOpen.ts</code>; role ids in <code>roles.ts</code>; exceptions in <code>profiles.ts</code></li>
       <li>Hand-over check: <code>assertHandedOver</code> in <code>test/nodejs/fixtures.ts</code></li>
-      <li>Role gates in code: <code>PolicyGatedERC20Upgradeable.sol</code>, <code>GovernanceTimelock.sol</code>, <code>CredentialRegistry.sol</code>, <code>IntentExecutor.sol</code>, <code>DvPExecutor.sol</code>, <code>Portfolio.sol</code>, <code>GuardedAccount.sol</code>, <code>NavDesk.sol</code>, <code>Distributor.sol</code></li>
+      <li>Role gates in code: <code>PolicyGatedCoreUpgradeable.sol</code>, <code>PolicyGatedERC20Upgradeable.sol</code>, <code>IntentSettledUpgradeable.sol</code>, <code>Gated721.sol</code>, <code>Gated4626Vault.sol</code>, <code>Gated7540Vault.sol</code>, <code>Gated7540Settlement.sol</code>, <code>PolicyRegistry.sol</code>, <code>GovernanceTimelock.sol</code>, <code>CredentialRegistry.sol</code>, <code>IntentExecutor.sol</code>, <code>DvPExecutor.sol</code>, <code>Portfolio.sol</code>, <code>GuardedAccount.sol</code>, <code>NavDesk.sol</code>, <code>Distributor.sol</code>, <code>ComplianceHook.sol</code>, and the rules' setters, which ask the token's roles</li>
       <li>Tests: <code>test/nodejs/governance.test.ts</code> (the delay, the guardian's veto and the recovery batch), <code>test/nodejs/legos.test.ts</code> (what the hand-over check refuses), <code>GovernanceTimelock.t.sol</code>, and behaviour while paused in <code>Gated7540Vault.t.sol</code>, <code>Gated4626Vault.t.sol</code>, <code>NavDesk.t.sol</code>, <code>Portfolio.t.sol</code> and <code>GuardedAccount.t.sol</code></li>
     </ul>
   </div>

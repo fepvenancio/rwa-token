@@ -161,7 +161,7 @@
       </tbody>
     </table>
   </div>
-  <p class="small wrap-any">Its one immutable is <code>__self</code>, which OpenZeppelin's <code>UUPSUpgradeable</code> keeps: its own address. It has no constructor and no state variable of its own. It emits the vault's events and reverts with the vault's errors, all declared in <code>IGated7540Vault</code>.</p>
+  <p class="small wrap-any">Its one immutable is <code>__self</code>, which OpenZeppelin's <code>UUPSUpgradeable</code> keeps: its own address. It has no constructor and no state variable of its own. It declares no events or errors of its own: it uses the vault's, from <code>IGated7540Vault</code> and the base token.</p>
 </section>
 
 <section id="upgrade">
@@ -189,9 +189,9 @@
     <h2>What it costs</h2>
     <ul class="plain wrap-any">
       <li><b>Two contracts to read as one.</b> This is <code>delegatecall</code> inside a UUPS implementation, a pattern OpenZeppelin does not ship, though the call itself is theirs. <code>npm run validate:upgrades</code> passes because the hand-off, the immutable, the constructor and the missing initializer carry <code>@custom:oz-upgrades-unsafe-allow</code> annotations: the tool is told to allow them, and does not prove them safe.</li>
-      <li><b>An unreachable copy of the base.</b> Its runtime code is 18,001 bytes, against the vault's 21,908. A contract with the same parents and no functions of its own is 12,806 bytes, and no vault can call that code's external functions.</li>
-      <li><b>A larger deployment.</b> The vault's creation code carries this contract's, for 40,294 bytes against the 49,152 that EIP-3860 allows (<code>test_WhenDeployed_TheVaultWithASecondContractFitsTheEip3860Limit</code>). <code>PLAN.md</code> measured the implementation's deployment at 8,745,154 gas.</li>
-      <li><b>Some gas on each hand-off.</b> <code>PLAN.md</code> measured about 2,900 to 3,700 gas on a handed call, and at most 35 on an investor's call.</li>
+      <li><b>An unreachable copy of the base.</b> Its runtime code is 18,118 bytes, against the vault's 22,022. Most of it is the base it inherits, and no vault can call that code's external functions.</li>
+      <li><b>A larger deployment.</b> The vault's creation code carries this contract's, for 40,525 bytes against the 49,152 that EIP-3860 allows (<code>test_WhenDeployed_TheVaultWithASecondContractFitsTheEip3860Limit</code>).</li>
+      <li><b>Some gas on each hand-off.</b> <code>PLAN.md</code> estimates about 3,000 to 3,700 more gas on a handed call, and at most 35 on an investor's call.</li>
       <li><b>No fix without an upgrade.</b> A bug here is fixed the way a bug in the vault is: through the timelock, to a newly attested implementation.</li>
       <li><b>Not reviewed.</b> No review has covered this contract, and nothing here has had an external audit.</li>
     </ul>

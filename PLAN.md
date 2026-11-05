@@ -3840,6 +3840,16 @@ The pages landed in #36 (`379db88`), with two new ones, `PolicyGatedCoreUpgradea
 
 A separate check of the follow-up's 35 changed claims found 1 wrong and 2 unsupported, all applied.
 
+## Every page and the Markdown files checked at `6fc1953` (2026-11-05)
+
+The owner asked for the cleaning and a final review of all the docs once `Gated721` had landed.
+
+- **Cleaning.** The nine local branches left from #12 to #20 were deleted: each was the pre-rebase copy of a merged pull request, so `main` is the only branch, here and on GitHub. Every gate passed on `main`: lint, format, build, typecheck, 1977 tests (1798 Solidity, 179 Node.js), the isolated profile, Slither and Aderyn with 0 findings, Halmos, upgrade safety (6 of 6) and the reproducible build.
+- **The check.** Fourteen separate checkers read every claim in the 42 pages, `README.md`, `CLAUDE.md` and `SECURITY.md` against the code, about 4,400 claims: 42 problems in the pages, `README.md` and `SECURITY.md`, every one confirmed in the code and applied, and one name on the `Gated721` page made to match the other pages. The pages keep their pin, `9526fc7`: only a test file changed since.
+- **What they were.** Stale sizes and counts (the 7540's second contract, the contracts on the overview, the fields the desk's proposal hash covers); refusals or cases left out (`approve`'s expiry, a period whose limit takes no redemptions, `Gated721` in the incident runbook); test citations that showed less than the sentence said; two runs off the repository cited as evidence, removed; and in `SECURITY.md`, analyser suppressions in the source that its tables did not name, or named in the wrong function.
+- **A second check** of the 45 changed lines found 2 more, applied.
+- **The brief.** Four places in `CLAUDE.md` differ from the code: §4 shows `pause`, `setPolicyHook`, `policyHook` and `registry` on `IPolicyGated`, which now has them through `IPolicyGatedCore`, and §5's ERC-165 list leaves out `IPolicyGatedCore`, `IGated721` and `IERC7943NonFungible`; §5 calls 721 a future template; rule 4's list of reopenings leaves out 2026-10-17, 10-22 and 10-27; and rule 15 says every source file carries the licence line, which the TypeScript and shell sources do not. The brief is the owner's, so these wait for the owner's word.
+
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
 2. Credential layer: none left. On 2026-10-30 the owner confirmed decisions 11, 12, 13, 15, 16 and 17 as built (17 at the measured +8,179 gas on a transfer). Decision 14 is moot, since `IdentityRule` was removed in the cleanup. Decisions 8 and 9 are recorded in the credential section's table.

@@ -75,7 +75,7 @@
         <tr><td><code>amount</code></td><td>Always 1</td></tr>
         <tr><td><code>operator</code></td><td>The caller: the owner or an approved operator, the minter, the burner, or the agent</td></tr>
         <tr><td><code>kind</code></td><td><span class="k k-transfer">TRANSFER</span> from <code>transferFrom</code> and <code>safeTransferFrom</code>, <span class="k k-mint">MINT</span>, <span class="k k-burn">BURN</span>, <span class="k k-forced">FORCED</span> from <code>forcedTransfer</code>. There is no <span class="k k-executed">EXECUTED</span>: the NFT has no signed intents.</td></tr>
-        <tr><td><code>extra</code></td><td><code>abi.encode(fromCount, toCount)</code>: how many items each side held before the move, zero for the zero address</td></tr>
+        <tr><td><code>extra</code></td><td><code>abi.encode(fromBalance, toBalance)</code>: how many items each side held before the move, zero for the zero address</td></tr>
       </tbody>
     </table>
   </div>
@@ -171,7 +171,7 @@
     <ul class="plain wrap-any">
       <li><b>The same hook, not a second one.</b> One attested hook serves every token of a deployment, with a rule list per token. The rules read who, which kind and who is driving, so the account-based ones serve an NFT unchanged.</li>
       <li><b>ERC-721 checks first.</b> An unapproved caller gets ERC-721's error, and the policy is asked only about the real owner's movement.</li>
-      <li><b>A plain mint.</b> Issuance calls no receiver, so nothing runs between the mint and the URI being set.</li>
+      <li><b>A plain mint.</b> Issuance calls no receiver, so no receiver code runs between the mint and the URI being set. The hook's <code>afterTransfer</code> does, if a listed rule wants it; neither rule the <code>nft</code> profile lists does.</li>
       <li><b>Pre-flights that match the routes.</b> A transfer is driven by its owner, a mint and a burn by a role holder, so the pre-flight takes the operator each route has.</li>
     </ul>
   </div>
