@@ -3081,7 +3081,7 @@ We are the issuer, so this falls on us. The country is not yet known, and the ru
 - **A custodian's honesty.** A report is a claim, and the hash only proves which report was used. It does not prove the money exists.
 - **A maker and checker who collude.** The cooldown, the guardian's cancel and the published hash make that harder and traceable. They do not prevent it.
 - **A custodian that does not return money.** That risk stays off-chain.
-- **A run.** There are no redemption gates in the first version. If redemptions exceed the cash the desk can raise, settlement cannot run and dealing stops for everyone until it can.
+- **A run.** A redemption gate, built in #25, limits what may leave a 7540 in one period, net of deposits, as a share of all shares (`NavDesk.setRedemptionGate`, the timelock; zero is off). Past it every request is filled at the same fraction and the rest carries to the next period. With the gate off, or when the cash the desk can raise does not cover even the part the gate lets through, settlement cannot run and dealing stops for everyone until it can.
 - **A total loss.** With nothing to count and shares outstanding, dealing stops. Unsettled requests can still be refunded. Beyond that it is a wind-down, not a state the contracts recover from.
 - **A gap in a `GuardedAccount`'s permissions.** It is the most dangerous new lego. Default deny, one narrow validator per call and a timelock on every grant reduce that, and only a review of each permission set closes it. An `approve` gives the spender up to what it allows.
 - **Fairness between investors on the performance fee.** One high-water mark per vault, no investor-level equalisation, so someone entering below the mark pays no performance fee until it is passed.
