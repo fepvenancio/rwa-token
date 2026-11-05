@@ -19,7 +19,6 @@
   <a href="../movement.html">One movement</a>
   <a href="../deployment.html">Deployment and governance</a>
   <a href="../money.html">Where the money sits</a>
-  <a href="../review.html">Security review</a>
 </nav>
 <main class="page">
 
@@ -275,9 +274,9 @@
   <div class="prose wrap-any">
     <h2>Source and tests</h2>
     <ul class="plain">
-      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/governance/GovernanceTimelock.sol"><code>contracts/governance/GovernanceTimelock.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/interfaces/IGovernanceTimelock.sol"><code>IGovernanceTimelock.sol</code></a></li>
-      <li>Deployment: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/ignition/modules/Core.ts"><code>ignition/modules/Core.ts</code></a> (both timelocks, the delay) and <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/ignition/modules/CoreHandover.ts"><code>CoreHandover.ts</code></a> (the guardian as canceller, <code>RECOVERY_ROLE</code> grants on the core, the hand-over)</li>
-      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/governance/GovernanceTimelock.t.sol"><code>GovernanceTimelock.t.sol</code></a> (what <code>RECOVERY_ROLE</code> can and cannot do, and the floor at deployment and in <code>updateDelay</code>), <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/test/nodejs/governance.test.ts"><code>test/nodejs/governance.test.ts</code></a> (upgrades, cancels and recovery through the real timelocks), and <code>assertHandedOver</code> in <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/test/nodejs/fixtures.ts"><code>test/nodejs/fixtures.ts</code></a> (the post-deploy check)</li>
+      <li>Contract: <code>contracts/governance/GovernanceTimelock.sol</code>, interface <code>IGovernanceTimelock.sol</code></li>
+      <li>Deployment: <code>ignition/modules/Core.ts</code> (both timelocks, the delay) and <code>CoreHandover.ts</code> (the guardian as canceller, <code>RECOVERY_ROLE</code> grants on the core, the hand-over)</li>
+      <li>Tests: <code>GovernanceTimelock.t.sol</code> (what <code>RECOVERY_ROLE</code> can and cannot do, and the floor at deployment and in <code>updateDelay</code>), <code>test/nodejs/governance.test.ts</code> (upgrades, cancels and recovery through the real timelocks), and <code>assertHandedOver</code> in <code>test/nodejs/fixtures.ts</code> (the post-deploy check)</li>
     </ul>
   </div>
 </section>

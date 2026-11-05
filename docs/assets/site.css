@@ -131,7 +131,6 @@ footer { font-size: 13.5px; color: var(--muted); border-top: 1px solid var(--lin
 /* Additions for this page. */
 .small { font-size: 13.5px; color: var(--muted); }
 td.c.ok, td.c.no { font-weight: 600; }
-.pill { font: 500 11.5px/1 var(--mono); padding: 3px 7px; border-radius: 6px; border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--muted); white-space: nowrap; }
 .kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: 14.5px; }
 .kv dt { font: 500 12.5px/1.6 var(--mono); color: var(--muted); }
 .kv dd { margin: 0; min-width: 0; }

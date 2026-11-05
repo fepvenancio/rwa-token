@@ -19,7 +19,6 @@
   <a href="../movement.html">One movement</a>
   <a href="../deployment.html">Deployment and governance</a>
   <a href="../money.html">Where the money sits</a>
-  <a href="../review.html">Security review</a>
 </nav>
 <main class="page">
 
@@ -340,8 +339,8 @@
   <div class="prose">
     <h2>Source and tests</h2>
     <ul class="plain">
-      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/hooks/rules/FundHoldersRule.sol"><code>contracts/hooks/rules/FundHoldersRule.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/interfaces/IFundHoldersRule.sol"><code>IFundHoldersRule.sol</code></a>, reason codes in <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/interfaces/Errors.sol"><code>Errors.sol</code></a></li>
-      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/hooks/rules/FundHoldersRule.t.sol"><code>FundHoldersRule.t.sol</code></a> (every step of the check, the net-zero cases, <code>after_</code>, the gate against fake tokens and fake hooks, the account questions), <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/fund/FundIntegration.t.sol"><code>FundIntegration.t.sol</code></a> (three real classes: the cap with pre-flight parity, no event showing the count above the cap, forced transfers, the 7540 escrow, a blocked claim, rule replacement), <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/fund/FundInvariant.t.sol"><code>FundInvariant.t.sol</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/test/halmos/FundHalmos.t.sol"><code>FundHalmos.t.sol</code></a>, and <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/test/nodejs/fund.test.ts"><code>test/nodejs/fund.test.ts</code></a> (through the real deployment)</li>
+      <li>Contract: <code>contracts/hooks/rules/FundHoldersRule.sol</code>, interface <code>IFundHoldersRule.sol</code>, reason codes in <code>Errors.sol</code></li>
+      <li>Tests: <code>FundHoldersRule.t.sol</code> (every step of the check, the net-zero cases, <code>after_</code>, the gate against fake tokens and fake hooks, the account questions), <code>FundIntegration.t.sol</code> (three real classes: the cap with pre-flight parity, no event showing the count above the cap, forced transfers, the 7540 escrow, a blocked claim, rule replacement), <code>FundInvariant.t.sol</code>, <code>FundHalmos.t.sol</code>, and <code>test/nodejs/fund.test.ts</code> (through the real deployment)</li>
     </ul>
   </div>
 </section>

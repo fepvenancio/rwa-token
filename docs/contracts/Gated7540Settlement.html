@@ -19,7 +19,6 @@
   <a href="../movement.html">One movement</a>
   <a href="../deployment.html">Deployment and governance</a>
   <a href="../money.html">Where the money sits</a>
-  <a href="../review.html">Security review</a>
 </nav>
 <main class="page">
 
@@ -194,7 +193,7 @@
       <li><b>A larger deployment.</b> The vault's creation code carries this contract's, for 40,294 bytes against the 49,152 that EIP-3860 allows (<code>test_WhenDeployed_TheVaultWithASecondContractFitsTheEip3860Limit</code>). <code>PLAN.md</code> measured the implementation's deployment at 8,745,154 gas.</li>
       <li><b>Some gas on each hand-off.</b> <code>PLAN.md</code> measured about 2,900 to 3,700 gas on a handed call, and at most 35 on an investor's call.</li>
       <li><b>No fix without an upgrade.</b> A bug here is fixed the way a bug in the vault is: through the timelock, to a newly attested implementation.</li>
-      <li><b>Not reviewed on its own.</b> See <a href="../review.html#not-reviewed">what no review has covered</a>.</li>
+      <li><b>Not reviewed.</b> No review has covered this contract, and nothing here has had an external audit.</li>
     </ul>
   </div>
 </section>
@@ -215,9 +214,9 @@
   <div class="prose wrap-any">
     <h2>Source and tests</h2>
     <ul class="plain wrap-any">
-      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/vaults/Gated7540Settlement.sol"><code>contracts/vaults/Gated7540Settlement.sol</code></a>, specified in <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/interfaces/IGated7540Vault.sol"><code>IGated7540Vault.sol</code></a></li>
-      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/vaults/Gated7540Settlement.t.sol"><code>Gated7540Settlement.t.sol</code></a> (the wiring, direct calls, the hand-off, upgrades, part fills, the walk and rounding), <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/vaults/Gated7540Vault.t.sol"><code>Gated7540Vault.t.sol</code></a> (settlement and recovery through the vault), <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/test/ContractSizes.t.sol"><code>ContractSizes.t.sol</code></a> (the runtime and creation-code limits)</li>
-      <li>Checks: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/scripts/verify-reproducible.ts"><code>scripts/verify-reproducible.ts</code></a>, <code>assertHandedOver</code> in <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/test/nodejs/fixtures.ts"><code>test/nodejs/fixtures.ts</code></a></li>
+      <li>Contract: <code>contracts/vaults/Gated7540Settlement.sol</code>, specified in <code>IGated7540Vault.sol</code></li>
+      <li>Tests: <code>Gated7540Settlement.t.sol</code> (the wiring, direct calls, the hand-off, upgrades, part fills, the walk and rounding), <code>Gated7540Vault.t.sol</code> (settlement and recovery through the vault), <code>ContractSizes.t.sol</code> (the runtime and creation-code limits)</li>
+      <li>Checks: <code>scripts/verify-reproducible.ts</code>, <code>assertHandedOver</code> in <code>test/nodejs/fixtures.ts</code></li>
     </ul>
   </div>
 </section>

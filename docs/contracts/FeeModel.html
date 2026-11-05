@@ -19,7 +19,6 @@
   <a href="../movement.html">One movement</a>
   <a href="../deployment.html">Deployment and governance</a>
   <a href="../money.html">Where the money sits</a>
-  <a href="../review.html">Security review</a>
 </nav>
 <main class="page">
 
@@ -293,8 +292,8 @@ return (fee, newMark, true)</pre>
   <div class="prose wrap-any">
     <h2>Source and tests</h2>
     <ul class="plain">
-      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/nav/FeeModel.sol"><code>contracts/nav/FeeModel.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/interfaces/IFeeModel.sol"><code>IFeeModel.sol</code></a></li>
-      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/nav/FeeModel.t.sol"><code>FeeModel.t.sol</code></a> (the arithmetic and its properties), the fee tests in <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/nav/NavDesk.t.sol"><code>NavDesk.t.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/vaults/Gated4626VaultPortfolio.t.sol">Gated4626VaultPortfolio.t.sol</a> (what each caller keeps and pays), and <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/test/nodejs/legos.test.ts"><code>test/nodejs/legos.test.ts</code></a> (a deployed model)</li>
+      <li>Contract: <code>contracts/nav/FeeModel.sol</code>, interface <code>IFeeModel.sol</code></li>
+      <li>Tests: <code>FeeModel.t.sol</code> (the arithmetic and its properties), the fee tests in <code>NavDesk.t.sol</code> and Gated4626VaultPortfolio.t.sol (what each caller keeps and pays), and <code>test/nodejs/legos.test.ts</code> (a deployed model)</li>
     </ul>
   </div>
 </section>

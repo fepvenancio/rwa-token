@@ -19,7 +19,6 @@
   <a href="../movement.html">One movement</a>
   <a href="../deployment.html">Deployment and governance</a>
   <a href="../money.html">Where the money sits</a>
-  <a href="../review.html">Security review</a>
 </nav>
 <main class="page">
 
@@ -396,8 +395,8 @@ nav   = gross - fee</pre>
   <div class="prose wrap-any">
     <h2>Source and tests</h2>
     <ul class="plain">
-      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/nav/NavDesk.sol"><code>contracts/nav/NavDesk.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/interfaces/INavDesk.sol"><code>INavDesk.sol</code></a></li>
-      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/nav/NavDesk.t.sol"><code>NavDesk.t.sol</code></a> (a real vault behind a real hook, with a desk holding <code>SETTLER_ROLE</code>), and <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/test/nodejs/legos.test.ts"><code>test/nodejs/legos.test.ts</code></a> (a deployed desk through whole cycles, and the post-deploy check)</li>
+      <li>Contract: <code>contracts/nav/NavDesk.sol</code>, interface <code>INavDesk.sol</code></li>
+      <li>Tests: <code>NavDesk.t.sol</code> (a real vault behind a real hook, with a desk holding <code>SETTLER_ROLE</code>), and <code>test/nodejs/legos.test.ts</code> (a deployed desk through whole cycles, and the post-deploy check)</li>
     </ul>
   </div>
 </section>

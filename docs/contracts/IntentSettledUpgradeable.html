@@ -19,7 +19,6 @@
   <a href="../movement.html">One movement</a>
   <a href="../deployment.html">Deployment and governance</a>
   <a href="../money.html">Where the money sits</a>
-  <a href="../review.html">Security review</a>
 </nav>
 <main class="page">
 
@@ -411,9 +410,9 @@
   <div class="prose wrap-any">
     <h2>Source and tests</h2>
     <ul class="plain wrap-any">
-      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/mixins/IntentSettledUpgradeable.sol"><code>contracts/mixins/IntentSettledUpgradeable.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/interfaces/ITransferIntent.sol"><code>ITransferIntent.sol</code></a></li>
-      <li>Unit tests: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/mixins/IntentSettledUpgradeable.t.sol"><code>IntentSettledUpgradeable.t.sol</code></a> (replay, expiry, wrong chain or token, high-<code>s</code> malleability, ERC-1271 wallets, executor binding, start time, consideration, the check order, cancelling, and <code>canExecute</code> parity)</li>
-      <li>Integration: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/tokens/IntentToken.t.sol"><code>IntentToken.t.sol</code></a> (real registry and hook), <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/test/nodejs/intents.test.ts"><code>test/nodejs/intents.test.ts</code></a> (a real wallet's <code>signTypedData</code> settling through the executor), <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/test/nodejs/time.test.ts"><code>test/nodejs/time.test.ts</code></a> (inclusive times), and the Halmos properties in <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/test/halmos/IntentTokenHalmos.t.sol"><code>IntentTokenHalmos.t.sol</code></a>: <code>check_executedIntentCannotReplay</code>, <code>check_cancelledNonceNeverExecutes</code>, <code>check_intentNamingAnotherExecutorNeverExecutes</code>, <code>check_considerationWithoutExecutorNeverExecutes</code></li>
+      <li>Contract: <code>contracts/mixins/IntentSettledUpgradeable.sol</code>, interface <code>ITransferIntent.sol</code></li>
+      <li>Unit tests: <code>IntentSettledUpgradeable.t.sol</code> (replay, expiry, wrong chain or token, high-<code>s</code> malleability, ERC-1271 wallets, executor binding, start time, consideration, the check order, cancelling, and <code>canExecute</code> parity)</li>
+      <li>Integration: <code>IntentToken.t.sol</code> (real registry and hook), <code>test/nodejs/intents.test.ts</code> (a real wallet's <code>signTypedData</code> settling through the executor), <code>test/nodejs/time.test.ts</code> (inclusive times), and the Halmos properties in <code>IntentTokenHalmos.t.sol</code>: <code>check_executedIntentCannotReplay</code>, <code>check_cancelledNonceNeverExecutes</code>, <code>check_intentNamingAnotherExecutorNeverExecutes</code>, <code>check_considerationWithoutExecutorNeverExecutes</code></li>
     </ul>
   </div>
 </section>

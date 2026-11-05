@@ -7,7 +7,7 @@ Brief v2 ("Gated Token Stack") replaced the original executor-only brief on 2026
 ## Standing decisions
 | Date | Decision |
 |---|---|
-| 2026-10-16 | `rwaToken/` is its own git repo. |
+| 2026-10-16 | The project is its own git repo. |
 | 2026-10-16 | solc 0.8.30 pinned in config, `cancun`; source pragmas `^0.8.28`. |
 | 2026-10-16 | **License: proprietary, all rights reserved; use requires the owners' approval.** SPDX `UNLICENSED` everywhere; `package.json` is `private` + `UNLICENSED` (CLAUDE.md rule 15). |
 | 2026-10-16 | **Wonderland Solidity standards** (CLAUDE.md rule 16). Lint config `.solhint.json`; formatting config `foundry.toml [fmt]`; imports through `remappings.txt`. |
@@ -2789,7 +2789,7 @@ Tests first, in `deployment.test.ts`: the core and one product deploy and pass t
 
 Done when: those pass, the runbook in `README.md` and `docs/deployment.html` describe core and products, and the brief's §8 Phase 7 says so.
 
-**Result (2026-10-30).** Built on branch `step-1-core-products`, in [PR #9](https://github.com/fepvenancio/rwa-token/pull/9), and corrected the same day after the outside review (L-1, L-2 below). `GatedToken` is 15,300 bytes, against `IntentToken`'s 17,945. A deployment of one product is the core plus that product: 9 contracts and a proxy for a plain token. Red runs first: Solidity 3 failing (the timelock refused 24 hours, and the token was a stub), Node 10 failing; then for the correction Solidity 3 and Node 5. Then `npx hardhat test` 1178 passing (1037 Solidity, 141 Node). Mutants 32 of 32 caught, in `SECURITY.md` section 5.
+**Result (2026-10-30).** Built on branch `step-1-core-products`, in PR #9, and corrected the same day after the outside review (L-1, L-2 below). `GatedToken` is 15,300 bytes, against `IntentToken`'s 17,945. A deployment of one product is the core plus that product: 9 contracts and a proxy for a plain token. Red runs first: Solidity 3 failing (the timelock refused 24 hours, and the token was a stub), Node 10 failing; then for the correction Solidity 3 and Node 5. Then `npx hardhat test` 1178 passing (1037 Solidity, 141 Node). Mutants 32 of 32 caught, in `SECURITY.md` section 5.
 
 Where it differs from the plan:
 - One more small module: `CoreHandover` sits after the council step, because the core must be attested before its roles and hand-over run.
@@ -3576,7 +3576,34 @@ The second pull request of the section above. The 41 pages are pinned to `bfb424
 - One agent checked about 95 changed claims against the code and found 8 problems: three places that said the next investor buys at par where dust has them pay as little as about half par; a jump overstated for large dust, also in two code comments and `SECURITY.md`; "up to half par", which reads the wrong way; the 4626's mint route to the same dust, as one raw unit buys 999,999 share units in an empty vault (run by hand); the source of the first open row; three claims about the list that nothing recorded; the CI runs still naming `d903344`'s; and a claim about the 4626's clocks that its tests did not show. Each was checked by hand and applied. These fixes have had the lint and no further independent check.
 - The contracts change only in those two comments, so the pin holds.
 
+## The repository's name out of the files (planned and approved by the owner 2026-11-05)
+
+The owner asked for every mention of this repository, and of its name, to come out of the files. At `33dd064` they are in:
+
+- All 41 HTML pages: 351 links through the repository's address on GitHub. 349 point at a file or folder at `bfb424e`, mostly from each page's list of sources, and two at pull requests 21 and 22.
+- `README.md`: the title, and the address of the published pages, which carries the owner's handle and the repository's name.
+- `PLAN.md`: the decision of 2026-10-16 naming the project's folder, and the link to PR #9.
+- `package.json` and `package-lock.json`: the package's name, the same words written as one.
+
+What changes:
+
+1. **Pages.** Each link is taken off and its text stays as it reads now: the path in `<code>` for 346 of them, and "README runbook", a test file's name and "pull request 21" or "22" for the other five. The footer already names the commit. The repository is private, so a reader of the published pages cannot follow those links anyway; a reader with access finds each file by its path at that commit. Relative links would not do: Pages publishes only `docs/`, so they would break on the site.
+2. **`README.md`.** The title becomes "Gated Token Stack". The documentation line keeps its pointer to `docs/index.html` and loses the address.
+3. **`PLAN.md`.** The 2026-10-16 decision reads "The project is its own git repo." PR #9 stays named, without the address.
+4. **The package's name** becomes `gated-token-stack`, after the project's title, in `package.json` and in the two name fields of the lock. The package is `private` and nothing reads its name: the contracts, their bytecode, the tests and the deployment modules do not change.
+5. **The page lint**, which lives outside the repository, checks that every path the pages cite in `<code>` exists at the pin, in place of checking the links.
+6. **The review page goes too**, as the owner asked while this was being built: `docs/review.html` is deleted, with the "Security review" entry in every page's navigation, its card on the overview, and the overview's sentence pointing at it, which keeps "Nothing here has had an external audit." `Gated7540Settlement`'s page linked to its list of what no review has covered; that item now says so itself. The `.pill` style, used only by that page, goes with it. Open question 3 below pointed at the page and now points at `SECURITY.md`, which holds the same two limits.
+
+Left as they are:
+
+- `LICENSE`: "Requests for permission" points at the owner's GitHub profile, not at this repository, and the licence needs a way to ask. It changes only if the owner says so.
+- The mentions of `urwa-policy` in this file: a different repository.
+- Git history, earlier commit messages and pull request bodies on GitHub keep the name. Changing them means rewriting `main`, which nobody has asked for.
+- The repository's name on GitHub, and with it the address the published pages will have once Pages is on. Only renaming the repository, or a custom domain, changes that, and both are the owner's call.
+
+Checks: the page lint at 40 pages with no errors; `npx hardhat test`, lint and format; and `git grep` for the name and the handle finding only `LICENSE`.
+
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
 2. Credential layer: none left. On 2026-10-30 the owner confirmed decisions 11, 12, 13, 15, 16 and 17 as built (17 at the measured +8,179 gas on a transfer). Decision 14 is moot, since `IdentityRule` was removed in the cleanup. Decisions 8 and 9 are recorded in the credential section's table.
-3. Redemption gate and the second contract: built and landed in #24 and #25. Open from its review: dust in a fund everyone has left ends the performance fee (`docs/review.html`, under open items). Fixed in #27; the pages at `bfb424e` describe it. What it leaves, dust left on purpose and the 4626's management fee on a small or low-decimal fund, is in the open items of `docs/review.html`.
+3. Redemption gate and the second contract: built and landed in #24 and #25. Open from its review: dust in a fund everyone has left ends the performance fee. Fixed in #27; the pages at `bfb424e` describe it. What it leaves, dust left on purpose and the 4626's management fee on a small or low-decimal fund, is in `SECURITY.md`.

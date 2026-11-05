@@ -19,7 +19,6 @@
   <a href="../movement.html">One movement</a>
   <a href="../deployment.html">Deployment and governance</a>
   <a href="../money.html">Where the money sits</a>
-  <a href="../review.html">Security review</a>
 </nav>
 <main class="page">
 
@@ -249,8 +248,8 @@
   <div class="prose wrap-any">
     <h2>Source and tests</h2>
     <ul class="plain">
-      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/governance/PolicyRegistry.sol"><code>contracts/governance/PolicyRegistry.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/interfaces/IPolicyRegistry.sol"><code>IPolicyRegistry.sol</code></a></li>
-      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/governance/PolicyRegistry.t.sol"><code>PolicyRegistry.t.sol</code></a> (attest, revoke, kinds, empty hashes, shared code, role gates). The gates are tested where they live: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/base/PolicyGatedERC20Upgradeable.t.sol"><code>PolicyGatedERC20Upgradeable.t.sol</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/hooks/ComplianceHook.t.sol"><code>ComplianceHook.t.sol</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/fund/Fund.t.sol"><code>Fund.t.sol</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/deploy/ProxyDeployer.t.sol"><code>ProxyDeployer.t.sol</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/portfolio/Portfolio.t.sol"><code>Portfolio.t.sol</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/portfolio/GuardedAccount.t.sol"><code>GuardedAccount.t.sol</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/vaults/Gated4626VaultPortfolio.t.sol"><code>Gated4626VaultPortfolio.t.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/nav/NavDesk.t.sol"><code>NavDesk.t.sol</code></a>. Through the real deployment: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/test/nodejs/deployment.test.ts"><code>test/nodejs/deployment.test.ts</code></a> (an unattested implementation or rule stops the product), <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/test/nodejs/governance.test.ts"><code>governance.test.ts</code></a> (an upgrade to unattested code is refused at execution) and <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/test/nodejs/legos.test.ts"><code>legos.test.ts</code></a> (the post-deploy check fails after a revoke).</li>
+      <li>Contract: <code>contracts/governance/PolicyRegistry.sol</code>, interface <code>IPolicyRegistry.sol</code></li>
+      <li>Tests: <code>PolicyRegistry.t.sol</code> (attest, revoke, kinds, empty hashes, shared code, role gates). The gates are tested where they live: <code>PolicyGatedERC20Upgradeable.t.sol</code>, <code>ComplianceHook.t.sol</code>, <code>Fund.t.sol</code>, <code>ProxyDeployer.t.sol</code>, <code>Portfolio.t.sol</code>, <code>GuardedAccount.t.sol</code>, <code>Gated4626VaultPortfolio.t.sol</code> and <code>NavDesk.t.sol</code>. Through the real deployment: <code>test/nodejs/deployment.test.ts</code> (an unattested implementation or rule stops the product), <code>governance.test.ts</code> (an upgrade to unattested code is refused at execution) and <code>legos.test.ts</code> (the post-deploy check fails after a revoke).</li>
     </ul>
   </div>
 </section>
