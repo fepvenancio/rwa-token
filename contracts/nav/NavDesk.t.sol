@@ -1437,8 +1437,8 @@ contract NavDesk_NoShares is NavDeskTest {
     assertEq(_desk.proposal().mark, _PAR_MARK);
   }
 
-  /// @dev The limit: just under a million units left on purpose has the next investor buy at up to half par with the
-  ///      mark at par, so the first doubling pays no performance fee. It costs the fee recipient once
+  /// @dev The limit: just under a million units left on purpose has the next investor pay as little as about half par
+  ///      with the mark at par, so the first doubling pays no performance fee. It costs the fee recipient once
   function test_TheLargestDustCostsTheFeeOnTheFirstDoubling() external {
     _leaveJustUnderAMillionUnits();
     _request(_bob, _IN);

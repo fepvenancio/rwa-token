@@ -205,7 +205,7 @@ contract NavDesk is INavDesk {
     // With no shares nothing is anyone's. A price struck on what is reported or left in the portfolio would be charged
     // as a gain on the next investors' principal, and refusing would let a stranger's donation stop the period. Fewer
     // share units than one unit of the asset buys at par count as none: between them they own less than that unit, and
-    // the least value that could be proposed on them would move the mark beyond any later gain.
+    // on a few of them the least value that could be proposed would move the mark beyond any later gain.
     uint256 _gross = _supply < _VIRTUAL_SHARES ? 0 : _reported + _priced;
     _quote(_p, _gross, _supply);
     _p.nav = _gross - _p.fee;

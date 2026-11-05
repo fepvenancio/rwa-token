@@ -39,7 +39,7 @@
 <section id="in-one-minute">
   <div class="callout">
     <h3>In one minute</h3>
-    <p>Two reviews in the last week of October 2026 are recorded here in detail, each on the code as it stood then. The review of 2026-10-26, by an AI assistant, covered the token, its policy and the contracts around them, and left out the vaults and the credential layer. It rated nothing medium or higher. <code>PLAN.md</code> calls the review of 2026-10-31 a whole-stack assessment, and it came while the 7540 vault's dealing periods and <code>NavDesk</code> were unfinished. <code>PLAN.md</code> rates two of its findings low and gives no rating for the rest, and the repository keeps no report of it. Each item is fixed or decided below, except that finding 3 stays open on a fund class with no minimum. A read of the redemption gate on 2026-11-02 found no fault in the accounting on a fresh deployment, one thing since fixed, and <a href="#open">one more open item</a>.</p>
+    <p>Two reviews in the last week of October 2026 are recorded here in detail, each on the code as it stood then. The review of 2026-10-26, by an AI assistant, covered the token, its policy and the contracts around them, and left out the vaults and the credential layer. It rated nothing medium or higher. <code>PLAN.md</code> calls the review of 2026-10-31 a whole-stack assessment, and it came while the 7540 vault's dealing periods and <code>NavDesk</code> were unfinished. <code>PLAN.md</code> rates two of its findings low and gives no rating for the rest, and the repository keeps no report of it. Each item is fixed or decided below, except that finding 3 stays open on a fund class with no minimum. A read of the redemption gate on 2026-11-02 found no fault in the accounting on a fresh deployment, and two things, both since fixed. <a href="#list-2026-11-04">An outside list of 2026-11-04</a> named three items it rated low: one of those two, one limit now <a href="#open">listed as open</a>, and one already described.</p>
     <p>That is less than it sounds. Eight contracts were built after the second review and have had automated checks and mutation testing but no review: <code>GuardedAccount</code>, <code>ERC20CallValidator</code>, <code>ERC4626CallValidator</code>, <code>FeeModel</code>, <code>SignedEntry</code>, <code>SupplyCapRule</code>, <code>ExecutedOnlyRule</code> and <code>Distributor</code>. <code>Gated7540Settlement</code>, <code>Gated7540Common</code> and the 7540's part fills came after it too, and have had that one read. No review ran on the code at this commit as a whole. Checking these pages against the code found sixteen more code problems, some of which could cost holders money. All are fixed, with the limits stated there, and no review has read those fixes. No external audit has happened. An earlier review, on 2026-10-17 and of much earlier code, did rate three items medium; all three were fixed. This page is a record of that, not a certification of anything.</p>
   </div>
 </section>
@@ -47,7 +47,7 @@
 <section id="record">
   <div class="prose">
     <h2>The record</h2>
-    <p>The reviews this page counts, oldest first, with the outside reviews it does not count, and the assistant's documentation check of 2026-11-01 and the agent's read of 2026-11-02, which it does not count either. <code>PLAN.md</code> also records a test-quality review (2026-10-17) and assessments on 2026-10-30, one of them by three sessions, and this page does not count those either. The ratings are as recorded, here or in <code>PLAN.md</code>, and nobody independent checked them.</p>
+    <p>The reviews this page counts, oldest first, with the outside reviews it does not count, and the assistant's documentation check of 2026-11-01 and the agent's read of 2026-11-02 and the outside list of 2026-11-04, which it does not count either. <code>PLAN.md</code> also records a test-quality review (2026-10-17) and assessments on 2026-10-30, one of them by three sessions, and this page does not count those either. The ratings are as recorded, here or in <code>PLAN.md</code>, and nobody independent checked them.</p>
   </div>
   <div class="table-wrap">
     <table class="tight">
@@ -58,7 +58,8 @@
         <tr><td><code>2026-10-26</code></td><td>AI assistant</td><td>Sixteen contracts at commit <code>a148d2f</code>: <a href="#scope">the token, policy, fund, governance, deployment and settlement</a>.</td><td>Nothing rated medium or higher. <a href="#findings">One low, two informational</a>.</td></tr>
         <tr><td><code>2026-10-31</code></td><td>Not recorded</td><td><a href="#review-2026-10-31">The whole stack</a>, in the words of <code>PLAN.md</code>, part of it unfinished. The exact tree is not recorded.</td><td>Nine items. <code>PLAN.md</code> rates two low and gives no rating for the rest.</td></tr>
         <tr><td><code>2026-11-01</code></td><td>AI assistant</td><td><a href="#pages-check">Every shipped contract, claim by claim, while writing these pages.</a> A documentation check, by the assistant that wrote much of the code, so this page does not count it as a review.</td><td>Sixteen code problems, all fixed, with the limits stated there.</td></tr>
-        <tr><td><code>2026-11-02</code></td><td>A fresh AI agent, with no sight of the plan's reasoning</td><td><a href="#read-2026-11-02">The redemption gate, the desk and the 4626's event</a>, before the fix it led to, by reading and by random sequences of operations. An agent from the same process that wrote the code, so this page does not count it as a review.</td><td>No fault in the accounting on a fresh deployment. Two items: one fixed, <a href="#open">one open</a>.</td></tr>
+        <tr><td><code>2026-11-02</code></td><td>A fresh AI agent, with no sight of the plan's reasoning</td><td><a href="#read-2026-11-02">The redemption gate, the desk and the 4626's event</a>, before the fix it led to, by reading and by random sequences of operations. An agent from the same process that wrote the code, so this page does not count it as a review.</td><td>No fault in the accounting on a fresh deployment. Two items, both since fixed.</td></tr>
+        <tr><td><code>2026-11-04</code></td><td>Outside the repository; author not recorded</td><td><a href="#list-2026-11-04">Three items</a> on the desk, the 4626 and its fee clock, which the list said it read at <code>d903344</code>.</td><td>Three items it rated low: one fixed, one a limit now <a href="#open">listed as open</a>, one already described. Not counted here as a review.</td></tr>
         <tr><td>None yet</td><td>External auditor</td><td>No external audit has happened. <code>PLAN.md</code> names one as the next step, to include the vaults, the credential layer and each lego.</td><td>None.</td></tr>
       </tbody>
     </table>
@@ -74,7 +75,8 @@
       <li><b>What was added to older contracts.</b> The 4626's investing path (<code>setPortfolio</code>, <code>setMaxRate</code>, <code>setFeeModel</code>, <code>collectFees</code> and the limit on its counted value) came after the second review. So did the credential record's loss of its country, which changes <code>CREDENTIAL_TYPEHASH</code>, <code>set</code>, <code>profileOf</code> and <code>CredentialSet</code> in <code>CredentialRegistry</code>, and <code>CredentialRule</code> with them. So did the deployment module <code>Legos.ts</code>, the lego part of <code>Product.ts</code>, the <code>managed-fund</code> and <code>vault4626-invest</code> profiles, and the lego part of <code>assertHandedOver</code>.</li>
       <li><b>The finished 7540 dealing periods and <code>NavDesk</code>.</b> <code>PLAN.md</code> records findings of the second review on <code>NavDesk</code> and <code>settlePeriod</code>, fixed in the row whose result it dates 2026-11-01, the day they were finished and merged. So that review saw them unfinished, and nothing records how closely. Their merge record calls them the highest audit priority.</li>
       <li><b>The 7540's second contract and its part fills.</b> <code>Gated7540Settlement</code>, <code>Gated7540Common</code>, the limit on <code>settlePeriod</code>, the walk in the request roll, the desk's redemption gate and the 4626's <code>DepositsClosed</code> came after both reviews. <a href="#read-2026-11-02">One read</a> came after them, and the record does not say how closely it read each. The fix it led to has tests and planted bugs and no later read.</li>
-      <li><b>This commit as a whole.</b> No review ran on <code>d903344</code>. The first review's baseline is <code>a148d2f</code>, and ten of its sixteen contracts have changed since, so its result does not carry over on its own. The fixes for the second review's items, and for what <a href="#pages-check">checking these pages</a> found, have tests, and mutants apart from the default of 1023 attester bits, and no later review.</li>
+      <li><b>The dust fix.</b> Counting fewer than <code>1e6</code> share units as no shares, in <code>NavDesk</code> and <code>Gated4626Vault</code>, came after every review and read. It has tests and planted bugs, and no read.</li>
+      <li><b>This commit as a whole.</b> No review ran on <code>bfb424e</code>. The first review's baseline is <code>a148d2f</code>, and ten of its sixteen contracts have changed since, so its result does not carry over on its own. The fixes for the second review's items, and for what <a href="#pages-check">checking these pages</a> found, have tests, and mutants apart from the default of 1023 attester bits, and no later review.</li>
       <li><b>An external audit.</b> None has happened. The commit messages on <code>main</code> credit an AI assistant on all but one commit, and an AI assistant ran the review of 2026-10-26. The repository does not record who ran the reviews of 2026-10-17 and 2026-10-31, so nothing shows them to be independent of that process. An AI review cannot show that no bug exists. The code, the tests, the planted bugs and any review from that process can share a blind spot.</li>
       <li><b>Things outside every pass.</b> OpenZeppelin 5.6.1 itself, which was read for how these contracts use it. The attesters' off-chain checks. What a target vault or a custodian does with money it holds. Economic and legal questions. A compromised security council, governance multisig or issuer key is outside what the code can defend against.</li>
     </ul>
@@ -91,7 +93,7 @@
         <tr><td class="wrap-any"><code>GatedToken</code>, <code>GatedVaultBase</code></td><td>Did not exist</td><td>Existed</td><td>Second review only.</td></tr>
         <tr><td class="wrap-any"><code>Gated4626Vault</code></td><td>Left out</td><td>Existed, without its investing path</td><td>Second review only, and <span class="no">no review</span> of the investing path.</td></tr>
         <tr><td class="wrap-any"><code>Gated7540Vault</code></td><td>Left out</td><td>Unfinished dealing periods</td><td>Seen once, on unfinished code. Its settlement code has moved to <code>Gated7540Settlement</code> since.</td></tr>
-        <tr><td class="wrap-any"><code>NavDesk</code></td><td>Did not exist</td><td>Unfinished</td><td>Seen once, on unfinished code. The redemption gate came after it.</td></tr>
+        <tr><td class="wrap-any"><code>NavDesk</code></td><td>Did not exist</td><td>Unfinished</td><td>Seen once, on unfinished code. The redemption gate and the dust fix came after it.</td></tr>
         <tr><td class="wrap-any"><code>Gated7540Settlement</code>, <code>Gated7540Common</code></td><td>Did not exist</td><td>Did not exist</td><td>Code moved out of the 7540 vault, plus part fills. <a href="#read-2026-11-02">One read</a>, and <span class="no">no review</span>.</td></tr>
         <tr><td class="wrap-any"><code>Portfolio</code>, <code>ERC4626Adapter</code></td><td>Did not exist</td><td>Merged that day</td><td>One small item, on the pause, and an outside review not counted here. Treat as <span class="no">not reviewed</span>.</td></tr>
         <tr><td class="wrap-any"><code>GuardedAccount</code>, <code>ERC20CallValidator</code>, <code>ERC4626CallValidator</code>, <code>FeeModel</code></td><td>Did not exist</td><td>Did not exist</td><td><span class="no">No review</span>.</td></tr>
@@ -129,7 +131,7 @@
 <section id="findings">
   <div class="prose">
     <h2>The review of 2026-10-26: findings</h2>
-    <p>The last column gives where each one stands at <code>d903344</code>, checked against the code.</p>
+    <p>The last column gives where each one stands at <code>bfb424e</code>, checked against the code.</p>
   </div>
   <div class="table-wrap">
     <table class="tight">
@@ -222,7 +224,7 @@
       </tbody>
     </table>
   </div>
-  <p class="small">The registry is fixed when the deployer is created and cannot be changed. The tests are in <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/deploy/ProxyDeployer.t.sol"><code>ProxyDeployer.t.sol</code></a>. <code>deploy</code> is owner-only, and after <code>CoreHandover</code> the owner is the operations account, so a launch has no timelock delay. A stolen operations key can still place a token over attested code with its own admin, and can use up a symbol. It cannot change an existing product.</p>
+  <p class="small">The registry is fixed when the deployer is created and cannot be changed. The tests are in <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/deploy/ProxyDeployer.t.sol"><code>ProxyDeployer.t.sol</code></a>. <code>deploy</code> is owner-only, and after <code>CoreHandover</code> the owner is the operations account, so a launch has no timelock delay. A stolen operations key can still place a token over attested code with its own admin, and can use up a symbol. It cannot change an existing product.</p>
 </section>
 
 <section id="finding-2">
@@ -230,7 +232,7 @@
     <h2>Finding 2: a batch is all-or-nothing</h2>
     <p><code>executeBatch</code> runs every intent in one transaction. If one fails, the executor reverts with <code>IntentExecutor_BatchItemFailed(index, reason)</code>, carrying the token's own revert data, and nothing in the batch settles. An intent that states a payment is refused first with <code>IntentExecutor_ConsiderationNotSupported(index)</code>. So any signer in the batch can make it fail, by cancelling the nonce with <code>cancelIntent</code> or by moving the balance first. Nobody loses tokens: the cost is the operator's gas and time.</p>
     <p>This is by design. The operator can pre-flight each intent with <code>canExecute(intent, sig, executor)</code>, naming the executor's address, submit intents one at a time with <code>execute</code>, or drop the failing intent and send the rest again.</p>
-    <p class="small wrap-any">Pinned by <code>test_WhenOneIntentIsRejected_NothingSettlesAndTheIndexIsReported</code>, <code>test_WhenOneIntentFails_ItRevertsWithItsIndexAndTheTokensReason</code> and <code>test_WhenTheFailingIntentIsDroppedAndResubmitted_TheRestSettles</code> in <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/intents/IntentExecutor.t.sol"><code>IntentExecutor.t.sol</code></a>.</p>
+    <p class="small wrap-any">Pinned by <code>test_WhenOneIntentIsRejected_NothingSettlesAndTheIndexIsReported</code>, <code>test_WhenOneIntentFails_ItRevertsWithItsIndexAndTheTokensReason</code> and <code>test_WhenTheFailingIntentIsDroppedAndResubmitted_TheRestSettles</code> in <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/intents/IntentExecutor.t.sol"><code>IntentExecutor.t.sol</code></a>.</p>
   </div>
 </section>
 
@@ -240,7 +242,7 @@
     <p><code>FundHoldersRule</code> counts an address as an investor as soon as it holds any amount of a class. With no minimum position, one unit is enough. Someone with several addresses that hold an eligible credential can send each of them one unit, fill the fund's cap, and keep new investors out until the agent takes the dust back with a forced transfer.</p>
     <p><code>MinPositionRule</code> closes this where a token lists it with a minimum above 0. It refuses with <code>BELOW_MIN_POSITION</code> a transfer, intent or mint that would leave the receiver above zero and below the minimum, and a movement that would leave the sender such a remainder. Forced moves, the burner's burns, the token itself and accounts the token's admin exempts are outside the rule, so the agent can still clear dust.</p>
     <p>It is not on by default. The demo profile <code>full</code> lists the rule second on each of its tokens, with the minimum taken from the <code>minPosition</code> parameter of <code>Product.ts</code>, which is 0 unless given. The other profiles list neither this rule nor <code>FundHoldersRule</code>. On a fund class with no minimum the finding stands, and the answer is operational: the agent's forced transfer, and monitoring of the investor count.</p>
-    <p class="small wrap-any">Pinned by <code>test_WhenADustTransferTargetsAnEmptyAccount_ItIsRejectedWithParity</code>, <code>test_WhenATransferWouldLeaveDustBehind_ItIsRejected</code>, <code>test_WhenAMintWouldLeaveDust_ItIsRejected</code> and <code>test_WhenForced_DustIsAllowed</code> in <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/contracts/hooks/rules/RuleSetIntegration.t.sol"><code>RuleSetIntegration.t.sol</code></a>.</p>
+    <p class="small wrap-any">Pinned by <code>test_WhenADustTransferTargetsAnEmptyAccount_ItIsRejectedWithParity</code>, <code>test_WhenATransferWouldLeaveDustBehind_ItIsRejected</code>, <code>test_WhenAMintWouldLeaveDust_ItIsRejected</code> and <code>test_WhenForced_DustIsAllowed</code> in <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/hooks/rules/RuleSetIntegration.t.sol"><code>RuleSetIntegration.t.sol</code></a>.</p>
   </div>
 </section>
 
@@ -263,7 +265,7 @@
   <div class="prose">
     <h2>The review of 2026-10-31: nine items</h2>
     <p><code>PLAN.md</code> calls it a whole-stack assessment and dates its first fixes 2026-10-31. Nothing records who ran it or the exact tree it read. Commit times suggest three commits not yet merged (<code>refs/pull/12/head</code> to <code>refs/pull/14/head</code>, the last authored at 23:14 UTC that day; the last two were rebased on 2026-11-01 with the same trees), with the 7540 vault's dealing periods and <code>NavDesk</code> not yet committed (<code>refs/pull/15/head</code> is dated 2026-11-01). <code>PLAN.md</code> rates the first two findings low and records no rating for the rest.</p>
-    <p>The repository keeps no report of it. What it records is the findings, in <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/PLAN.md"><code>PLAN.md</code></a> (the sections "Review fixes (2026-10-31)" and "The last review items, settled on 2026-11-01") and <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/SECURITY.md"><code>SECURITY.md</code></a> section 3. Nothing says which attacks it tried or how closely each contract was read, so "whole stack" describes what it set out to cover and not a line-by-line read. Every item below is closed or decided, and each was checked against the code at this commit. Item 6 is a group of four smaller points.</p>
+    <p>The repository keeps no report of it. What it records is the findings, in <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/PLAN.md"><code>PLAN.md</code></a> (the sections "Review fixes (2026-10-31)" and "The last review items, settled on 2026-11-01") and <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/SECURITY.md"><code>SECURITY.md</code></a> section 3. Nothing says which attacks it tried or how closely each contract was read, so "whole stack" describes what it set out to cover and not a line-by-line read. Every item below is closed or decided, and each was checked against the code at this commit. Item 6 is a group of four smaller points.</p>
   </div>
   <div class="table-wrap">
     <table class="tight">
@@ -372,7 +374,19 @@
     <p>It found two things.</p>
     <ul class="plain">
       <li><b>Fixed: an upgrade in place could pay twice.</b> A period's book stored what was taken, which read as nothing taken on a period settled before that field existed, so an upgrade in place would have paid settled redemptions again. Nothing was deployed. The book stores what <code>carried</code>, so zero means filled and a full fill writes nothing extra (<code>test_WhenAPeriodIsFilledInFull_NothingIsWrittenAsCarried</code>). The second contract also reports its own template id, so no proxy can be moved onto it (<code>test_WhenUpgradedOntoTheSecondContract_ItIsRefused</code>).</li>
-      <li><b>Open: dust in a fund everyone has left.</b> It is the first row <a href="#open">below</a>.</li>
+      <li><b>Fixed since: dust in a fund everyone has left.</b> See <a href="#list-2026-11-04">the list of 2026-11-04</a>.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="list-2026-11-04">
+  <div class="prose">
+    <h2>The outside list of 2026-11-04: dust and the fee clock</h2>
+    <p>A list from outside the repository, whose author is not recorded, named three items it rated low, which it said it read at <code>d903344</code>. Each was run on a copy of <code>dced280</code>, whose contracts are those of <code>d903344</code>, before anything changed, so what follows was measured, not taken from the list. The repository does not keep the list, and this page does not count it as a review.</p>
+    <ul class="plain">
+      <li><b>Fixed: dust in a fund everyone has left.</b> The rounding of a 7540's claims can leave a few share units after everyone has gone, and a 4626 holder alone in the vault can leave one. On that dust a desk had to propose a value of at least 1, or a 4626 counted what was left, and <code>FeeModel</code> priced it about a million times above par. The mark moved there and no later gain reached it, so no performance fee would have been charged again. On a 4626 it needed no reporter, as anyone can call <code>accrue()</code>. Fewer share units than one unit of the asset buys at par, <code>1e6</code>, count as no shares on both (<code>test_DustLeftByTheClaimsStrikesAtParAndTheFeeStillWorks</code>, <code>test_WhenAHolderAloneLeavesOneShareUnitTheMarkStaysAtPar</code>). What remains is the first row <a href="#open">below</a>.</li>
+      <li><b>Kept, and listed as open: the 4626's fee clock.</b> A count restarts the management fee clock even when the fee rounds to nothing. The list's example was wrong: 1e10 raw units at 1% for 12 seconds charge 38, not 0. Its fix, holding the clock while the fee is zero, would charge the time to whoever arrives next: in a run, 1,000 raw units sat for 30 days, 10 million arrived, and 12 seconds later the fund owed 8,219 where 12 seconds of fee is 0.04 (<code>test_NewMoneyDoesNotPayForTimeBeforeItArrived</code>). The fix is not taken, and the limit is the second row <a href="#open">below</a>.</li>
+      <li><b>Already described: a unit given during a read of nothing.</b> It is the low read in <a href="#pages-check">what checking these pages found</a>. A pause stops redemptions but not <code>accrue()</code>, which the <a href="contracts/Gated4626Vault.html">4626's page</a> says.</li>
     </ul>
   </div>
 </section>
@@ -380,13 +394,14 @@
 <section id="open">
   <div class="prose">
     <h2>What stays open at this commit</h2>
-    <p>These are known and not fixed. Two more are elsewhere on this page: <a href="#finding-3">finding 3</a>, on a fund class with no minimum, and the low reads in <a href="#pages-check">what checking these pages found</a>. The first row below came from the read of 2026-11-02, and the gate did not cause it. The rest are limits of the gate itself.</p>
+    <p>These are known and not fixed. Two more are elsewhere on this page: <a href="#finding-3">finding 3</a>, on a fund class with no minimum, and the low reads in <a href="#pages-check">what checking these pages found</a>. The first row below is the dust fix's own limit, and the second came with the outside list of 2026-11-04. The rest are limits of the gate itself.</p>
   </div>
   <div class="table-wrap">
     <table class="tight">
       <thead><tr><th>Item</th><th>What happens</th><th>What bounds it</th></tr></thead>
       <tbody>
-        <tr><td>Dust in a fund everyone has left</td><td class="wrap-any">Each deposit claim rounds down, so a fund whose investors have all left can keep a few share units in <code>unclaimedShares</code>. <code>NavDesk</code>'s case for no shares, <code>_supply == 0</code>, then never runs again. A value of zero reverts with <code>NavDesk_ZeroNav</code>, so the reporter must propose at least 1. <code>FeeModel</code> prices that far above par: one asset unit over one share unit is <code>1e18</code>, against par's <code>1e12</code>. The charge rounds to no fee and the mark moves there. No later gain reaches it, so no performance fee is charged for the rest of the fund's life. The management fee still runs.</td><td class="wrap-any">Investors lose nothing, and the fee recipient goes short. In a run at this commit one unit was left, the reporter proposed 1, and the mark went from about <code>1.05e12</code> to <code>1e18</code>. The next investor's 1,000 bought half the shares par gives, at twice par, the fund doubled, and a 20% performance fee charged nothing. That run is not one of the repository's tests.</td></tr>
+        <tr><td>Dust left on purpose</td><td class="wrap-any">Fewer than <code>1e6</code> share units count as no shares. A holder who leaves just under that, or mints that many into an empty 4626 for one raw unit, has the next investor pay as little as about half par with the mark at par, so the first doubling pays no performance fee.</td><td class="wrap-any">Investors lose nothing, and it costs the fee recipient once (<code>test_TheLargestDustCostsTheFeeOnTheFirstDoubling</code>).</td></tr>
+        <tr><td>A management fee too small to pay a unit at each count</td><td class="wrap-any">A 4626 restarts its fee clock at every count and the fee rounds down, so under one raw unit is lost per count, and only one count a block matters. On a 2-decimal asset that is a cent a block: anyone calling <code>accrue()</code> every 12 seconds keeps a fund of up to about 2.6 million at 1% a year from paying any management fee.</td><td class="wrap-any">The gas of each call. With 6 decimals it is at most about 2.63 a year on 12-second blocks. <code>test_ACountThatRoundsToNoFeeStillRestartsTheClock</code> pins it, and holding the clock instead would charge new money for earlier time (<code>test_NewMoneyDoesNotPayForTimeBeforeItArrived</code>).</td></tr>
         <tr><td>Over-requesting</td><td>A holder who expects a gate can ask for more than it wants, to get a bigger slice.</td><td class="wrap-any">Only the agent, or the settler once the period has closed, can hand back a carried part. That is the deterrent, and not a complete one.</td></tr>
         <tr><td>A controller that waited walks</td><td class="wrap-any">Its next read or claim passes the settled gated periods one at a time, at 5,979 gas per period when measured.</td><td class="wrap-any">About 5,000 gated periods in a row fit a block of 30 million, and the cost falls only on calls about that controller. <code>test/nodejs/vaults.test.ts</code> holds it below 7,000.</td></tr>
         <tr><td>A wind-down under a gate</td><td class="wrap-any">The level is a share of what remains. When everyone is leaving, the queue shrinks by the same fraction each period and does not finish.</td><td class="wrap-any">The timelock sets the level to zero, which is off (<code>setRedemptionGate</code>).</td></tr>
@@ -415,7 +430,7 @@
 <section id="evidence">
   <div class="prose">
     <h2>The automated evidence</h2>
-    <p><a href="https://github.com/fepvenancio/rwa-token/blob/d903344/.github/workflows/ci.yml"><code>ci.yml</code></a> runs these on every pull request and every push to <code>main</code>, with two exceptions: <code>npm run verify:reproducible</code> runs on pull requests into <code>main</code> and, through <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/.github/workflows/release.yml"><code>release.yml</code></a>, on <code>v*</code> tags; mutation testing is by hand and not in CI. The CI run on <code>main</code> for this commit (run 41466028477) passed on 2026-11-02, as did its pull request's run on <code>40834b8</code>, the same tree (run 41462102879), which also ran <code>verify:reproducible</code>. The runs on <code>main</code> for the commits from <code>f1787df</code> to <code>e6418c0</code>, and for <code>61a103a</code>, were cancelled, so for those the record is the pull request's run. Each merge record names it, except that of <code>f1787df</code>, whose run was on <code>08ea2fd</code>. Two runs on <code>main</code> failed: <code>a2082b8</code> (2026-10-17, the type check) and <code>c859dc6</code> (2026-10-30, the analysis job). The next run after <code>c859dc6</code>, on <code>b7df8ac</code>, passed. Nothing in the repository makes a merge wait for a pass.</p>
+    <p><a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/.github/workflows/ci.yml"><code>ci.yml</code></a> runs these on every pull request and every push to <code>main</code>, with two exceptions: <code>npm run verify:reproducible</code> runs on pull requests into <code>main</code> and, through <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/.github/workflows/release.yml"><code>release.yml</code></a>, on <code>v*</code> tags; mutation testing is by hand and not in CI. The CI run on <code>main</code> for this commit (run 41938570674) passed on 2026-11-05, as did its pull request's run on <code>1cf1bd9</code>, the same tree (run 41932179896), which also ran <code>verify:reproducible</code>. The runs on <code>main</code> for the commits from <code>f1787df</code> to <code>e6418c0</code>, and for <code>61a103a</code>, were cancelled, so for those the record is the pull request's run. Each merge record names it, except that of <code>f1787df</code>, whose run was on <code>08ea2fd</code>. Two runs on <code>main</code> failed: <code>a2082b8</code> (2026-10-17, the type check) and <code>c859dc6</code> (2026-10-30, the analysis job). The next run after <code>c859dc6</code>, on <code>b7df8ac</code>, passed. Nothing in the repository makes a merge wait for a pass.</p>
   </div>
   <div class="table-wrap">
     <table class="tight">
@@ -425,7 +440,7 @@
           <td>Test suite</td>
           <td><code>npm test</code>, then <code>npx hardhat test solidity --test-profile isolated</code>. Solidity unit, fuzz (256 runs) and invariant tests next to each contract, and Node tests with viem that deploy each profile. <code>ContractSizes.t.sol</code> holds contract sizes to the EIP-170 limit and the 7540's creation code to the EIP-3860 limit, and <code>InterfaceFreeze.t.sol</code> pins interface ids and event topics.</td>
           <td>Every written test holds. It says nothing about a case nobody wrote.</td>
-          <td><code>1851 passing (1678 solidity, 173 nodejs)</code> on 2026-11-02, in <code>PLAN.md</code>'s section on the redemption gate.</td>
+          <td><code>1866 passing (1693 solidity, 173 nodejs)</code> on 2026-11-04, in <code>PLAN.md</code>'s section on dust in a fund everyone has left.</td>
         </tr>
         <tr>
           <td>Slither 0.11.5</td>
@@ -483,7 +498,7 @@
 <section id="holds">
   <div class="prose">
     <h2>What holds, and the test that pins it</h2>
-    <p>The properties the rest of the documentation depends on, listed for the review of 2026-10-26 and re-read at this commit. They cover the token and its policy, not the vaults or the portfolio. Each is covered by a test or a Halmos property at <code>d903344</code>, except where a row says otherwise. The integration tests in <code>RuleSetIntegration.t.sol</code> use a test identity rule in place of <code>CredentialRule</code>.</p>
+    <p>The properties the rest of the documentation depends on, listed for the review of 2026-10-26 and re-read at this commit. They cover the token and its policy, not the vaults or the portfolio. Each is covered by a test or a Halmos property at <code>bfb424e</code>, except where a row says otherwise. The integration tests in <code>RuleSetIntegration.t.sol</code> use a test identity rule in place of <code>CredentialRule</code>.</p>
   </div>
   <div class="table-wrap">
     <table class="tight fixed">
@@ -516,13 +531,13 @@
       </tbody>
     </table>
   </div>
-  <p class="small">Unit and integration tests sit next to each contract (<code>*.t.sol</code>); the Halmos properties are in <a href="https://github.com/fepvenancio/rwa-token/tree/d903344/contracts/test/halmos"><code>contracts/test/halmos/</code></a> (here <code>IntentTokenHalmos.t.sol</code> and <code>MinPositionRuleHalmos.t.sol</code>).</p>
+  <p class="small">Unit and integration tests sit next to each contract (<code>*.t.sol</code>); the Halmos properties are in <a href="https://github.com/fepvenancio/rwa-token/tree/bfb424e/contracts/test/halmos"><code>contracts/test/halmos/</code></a> (here <code>IntentTokenHalmos.t.sol</code> and <code>MinPositionRuleHalmos.t.sol</code>).</p>
 </section>
 
 <section id="accepted">
   <div class="prose">
     <h2>Behaviour that looks like a bug and is on purpose</h2>
-    <p>These behaviours are in the code by design. They are listed so that a reader does not report them as findings. <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/SECURITY.md"><code>SECURITY.md</code></a> section 3 has the longer list, vaults and legos included.</p>
+    <p>These behaviours are in the code by design. They are listed so that a reader does not report them as findings. <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/SECURITY.md"><code>SECURITY.md</code></a> section 3 has the longer list, vaults and legos included.</p>
     <ul class="plain">
       <li><b><code>canTransfer</code> can say yes where the write reverts.</b> ERC-7943 forbids it to fail on a plain balance shortfall, so with nothing frozen an amount above the balance reads true when the rules accept it. <code>canTransferWithReason</code> says no with <code>INSUFFICIENT_UNFROZEN</code>.</li>
       <li><b>A pause stops mints and burns too.</b> Only <span class="k k-forced">FORCED</span> movements pass.</li>
@@ -533,7 +548,7 @@
       <li><b>The investor count is by address.</b> One person with two addresses counts twice.</li>
       <li><b>A burner's own burns are enforcement burns.</b> The rules look at the operator, so a burn by a <code>BURNER_ROLE</code> holder passes its own lockup and minimum position. A burner account should not also be used as an investor.</li>
       <li><b>The recovery timelock administers itself,</b> as every OpenZeppelin <code>TimelockController</code> does: an operation it runs, after its delay, can change its own roles. The floor on its delay still holds.</li>
-      <li><b>With no shares a report changes nothing.</b> A desk proposes a value of zero whatever is reported or sits in the portfolio, and a 4626 counts zero, so the next investors buy at par. What is left goes to them.</li>
+      <li><b>With no shares, or fewer than <code>1e6</code> share units, a report changes nothing.</b> A desk proposes a value of zero whatever is reported or sits in the portfolio, and a 4626 counts zero, so the next investors buy at par, or for as little as about half par when the dust is close to <code>1e6</code> units. What is left goes to them.</li>
       <li><b>A low read counts at once.</b> Losses are not rate limited. Deposits stay open at a price that can still be read while the fall in one count is half or less, and close for good beyond that. See <a href="#pages-check">what checking these pages found</a>.</li>
       <li><b>A redemption can be filled in part.</b> Past a fund's redemption gate each request takes the same fraction, and the rest waits, stays invested and deals at a later price. A holder cannot take the rest back itself. See <a href="#open">what stays open</a>.</li>
       <li><b>Pre-flights answer for the latest block.</b> A write lands in a later one, so at a lockup end, a window edge or an intent deadline the two can differ by a second.</li>
@@ -560,16 +575,16 @@
   <div class="prose">
     <h2>Source</h2>
     <ul class="plain">
-      <li>The audit package and its limits: <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/SECURITY.md"><code>SECURITY.md</code></a></li>
-      <li>The review items as recorded: <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/PLAN.md"><code>PLAN.md</code></a></li>
-      <li>CI: <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/.github/workflows/ci.yml"><code>ci.yml</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/.github/workflows/release.yml"><code>release.yml</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/scripts/verify-reproducible.ts"><code>verify-reproducible.ts</code></a></li>
-      <li>Analyser settings: <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/slither.config.json"><code>slither.config.json</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/aderyn.toml"><code>aderyn.toml</code></a></li>
-      <li>The post-deploy check: <a href="https://github.com/fepvenancio/rwa-token/blob/d903344/test/nodejs/fixtures.ts"><code>test/nodejs/fixtures.ts</code></a></li>
+      <li>The audit package and its limits: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/SECURITY.md"><code>SECURITY.md</code></a></li>
+      <li>The review items as recorded: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/PLAN.md"><code>PLAN.md</code></a></li>
+      <li>CI: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/.github/workflows/ci.yml"><code>ci.yml</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/.github/workflows/release.yml"><code>release.yml</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/scripts/verify-reproducible.ts"><code>verify-reproducible.ts</code></a></li>
+      <li>Analyser settings: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/slither.config.json"><code>slither.config.json</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/aderyn.toml"><code>aderyn.toml</code></a></li>
+      <li>The post-deploy check: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/test/nodejs/fixtures.ts"><code>test/nodejs/fixtures.ts</code></a></li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>d903344</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>bfb424e</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

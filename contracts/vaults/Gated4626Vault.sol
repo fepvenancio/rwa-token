@@ -490,7 +490,7 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
     // With no shares nothing is anyone's. A price struck on what is left would be charged as a gain on the next
     // investor's principal, so they buy at par, and the mark starts there. What is left counts for them under the
     // limit. Fewer share units than one unit of the asset buys at par count as none: between them they own less than
-    // that unit, and a count on them would move the mark beyond any later gain.
+    // that unit, and a count on a few of them could move the mark beyond any later gain.
     if (totalSupply() < _VIRTUAL_SHARES) return (0, 0, _PAR_MARK, true);
 
     uint256 _priced = _portfolio.pricedValue();
