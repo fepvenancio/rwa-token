@@ -503,7 +503,7 @@
         <tr><td><code>CONSIDERATION_NEEDS_EXECUTOR</code></td><td><code>executeTransfer</code>, <code>canExecute</code></td><td>The intent states a payment but names no executor to enforce it</td></tr>
         <tr><td><code>WRONG_EXECUTOR</code></td><td><code>executeTransfer</code>, <code>canExecute</code></td><td>The intent names another executor</td></tr>
         <tr><td><code>INTENT_NOT_YET_VALID</code></td><td><code>executeTransfer</code>, <code>canExecute</code>; <code>canExecuteDvP3009</code> for the authorization</td><td>Before <code>validAfter</code></td></tr>
-        <tr><td><code>ZERO_RECEIVER</code></td><td><code>executeTransfer</code>, <code>canExecute</code></td><td>The intent pays the zero address</td></tr>
+        <tr><td><code>ZERO_RECEIVER</code></td><td><code>executeTransfer</code>, <code>canExecute</code>; <code>canTransferWithReason</code>, where <code>canTransfer</code> reads false</td><td>The intent pays the zero address; a pre-flight asks about a mint to it</td></tr>
         <tr><td><code>BAD_SIGNATURE</code></td><td><code>executeTransfer</code>, <code>canExecute</code></td><td>The signature is not the sender's over this intent, token and chain</td></tr>
 
         <tr><td><code>LEGS_DO_NOT_MATCH</code></td><td><code>canExecuteDvPGated</code>, <code>canExecuteDvP3009</code></td><td>The two legs do not describe one trade. The write reverts with <code>DvPExecutor_LegsDoNotMatch</code> instead</td></tr>
@@ -606,7 +606,7 @@ transfer(carol, 120)  <span class="cm">reverts</span> ERC20InsufficientBalance(h
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>bfb424e</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>ce7c6c4</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

@@ -142,7 +142,7 @@
       </tbody>
     </table>
   </div>
-  <p class="small">The post-deploy check (<code>assertHandedOver</code> in <code>test/nodejs/fixtures.ts</code>) asserts that the recovery timelock's code is identical to the main timelock's, that the guardian holds nothing on the recovery timelock and on the main timelock can cancel and cannot propose or execute, the recovery timelock's roles and the absence of cancellers on it among the accounts the stack knows, that the deployer and the operations account hold no role, and at least 24 hours on both delays. It does not assert governance's roles on the main timelock.</p>
+  <p class="small">The post-deploy check (<code>assertHandedOver</code> in <code>test/nodejs/fixtures.ts</code>) asserts that the recovery timelock's code is identical to the main timelock's, that the guardian holds nothing on the recovery timelock and on the main timelock can cancel and cannot propose or execute, the recovery timelock's roles and the absence of cancellers on it among the accounts the stack knows, that on each timelock no known account but governance proposes or executes and the zero address holds no proposer, executor or canceller role, that the deployer and the operations account hold no role, and at least 24 hours on both delays. It does not assert governance's own roles on the main timelock.</p>
 </section>
 
 <section id="delay">
@@ -281,7 +281,7 @@
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>bfb424e</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>ce7c6c4</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

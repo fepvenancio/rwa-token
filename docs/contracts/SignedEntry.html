@@ -285,7 +285,7 @@ vault.multicall([
       <tbody>
         <tr><td><code>enterWithPermit(entry, entrySig, v, r, s)</code></td><td>Anyone</td><td>Checks the entry, tries the permit (a failure is ignored), pulls the cash by <code>transferFrom</code> and pays the vault. Returns the shares received, zero for a request.</td></tr>
         <tr><td><code>enterWith3009(entry, entrySig, cashSig)</code></td><td>Anyone</td><td>Checks the entry, pulls the cash by <code>receiveWithAuthorization</code> with <code>cashNonce(entry)</code>, and pays the vault. Returns the shares received, zero for a request.</td></tr>
-        <tr><td><code>cancelEntry(nonce)</code></td><td>Anyone, for their own nonces</td><td>Marks the nonce used under the caller's address, so an entry signed with it cannot execute. It does not revert if the nonce was already used. It touches neither an allowance nor an authorization on the cash token.</td></tr>
+        <tr><td><code>cancelEntry(nonce)</code></td><td>Anyone, for their own nonces</td><td>Marks the nonce used under the caller's address, so an entry signed with it cannot execute. It reverts with <code>SignedEntry_NonceUsed</code> if the nonce was already used, by an entry that ran or an earlier cancel (<code>test_AnEntryThatRanCannotBeCancelled</code>, <code>test_CancellingTwiceReverts</code>). It touches neither an allowance nor an authorization on the cash token.</td></tr>
         <tr><td><code>entryHash(entry)</code></td><td>Anyone (read-only)</td><td>The EIP-712 hash the investor signs.</td></tr>
         <tr><td><code>cashNonce(entry)</code></td><td>Anyone (read-only)</td><td>The nonce an ERC-3009 authorization for this entry must carry.</td></tr>
         <tr><td><code>nonceUsed(investor, nonce)</code></td><td>Anyone (read-only)</td><td>Whether a nonce was used or cancelled.</td></tr>
@@ -365,7 +365,7 @@ vault.multicall([
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>bfb424e</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>ce7c6c4</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

@@ -255,7 +255,7 @@
 <section id="preflight">
   <div class="prose wrap-any">
     <h2>Asking before moving</h2>
-    <p>Wallets, exchanges and the vaults ask the token whether a movement would pass before sending it. <code>canTransferWithReason</code> and <code>canTransfer</code> run the checks of the movement path without moving anything. They simulate a movement driven by <code>from</code> itself: the operator is <code>from</code>, or the caller for a mint, whoever asks (<code>test_WhenCalledByAThirdParty_ItSimulatesATransferByFrom</code>). A zero <code>from</code> reads as a mint and a zero <code>to</code> as a holder's burn.</p>
+    <p>Wallets, exchanges and the vaults ask the token whether a movement would pass before sending it. <code>canTransferWithReason</code> and <code>canTransfer</code> run the checks of the movement path without moving anything. They simulate a movement driven by <code>from</code> itself: the operator is <code>from</code>, or the caller for a mint, whoever asks (<code>test_WhenCalledByAThirdParty_ItSimulatesATransferByFrom</code>). A zero <code>from</code> reads as a mint and a zero <code>to</code> as a holder's burn. Both zero, a mint to the zero address, cannot happen, so it reads false with <code>ZERO_RECEIVER</code> without asking the hook, and <code>mint</code> to it reverts with <code>ERC20InvalidReceiver</code> (<code>PolicyGatedUnit_ZeroToZero</code>).</p>
     <p>The two differ in one case, because ERC-7943 says <code>canTransfer</code> must not fail on a plain balance check and must fail when frozen tokens are in the way.</p>
   </div>
   <div class="table-wrap">
@@ -265,6 +265,7 @@
         <tr><td>Hook accepts, amount within the unfrozen balance</td><td class="ok">true, <code>TRANSFER_OK</code></td><td class="ok">true</td><td>moves</td></tr>
         <tr><td>A rule refuses, for example a receiver without a credential</td><td class="no">false, the rule's reason</td><td class="no">false</td><td><code>PolicyGated_TransferRejected(reason)</code></td></tr>
         <tr><td>Token paused</td><td class="no">false, <code>PAUSED</code></td><td class="no">false</td><td><code>PolicyGated_TransferRejected(PAUSED)</code></td></tr>
+        <tr><td><code>from</code> and <code>to</code> both zero</td><td class="no">false, <code>ZERO_RECEIVER</code></td><td class="no">false</td><td><code>mint</code> reverts with <code>ERC20InvalidReceiver</code></td></tr>
         <tr><td>Something frozen on <code>from</code>; amount above the unfrozen balance, within the balance</td><td class="no">false, <code>INSUFFICIENT_UNFROZEN</code></td><td class="no">false</td><td><code>ERC7943InsufficientUnfrozenBalance</code></td></tr>
         <tr><td>Something frozen on <code>from</code>; amount above the balance</td><td class="no">false, <code>INSUFFICIENT_UNFROZEN</code></td><td class="no">false</td><td><code>ERC20InsufficientBalance</code></td></tr>
         <tr><td>Nothing frozen; amount above the balance; hook accepts</td><td class="no">false, <code>INSUFFICIENT_UNFROZEN</code></td><td class="ok">true</td><td><code>ERC20InsufficientBalance</code></td></tr>
@@ -481,7 +482,7 @@
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>bfb424e</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>ce7c6c4</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

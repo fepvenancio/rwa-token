@@ -25,7 +25,7 @@
 <header class="top">
   <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Vaults</div>
   <h1>FeeModel</h1>
-  <p class="lede wrap-any">Works out a fund's fee. The rates are fixed when it is deployed, it remembers nothing, and whoever asks supplies the value, the share count, the high-water mark and the clocks.</p>
+  <p class="lede wrap-any">Works out a fund's fee. The rates are fixed when it is deployed, it remembers nothing, and whoever asks supplies the value, the share count, the high-water mark, the clocks and what was paid since the mark moved.</p>
   <div class="facts">
     <span class="fact"><b>contracts/nav/FeeModel.sol</b></span>
     <span class="fact">immutable, <b>no storage</b>, one view</span>
@@ -37,38 +37,43 @@
 <section id="in-one-minute">
   <div class="callout wrap-any">
     <h3>In one minute</h3>
-    <p>A fund charges two kinds of fee: a management fee for the time that has passed, and a performance fee on gains above a high-water mark, which starts at the vault's price and moves up each time a performance fee is charged. This contract is the arithmetic. One function, <code>quote</code>, takes the numbers and returns the fee, the mark after that fee, and whether the mark moved.</p>
-    <p>It stores nothing. The rates and the recipient are immutables, which sit in its code, so the security council's attestation of the code hash covers them. Changing the fees means deploying another model, attesting it, and swapping through the timelock. It does not pay anyone: a <a href="NavDesk.html">NavDesk</a> or a <a href="Gated4626Vault.html">Gated4626Vault</a> calls it, keeps the mark and the clocks, and moves the money.</p>
+    <p>A fund charges two kinds of fee: a management fee for the time that has passed, and a performance fee on gains above a high-water mark, which starts at the vault's price and moves up when a performance fee is charged, except inside a soft hurdle's catch-up, where it waits until the catch-up is complete. This contract is the arithmetic. One function, <code>quote</code>, takes the numbers and returns the fee, the mark after that fee, whether the mark moved, and the performance fee paid since it last moved.</p>
+    <p>It stores nothing. The rates and the recipient are immutables, which sit in its code, so the security council's attestation of the code hash covers them. Changing the fees means deploying another model, attesting it, and swapping through the timelock. It does not pay anyone: a <a href="NavDesk.html">NavDesk</a> or a <a href="Gated4626Vault.html">Gated4626Vault</a> calls it, keeps the mark, the clocks and what was paid since the mark moved, and moves the money.</p>
   </div>
 </section>
 
 <section id="how">
   <div class="prose wrap-any">
     <h2>The formula</h2>
-    <p><code>quote(_gross, _supply, _mark, _markAge, _feeAge)</code> returns <code>(_fee, _newMark, _markMoved)</code>. The mark and the price are in assets per 1e18 share units. The ages are in seconds. A year is 365 days. Every step rounds down. The code runs in this order:</p>
+    <p><code>quote(_gross, _supply, _mark, _markAge, _feeAge, _paidSince)</code> returns <code>(_fee, _newMark, _markMoved, _newPaidSince)</code>. The mark, the price and what was paid are in assets per 1e18 share units. The ages are in seconds. A year is 365 days. Every step rounds down. The code runs in this order:</p>
   </div>
   <div class="code-block">
     <div class="code-label">quote, with the leading underscores dropped</div>
-    <pre>if supply == 0, or supply, gross or mark is above type(uint128).max:
-    return (0, mark, false)
+    <pre>if supply == 0, or supply, gross, mark or paidSince is above type(uint128).max:
+    return (0, mark, false, paidSince)
 
 fee     = gross × MANAGEMENT_BPS × min(feeAge, 20 years) / (10,000 × 1 year)
 price   = (gross - fee) × 1e18 / supply
 hurdled = mark + mark × HURDLE_BPS × min(markAge, 20 years) / (10,000 × 1 year)
+before  = price + paidSince      // the price had nothing been paid since the mark moved
 
-if price &lt;= hurdled:
-    return (fee, mark, false)
+if before &lt;= hurdled:
+    return (fee, mark, false, paidSince)
 
-hard hurdle:  charged = (price - hurdled) × PERFORMANCE_BPS / 10,000
-soft hurdle:  charged = min((price - mark) × PERFORMANCE_BPS / 10,000, price - hurdled)
+hard hurdle:  due = (before - hurdled) × PERFORMANCE_BPS / 10,000, and it is caught up
+soft hurdle:  whole = (before - mark) × PERFORMANCE_BPS / 10,000
+              caught up when whole &lt;= before - hurdled
+              due = whole if caught up, else before - hurdled
 
-if charged == 0:
-    return (fee, mark, false)
+if due &lt;= paidSince:
+    return (fee, mark, false, paidSince)
 
-paid    = charged × supply / 1e18
+paid    = (due - paidSince) × supply / 1e18
 fee     = fee + paid
+if not caught up:
+    return (fee, mark, false, paidSince + paid × 1e18 / supply)
 newMark = price - paid × 1e18 / supply
-return (fee, newMark, true)</pre>
+return (fee, newMark, true, 0)</pre>
   </div>
   <div class="prose wrap-any">
     <h3>What the two callers pass</h3>
@@ -82,6 +87,7 @@ return (fee, newMark, true)</pre>
         <tr><td><code>_mark</code></td><td>Its <code>mark</code></td><td>Its mark</td></tr>
         <tr><td><code>_markAge</code></td><td>Seconds since <code>markMovedAt</code></td><td>Seconds since its <code>markMovedAt</code></td></tr>
         <tr><td><code>_feeAge</code></td><td>Seconds since <code>lastFeeAt</code></td><td>Seconds since its <code>lastFeeAt</code></td></tr>
+        <tr><td><code>_paidSince</code></td><td>Its <code>paidSinceMark</code>, frozen in the proposal with the mark</td><td>Its <code>paidSinceMark()</code></td></tr>
         <tr><td>When it asks</td><td>At <code>propose</code>; the result is frozen until the proposal executes or is cancelled</td><td>At each accrual</td></tr>
         <tr><td>How the fee is paid</td><td>In <code>settlePeriod</code>, when the proposal executes</td><td>Added to <code>feesOwed</code>; <code>collectFees()</code> pays it from idle money</td></tr>
       </tbody>
@@ -103,7 +109,7 @@ return (fee, newMark, true)</pre>
         <tr><td>900</td><td>0.90</td><td>0</td><td>1.00, stays</td><td>0</td><td>1.00, stays</td><td>Below the mark</td></tr>
         <tr><td>1,000</td><td>1.00</td><td>0</td><td>1.00, stays</td><td>0</td><td>1.00, stays</td><td>At the mark, below the hurdle</td></tr>
         <tr><td>1,100</td><td>1.10</td><td>0</td><td>1.00, stays</td><td>0</td><td>1.00, stays</td><td>Exactly at the hurdle: <code>test_AtTheHurdleThereIsNone</code></td></tr>
-        <tr><td>1,110</td><td>1.11</td><td>2</td><td>1.108</td><td>10</td><td>1.10</td><td><code>test_JustAboveAHardOrSoftHurdle_TheyDiffer</code>, <code>test_TheMarkNeverLandsBelowTheHurdle</code></td></tr>
+        <tr><td>1,110</td><td>1.11</td><td>2</td><td>1.108</td><td>10</td><td>1.00, stays; 0.01 carried</td><td><code>test_JustAboveAHardOrSoftHurdle_TheyDiffer</code>, <code>test_TheMarkNeverLandsBelowTheHurdle</code>, <code>test_InsideTheBandTheMarkStaysAndWhatIsPaidIsCarried</code></td></tr>
         <tr><td>1,125</td><td>1.125</td><td>5</td><td>1.12</td><td>25</td><td>1.10</td><td>The soft catch-up ends: its fee is 20% of the whole gain</td></tr>
         <tr><td>1,210</td><td>1.21</td><td>22</td><td>1.188</td><td>42</td><td>1.168</td><td>Hard: <code>test_AHardHurdleChargesOnlyWhatIsAboveIt</code></td></tr>
         <tr><td>1,500</td><td>1.50</td><td>80</td><td>1.42</td><td>100</td><td>1.40</td><td>Soft: <code>test_ASoftHurdleCatchesUpToTheRateOnTheWholeGain</code></td></tr>
@@ -135,9 +141,10 @@ return (fee, newMark, true)</pre>
     <p>A hurdle is a return the investors keep before any performance fee. Here it is <code>hurdled</code> in the formula: the mark plus simple yearly growth since the mark last moved. Below it nobody pays a performance fee and the mark stays. <code>SOFT_HURDLE</code> decides what happens above it.</p>
     <ul class="plain">
       <li><b>Hard hurdle.</b> The performance rate applies to what is above the hurdle and to nothing below it.</li>
-      <li><b>Soft hurdle, with a full catch-up.</b> Above the hurdle the manager first takes everything until it holds the performance rate of the whole gain since the mark, then shares at that rate. In the table above and the figure below, investors stay at 1.10 while the price goes from 1.10 to 1.125.</li>
+      <li><b>Soft hurdle, with a full catch-up.</b> Above the hurdle the manager first takes everything until it holds the performance rate of the whole gain since the mark, then shares at that rate. In the table above and the figure below, investors stay at 1.10 while the price goes from 1.10 to 1.125. Until the catch-up is complete the mark and its clock stay where they were, and what each count charges is carried in <code>paidSince</code>, so the next count charges only the rest. On 1,000 shares, a count at a gross of 1,100.1 charges 0.1, and a second count at the same hurdle, at 1,125 less that fee, which has left the fund, charges 24.9: the 25 one count at 1,125 charges (<code>test_ACountInsideTheBandDoesNotCostTheCatchUp</code>, and <code>testFuzz_SplitInTwoItChargesWhatOneCountDoes</code> for any first count inside the band). A price that falls back keeps what was paid (<code>test_AFallBackBelowTheHurdleKeepsWhatWasPaid</code>), and when the hurdle's growth leaves nothing more due, nothing more is charged (<code>test_WhenTheHurdleOutgrowsWhatWasPaidNothingIsCharged</code>).</li>
     </ul>
-    <p>On either kind, the mark moves to the price after what is actually paid, which is not below <code>hurdled</code> (<code>testFuzz_OnceAFeeIsChargedTheMarkIsNotBelowTheHurdle</code>), and net value does not fall as gross rises, apart from rounding (<code>testFuzz_NetValueNeverFallsAsGrossRises</code> allows 1,000 of the smallest unit for it).</p>
+    <p>A hard hurdle takes <code>paidSince</code> off what is due in the same way. It is zero unless a soft model was swapped for a hard one inside its catch-up, and then the hard one does not charge again for what the soft one took (<code>test_AHardHurdleCarriesNothing</code>).</p>
+    <p>On either kind, once the catch-up is complete, the mark moves to the price after what is actually paid, which is not below <code>hurdled</code> (<code>testFuzz_OnceAFeeIsChargedTheMarkIsNotBelowTheHurdle</code>), and <code>paidSince</code> returns to zero (<code>test_ACountInsideTheBandDoesNotCostTheCatchUp</code>, <code>test_AHardHurdleCarriesNothing</code>), and net value does not fall as gross rises, apart from rounding (<code>testFuzz_NetValueNeverFallsAsGrossRises</code> allows 1,000 of the smallest unit for it).</p>
   </div>
   <figure>
     <div class="fig-scroll">
@@ -190,7 +197,7 @@ return (fee, newMark, true)</pre>
 <section id="slicing">
   <div class="prose wrap-any">
     <h2>Why slicing a gain does not clear a hurdle</h2>
-    <p>The hurdle's clock, <code>_markAge</code>, runs from when the mark last moved, and the mark moves only when <code>charged</code> is above zero. A quote that finds the price at or below the hurdle changes nothing, so the next quote is measured from the same mark over a longer age. Asking more often does not restart the clock.</p>
+    <p>The hurdle's clock, <code>_markAge</code>, runs from when the mark last moved, and the mark moves only when a performance fee is due and, on a soft hurdle, its catch-up is complete. A quote that finds the price at or below the hurdle changes nothing, so the next quote is measured from the same mark over a longer age. Asking more often does not restart the clock.</p>
     <p>The example is a 10% yearly hurdle and a 20% performance rate. The price sits at 1.00 for eleven months and reaches 1.09 in the twelfth.</p>
   </div>
   <div class="table-wrap">
@@ -228,8 +235,8 @@ return (fee, newMark, true)</pre>
     <p>After that, <code>quote</code> does not revert (<code>testFuzz_ItNeverRevertsAndAFeeNeverExceedsTheGross</code>, fuzzed over the full range of every input at the ceiling rates). A revert here would stop a price from being proposed on a desk, or stop a 4626 vault counting its value. The reasons it holds:</p>
     <ul class="plain">
       <li><b>Ages are capped at 20 years.</b> At the 5% ceiling that is exactly the whole gross value, so the management fee cannot exceed the gross and <code>gross - fee</code> cannot go below zero. Time beyond the cap is not charged. The hurdle's age has the same cap.</li>
-      <li><b>A figure too large to be real gets no fee.</b> A <code>_gross</code>, <code>_supply</code> or <code>_mark</code> above <code>type(uint128).max</code> returns no fee and an unchanged mark, as does a <code>_supply</code> of zero (<code>test_AFigureTooLargeToBeRealGetsNoFee</code>, <code>test_AtTheLargestRealFiguresItDoesNotRevert</code>).</li>
-      <li><b>It compares before it subtracts.</b> <code>price - hurdled</code> and <code>price - mark</code> run only once the price is above <code>hurdled</code>, which is at least the mark, and <code>charged</code> is at most <code>price - hurdled</code>.</li>
+      <li><b>A figure too large to be real gets no fee.</b> A <code>_gross</code>, <code>_supply</code>, <code>_mark</code> or <code>_paidSince</code> above <code>type(uint128).max</code> returns no fee and an unchanged mark, as does a <code>_supply</code> of zero (<code>test_AFigureTooLargeToBeRealGetsNoFee</code>, <code>test_AtTheLargestRealFiguresItDoesNotRevert</code>).</li>
+      <li><b>It compares before it subtracts.</b> <code>before - hurdled</code> and <code>before - mark</code> run only once <code>before</code> is above <code>hurdled</code>, which is at least the mark, <code>due - paidSince</code> only once <code>due</code> is above <code>paidSince</code>, and what is charged is at most <code>price - hurdled</code>, so the new mark is not below the hurdle.</li>
       <li><b>The fee does not exceed the gross.</b> The performance fee is at most what the price after the management fee is worth across all shares. The products go through OpenZeppelin's <code>Math.mulDiv</code>, which keeps the full precision of the intermediate value.</li>
     </ul>
   </div>
@@ -241,7 +248,7 @@ return (fee, newMark, true)</pre>
     <table>
       <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
       <tbody>
-        <tr><td><span class="wrap-any"><code>quote(_gross, _supply, _mark, _markAge, _feeAge)</code></span></td><td>Anyone (read-only)</td><td>Returns <code>_fee</code> in assets, <code>_newMark</code>, and <code>_markMoved</code>, which tells the caller to restart the mark's clock.</td></tr>
+        <tr><td><span class="wrap-any"><code>quote(_gross, _supply, _mark, _markAge, _feeAge, _paidSince)</code></span></td><td>Anyone (read-only)</td><td>Returns <code>_fee</code> in assets, <code>_newMark</code>, <code>_markMoved</code>, which tells the caller to restart the mark's clock, and <code>_newPaidSince</code>, which the caller keeps for the next quote.</td></tr>
         <tr><td><code>RECIPIENT()</code></td><td>Anyone (read-only)</td><td>Who is paid. The model pays nobody itself: the caller reads this and sends the money.</td></tr>
         <tr><td><code>MANAGEMENT_BPS()</code>, <code>PERFORMANCE_BPS()</code>, <code>HURDLE_BPS()</code>, <code>SOFT_HURDLE()</code></td><td>Anyone (read-only)</td><td>The terms, fixed at construction.</td></tr>
         <tr><td><span class="wrap-any"><code>constructor(_recipient, _managementBps, _performanceBps, _hurdleBps, _softHurdle)</code></span></td><td>Whoever deploys it</td><td>Sets the terms. Reverts with <code>FeeModel_RateTooHigh</code> or <code>FeeModel_ZeroRecipient</code>. Nothing uses a model until it is attested as <code>FEE_MODEL</code> and plugged in.</td></tr>
@@ -255,7 +262,7 @@ return (fee, newMark, true)</pre>
     <h2>Why it is built this way</h2>
     <ul class="plain">
       <li><b>No storage.</b> The rates and the recipient are in the code, so one attested code hash covers one set of terms. Terms cannot change behind the attestation, and a change of terms goes through a deployment, an attestation and a timelock swap.</li>
-      <li><b>The caller keeps the state.</b> Replacing a model does not lose the mark or the clocks, because the model never held them (<code>test_ASwapKeepsTheMarkAndTheClocks</code> in <code>NavDesk.t.sol</code>).</li>
+      <li><b>The caller keeps the state.</b> Replacing a model does not lose the mark, the clocks or what was paid since the mark moved, because the model never held them (<code>test_ASwapKeepsTheMarkAndTheClocks</code> in <code>NavDesk.t.sol</code> for the mark and the fee clock).</li>
       <li><b>The performance fee is measured after the management fee.</b> A gain that only covers the management fee does not count as a gain (<code>test_ThePriceIsMeasuredAfterTheManagementFee</code>).</li>
       <li><b>It does not revert.</b> A fee calculation should not be able to stop a fund from dealing. A figure too large to be real charges nothing, and an age above 20 years is charged as 20 years.</li>
     </ul>
@@ -267,11 +274,11 @@ return (fee, newMark, true)</pre>
   <div class="prose wrap-any">
     <h2>What it does not do</h2>
     <ul class="plain">
-      <li><b>It trusts its inputs.</b> The gross value, the share count, the mark and the ages are what the caller says. On a desk the gross value rests on a report, so a wrong report gives a wrong fee.</li>
-      <li><b>It has one mark for the whole vault.</b> There is no high-water mark per investor and no equalisation. Investors who came in at different prices pay the same fee per share.</li>
+      <li><b>It trusts its inputs.</b> The gross value, the share count, the mark, the ages and what was paid since the mark moved are what the caller says. On a desk the gross value rests on a report, so a wrong report gives a wrong fee.</li>
+      <li><b>It has one mark for the whole vault.</b> There is no high-water mark per investor and no equalisation. Investors who came in at different prices pay the same fee per share, and someone who comes in during a soft hurdle's catch-up pays into it on their own gains.</li>
       <li><b>It does not compound.</b> The management fee and the hurdle are simple, in proportion to the time.</li>
       <li><b>It does not raise an alarm.</b> A figure above <code>type(uint128).max</code> or an age above 20 years gets a smaller fee or none, with no error.</li>
-      <li><b>It does not move the mark without a charge.</b> With a performance rate of zero, or a <code>charged</code> that rounds to zero, the mark and its clock stay where they are (<code>test_WithARateOfZeroTheMarkDoesNotMove</code>). A <code>charged</code> above zero can still round to no fee in assets, because the fee adds <code>charged × supply / 1e18</code>. Then no performance fee is owed, the price has not fallen, and the mark moves to the whole price and its clock restarts (<code>test_WhenTheChargeRoundsToNoFeeTheMarkIsThePrice</code>). On a dust position the next investor buys at or below that price, so a mark left below it would be charged on their principal. A gain sliced into calls too small to pay a whole unit therefore pays nothing. That costs the fee recipient a rounding error per call: under 3 raw units while the supply is under 1e18 share units, and about one price unit, supply / 1e18 raw units, above that.</li>
+      <li><b>It does not move the mark without a charge.</b> With a performance rate of zero, or nothing due beyond what was paid, the mark and its clock stay where they are (<code>test_WithARateOfZeroTheMarkDoesNotMove</code>). Inside a soft hurdle's catch-up, a charge that rounds to no fee in assets changes nothing either (<code>test_AChargeInsideTheBandThatRoundsToNothingChangesNothing</code>). Past the catch-up, or on a hard hurdle, a charge above zero can still round to no fee in assets, because the fee adds <code>(due - paidSince) × supply / 1e18</code>. Then no performance fee is owed, the price has not fallen, and the mark moves to the whole price and its clock restarts (<code>test_WhenTheChargeRoundsToNoFeeTheMarkIsThePrice</code>). On a dust position the next investor buys at or below that price, so a mark left below it would be charged on their principal. A gain sliced into calls too small to pay a whole unit therefore pays nothing. That costs the fee recipient a rounding error per call: under 3 raw units while the supply is under 1e18 share units, and about one price unit, supply / 1e18 raw units, above that.</li>
       <li><b>It does not know a price is dust.</b> It divides the gross value by the shares it is given, so one asset unit over one share unit reads as a price of <code>1e18</code>, against par's <code>1e12</code>, and with a charge that rounds to no fee the mark would move there. Its callers keep such dust from it: with fewer than <code>1e6</code> share units, less than one unit of the asset at par between them, the desk proposes a value of zero and the 4626 counts zero.</li>
       <li><b>It does not pay.</b> On a 4626, <code>collectFees()</code> pays what idle money allows, so holders can leave ahead of fees owed, and a model replaced with fees still owed pays them to the replacement's recipient unless a timelock batch collects first. On a desk, the fee is paid when the proposal executes. A cancelled proposal pays nothing, and the desk's clocks stay where they were, so the next proposal quotes that time again.</li>
     </ul>
@@ -298,7 +305,7 @@ return (fee, newMark, true)</pre>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>bfb424e</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>ce7c6c4</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>
