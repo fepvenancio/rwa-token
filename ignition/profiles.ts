@@ -9,7 +9,7 @@ export type RuleKey =
   | "fundHoldersRule"
   | "supplyCapRule"
   | "executedOnlyRule";
-export type Template = "GatedToken" | "IntentToken" | "Gated4626Vault" | "Gated7540Vault";
+export type Template = "GatedToken" | "IntentToken" | "Gated721" | "Gated4626Vault" | "Gated7540Vault";
 /** `ICredentialRule.Policy`: the qualification bits a receiver needs, and the attesters this token trusts. */
 export type Policy = { requireAll: number; requireAny: number; forbidAny: number; attesters: bigint };
 
@@ -70,12 +70,19 @@ export const DEFAULT_POLICY: Policy = { requireAll: QUALS.KYC, requireAny: 0, fo
 export const IMPLEMENTATION_KEY: Record<Template, string> = {
   GatedToken: "gatedImpl",
   IntentToken: "intentImpl",
+  Gated721: "nftImpl",
   Gated4626Vault: "fundImpl",
   Gated7540Vault: "asyncFundImpl",
 };
 
 /** `SettlementWindowRule` judges EXECUTED movements only, and only an `IntentToken` has them. */
 const RULES_NEEDING_INTENTS: readonly RuleKey[] = ["windowRule", "executedOnlyRule"];
+
+/**
+ * Rules an ERC-721 cannot use: a minimum position counts units, which mean nothing for unique tokens, and the fund cap and
+ * the supply cap read an ERC-20 `totalSupply` the NFT does not have.
+ */
+const RULES_NOT_FOR_NFTS: readonly RuleKey[] = ["minPositionRule", "fundHoldersRule", "supplyCapRule"];
 
 /** A supply cap would refuse the large mint a vault's `maxDeposit` probes with, so it would read zero for everybody. */
 const RULES_FOR_TOKENS_ONLY: readonly RuleKey[] = ["supplyCapRule"];
@@ -84,6 +91,9 @@ const RULES_FOR_TOKENS_ONLY: readonly RuleKey[] = ["supplyCapRule"];
 export function assertUsable(product: Product) {
   for (const rule of product.rules) {
     if (RULES_NEEDING_INTENTS.includes(rule) && product.template !== "IntentToken") {
+      throw new Error(`${product.key}: ${product.template} cannot use ${rule}`);
+    }
+    if (RULES_NOT_FOR_NFTS.includes(rule) && product.template === "Gated721") {
       throw new Error(`${product.key}: ${product.template} cannot use ${rule}`);
     }
   }
@@ -139,6 +149,12 @@ export const PROFILES = {
     id: "token",
     singleSigners: DEMO_SIGNERS,
     products: [{ key: "token", template: "GatedToken", name: "Gated Token", symbol: "GTK", rules: PLAIN_RULES }],
+  },
+  /** One NFT, alone: a certificate or a note per token, with who may hold it and each holder's lockup and freeze. */
+  nft: {
+    id: "nft",
+    singleSigners: DEMO_SIGNERS,
+    products: [{ key: "nft", template: "Gated721", name: "Gated Note", symbol: "gNOTE", rules: PLAIN_RULES }],
   },
   /** One instant vault, alone. */
   vault4626: {

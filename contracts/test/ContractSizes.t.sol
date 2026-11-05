@@ -34,6 +34,7 @@ import {GuardedAccount} from 'contracts/portfolio/GuardedAccount.sol';
 import {Portfolio} from 'contracts/portfolio/Portfolio.sol';
 import {MockAsset} from 'contracts/test/MockAsset.sol';
 import {MockERC4626Target} from 'contracts/test/MockERC4626Target.sol';
+import {Gated721} from 'contracts/tokens/Gated721.sol';
 import {GatedToken} from 'contracts/tokens/GatedToken.sol';
 import {IntentToken} from 'contracts/tokens/IntentToken.sol';
 import {Gated4626Vault} from 'contracts/vaults/Gated4626Vault.sol';
@@ -57,6 +58,7 @@ contract ContractSizesTest is Test {
     address _registry = address(new PolicyRegistry(address(this), address(this)));
     _assertFits('GatedToken', address(new GatedToken()));
     _assertFits('IntentToken', address(new IntentToken()));
+    _assertFits('Gated721', address(new Gated721()));
     _assertFits('Gated4626Vault', address(new Gated4626Vault()));
     Gated7540Vault _asyncVault = new Gated7540Vault();
     _assertFits('Gated7540Vault', address(_asyncVault));

@@ -81,6 +81,7 @@ const REASON_NAMES = [
   "ZERO_RECEIVER",
   "ABOVE_SUPPLY_CAP",
   "TRANSFER_NOT_EXECUTED",
+  "NOT_TOKEN_OWNER",
 ] as const;
 
 /** `Errors.sol` reason codes, keyed by name; `reasonName` maps a code back for readable assertions. */
@@ -296,6 +297,8 @@ async function stages(connection: NetworkConnection, profile: Profile) {
         return viem.getContractAt("GatedToken", target);
       case "IntentToken":
         return viem.getContractAt("IntentToken", target);
+      case "Gated721":
+        return viem.getContractAt("Gated721", target);
       case "Gated4626Vault":
         return viem.getContractAt("Gated4626Vault", target);
       case "Gated7540Vault":
