@@ -19,7 +19,6 @@
   <a href="movement.html">One movement</a>
   <a href="deployment.html">Deployment and governance</a>
   <a href="money.html">Where the money sits</a>
-  <a href="review.html">Security review</a>
 </nav>
 <main class="page">
 
@@ -40,7 +39,7 @@
   <div class="callout">
     <h3>In one minute</h3>
     <p>An issuer of fund shares usually may sell only to approved investors, and must be able to act on an account: pause the token during an incident, hold back part of a balance, or move tokens out of an account. A plain ERC-20 token lets anyone send to anyone and has none of these powers. Here every token keeps the books and the powers, and hands each question about who may hold, send or receive to one outside contract, the hook. The hook asks a short list of small contracts, the rules, and the first rule that says no stops the movement. Rules can be replaced through governance without touching the token or its address.</p>
-    <p>Around that core sit optional parts: executors that run signed transfers, vaults that deal at once or at an approved price, a portfolio that limits where a vault's money may go, and a contract that pays distributions. An issuer deploys one core and adds products one at a time. Nothing here has had an external audit; the <a href="review.html">security review</a> page says what has been checked and what has not.</p>
+    <p>Around that core sit optional parts: executors that run signed transfers, vaults that deal at once or at an approved price, a portfolio that limits where a vault's money may go, and a contract that pays distributions. An issuer deploys one core and adds products one at a time. Nothing here has had an external audit.</p>
   </div>
 </section>
 
@@ -458,7 +457,6 @@
       <a class="card" href="movement.html"><span class="name">One movement</span><p>Everything that happens when a balance changes: kinds, checks, rules, reason codes and errors.</p></a>
       <a class="card" href="deployment.html"><span class="name">Deployment and governance</span><p>How one core and then each product are put in place, and how policy and code change later.</p></a>
       <a class="card" href="money.html"><span class="name">Where the money sits</span><p>Which contract holds the assets, the shares and the cash at each step.</p></a>
-      <a class="card" href="review.html"><span class="name">Security review</span><p>What has been reviewed, when and by whom, what it found, what has not been reviewed, and the automated checks.</p></a>
     </div>
   </div>
 </section>
@@ -467,9 +465,9 @@
   <div class="prose">
     <h2>Source</h2>
     <ul class="plain">
-      <li>Repository: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/README.md"><code>README.md</code></a> (setup and commands) and <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/SECURITY.md"><code>SECURITY.md</code></a> (audit preparation)</li>
-      <li>Contracts: <a href="https://github.com/fepvenancio/rwa-token/tree/bfb424e/contracts"><code>contracts/</code></a>, interfaces in <a href="https://github.com/fepvenancio/rwa-token/tree/bfb424e/contracts/interfaces"><code>contracts/interfaces/</code></a></li>
-      <li>Deployment: <a href="https://github.com/fepvenancio/rwa-token/tree/bfb424e/ignition/modules"><code>ignition/modules/</code></a> (<code>Core.ts</code>, <code>CoreHandover.ts</code>, <code>Fund.ts</code>, <code>Legos.ts</code>, <code>Product.ts</code>, <code>FundOpen.ts</code> and <code>roles.ts</code>), and the combinations in <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/ignition/profiles.ts"><code>ignition/profiles.ts</code></a></li>
+      <li>Repository: <code>README.md</code> (setup and commands) and <code>SECURITY.md</code> (audit preparation)</li>
+      <li>Contracts: <code>contracts/</code>, interfaces in <code>contracts/interfaces/</code></li>
+      <li>Deployment: <code>ignition/modules/</code> (<code>Core.ts</code>, <code>CoreHandover.ts</code>, <code>Fund.ts</code>, <code>Legos.ts</code>, <code>Product.ts</code>, <code>FundOpen.ts</code> and <code>roles.ts</code>), and the combinations in <code>ignition/profiles.ts</code></li>
     </ul>
   </div>
 </section>

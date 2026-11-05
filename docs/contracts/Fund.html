@@ -19,7 +19,6 @@
   <a href="../movement.html">One movement</a>
   <a href="../deployment.html">Deployment and governance</a>
   <a href="../money.html">Where the money sits</a>
-  <a href="../review.html">Security review</a>
 </nav>
 <main class="page">
 
@@ -338,9 +337,9 @@
   <div class="prose">
     <h2>Source and tests</h2>
     <ul class="plain">
-      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/fund/Fund.sol"><code>contracts/fund/Fund.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/interfaces/IFund.sol"><code>IFund.sol</code></a></li>
-      <li>Deployment: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/ignition/modules/Fund.ts"><code>ignition/modules/Fund.ts</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/ignition/modules/FundOpen.ts"><code>FundOpen.ts</code></a></li>
-      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/fund/Fund.t.sol"><code>Fund.t.sol</code></a> (each function, the shared slot, a fuzz model of the count, the monitor), <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/fund/FundIntegration.t.sol"><code>FundIntegration.t.sol</code></a> (one fund with the three templates as classes: counting, the cap, registration, the vault escrow, rule and hook replacement, the monitor), <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/fund/FundInvariant.t.sol"><code>FundInvariant.t.sol</code></a> (the three invariants above), <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/test/nodejs/fund.test.ts"><code>test/nodejs/fund.test.ts</code></a> (through the real deployment, including the timelock batch that replaces the rule) and <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/test/nodejs/products.test.ts"><code>products.test.ts</code></a> (an issuer with two funds)</li>
+      <li>Contract: <code>contracts/fund/Fund.sol</code>, interface <code>IFund.sol</code></li>
+      <li>Deployment: <code>ignition/modules/Fund.ts</code> and <code>FundOpen.ts</code></li>
+      <li>Tests: <code>Fund.t.sol</code> (each function, the shared slot, a fuzz model of the count, the monitor), <code>FundIntegration.t.sol</code> (one fund with the three templates as classes: counting, the cap, registration, the vault escrow, rule and hook replacement, the monitor), <code>FundInvariant.t.sol</code> (the three invariants above), <code>test/nodejs/fund.test.ts</code> (through the real deployment, including the timelock batch that replaces the rule) and <code>products.test.ts</code> (an issuer with two funds)</li>
     </ul>
   </div>
 </section>

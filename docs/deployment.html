@@ -19,7 +19,6 @@
   <a href="movement.html">One movement</a>
   <a href="deployment.html" aria-current="page">Deployment and governance</a>
   <a href="money.html">Where the money sits</a>
-  <a href="review.html">Security review</a>
 </nav>
 <main class="page">
 
@@ -207,7 +206,7 @@
       <li>after each <code>Fund</code>: its <code>FundHoldersRule</code> as <code>RULE</code>. A class cannot list the rule before that, because the hook refuses an unattested rule;</li>
       <li>after each <code>Legos</code>: the portfolio as <code>PORTFOLIO</code>, each guarded account and adapter as <code>ADAPTER</code>, each validator as <code>VALIDATOR</code> and the fee model as <code>FEE_MODEL</code>. The desk is not attested: it holds no money and acts by the role <code>Product</code> grants it.</li>
     </ul>
-    <p>The <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/README.md#deployment-runbook">README runbook</a> describes the procedure: rebuild from the release tag with <code>npm run verify:reproducible</code>, compare with the published build and with the code on chain, then attest.</p>
+    <p>The README runbook describes the procedure: rebuild from the release tag with <code>npm run verify:reproducible</code>, compare with the published build and with the code on chain, then attest.</p>
     <p>A codehash covers a contract's code including its immutable values, such as an address fixed at construction, but not the code that lives at that address. So the council also reads what these contracts point at:</p>
     <ul class="plain">
       <li>the hook's <code>REGISTRY()</code>, which must be the deployment's registry;</li>
@@ -681,10 +680,10 @@
   <div class="prose">
     <h2>Source and tests</h2>
     <ul class="plain">
-      <li>Modules: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/ignition/modules/Core.ts"><code>Core.ts</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/ignition/modules/CoreHandover.ts"><code>CoreHandover.ts</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/ignition/modules/Fund.ts"><code>Fund.ts</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/ignition/modules/Legos.ts"><code>Legos.ts</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/ignition/modules/Product.ts"><code>Product.ts</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/ignition/modules/FundOpen.ts"><code>FundOpen.ts</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/ignition/modules/roles.ts"><code>roles.ts</code></a></li>
-      <li>Profiles: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/ignition/profiles.ts"><code>ignition/profiles.ts</code></a></li>
-      <li>Council step and post-deploy check: <code>stages</code> and <code>assertHandedOver</code> in <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/test/nodejs/fixtures.ts"><code>test/nodejs/fixtures.ts</code></a>; procedure in the <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/README.md#deployment-runbook">README runbook</a>; the CI job in <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/.github/workflows/ci.yml"><code>.github/workflows/ci.yml</code></a></li>
-      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/test/nodejs/deployment.test.ts"><code>deployment.test.ts</code></a> (rule order, a twin hook, an unattested rule or implementation stopping a product), <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/test/nodejs/products.test.ts"><code>products.test.ts</code></a> (one core and many products, funds, a later class), <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/test/nodejs/legos.test.ts"><code>legos.test.ts</code></a> (the legos by profile, what the hand-over check refuses, products that do not build), <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/test/nodejs/governance.test.ts"><code>governance.test.ts</code></a> (upgrades, hook and rule changes, pause and recovery)</li>
+      <li>Modules: <code>Core.ts</code>, <code>CoreHandover.ts</code>, <code>Fund.ts</code>, <code>Legos.ts</code>, <code>Product.ts</code>, <code>FundOpen.ts</code>, <code>roles.ts</code></li>
+      <li>Profiles: <code>ignition/profiles.ts</code></li>
+      <li>Council step and post-deploy check: <code>stages</code> and <code>assertHandedOver</code> in <code>test/nodejs/fixtures.ts</code>; procedure in the README runbook; the CI job in <code>.github/workflows/ci.yml</code></li>
+      <li>Tests: <code>deployment.test.ts</code> (rule order, a twin hook, an unattested rule or implementation stopping a product), <code>products.test.ts</code> (one core and many products, funds, a later class), <code>legos.test.ts</code> (the legos by profile, what the hand-over check refuses, products that do not build), <code>governance.test.ts</code> (upgrades, hook and rule changes, pause and recovery)</li>
     </ul>
   </div>
 </section>

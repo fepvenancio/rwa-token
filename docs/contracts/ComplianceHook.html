@@ -19,7 +19,6 @@
   <a href="../movement.html">One movement</a>
   <a href="../deployment.html">Deployment and governance</a>
   <a href="../money.html">Where the money sits</a>
-  <a href="../review.html">Security review</a>
 </nav>
 <main class="page">
 
@@ -267,8 +266,8 @@
   <div class="prose">
     <h2>Source and tests</h2>
     <ul class="plain">
-      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/hooks/ComplianceHook.sol"><code>contracts/hooks/ComplianceHook.sol</code></a>, interfaces <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/interfaces/IComplianceHook.sol"><code>IComplianceHook.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/interfaces/IPolicyHook.sol"><code>IPolicyHook.sol</code></a>, reason codes in <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/interfaces/Errors.sol"><code>Errors.sol</code></a></li>
-      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/hooks/ComplianceHook.t.sol"><code>ComplianceHook.t.sol</code></a> (unit tests with mocked rules and registry: who may set a list, the cap, attestation, duplicates, first refusal, the after mask, isolation between tokens), <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/hooks/rules/RuleSetIntegration.t.sol"><code>RuleSetIntegration.t.sol</code></a> (MinPositionRule, HolderRestrictionRule and SettlementWindowRule behind a test identity rule, on a real hook and a real IntentToken, with pre-flight parity), <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/tokens/IntentToken.t.sol"><code>IntentToken.t.sol</code></a> (a rule that tries to re-enter the token makes the movement revert), <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/test/nodejs/governance.test.ts"><code>test/nodejs/governance.test.ts</code></a> (list and hook changes through the timelock) and <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/test/nodejs/deployment.test.ts"><code>test/nodejs/deployment.test.ts</code></a> (the deployed lists, and a second hook on the same registry refused by the hand-over check)</li>
+      <li>Contract: <code>contracts/hooks/ComplianceHook.sol</code>, interfaces <code>IComplianceHook.sol</code> and <code>IPolicyHook.sol</code>, reason codes in <code>Errors.sol</code></li>
+      <li>Tests: <code>ComplianceHook.t.sol</code> (unit tests with mocked rules and registry: who may set a list, the cap, attestation, duplicates, first refusal, the after mask, isolation between tokens), <code>RuleSetIntegration.t.sol</code> (MinPositionRule, HolderRestrictionRule and SettlementWindowRule behind a test identity rule, on a real hook and a real IntentToken, with pre-flight parity), <code>IntentToken.t.sol</code> (a rule that tries to re-enter the token makes the movement revert), <code>test/nodejs/governance.test.ts</code> (list and hook changes through the timelock) and <code>test/nodejs/deployment.test.ts</code> (the deployed lists, and a second hook on the same registry refused by the hand-over check)</li>
     </ul>
   </div>
 </section>

@@ -19,7 +19,6 @@
   <a href="../movement.html">One movement</a>
   <a href="../deployment.html">Deployment and governance</a>
   <a href="../money.html">Where the money sits</a>
-  <a href="../review.html">Security review</a>
 </nav>
 <main class="page">
 
@@ -390,8 +389,8 @@
   <div class="prose">
     <h2>Source and tests</h2>
     <ul class="plain">
-      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/intents/DvPExecutor.sol"><code>contracts/intents/DvPExecutor.sol</code></a>, interfaces <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/interfaces/IDvPExecutor.sol"><code>IDvPExecutor.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/interfaces/IERC3009.sol"><code>IERC3009.sol</code></a></li>
-      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/intents/DvPExecutor.t.sol"><code>DvPExecutor.t.sol</code></a> (unit tests with mocked tokens; integration tests for both forms, the counterfeit token, fees, deadlines, reentry, and the fund cap across two classes) and <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/test/nodejs/dvp.test.ts"><code>test/nodejs/dvp.test.ts</code></a> (trades through the deployed stack). The signing helpers <code>signGatedTrade</code>, <code>sign3009Trade</code> and <code>dvpNonce</code> are in <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/test/nodejs/fixtures.ts"><code>test/nodejs/fixtures.ts</code></a>.</li>
+      <li>Contract: <code>contracts/intents/DvPExecutor.sol</code>, interfaces <code>IDvPExecutor.sol</code> and <code>IERC3009.sol</code></li>
+      <li>Tests: <code>DvPExecutor.t.sol</code> (unit tests with mocked tokens; integration tests for both forms, the counterfeit token, fees, deadlines, reentry, and the fund cap across two classes) and <code>test/nodejs/dvp.test.ts</code> (trades through the deployed stack). The signing helpers <code>signGatedTrade</code>, <code>sign3009Trade</code> and <code>dvpNonce</code> are in <code>test/nodejs/fixtures.ts</code>.</li>
     </ul>
   </div>
 </section>

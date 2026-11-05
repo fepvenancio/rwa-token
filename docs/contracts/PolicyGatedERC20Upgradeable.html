@@ -19,7 +19,6 @@
   <a href="../movement.html">One movement</a>
   <a href="../deployment.html">Deployment and governance</a>
   <a href="../money.html">Where the money sits</a>
-  <a href="../review.html">Security review</a>
 </nav>
 <main class="page">
 
@@ -474,10 +473,10 @@
   <div class="prose wrap-any">
     <h2>Source and tests</h2>
     <ul class="plain wrap-any">
-      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/base/PolicyGatedERC20Upgradeable.sol"><code>contracts/base/PolicyGatedERC20Upgradeable.sol</code></a></li>
-      <li>Interfaces: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/interfaces/IPolicyGated.sol"><code>IPolicyGated.sol</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/interfaces/IERC7943Fungible.sol"><code>IERC7943Fungible.sol</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/interfaces/ITemplated.sol"><code>ITemplated.sol</code></a>, <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/interfaces/IPolicyHook.sol"><code>IPolicyHook.sol</code></a> (the context and the kinds), <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/interfaces/Errors.sol"><code>Errors.sol</code></a> (the reason codes)</li>
-      <li>Unit tests: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/base/PolicyGatedERC20Upgradeable.t.sol"><code>PolicyGatedERC20Upgradeable.t.sol</code></a> (the role gates, frozen maths, pre-flight answers, recovery, upgrades, multicall, the context per kind, and the invariants <code>invariant_SumOfBalancesEqualsTotalSupply</code> and <code>invariant_TheUnfrozenBalanceIsExactlyWhatCanBeSent</code>)</li>
-      <li>Integration: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/tokens/GatedToken.t.sol"><code>GatedToken.t.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/tokens/IntentToken.t.sol"><code>IntentToken.t.sol</code></a> (real registry and hook), <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/hooks/rules/RuleSetIntegration.t.sol"><code>RuleSetIntegration.t.sol</code></a> (the shipped rules together), <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/test/nodejs/erc7943.test.ts"><code>test/nodejs/erc7943.test.ts</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/test/nodejs/parity.test.ts"><code>test/nodejs/parity.test.ts</code></a> (the deployed stack), and the Halmos properties <code>check_frozenBalanceInvariants</code> and <code>check_enforcementCanTakeFrozenTokens</code> in <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/test/halmos/IntentTokenHalmos.t.sol"><code>IntentTokenHalmos.t.sol</code></a></li>
+      <li>Contract: <code>contracts/base/PolicyGatedERC20Upgradeable.sol</code></li>
+      <li>Interfaces: <code>IPolicyGated.sol</code>, <code>IERC7943Fungible.sol</code>, <code>ITemplated.sol</code>, <code>IPolicyHook.sol</code> (the context and the kinds), <code>Errors.sol</code> (the reason codes)</li>
+      <li>Unit tests: <code>PolicyGatedERC20Upgradeable.t.sol</code> (the role gates, frozen maths, pre-flight answers, recovery, upgrades, multicall, the context per kind, and the invariants <code>invariant_SumOfBalancesEqualsTotalSupply</code> and <code>invariant_TheUnfrozenBalanceIsExactlyWhatCanBeSent</code>)</li>
+      <li>Integration: <code>GatedToken.t.sol</code> and <code>IntentToken.t.sol</code> (real registry and hook), <code>RuleSetIntegration.t.sol</code> (the shipped rules together), <code>test/nodejs/erc7943.test.ts</code> and <code>test/nodejs/parity.test.ts</code> (the deployed stack), and the Halmos properties <code>check_frozenBalanceInvariants</code> and <code>check_enforcementCanTakeFrozenTokens</code> in <code>IntentTokenHalmos.t.sol</code></li>
     </ul>
   </div>
 </section>

@@ -19,7 +19,6 @@
   <a href="../movement.html">One movement</a>
   <a href="../deployment.html">Deployment and governance</a>
   <a href="../money.html">Where the money sits</a>
-  <a href="../review.html">Security review</a>
 </nav>
 <main class="page">
 
@@ -290,9 +289,9 @@
   <div class="prose">
     <h2>Source and tests</h2>
     <ul class="plain">
-      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/intents/IntentExecutor.sol"><code>contracts/intents/IntentExecutor.sol</code></a>, interfaces <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/interfaces/IIntentExecutor.sol"><code>IIntentExecutor.sol</code></a> and <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/interfaces/IIntentExecutorBatch.sol"><code>IIntentExecutorBatch.sol</code></a></li>
-      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/intents/IntentExecutor.t.sol"><code>IntentExecutor.t.sol</code></a> (unit tests with a mocked token, recovery included, and integration tests on a real <code>IntentToken</code>: the consideration refusal in <code>test_WhenTheIntentNamesTheIntentExecutorAndStatesAPayment_ItIsRefusedAndNothingMoves</code>, batches in <code>test_WhenTheFailingIntentIsDroppedAndResubmitted_TheRestSettles</code>, the pause in <code>test_WhenTheExecutorIsPaused_TheTokenStillSettlesThroughOtherExecutors</code>) and <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/test/nodejs/intents.test.ts"><code>test/nodejs/intents.test.ts</code></a> (wallet signatures, the executor binding from each address, the token's pre-flight beside the executor's refusal, a failed batch decoded)</li>
-      <li>The signing helper <code>signIntent</code> is in <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/test/nodejs/fixtures.ts"><code>test/nodejs/fixtures.ts</code></a>.</li>
+      <li>Contract: <code>contracts/intents/IntentExecutor.sol</code>, interfaces <code>IIntentExecutor.sol</code> and <code>IIntentExecutorBatch.sol</code></li>
+      <li>Tests: <code>IntentExecutor.t.sol</code> (unit tests with a mocked token, recovery included, and integration tests on a real <code>IntentToken</code>: the consideration refusal in <code>test_WhenTheIntentNamesTheIntentExecutorAndStatesAPayment_ItIsRefusedAndNothingMoves</code>, batches in <code>test_WhenTheFailingIntentIsDroppedAndResubmitted_TheRestSettles</code>, the pause in <code>test_WhenTheExecutorIsPaused_TheTokenStillSettlesThroughOtherExecutors</code>) and <code>test/nodejs/intents.test.ts</code> (wallet signatures, the executor binding from each address, the token's pre-flight beside the executor's refusal, a failed batch decoded)</li>
+      <li>The signing helper <code>signIntent</code> is in <code>test/nodejs/fixtures.ts</code>.</li>
     </ul>
   </div>
 </section>

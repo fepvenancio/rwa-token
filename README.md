@@ -1,4 +1,4 @@
-# rwa-token — Gated Token Stack
+# Gated Token Stack
 
 Permissioned ERC-20 templates for institutional real-world assets. Every balance movement goes through one
 mechanical base and an external, replaceable policy hook made of small, attested rules. One template adds
@@ -6,9 +6,8 @@ executor-settled transfers: the holder signs an EIP-712 intent, and an executor 
 share trade against cash in one transaction. A `Fund` groups several of these tokens as share classes and counts its
 investors across them.
 
-**Documentation:** <https://fepvenancio.github.io/rwa-token/> (the HTML pages in [`docs/`](docs/index.html)): an overview,
-one page per contract, and pages on roles, a single movement, deployment and governance, where the money sits, and the
-security review.
+**Documentation:** the HTML pages in [`docs/`](docs/index.html): an overview, one page per contract, and pages on roles,
+a single movement, deployment and governance, and where the money sits.
 
 > **Proprietary.** Copyright (c) 2026 Filipe Venancio. All rights reserved. See [LICENSE](LICENSE). No use, copying,
 > modification or deployment without prior written permission.

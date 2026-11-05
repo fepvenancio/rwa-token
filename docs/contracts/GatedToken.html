@@ -19,7 +19,6 @@
   <a href="../movement.html">One movement</a>
   <a href="../deployment.html">Deployment and governance</a>
   <a href="../money.html">Where the money sits</a>
-  <a href="../review.html">Security review</a>
 </nav>
 <main class="page">
 
@@ -163,9 +162,9 @@
   <div class="prose wrap-any">
     <h2>Source and tests</h2>
     <ul class="plain wrap-any">
-      <li>Contract: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/tokens/GatedToken.sol"><code>contracts/tokens/GatedToken.sol</code></a>, interface <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/interfaces/ITemplated.sol"><code>ITemplated.sol</code></a></li>
-      <li>Deployment: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/ignition/profiles.ts"><code>ignition/profiles.ts</code></a> (<code>assertUsable</code>, the <code>token</code> profile), <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/ignition/modules/Product.ts"><code>ignition/modules/Product.ts</code></a></li>
-      <li>Tests: <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/contracts/tokens/GatedToken.t.sol"><code>GatedToken.t.sol</code></a> (the token with a real registry, hook and <code>ProxyDeployer</code> and a mock identity rule: setup, decimals, no intent entry point, enforcement, upgrades, no ether), <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/test/nodejs/products.test.ts"><code>test/nodejs/products.test.ts</code></a> (the deployed <code>token</code> profile, a later product, a cash token behind a vault, fund classes), <a href="https://github.com/fepvenancio/rwa-token/blob/bfb424e/test/nodejs/legos.test.ts"><code>test/nodejs/legos.test.ts</code></a> (a supply cap at launch, unusable rule lists)</li>
+      <li>Contract: <code>contracts/tokens/GatedToken.sol</code>, interface <code>ITemplated.sol</code></li>
+      <li>Deployment: <code>ignition/profiles.ts</code> (<code>assertUsable</code>, the <code>token</code> profile), <code>ignition/modules/Product.ts</code></li>
+      <li>Tests: <code>GatedToken.t.sol</code> (the token with a real registry, hook and <code>ProxyDeployer</code> and a mock identity rule: setup, decimals, no intent entry point, enforcement, upgrades, no ether), <code>test/nodejs/products.test.ts</code> (the deployed <code>token</code> profile, a later product, a cash token behind a vault, fund classes), <code>test/nodejs/legos.test.ts</code> (a supply cap at launch, unusable rule lists)</li>
     </ul>
   </div>
 </section>
