@@ -318,6 +318,23 @@ contract SignedEntry_Permit is SignedEntryTest {
     _router.enterWithPermit(_e, _sig, _v, _r, _s);
   }
 
+  function test_AnEntryThatRanCannotBeCancelled() external {
+    ISignedEntry.Entry memory _e = _entry(address(_vault), false);
+    _enter(_e);
+    vm.expectRevert(ISignedEntry.SignedEntry_NonceUsed.selector);
+    vm.prank(_investor);
+    _router.cancelEntry(_e.nonce);
+  }
+
+  function test_CancellingTwiceReverts() external {
+    bytes32 _nonce = keccak256('twice');
+    vm.prank(_investor);
+    _router.cancelEntry(_nonce);
+    vm.expectRevert(ISignedEntry.SignedEntry_NonceUsed.selector);
+    vm.prank(_investor);
+    _router.cancelEntry(_nonce);
+  }
+
   function testFuzz_SomeoneElseCancellingDoesNothing(
     address _caller
   ) external {

@@ -900,6 +900,17 @@ contract NavDesk_Adopt is NavDeskTest {
     _next.adopt(address(_desk));
   }
 
+  /// @dev Executed after the adoption, a proposal priced before it would write its own mark and clocks over the adopted ones
+  function test_ThisDeskWithAProposalPendingCannotAdopt() external {
+    _request(_alice, 10);
+    _close();
+    vm.prank(_reporter);
+    _next.propose(0, _REPORT, block.timestamp, 0);
+    assertEq(_desk.proposal().period, 0, 'the old desk has nothing on the table');
+    vm.expectRevert(INavDesk.NavDesk_CannotAdopt.selector);
+    _next.adopt(address(_desk));
+  }
+
   function test_TheSuccessorDealsOnFromThere() external {
     _request(_alice, 10);
     _deal(0);
@@ -1210,6 +1221,59 @@ contract NavDesk_Fees is NavDeskTest {
     assertEq(_next.mark(), _mark);
     assertEq(_next.markMovedAt(), _at);
     assertEq(_next.lastFeeAt(), _at);
+  }
+
+  /// @dev The other order in the same batch: adopting first, then plugging, still charges the time since the old desk's
+  ///      last fee
+  function test_AdoptingThenPluggingTakesTheOldDesksClocks() external {
+    _plug();
+    uint256 _mark = _desk.mark();
+    uint256 _at = block.timestamp;
+    vm.warp(block.timestamp + 30 days);
+    NavDesk _next = new NavDesk(address(_vault), _custodian, _LENGTH, _COOLDOWN, _MAX_AGE);
+    _next.adopt(address(_desk));
+    _next.setFeeModel(address(_model));
+    assertEq(_next.mark(), _mark);
+    assertEq(_next.markMovedAt(), _at);
+    assertEq(_next.lastFeeAt(), _at);
+  }
+
+  /// @dev A plug in a later operation starts the clock: the new desk dealt with no model in between, and no fee was due
+  function test_APlugAfterTheAdoptingBatchStartsTheFeeClock() external {
+    _plug();
+    vm.warp(block.timestamp + 30 days);
+    NavDesk _next = new NavDesk(address(_vault), _custodian, _LENGTH, _COOLDOWN, _MAX_AGE);
+    _next.adopt(address(_desk));
+    vm.warp(block.timestamp + 1 days);
+    _next.setFeeModel(address(_model));
+    assertEq(_next.lastFeeAt(), block.timestamp);
+  }
+
+  /// @dev An adopted clock is kept by the first plug only: a model switched off and on again charges no time without one
+  function test_AfterAdoptingAModelSwitchedOffAndOnRestartsTheFeeClock() external {
+    _plug();
+    vm.warp(block.timestamp + 30 days);
+    NavDesk _next = new NavDesk(address(_vault), _custodian, _LENGTH, _COOLDOWN, _MAX_AGE);
+    _next.adopt(address(_desk));
+    _next.setFeeModel(address(_model));
+    _next.setFeeModel(address(0));
+    vm.warp(block.timestamp + 30 days);
+    _next.setFeeModel(address(_model));
+    assertEq(_next.lastFeeAt(), block.timestamp);
+  }
+
+  /// @dev Adopting from a desk with its model off, then plugging: the plug starts the fee clock, as the old one had stopped
+  function test_AdoptingFromADeskWithItsModelOffThenPluggingStartsTheFeeClock() external {
+    _plug();
+    uint256 _mark = _desk.mark();
+    vm.warp(block.timestamp + 30 days);
+    _desk.setFeeModel(address(0));
+    vm.warp(block.timestamp + 30 days);
+    NavDesk _next = new NavDesk(address(_vault), _custodian, _LENGTH, _COOLDOWN, _MAX_AGE);
+    _next.adopt(address(_desk));
+    _next.setFeeModel(address(_model));
+    assertEq(_next.mark(), _mark);
+    assertEq(_next.lastFeeAt(), block.timestamp);
   }
 
   /// @dev A desk with its model taken off keeps a mark, so no gain pays twice, and no time without a model is charged

@@ -167,7 +167,7 @@ interface IPortfolio {
   error Portfolio_NotEmpty(address _adapter);
 
   /**
-   * @notice Thrown when writing off a priced adapter that can still be priced
+   * @notice Thrown when writing off a priced adapter that can still be priced and pay out what it is priced at
    * @param _adapter The adapter
    */
   error Portfolio_StillPriced(address _adapter);
@@ -248,9 +248,9 @@ interface IPortfolio {
 
   /**
    * @notice Takes an adapter off the list with whatever it holds, and clears its allocation
-   * @dev The vault's DEFAULT_ADMIN_ROLE. A priced adapter qualifies only while it cannot be priced, and the value it stops
-   *      contributing is a loss to the vault. A reported adapter qualifies at any time, and its value was always the report.
-   *      Sets `writtenOff` for good
+   * @dev The vault's DEFAULT_ADMIN_ROLE. A priced adapter qualifies only while it cannot be priced or cannot pay out what
+   *      it is priced at (`liquid()` below `value()`), and the value it stops contributing is a loss to the vault. A
+   *      reported adapter qualifies at any time, and its value was always the report. Sets `writtenOff` for good
    * @param _adapter The adapter
    */
   function writeOffAdapter(

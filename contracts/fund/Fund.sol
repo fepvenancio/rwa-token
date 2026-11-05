@@ -349,9 +349,12 @@ contract Fund is Ownable, ERC165, IFund {
     address _token
   ) internal view returns (bool _listed) {
     address _installed = _investors.rule;
-    // A failing token or hook is a broken class, not an error: the empty catch blocks answer false.
+    // A failing token or hook is a broken class, not an error: the empty catch blocks answer false. A call to an address
+    // with no code would fail in decoding its answer, which no catch block reaches, so that is asked first.
+    if (_token.code.length == 0) return false;
     // aderyn-ignore-next-line(empty-block)
     try IPolicyGated(_token).policyHook() returns (address _hook) {
+      if (_hook.code.length == 0) return false;
       // aderyn-ignore-next-line(empty-block)
       try IComplianceHook(_hook).rules(_token) returns (IComplianceRule[] memory _list) {
         uint256 _length = _list.length;

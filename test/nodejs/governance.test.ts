@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { network } from "hardhat";
-import { encodeFunctionData, getAddress, isAddressEqual, keccak256, toHex, zeroHash, type Abi, type Address, type Hex } from "viem";
+import { encodeFunctionData, getAddress, isAddressEqual, keccak256, toHex, zeroAddress, zeroHash, type Abi, type Address, type Hex } from "viem";
 
 import { ROLES, RULE_ORDER } from "../../ignition/modules/roles.js";
 import { assertHandedOver, deployStack, revertOf, type Stack } from "./fixtures.js";
@@ -358,6 +358,33 @@ describe("governance through the timelock", async function () {
       const failure = await revertOf(op.execute(), [...s.recoveryTimelock.abi, ...s.token.abi, ...s.timelock.abi] as Abi);
       assert.equal(failure?.errorName, "AccessControlUnauthorizedAccount", `allowed: ${f.data.slice(0, 10)}`);
     }
+  });
+
+  it("an EXECUTOR_ROLE on the timelock held by the zero address, which opens execution to anyone, fails the post-deploy check", async function () {
+    const s = await networkHelpers.loadFixture(stack);
+    const executorRole = await s.timelock.read.EXECUTOR_ROLE();
+    const op = await schedule(
+      s,
+      s.timelock.address,
+      encodeFunctionData({ abi: s.timelock.abi, functionName: "grantRole", args: [executorRole, zeroAddress] }),
+    );
+    await networkHelpers.time.increase(op.delay);
+    await op.execute();
+    await assert.rejects(assertHandedOver(s), /the zero address holds EXECUTOR_ROLE on the timelock/);
+  });
+
+  it("a PROPOSER_ROLE on the timelock held by any known account but governance fails the post-deploy check", async function () {
+    const s = await networkHelpers.loadFixture(stack);
+    const proposerRole = await s.timelock.read.PROPOSER_ROLE();
+    const operator = s.wallets.operator.account.address;
+    const op = await schedule(
+      s,
+      s.timelock.address,
+      encodeFunctionData({ abi: s.timelock.abi, functionName: "grantRole", args: [proposerRole, operator] }),
+    );
+    await networkHelpers.time.increase(op.delay);
+    await op.execute();
+    await assert.rejects(assertHandedOver(s), new RegExp(`${operator} holds PROPOSER_ROLE on the timelock`));
   });
 
   it("an EXECUTOR_ROLE granted on the intent token to any account but the two executors fails the post-deploy check", async function () {

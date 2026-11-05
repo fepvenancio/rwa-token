@@ -79,6 +79,7 @@ contract SignedEntry is EIP712, ISignedEntry {
   function cancelEntry(
     bytes32 _nonce
   ) external {
+    if (_nonces[msg.sender][_nonce]) revert SignedEntry_NonceUsed();
     _nonces[msg.sender][_nonce] = true;
     emit EntryCancelled(msg.sender, _nonce);
   }

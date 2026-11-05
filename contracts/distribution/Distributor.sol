@@ -81,6 +81,7 @@ contract Distributor is IDistributor {
     Distribution storage _d = _distributions[_id];
     if (_d.root == bytes32(0)) revert Distributor_NotApproved();
     if (_d.approved) revert Distributor_AlreadyApproved();
+    if (block.timestamp > _d.expiry) revert Distributor_Expired();
     if (msg.sender == _d.maker) revert Distributor_SelfApproval();
     _d.approved = true;
     emit DistributionApproved(_id, msg.sender);
@@ -104,7 +105,7 @@ contract Distributor is IDistributor {
     // aderyn-ignore-next-line(reentrancy-state-change)
     if (!IERC7943Fungible(TOKEN).canReceive(_holder)) revert Distributor_HolderMayNotReceive(_holder);
     bytes32 _leaf = keccak256(bytes.concat(keccak256(abi.encode(_holder, _amount))));
-    if (!MerkleProof.verify(_proof, _d.root, _leaf)) revert Distributor_BadProof();
+    if (!MerkleProof.verifyCalldata(_proof, _d.root, _leaf)) revert Distributor_BadProof();
     if (_amount > _d.total - _d.claimed) revert Distributor_OverFunding();
 
     hasClaimed[_id][_holder] = true;

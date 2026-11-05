@@ -255,7 +255,8 @@ exact sequence on the local network, playing the council and the KYC attester, a
      `rules(token)` equals the rule list in the product's profile. A second hook on the same registry carries the same attested
      codehash and passes `ProxyDeployer`; this check is what refuses it;
    - the guardian can cancel main-timelock operations but cannot propose or execute them, and holds nothing on the
-     recovery timelock;
+     recovery timelock; on each timelock no known account but governance proposes or executes, and the zero address,
+     which would open a role to anyone, holds no proposer, executor or canceller role;
    - the credential registry's guardian holds only `GUARDIAN_ROLE`; it has one attester, the KYC function, not killed;
      the credential rule reads that registry and is attested; each product's policy is the one in its profile;
    - the recovery timelock holds exactly `RECOVERY_ROLE` on each product, the executors, the credential registry and the main timelock,
@@ -268,8 +269,9 @@ exact sequence on the local network, playing the council and the KYC attester, a
      intended one, its classes are the ones it opened with, in order, and every class is intact (`firstBrokenClass()` is the
      zero address);
    - a product's legos name it and are wired as its profile says: the desk alone holds `SETTLER_ROLE`, the portfolio and the
-     fee model are plugged in and attested, the adapters are the listed ones, each attested, and the reporter, the checker and
-     the allocator are different accounts;
+     fee model are plugged in and attested, the adapters are the listed ones, each attested, the reporter, the checker and
+     the allocator are different accounts, each custodian's account lets its attested validator judge the asset's
+     `transfer` up to the profile's amount, and every risk has the profile's caps;
    - `MINTER_ROLE`, `BURNER_ROLE`, `AGENT_ROLE` and a desk-less fund's `SETTLER_ROLE` sit with a Safe of at least 2 signers,
      unless the profile's `singleSigners` names the role, for example for an MPC custody wallet whose policy engine does the same
      job. The demo profiles name all four, so a real deployment has to state its own;

@@ -262,10 +262,11 @@ interface INavDesk {
    * @notice Takes over from a desk being replaced: its last cut-off and its fee state, read at this moment, so nothing is
    *         charged twice however long the timelock took, and its redemption gate, so a replacement cannot lift it by
    *         forgetting it
-   * @dev The vault's DEFAULT_ADMIN_ROLE, once, in the batch that moves SETTLER_ROLE. Plug a fee model before this, as a
-   *      first plug after it restarts the fee clock. A desk that never charged passes on no mark, and a desk with its
-   *      model off passes on no fee clock, so a plug made here keeps those
-   * @param _oldDesk The desk it replaces; it must have nothing on the table
+   * @dev The vault's DEFAULT_ADMIN_ROLE, once, in the batch that moves SETTLER_ROLE. A fee model plugged in that batch,
+   *      before or after this, keeps the fee clock taken; a first plug in a later operation starts it, as the desk dealt
+   *      with no model in between. A desk that never charged passes on no mark, and a desk with its model off passes on
+   *      no fee clock, so a plug made here keeps those
+   * @param _oldDesk The desk it replaces; neither desk may have anything on the table
    */
   function adopt(
     address _oldDesk

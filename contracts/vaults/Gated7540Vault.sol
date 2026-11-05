@@ -334,13 +334,16 @@ contract Gated7540Vault is
 
   /**
    * @inheritdoc IERC4626
-   * @dev The controller's claimable deposit assets; 0 when paused or when the controller could not receive shares
+   * @dev The controller's claimable deposit assets; 0 when paused, when the controller could not receive shares, or when
+   *      they bought no shares
    */
   function maxDeposit(
     address _controller
   ) external view returns (uint256 _maxAssets) {
     if (_mintProbe(_controller) != Reasons.TRANSFER_OK) return 0;
-    _maxAssets = _request(_controller, true).paid;
+    Request memory _r = _request(_controller, true);
+    // A request that bought no shares cannot be claimed by its assets.
+    _maxAssets = _r.owed == 0 ? 0 : _r.paid;
   }
 
   /**
@@ -356,13 +359,16 @@ contract Gated7540Vault is
 
   /**
    * @inheritdoc IERC4626
-   * @dev The controller's claimable redemption shares; 0 when paused or when a burn from the controller would be rejected
+   * @dev The controller's claimable redemption shares; 0 when paused, when a burn from the controller would be rejected,
+   *      or when they pay nothing
    */
   function maxRedeem(
     address _controller
   ) external view returns (uint256 _maxShares) {
     if (_payoutReason(_controller) != Reasons.TRANSFER_OK) return 0;
-    _maxShares = _request(_controller, false).paid;
+    Request memory _r = _request(_controller, false);
+    // A redemption that pays nothing cannot be claimed by its shares.
+    _maxShares = _r.owed == 0 ? 0 : _r.paid;
   }
 
   /**

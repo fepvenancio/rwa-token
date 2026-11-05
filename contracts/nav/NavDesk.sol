@@ -97,6 +97,9 @@ contract NavDesk is INavDesk {
   /// @notice Whether `adopt` has run
   bool internal _adopted;
 
+  /// @notice When `adopt` took the old desk's fee clock; a first plug in that block keeps it
+  uint64 internal _feeClockAdoptedAt;
+
   /// @notice The proposal on the table
   Proposal internal _proposal;
 
@@ -170,7 +173,9 @@ contract NavDesk is INavDesk {
           mark = Math.max(IERC4626(VAULT).convertToAssets(_PRICE_SCALE), _PAR_MARK);
           markMovedAt = block.timestamp;
         }
-        lastFeeAt = block.timestamp;
+        // In the batch that adopts, the clock taken from the old desk runs on from its last fee. Any other first plug
+        // starts it, as no fee was due while no model was plugged.
+        if (_feeClockAdoptedAt != block.timestamp) lastFeeAt = block.timestamp;
       }
     }
     feeModel = _feeModel;
@@ -295,9 +300,12 @@ contract NavDesk is INavDesk {
   ) external {
     _onlyRole(_DEFAULT_ADMIN_ROLE);
     INavDesk _old = INavDesk(_oldDesk);
+    // A proposal of its own, executed after this, would write its mark and clocks over the adopted ones.
     // View interface: compiled to STATICCALL, so the old desk cannot change state or re-enter before these writes.
     // aderyn-ignore-next-line(reentrancy-state-change)
-    if (_adopted || _old.VAULT() != VAULT || _old.proposal().period != 0) revert NavDesk_CannotAdopt();
+    if (_adopted || _proposal.period != 0 || _old.VAULT() != VAULT || _old.proposal().period != 0) {
+      revert NavDesk_CannotAdopt();
+    }
     _adopted = true;
     // aderyn-ignore-next-line(reentrancy-state-change)
     lastCutoff = _old.lastCutoff();
@@ -311,7 +319,11 @@ contract NavDesk is INavDesk {
     }
     // With its model off the old desk's fee clock stopped, and no fee is due for the time since.
     // aderyn-ignore-next-line(reentrancy-state-change)
-    if (_old.feeModel() != address(0)) lastFeeAt = _old.lastFeeAt();
+    if (_old.feeModel() != address(0)) {
+      // aderyn-ignore-next-line(reentrancy-state-change)
+      lastFeeAt = _old.lastFeeAt();
+      _feeClockAdoptedAt = uint64(block.timestamp);
+    }
     // A replacement that forgot the level would lift the gate without anyone deciding to.
     // aderyn-ignore-next-line(reentrancy-state-change)
     _setRedemptionGate(_old.redemptionGate());

@@ -983,6 +983,15 @@ contract Gated7540VaultUnit_ClaimDeposit is Gated7540VaultUnitTest {
     vm.stopPrank();
   }
 
+  function test_WhenARequestBuysNoShares_NothingReadsAsClaimable() external {
+    _holdShares(_bob, 1000);
+    _requestDeposit(_alice, 1);
+    _settleAt(2 * (_supply() + _PAR));
+    assertEq(_vault.maxMint(_alice), 0);
+    assertEq(_vault.maxDeposit(_alice), 0, 'a deposit of what was paid would revert');
+    assertEq(_vault.claimableDepositRequest(0, _alice), 1, 'the paid assets are still booked');
+  }
+
   function test_WhenUsingTheErc4626Signature_TheCallerIsTheController() external {
     _requestDeposit(_alice, 10);
     _settleAtPar();
@@ -1164,6 +1173,12 @@ contract Gated7540VaultUnit_ClaimRedeem is Gated7540VaultUnitTest {
     vm.expectRevert(IGated7540Vault.Gated7540Vault_ZeroAmount.selector);
     _vault.withdraw(0, _alice, _alice);
     vm.stopPrank();
+  }
+
+  function test_WhenARedemptionPaysNothing_NothingReadsAsClaimable() external {
+    assertEq(_settledRedemption(0), 0);
+    assertEq(_vault.maxRedeem(_alice), 0, 'a redemption of what was paid would revert');
+    assertEq(_vault.claimableRedeemRequest(0, _alice), _HELD * _PAR, 'the paid shares are still booked');
   }
 
   function test_WhenClaimingMoreThanClaimable_ItReverts() external {
@@ -1701,9 +1716,10 @@ contract Gated7540VaultUnit_RecoverClaimable is Gated7540VaultUnitTest {
     _requestDeposit(_alice, 1);
     _settleAt(2 * _PAR); // 1 asset buys less than one share unit
     assertEq(_vault.maxMint(_alice), 0);
-    assertEq(_vault.maxDeposit(_alice), 1);
+    assertEq(_vault.maxDeposit(_alice), 0, 'a claim of the asset would revert');
+    assertEq(_vault.claimableDepositRequest(0, _alice), 1);
     _recover();
-    assertEq(_vault.maxDeposit(_alice), 0);
+    assertEq(_vault.claimableDepositRequest(0, _alice), 0);
   }
 }
 

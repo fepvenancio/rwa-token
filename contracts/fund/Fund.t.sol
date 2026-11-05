@@ -1039,6 +1039,23 @@ contract FundUnit_ClassIntegrity is FundUnitTest {
     assertEq(_fund.firstBrokenClass(), _token);
   }
 
+  function test_WhenTheHookHasNoCode_TheClassIsNotIntactAndTheViewDoesNotRevert() external {
+    address _token = _registered('alpha');
+    vm.mockCall(_token, abi.encodeCall(IPolicyGated.policyHook, ()), abi.encode(address(0)));
+    assertFalse(_fund.isClassIntact(_token));
+    assertEq(_fund.firstBrokenClass(), _token);
+    vm.mockCall(_token, abi.encodeCall(IPolicyGated.policyHook, ()), abi.encode(makeAddr('no code')));
+    assertFalse(_fund.isClassIntact(_token));
+  }
+
+  function test_WhenTheTokenHasNoCode_TheClassIsNotIntactAndTheViewDoesNotRevert() external {
+    address _token = _registered('alpha');
+    vm.clearMockedCalls();
+    vm.etch(_token, '');
+    assertFalse(_fund.isClassIntact(_token));
+    assertEq(_fund.firstBrokenClass(), _token);
+  }
+
   function test_WhenThereAreNoClasses_FirstBrokenClassIsZero() external view {
     assertEq(_fund.firstBrokenClass(), address(0));
   }

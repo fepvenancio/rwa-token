@@ -1043,11 +1043,55 @@ contract PortfolioUnit_Remove is PortfolioUnitTest {
 }
 
 contract PortfolioUnit_WriteOff is PortfolioUnitTest {
-  function test_APricedAdapterThatCanStillBeReadCannotBeWrittenOff() external {
+  function test_APricedAdapterThatCanBeReadAndPaysWhatItIsWorthCannotBeWrittenOff() external {
     _allocate(_priced, 100e6);
+    _priced.setLiquid(100e6);
     vm.expectRevert(abi.encodeWithSelector(IPortfolio.Portfolio_StillPriced.selector, address(_priced)));
     vm.prank(_admin);
     _portfolio.writeOffAdapter(address(_priced));
+  }
+
+  function test_APricedAdapterThatCannotPayWhatItIsWorthCanBeWrittenOff() external {
+    _allocate(_priced, 100e6);
+    _priced.setLiquid(100e6 - 1);
+    uint256 _before = _portfolio.pricedValue();
+    vm.expectEmit(address(_portfolio));
+    emit IPortfolio.AdapterWrittenOff(address(_priced), 100e6);
+    vm.prank(_admin);
+    _portfolio.writeOffAdapter(address(_priced));
+    assertEq(_portfolio.pricedValue(), _before - 100e6);
+    assertTrue(_portfolio.writtenOff());
+  }
+
+  function test_APricedAdapterWorthNothingIsNotAWriteOff() external {
+    vm.expectRevert(abi.encodeWithSelector(IPortfolio.Portfolio_StillPriced.selector, address(_priced)));
+    vm.prank(_admin);
+    _portfolio.writeOffAdapter(address(_priced));
+  }
+
+  function test_AnAdapterOverATargetThatStopsPayingCanBeWrittenOff() external {
+    MockERC4626Target _target = new MockERC4626Target(IERC20(address(_asset)));
+    ERC4626Adapter _adapter = new ERC4626Adapter(address(_portfolio), _target, _SHARED_ID);
+    vm.startPrank(_admin);
+    _portfolio.setCaps(_adapter.RISK_ID(), type(uint120).max, _NO_RELATIVE_LIMIT);
+    _attest(address(_adapter), true);
+    _portfolio.addAdapter(address(_adapter));
+    vm.stopPrank();
+    vm.prank(_allocator);
+    _portfolio.allocate(address(_adapter), 100e6, 0);
+
+    vm.expectRevert(abi.encodeWithSelector(IPortfolio.Portfolio_StillPriced.selector, address(_adapter)));
+    vm.prank(_admin);
+    _portfolio.writeOffAdapter(address(_adapter));
+
+    // ERC-4626 has maxWithdraw read 0 while withdrawals are disabled; the price still reads.
+    _target.setReportsNoLiquidity(true);
+    assertTrue(_adapter.fresh());
+    assertEq(_adapter.value(), 100e6);
+    vm.prank(_admin);
+    _portfolio.writeOffAdapter(address(_adapter));
+    assertTrue(_portfolio.writtenOff());
+    assertEq(_portfolio.adapters().length, 2);
   }
 
   function test_AWriteOffCountsTheLossOnAPricedAdapter() external {
