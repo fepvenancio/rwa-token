@@ -249,7 +249,7 @@ both rounded down</pre>
       <tbody>
         <tr><td><code>period</code></td><td colspan="2">The period holding <code>pending</code>; 0 with nothing pending.</td><td>No getter</td></tr>
         <tr><td><code>pending</code></td><td>Assets requested, not yet settled</td><td>Shares requested and not yet taken, in escrow, a carried part included</td><td><code>pendingDepositRequest</code>, <code>pendingRedeemRequest</code></td></tr>
-        <tr><td><code>paid</code></td><td>Assets settled and not yet claimed. They have already gone to redemptions, the fee or the cash account.</td><td>Shares settled and not yet claimed. They have already been burned.</td><td><code>claimableDepositRequest</code>, <code>maxDeposit</code>; <code>claimableRedeemRequest</code>, <code>maxRedeem</code></td></tr>
+        <tr><td><code>paid</code></td><td>Assets settled and not yet claimed. They have already gone to redemptions, the fee or the cash account.</td><td>Shares settled and not yet claimed. They have already been burned.</td><td><code>claimableDepositRequest</code>, <code>maxDeposit</code>; <code>claimableRedeemRequest</code>, <code>maxRedeem</code> (the two <code>max*</code> read 0 when nothing is owed)</td></tr>
         <tr><td><code>owed</code></td><td>Shares those assets bought, not yet minted</td><td>Assets those shares pay, held in the vault</td><td><code>maxMint</code>; <code>maxWithdraw</code></td></tr>
       </tbody>
     </table>
@@ -378,7 +378,7 @@ Alice    : owed = 10500e6 × 40,000.000000001904 / 42000e6    = 10,000.000000000
       <thead><tr><th>View</th><th>After a part fill it shows</th></tr></thead>
       <tbody>
         <tr><td><code>pendingRedeemRequest</code></td><td>The part carried, still in escrow and waiting.</td></tr>
-        <tr><td><code>claimableRedeemRequest</code>, <code>maxRedeem</code></td><td>The shares taken and not yet claimed.</td></tr>
+        <tr><td><code>claimableRedeemRequest</code>, <code>maxRedeem</code></td><td>The shares taken and not yet claimed; <code>maxRedeem</code> reads 0 when they pay nothing.</td></tr>
         <tr><td><code>maxWithdraw</code></td><td>The assets those shares pay, at the price of the period that took them.</td></tr>
         <tr><td><code>periodBook(period, isDeposit)</code></td><td>One side of one period: what its requests gave, carried shares included (<code>paid</code>), what that bought (<code>owed</code>), and what settlement left for the next period (<code>carried</code>). It reads the same for anyone.</td></tr>
         <tr><td><code>PeriodSettled</code></td><td><code>redemptions</code> is what was asked, carried shares included, and <code>redeemed</code> what was taken.</td></tr>
@@ -554,7 +554,7 @@ Alice    : owed = 10500e6 × 40,000.000000001904 / 42000e6    = 10,000.000000000
       <li><b>Lapsed and blocked are different.</b> With the real <a href="CredentialRule.html"><code>CredentialRule</code></a>, a lapsed controller can still request a redemption and collect its payout, but cannot request or claim a deposit (<code>test_WhenTheControllerHasLapsed_ItCanRequestARedemptionButNotADeposit</code>, <code>test_WhenTheControllerHasLapsed_ItCanStillClaimItsRedemptionPayout</code>, <code>test_WhenASettledDepositIsClaimedAfterTheLapse_ItIsRefusedAndTheAgentRecoversIt</code>). A blocked controller cannot collect (<code>test_WhenTheGuardianBlocksTheController_ItCannotCollectItsPayout</code>).</li>
       <li><b>Why the payout probe burns nothing.</b> The controller's shares went into escrow and were burned at settlement, so it usually holds none (<code>test_WhenTheControllerHoldsNoShares_ThePayoutIsStillAllowed</code>). A lockup on the controller holds the payout until it ends (<code>test_WhenTheControllerIsLockedUp_ThePayoutWaitsForTheUnlock</code>).</li>
       <li><b>The minimum position is judged at the claim.</b> A request cannot know how many shares it will buy, and the mint probe's amount is above any minimum up to <code>type(uint128).max</code>, so a fresh controller is not refused for size (<code>test_WhenAMinimumIsSet_AFreshControllerCanRequestAndClaimTheMinimum</code>). If the shares claimed, added to what the receiver holds, come to less than the minimum, the claim reverts with <code>PolicyGated_TransferRejected(BELOW_MIN_POSITION)</code> and the claimable amounts stay.</li>
-      <li><b><code>max*</code> follow the probes.</b> <code>maxDeposit</code> and <code>maxMint</code> are the controller's claimable assets and shares, or 0 if the mint probe fails. <code>maxRedeem</code> and <code>maxWithdraw</code> are its claimable shares and assets, or 0 if the burn probe fails. A pause makes all four 0. They describe claims, not new requests.</li>
+      <li><b><code>max*</code> follow the probes.</b> <code>maxDeposit</code> and <code>maxMint</code> are the controller's claimable assets and shares, or 0 if the mint probe fails. <code>maxRedeem</code> and <code>maxWithdraw</code> are its claimable shares and assets, or 0 if the burn probe fails. A request so small that it bought no shares, or a redemption that pays nothing, reads 0 on both views of its side, <code>maxDeposit</code> and <code>maxMint</code> or <code>maxRedeem</code> and <code>maxWithdraw</code>, because a claim of it would revert with <code>Gated7540Vault_ZeroAmount</code>; <code>claimableDepositRequest</code> and <code>claimableRedeemRequest</code> still show what is booked, and <code>recoverClaimable</code> clears it (<code>test_WhenARequestBuysNoShares_NothingReadsAsClaimable</code>, <code>test_WhenARedemptionPaysNothing_NothingReadsAsClaimable</code>, <code>test_WhenOwedRoundedToNothing_TheAmountsStillClear</code>). A pause makes all four 0. They describe claims, not new requests.</li>
     </ul>
   </div>
 </section>
@@ -652,7 +652,7 @@ Alice    : owed = 10500e6 × 40,000.000000001904 / 42000e6    = 10,000.000000000
         <tr><td><code>forcedTransfer(from, to, amount)</code></td><td><code>AGENT_ROLE</code></td><td>The base token's forced move. From the vault's own address, only shares above the booked total. <span class="small">Reverts: <code>Gated7540Vault_ExceedsSurplus(requested, surplus)</code>.</span></td></tr>
         <tr><td><code>setFrozenTokens(account, amount)</code></td><td><code>AGENT_ROLE</code></td><td>The base token's frozen amount, on any address except the vault's own. <span class="small">Reverts: <code>GatedVault_Unsupported</code>.</span></td></tr>
         <tr><td><code>setOperator(operator, approved)</code>, <code>isOperator(controller, operator)</code></td><td>Anyone, for itself; anyone (read-only)</td><td>Approves or revokes an operator for the caller, and reads an approval.</td></tr>
-        <tr><td><code>maxDeposit</code>, <code>maxMint</code>, <code>maxRedeem</code>, <code>maxWithdraw</code></td><td>Anyone (read-only)</td><td>The controller's claimable amounts on that side, or 0 if its probe fails.</td></tr>
+        <tr><td><code>maxDeposit</code>, <code>maxMint</code>, <code>maxRedeem</code>, <code>maxWithdraw</code></td><td>Anyone (read-only)</td><td>The controller's claimable amounts on that side, or 0 if its probe fails or the side buys or pays nothing.</td></tr>
         <tr><td><code>pendingDepositRequest</code>, <code>claimableDepositRequest</code>, <code>pendingRedeemRequest</code>, <code>claimableRedeemRequest</code></td><td>Anyone (read-only)</td><td>The controller's figures. The request id argument is ignored.</td></tr>
         <tr><td><code>dealingState()</code></td><td>Anyone (read-only)</td><td>The open period, the last settled period, and <code>unclaimedShares</code>. A period is closed when <code>settled + 1</code> is below <code>open</code>.</td></tr>
         <tr><td><code>periodBook(period, isDeposit)</code></td><td>Anyone (read-only)</td><td>One side of one period: <code>paid</code>, net of rejects, with carried shares on the redemption side; <code>owed</code>, what that bought; <code>carried</code>, what settlement left for the next period.</td></tr>
@@ -738,7 +738,7 @@ Alice    : owed = 10500e6 × 40,000.000000001904 / 42000e6    = 10,000.000000000
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>bfb424e</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>ce7c6c4</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

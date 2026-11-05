@@ -217,7 +217,7 @@
     <table>
       <thead><tr><th>View</th><th>Answer</th></tr></thead>
       <tbody>
-        <tr><td><code>isClassIntact(token)</code></td><td>True when the token is a registered class and its current hook's <code>rules(token)</code> lists the installed rule. False otherwise, including when the call to the token or to its hook reverts.</td></tr>
+        <tr><td><code>isClassIntact(token)</code></td><td>True when the token is a registered class and its current hook's <code>rules(token)</code> lists the installed rule. False otherwise, including when the call to the token or to its hook reverts, and when either has no code (<code>test_WhenTheHookHasNoCode_TheClassIsNotIntactAndTheViewDoesNotRevert</code>, <code>test_WhenTheTokenHasNoCode_TheClassIsNotIntactAndTheViewDoesNotRevert</code>).</td></tr>
         <tr><td><code>firstBrokenClass()</code></td><td>The first registered class, in registration order, that is not intact; the zero address when none is broken. One call, at most 32 classes.</td></tr>
       </tbody>
     </table>
@@ -315,7 +315,7 @@
       <li><b>It does not judge the size of a position.</b> One unit of a class is a holder. Without a minimum position on the class, 1 wei to an empty, credentialed account takes an investor slot. <a href="MinPositionRule.html"><code>MinPositionRule</code></a> closes that where it is listed with a non-zero minimum.</li>
       <li><b>It does not know people.</b> An investor is an address. Two wallets of one client count twice, and the count is only as meaningful as the credentials behind it.</li>
       <li><b>It does not re-check a class after registration.</b> The rule, the class's hook and its list can all change later. The views report the result; they change nothing.</li>
-      <li><b>The monitor views assume a real hook.</b> <code>isClassIntact</code> and <code>firstBrokenClass</code> answer false or name the class when a call to the token or hook reverts. A token that names an address with no code as its hook, or a hook that answers malformed data, makes them revert. The shipped templates refuse a hook with no code, because <code>isAttested</code> is false for it. A hook that answers malformed data would have to be attested first.</li>
+      <li><b>The monitor views assume well-formed answers.</b> <code>isClassIntact</code> and <code>firstBrokenClass</code> answer false or name the class when a call to the token or hook reverts, or when either has no code. A token or a hook that answers malformed data makes them revert, as no <code>catch</code> reaches a failure to decode an answer. Such a hook would have to be attested first.</li>
       <li><b>It has no list of holders.</b> The register is rebuilt off-chain from events. <code>positionsOf</code> answers for one account at a time.</li>
     </ul>
   </div>
@@ -344,7 +344,7 @@
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>bfb424e</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>ce7c6c4</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

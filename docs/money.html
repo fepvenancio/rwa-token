@@ -290,7 +290,7 @@ totalAssets = asset.balanceOf(vault)</pre>
 <pre>net     = pricedValue() − feesOwed, stopping at zero
 limit   = last + last × maxRate × elapsed / (10,000 × 365 days)
 counted = min(net, limit)
-fee     = feeModel.quote(counted, supply, mark, markAge, feeAge)   <span class="cm">zero with no fee model</span>
+fee     = feeModel.quote(counted, supply, mark, markAge, feeAge, paidSinceMark)   <span class="cm">zero with no fee model</span>
 totalAssets() = counted − fee
 <span class="cm">while priceFresh() is false: totalAssets() = last, and no fee</span></pre>
   </div>
@@ -302,7 +302,7 @@ totalAssets() = counted − fee
       <li><b>Exits are limited by what can be raised.</b> <code>maxRedeem</code> and <code>maxWithdraw</code> stop at <code>liquidAssets()</code>: the idle money plus what the liquidity adapter can return.</li>
       <li><b>A write-off is for good, and so is a large fall.</b> Once a portfolio has written off an adapter (<code>writeOffAdapter</code>), or a count has found the value fallen by more than half, <code>maxDeposit</code> and <code>maxMint</code> read 0 and <code>exitOnly()</code> reads true, also after a replacement portfolio, so a later depositor does not take part of a recovery from the holders who bore the loss.</li>
       <li><b>Fees.</b> A <a href="contracts/FeeModel.html"><code>FeeModel</code></a> (<code>setFeeModel</code>, the timelock) quotes on the counted value, so a gain pays only once it has passed the limit. Fees go into <code>feesOwed</code>, and <code>collectFees()</code>, which anyone can call while the vault is not paused, pays the model's <code>RECIPIENT</code> what idle money allows.</li>
-      <li><b>Plugging and replacing.</b> A first <code>setPortfolio</code> forwards what the vault held and counts it. A replacement needs the outgoing portfolio to have no adapter on its list and to read zero (<code>Gated4626Vault_PortfolioNotEmpty</code>), which <code>migrateTo</code> leaves it doing. So a position that cannot be read has to be written off first, which leaves the vault exit-only. A replacement keeps the price and the limit's clock, so the next count allows what it would have allowed anyway. The portfolio must hold the vault's asset (<code>Gated4626Vault_PortfolioRefused</code>).</li>
+      <li><b>Plugging and replacing.</b> A first <code>setPortfolio</code> forwards what the vault held and counts it. A replacement needs the outgoing portfolio to have no adapter on its list and to read zero (<code>Gated4626Vault_PortfolioNotEmpty</code>), which <code>migrateTo</code> leaves it doing. So a position that cannot be read, or that its target will not pay out, has to be written off first, which leaves the vault exit-only. A replacement keeps the price and the limit's clock, so the next count allows what it would have allowed anyway. The portfolio must hold the vault's asset (<code>Gated4626Vault_PortfolioRefused</code>).</li>
     </ul>
   </div>
 </section>
@@ -635,7 +635,7 @@ withdraw(assets)  shares = ceil(assets × paid / owed)</pre>
   </ol>
   <div class="prose wrap-any">
     <p><a href="contracts/ERC4626CallValidator.html"><code>ERC4626CallValidator</code></a> is the other shipped validator: it lets a strategy account call <code>deposit</code>, <code>mint</code>, <code>withdraw</code> and <code>redeem</code> on an outside vault when the receiver and owner are the account itself. <code>revokePermission</code> is the timelock's or the guardian's. A <code>GuardedAccount</code> is the most dangerous adapter here: it makes whatever calls its permissions allow, and an <code>approve</code> gives the spender up to what the validator allows. Each permission set needs its own review.</p>
-    <p>A <code>writeOffAdapter</code> takes an adapter off the list with whatever it holds. A priced adapter qualifies only while it cannot be priced (<code>Portfolio_StillPriced</code>); a reported one qualifies at any time. On a 4626 it leaves the vault exit-only, as above.</p>
+    <p>A <code>writeOffAdapter</code> takes an adapter off the list with whatever it holds. A priced adapter qualifies only while it cannot be priced or cannot pay out what it is priced at, <code>liquid()</code> below <code>value()</code>, and is otherwise refused with <code>Portfolio_StillPriced</code>; a reported one qualifies at any time. On a 4626 it leaves the vault exit-only, as above.</p>
   </div>
 </section>
 
@@ -932,7 +932,7 @@ withdraw(assets)  shares = ceil(assets × paid / owed)</pre>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>bfb424e</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>ce7c6c4</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>
