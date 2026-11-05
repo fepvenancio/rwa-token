@@ -11,6 +11,7 @@ import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
+import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {IProxyDeployer} from 'interfaces/IProxyDeployer.sol';
 
@@ -206,7 +207,7 @@ contract ProxyDeployerUnit_Deploy is ProxyDeployerUnitTest {
     address _otherRegistry = makeAddr('otherRegistry');
     _hookNamesRegistry(_otherHook, _otherRegistry);
     vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGated.PolicyGated_HookRegistryMismatch.selector, _otherRegistry, _registry)
+      abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_HookRegistryMismatch.selector, _otherRegistry, _registry)
     );
     _deploy('INT', _init('INT', _otherHook), _otherHook);
     assertFalse(_deployer.saltUsed(keccak256('INT')));
@@ -238,7 +239,7 @@ contract ProxyDeployerUnit_Deploy is ProxyDeployerUnitTest {
     address _predicted = _deployer.predict('INT', address(_impl));
     _setAttested(_hook, IPolicyRegistry.AttestKind.HOOK, false);
     vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGated.PolicyGated_NotAttested.selector, _hook, IPolicyRegistry.AttestKind.HOOK)
+      abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_NotAttested.selector, _hook, IPolicyRegistry.AttestKind.HOOK)
     );
     _deploy('INT', _init('INT', _hook), _hook);
     assertEq(_predicted.code.length, 0);
@@ -251,7 +252,7 @@ contract ProxyDeployerUnit_Deploy is ProxyDeployerUnitTest {
     address _predicted = _deployer.predict('INT', address(_impl));
     _setAttested(_hook, IPolicyRegistry.AttestKind.HOOK, false);
     vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGated.PolicyGated_NotAttested.selector, _hook, IPolicyRegistry.AttestKind.HOOK)
+      abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_NotAttested.selector, _hook, IPolicyRegistry.AttestKind.HOOK)
     );
     _deploy('INT', _init('INT', _hook), _hook);
 

@@ -7,7 +7,7 @@ import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
-import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
+import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {ISupplyCapRule} from 'interfaces/ISupplyCapRule.sol';
@@ -189,7 +189,7 @@ contract SupplyCapRuleIntegration is Helpers {
     assertFalse(_ok);
     assertEq(_reason, Reasons.ABOVE_SUPPLY_CAP);
     vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.ABOVE_SUPPLY_CAP)
+      abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.ABOVE_SUPPLY_CAP)
     );
     vm.prank(_minter);
     _token.mint(_alice, 1);

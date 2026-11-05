@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
-import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
+import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
@@ -104,7 +104,7 @@ contract ExecutedOnlyRuleIntegration is Helpers {
     assertFalse(_ok);
     assertEq(_reason, Reasons.TRANSFER_NOT_EXECUTED);
     vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.TRANSFER_NOT_EXECUTED)
+      abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.TRANSFER_NOT_EXECUTED)
     );
     vm.prank(_alice);
     _token.transfer(_bob, 1);

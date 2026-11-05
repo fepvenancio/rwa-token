@@ -35,6 +35,7 @@ import {IIntentExecutorBatch} from 'interfaces/IIntentExecutorBatch.sol';
 import {IMinPositionRule} from 'interfaces/IMinPositionRule.sol';
 import {INavDesk} from 'interfaces/INavDesk.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
+import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {IPortfolio} from 'interfaces/IPortfolio.sol';
@@ -86,7 +87,11 @@ contract InterfaceFreezeTest is Test {
     // boolean `canTransfer` live in `IERC7943Fungible`. What is left in `IPolicyGated` is mint, burn, pause, unpause,
     // setPolicyHook, canTransferWithReason, policyHook and registry (was 0xf517b40d; `setFrozen`, `getFrozen`,
     // `isUserAllowed` and the tuple `canTransfer` are gone)
-    assertEq(type(IPolicyGated).interfaceId, bytes4(0x02331726), 'IPolicyGated');
+    // Re-pinned 2026-11-05 on owner instruction, for the NFT template: pause, unpause, setPolicyHook, policyHook and
+    // registry moved to `IPolicyGatedCore`, which `IPolicyGated` inherits and the ERC-721 template shares. What is left
+    // is mint, burn and canTransferWithReason (was 0x02331726, the XOR of the two ids below). No topic or selector moved
+    assertEq(type(IPolicyGated).interfaceId, bytes4(0xcebd0f8c), 'IPolicyGated');
+    assertEq(type(IPolicyGatedCore).interfaceId, bytes4(0xcc8e18aa), 'IPolicyGatedCore');
     // Re-pinned in S1 of the review items (2026-10-24) on owner instruction (RD1 to RD3): `TransferContext` lost `ref` and
     // `deadline`, `IPolicyHook` and `IComplianceRule` gained `checkSend` and `checkReceive`, and `IComplianceHook` became
     // the shared hook (per-token `setRules`, `rules` and `ruleCount`; no `ADMIN` or `TOKEN`). Ids computed from the
@@ -169,7 +174,7 @@ contract InterfaceFreezeTest is Test {
     // `Frozen` is the standard's, with the same topic as before
     assertEq(IPolicyGated.ForcedTransferBy.selector, 0x9820680c613c6b8b74bedc929c1ffd105ced2cf11b34457bb8b06bd8ecb15978);
     assertEq(
-      IPolicyGated.PolicyHookChanged.selector, 0x964de01ec9270e869e61cc2efab9db5a19eac89859423a5963b19266cef000ca
+      IPolicyGatedCore.PolicyHookChanged.selector, 0x964de01ec9270e869e61cc2efab9db5a19eac89859423a5963b19266cef000ca
     );
     assertEq(
       ITransferIntent.IntentExecuted.selector, 0xbfb47f4ecbd3340a56ddfb40a6e422e8805e7c3f5f2563dd89154d3da6c8aee8

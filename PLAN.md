@@ -2804,6 +2804,8 @@ The HTML pages are not updated yet. They pin the commit they describe, so they f
 
 ### Step 2: `Gated721` (parked by the owner, 2026-10-30)
 
+Reopened by the owner on 2026-11-05: the plan that replaces this one is "The NFT template" near the end of this file, re-derived from the code at `ce7c6c4`. What follows is kept as the design of 2026-10-30, and parts of it no longer hold (the transient kind slots and `_consumePending` were removed in #11; P2 and P4 were renumbered when step 3 was rewritten).
+
 Not to be built until the owner reopens it. What follows is kept as the design for that day. While it is parked, the base split, the `IPolicyGated` re-pin and the `nft` profile do not apply.
 
 **The split.** The ERC-20 base cannot be inherited by an ERC-721: `_update` has another shape, and frozen amounts have another meaning. The generic part moves to an abstract `contracts/base/PolicyGatedCoreUpgradeable.sol`: role constants, pause and unpause, the hook pointer and `_setHook`, `registry`, `revokeRole`, `_authorizeUpgrade`, the transient kind slots and `_consumePending`, `_inferKind`, `_accountAllowed`, and the init that grants roles and installs hook and rules. `PolicyGatedERC20Upgradeable` keeps `_update`, `_moveAs`, `_mintAs`, frozen amounts, `_check`, `_context`, `_canTransfer`, `_mintProbe`, mint, burn, `forcedTransfer` and `setFrozenTokens`.
@@ -3687,7 +3689,120 @@ The pull request after #31 and #32. The 40 pages are pinned to `ce7c6c4`, and ch
 - One agent checked about 95 changed claims against the code and found 11 problems: the zero address opens only `EXECUTOR_ROLE` on OpenZeppelin's timelock; the check asks named accounts about proposer and executor only; two unchanged sentences that the fixes made false, on the first plug and on when the mark moves; two lists of the model's inputs missing `paidSince`; two citations that did not show what they were cited for; the worked example's second count keeps the same hurdle; the 7540's zero reads apply to one side; and `canTransfer` returns no reason. Each was checked by hand and applied. These fixes have had the lint and no further independent check.
 - The contracts do not change, so the pin holds.
 
+## The NFT template (planned 2026-11-05; approved by the owner the same day: "A, build it")
+
+Source: the owner, 2026-11-05: "I want to have several templates to provide to my clients, by creating different products", an NFT among them, built with only the contracts it needs, with tests. This reopens step 2 above, re-derived from the code at `ce7c6c4`. Nothing is built.
+
+### What the NFT reuses unchanged
+
+Read from the code, and to be proven by the integration test:
+
+- **`ComplianceHook`** asks a token only `hasRole(DEFAULT_ADMIN_ROLE, …)` in `setRules`, and accepts `afterTransfer` from the token it names. It never reads an amount.
+- **`ProxyDeployer.deploy`** asks the new proxy `registry()`, `policyHook()` and `symbol()`, which an ERC-721 with the core has under the same selectors.
+- **`CredentialRule`** and **`HolderRestrictionRule`** read `from`, `to`, `kind` and `operator`, ask the token `hasRole`, and never read `amount`, `id` or `extra`. Who may hold the NFT, and each holder's lockup and address freeze, work as they do on a token.
+- **`PolicyRegistry`**, both timelocks, `CredentialRegistry`: unchanged.
+
+Refused on the NFT, by the profile check in `ignition/profiles.ts`:
+
+- `MinPositionRule`: a minimum of NFTs held means nothing for unique items.
+- `FundHoldersRule`: `Fund.registerClass` asks ERC-165 for `IPolicyGated` and reads `totalSupply`, which a plain ERC-721 has not.
+- `SupplyCapRule`: it reads `IERC20.totalSupply`.
+- `SettlementWindowRule` and `ExecutedOnlyRule`: already refused on every template without intents.
+
+### The token
+
+`contracts/tokens/Gated721.sol`, one concrete contract on `ERC721URIStorageUpgradeable`, with the same parents as the ERC-20 base otherwise (`AccessControlUpgradeable`, `PausableUpgradeable`, `MulticallUpgradeable`, `UUPSUpgradeable`, `ReentrancyGuardTransient`). It implements ERC-7943's non-fungible interface (Final, id `0xbf1ef5fe`). No permit, no enumeration, no royalties, no intents, no DvP.
+
+| Function | Who | Note |
+|---|---|---|
+| `mint(to, tokenId, uri)` | `MINTER_ROLE` | Plain `_mint`: no receiver callback, so no re-entry on issuance |
+| `burn(tokenId)` | `BURNER_ROLE` | Enforcement: may take a frozen token and clears the freeze. No holder burn, as on the ERC-20 base |
+| `forcedTransfer(from, to, tokenId)` | `AGENT_ROLE` | Clears the freeze first; `Frozen(from, tokenId, false)` before `Transfer`; then the standard's `ForcedTransfer` and our `ForcedTransferBy` |
+| `setFrozenTokens(account, tokenId, frozen)` | `AGENT_ROLE` | A bool per account and token, overwritten as the standard says; may name a token the account does not hold |
+| `setTokenURI(tokenId, uri)` | `AGENT_ROLE` | Corrects metadata; OpenZeppelin emits ERC-4906's `MetadataUpdate` |
+| `pause`, `unpause`, `setPolicyHook`, `revokeRole`, upgrades | as on the ERC-20 base | Guardian stops only; timelock and recovery timelock as in brief §4 |
+| `canTransfer`, `canTransferWithReason`, `canSend`, `canReceive`, `getFrozenTokens` | anyone | `canTransferWithReason` runs the write's path minus the write, ownership included |
+
+The movement path, one `_move` as on the ERC-20 base:
+
+1. ERC-721's own checks first: the token exists and `from` owns it, and the caller is the owner or approved (`ERC721IncorrectOwner`, `ERC721InsufficientApproval`). A forced transfer and a burn skip the approval check, as `_update` with `auth == 0` does.
+2. Paused rejects everything except FORCED.
+3. A frozen token rejects everything except FORCED and a burn by `BURNER_ROLE`, with the standard's `ERC7943InsufficientUnfrozenBalance(account, tokenId)` and reason `INSUFFICIENT_UNFROZEN`.
+4. The hook, with `id = tokenId`, `amount = 1`, `operator = msg.sender` and `extra = abi.encode(fromCount, toCount)`, the holdings before the move. A rejection is `PolicyGated_TransferRejected(reason)`.
+5. The move, then `afterTransfer` if the hook wants it, inside the guard.
+
+`safeTransferFrom` calls `onERC721Received` after the move and after `afterTransfer`, outside the guard. The state is final by then, and a receiver that calls back into the token takes the same path as anyone.
+
+Pre-flight: `canTransferWithReason(from, to, tokenId)` says `NOT_TOKEN_OWNER` when `ownerOf(tokenId) != from`. That one appended reason covers a transfer by a non-owner, a burn of a token that does not exist, and a mint of an id that already exists (its owner is not the zero address). It does not take the caller, so approval is not judged, as the ERC-20 base does not judge an allowance. `canTransfer` is the standard's bool. Whether it may leave ownership to ERC-721, as the ERC-20 base leaves a balance shortfall, is checked against the Final text when the tests are written, and the test pins the answer.
+
+### The one decision: share the core, or copy it
+
+The ERC-20 base cannot be inherited: `_update` has another shape, frozen amounts are another type, and `IPolicyGated` inherits `IERC7943Fungible`, whose `setFrozenTokens(address,uint256)` and `getFrozenTokens(address)` an NFT cannot implement. The part that has nothing to do with amounts is about 150 lines: the role constants, pause and unpause with the recovery path, the hook pointer and its attestation check, `registry`, `revokeRole` for the recovery role, `_authorizeUpgrade` with the template check, the account-level answers behind `canSend` and `canReceive`, `_inferKind`, and the init that grants roles and installs the hook and rules.
+
+- **A. Share it (recommended).** Move that part into an abstract `contracts/base/PolicyGatedCoreUpgradeable.sol` with its own ERC-7201 location for `registry` and `hook`; `frozen` stays with the ERC-20 base. One copy of the code that governs every template, so a fix lands once and the audit reads it once, and a later ERC-1155 reuses it. The core declares the logic as internal functions and each template keeps its external functions as thin wrappers, so `IPolicyGated`'s functions and id stay as they are if the compiler allows it; if it does not, `IPolicyGated` inherits a new `IPolicyGatedCore` and its id is re-pinned in `InterfaceFreeze.t.sol`. Event topics and error selectors do not move either way. The cost is a change to the shipped base before any NFT code, its own pull request, behaviour unchanged and every existing test passing with edits only to pins and storage locations (nothing is deployed, so the layout is free). Stop condition: `Gated4626Vault` has 192 bytes free today; if the split pushes it over, stop and report.
+- **B. Copy it.** `Gated721` carries its own copy of that part and touches no shipped contract. Smallest change today. Two copies of the governance code to audit and to keep in step, and the copy grows with every template.
+
+### Interfaces (rule 4)
+
+All new or appended, needing the owner's instruction:
+
+- `IERC7943NonFungible.sol`: the standard's interface as written, its id pinned at `0xbf1ef5fe`.
+- `IGated721.sol`: `mint`, `burn`, `pause`, `unpause`, `setPolicyHook`, `policyHook`, `registry`, `canTransferWithReason`, `setTokenURI`; `ForcedTransferBy(from, to, tokenId, agent)`. Errors and `PolicyHookChanged` keep the names and signatures of `IPolicyGated`, so integrators decode both families the same way.
+- `Errors.sol`: `NOT_TOKEN_OWNER` appended.
+- With A, possibly `IPolicyGatedCore`, as above.
+
+### Deployment
+
+`Gated721` joins `Template` and `IMPLEMENTATION_KEY` (`nftImpl`) in `ignition/profiles.ts`, `Core` deploys its implementation when a profile lists one, and `Product` grants it `MINTER_ROLE` and `BURNER_ROLE` as it does a token's. Its `initialize(name, symbol, admin, guardian, registry, hook, rules)` takes the arguments `Product` already passes to a template without decimals or an asset. New profile `nft`: one `Gated721` with `credentialRule` and `holderRestrictionRule`. `assertHandedOver` and the post-deploy check cover it as they cover a token.
+
+### Tests, written first
+
+- `contracts/tokens/Gated721.t.sol`, with a mocked hook (`vm.mockCall` and `vm.expectCall`): every role gate; mint, burn and transfer reach the hook with the zero addresses, `id`, `amount = 1` and the counts in `extra`; a hook rejection changes nothing; a frozen token cannot be moved by its owner or an approved operator, a forced transfer and a burner's burn clear it with `Frozen` before `Transfer`, and a freeze may name a token the account does not hold; pause blocks all but FORCED, the guardian cannot unpause, the recovery role can; `setPolicyHook` and upgrades refuse an unattested target and another template; pre-flight parity with the write, fuzzed with `bound`; a re-entrant `onERC721Received`; `multicall`; ERC-165 ids from solc against `0xbf1ef5fe`, ERC-721, ERC-721 metadata and ERC-4906; an invariant that a frozen token moves only by a forced transfer or a burner's burn.
+- Integration: the real hook, `CredentialRule` and `HolderRestrictionRule`, deployed through `ProxyDeployer`: an unverified receiver is refused, a locked holder cannot transfer and the agent can still force, an address freeze stops sending and receiving, and every refusal compares pre-flight with the write.
+- `test/nodejs/products.test.ts`: the `nft` profile deploys and passes the hand-over check, a client verified once holds both the NFT and a token, and the profile check throws on the four refused rules.
+- `InterfaceFreeze.t.sol`, `ContractSizes.t.sol`, `scripts/verify-reproducible.ts`'s list, `validate:upgrades`.
+
+### Pull requests
+
+- With A: the core split first, alone; then `Gated721` with its profile; then the HTML pages, pinned to the merged commit.
+- With B: `Gated721` with its profile; then the pages.
+
+Checks for each: the full suite, the isolated run, lint and format, Slither, Aderyn, Halmos, `validate:upgrades`, `verify:reproducible`, and the sizes.
+
+### Not in this work: an account per NFT that holds gated tokens
+
+The owner asked on 2026-11-05 whether each NFT could have its own account (ERC-6551 token-bound accounts) that holds gated tokens. Not built, on its merits:
+
+- **Control moves where no gated token can see it.** The gated token's holder of record is the account. Selling the NFT hands control of everything in it to the buyer, and no gated token moves, so none of its rules runs: the buyer's credential, the seller's lockup, the fund's investor cap, the minimum position and the settlement window are all skipped. Every gated token's pre-flight would still say the right thing about the account and nothing about who controls it.
+- **The account cannot hold a true credential.** Its eligibility is its owner's, and the owner changes with every NFT transfer. A credential on the account's address cannot follow that.
+- **Enforcement splits in two.** A freeze or forced transfer on the gated token acts on the account; a forced transfer of the NFT, by another token's agent, moves control of tokens whose own agent never acted.
+- **It is the call surface `GuardedAccount` exists to prevent.** A token-bound account runs any call its NFT's owner asks for. Its implementation would need its own attestation, and the standard's registry lets anyone create accounts over any implementation.
+- **Known failure modes.** An owner can empty the account while a sale of the NFT is pending, and an NFT owned by its own account locks both for good.
+- **Little to gain here.** With issuer custody (P24) and a permissioned chain (P23), the open composability these accounts are for is not on offer anyway.
+
+If a product needs a position of gated tokens that changes hands as one unit, the sound shape is an escrow lego over one gated token named at construction, plus a rule on the NFT that asks that token whether the receiver could hold it. Even then the underlying token's holder cap and minimum see the escrow, not the owners, so it must never wrap a fund class with a cap. It gets its own plan when a product asks for it.
+
+### As built: the core split
+
+The owner answered "A, build it" on 2026-11-05, which is read as the rule 4 instruction for the interfaces this section lists. As planned, with these differences:
+
+- **`IPolicyGated`'s id moved**, from `0x02331726` to `0xcebd0f8c`, and `IPolicyGatedCore` is `0xcc8e18aa`; the two XOR to the old id, so nothing was added or lost. Thin wrappers would have kept the old id, but then the core would have to emit events and errors declared in `IPolicyGated`, and an ERC-721 would emit the fungible interface's declarations. No event topic or error selector moved.
+- **Solidity does not find an inherited member through a type name**, so tests that named `IPolicyGated.PolicyGated_TransferRejected`, `IPolicyGated.policyHook` and the like now name `IPolicyGatedCore`. Calls on an instance, `IPolicyGated(token).policyHook()`, are unchanged.
+- **The ERC-20 base has no initializer of its own.** Its only state is the frozen amounts, which start at zero. The upgrades validator counts only parent initializers that contain statements, so `Gated4626Vault`, which expands the parents around `__ERC4626_init`, could satisfy neither a composite one nor an empty one. Each template now calls `__ERC20_init`, `__ERC20Permit_init` and `__PolicyGatedCore_init`, and the validator stays fully on.
+- **Storage.** The core keeps `registry` and `hook` at `gated.storage.PolicyGatedCore` (`0x24cd…f100`). The ERC-20 location `gated.storage.PolicyGatedERC20` keeps only `frozen`, so the one test that clears the hook slot names the core's location.
+
+Checks: `npx hardhat test` `1904 passing (1727 solidity, 177 nodejs)`, the same count as at `ce7c6c4`; lint, format and types; `validate:upgrades` 5 of 5; Slither 0; Aderyn 0; Halmos 22 of 22; `verify:reproducible` 30 contracts.
+
+| Deployed size, bytes | `ce7c6c4` | After the split |
+|---|---|---|
+| `GatedToken` | 14,994 | 15,033 |
+| `IntentToken` | 17,990 | 18,029 |
+| `Gated4626Vault` | 24,384 | 24,402 (174 free) |
+| `Gated7540Vault` | 22,015 | 22,054 |
+| `Gated7540Settlement` | 18,075 | 18,118 |
+
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
 2. Credential layer: none left. On 2026-10-30 the owner confirmed decisions 11, 12, 13, 15, 16 and 17 as built (17 at the measured +8,179 gas on a transfer). Decision 14 is moot, since `IdentityRule` was removed in the cleanup. Decisions 8 and 9 are recorded in the credential section's table.
 3. Redemption gate and the second contract: built and landed in #24 and #25. Open from its review: dust in a fund everyone has left ends the performance fee. Fixed in #27; the pages at `bfb424e` describe it. What it leaves, dust left on purpose and the 4626's management fee on a small or low-decimal fund, is in `SECURITY.md`.
+4. The NFT template: answered 2026-11-05, A. Being built.

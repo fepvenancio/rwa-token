@@ -9,7 +9,7 @@ import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IGated7540Vault} from 'interfaces/IGated7540Vault.sol';
-import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
+import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {Quals} from 'interfaces/Quals.sol';
 
@@ -84,7 +84,7 @@ abstract contract CredentialVaultsTest is Test {
   function _rejected(
     bytes32 _reason
   ) internal pure returns (bytes memory _data) {
-    _data = abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, _reason);
+    _data = abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, _reason);
   }
 }
 

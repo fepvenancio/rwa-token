@@ -11,6 +11,7 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IERC7943Fungible} from 'interfaces/IERC7943Fungible.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
+import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {ITemplated} from 'interfaces/ITemplated.sol';
 import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
@@ -158,7 +159,7 @@ contract GatedTokenIntegrationTest is Test {
     (bool _allowed, bytes32 _reason) = _token.canTransferWithReason(_alice, _eve, 40);
     assertFalse(_allowed);
 
-    vm.expectRevert(abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, _reason));
+    vm.expectRevert(abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, _reason));
     vm.prank(_alice);
     _token.transfer(_eve, 40); // solhint-disable-line unchecked-transfer
   }
@@ -227,7 +228,7 @@ contract GatedTokenIntegrationTest is Test {
     GatedToken _next = new GatedToken();
     vm.expectRevert(
       abi.encodeWithSelector(
-        IPolicyGated.PolicyGated_NotAttested.selector, address(_next), IPolicyRegistry.AttestKind.IMPLEMENTATION
+        IPolicyGatedCore.PolicyGated_NotAttested.selector, address(_next), IPolicyRegistry.AttestKind.IMPLEMENTATION
       )
     );
     vm.prank(_upgrader);

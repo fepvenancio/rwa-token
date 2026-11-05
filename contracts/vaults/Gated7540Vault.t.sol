@@ -25,6 +25,7 @@ import {IGated7540Vault} from 'interfaces/IGated7540Vault.sol';
 import {IGatedVaultBase} from 'interfaces/IGatedVaultBase.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
+import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {ITemplated} from 'interfaces/ITemplated.sol';
@@ -1488,7 +1489,7 @@ contract Gated7540VaultUnit_Rejects is Gated7540VaultUnitTest {
     _requestRedeem(_alice, 30);
     vm.prank(_guardian);
     _vault.pause();
-    vm.expectRevert(abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.PAUSED));
+    vm.expectRevert(abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.PAUSED));
     vm.prank(_agent);
     _vault.rejectRedeemRequest(_alice);
     assertEq(_vault.balanceOf(address(_vault)), 30);
@@ -1928,7 +1929,7 @@ contract Gated7540VaultIntegration_Escrow is Gated7540VaultIntegrationTest {
     _invest(_alice, 100);
     vm.prank(_agent);
     _restrictionRule.setLockup(address(_vault), _alice, block.timestamp + 30 days);
-    vm.expectRevert(abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.LOCKED));
+    vm.expectRevert(abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.LOCKED));
     vm.prank(_alice);
     _vault.requestRedeem(100, _alice, _alice);
   }
@@ -1952,7 +1953,9 @@ contract Gated7540VaultIntegration_Escrow is Gated7540VaultIntegrationTest {
     uint256 _nav = _supply() / _PAR;
     vm.startPrank(_settler);
     _vault.closePeriod();
-    vm.expectRevert(abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.SENDER_FROZEN));
+    vm.expectRevert(
+      abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.SENDER_FROZEN)
+    );
     _vault.settlePeriod(_nav, 0, _cash, address(0), type(uint256).max);
     vm.stopPrank();
   }
@@ -1972,7 +1975,7 @@ contract Gated7540VaultIntegration_Escrow is Gated7540VaultIntegrationTest {
     vm.prank(_carol);
     _vault.mint(100 * _PAR, _carol, _carol); // the cap is full again without alice
 
-    vm.expectRevert(abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.MAX_HOLDERS));
+    vm.expectRevert(abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.MAX_HOLDERS));
     vm.prank(_agent);
     _vault.rejectRedeemRequest(_alice);
     assertEq(_vault.pendingRedeemRequest(0, _alice), 100 * _PAR);
@@ -1999,13 +2002,13 @@ contract Gated7540VaultIntegration_Escrow is Gated7540VaultIntegrationTest {
   function test_WhenAHolderNamesANewControllerAtAFullCap_TheRejectCannotBypassTheCap() external {
     _invest(_alice, 100);
     _invest(_bob, 100); // cap full; carol is verified but holds nothing
-    vm.expectRevert(abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.MAX_HOLDERS));
+    vm.expectRevert(abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.MAX_HOLDERS));
     vm.prank(_alice);
     _vault.transfer(_carol, 10); // the direct route is refused...
 
     vm.prank(_alice);
     _vault.requestRedeem(10, _carol, _alice);
-    vm.expectRevert(abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.MAX_HOLDERS));
+    vm.expectRevert(abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.MAX_HOLDERS));
     vm.prank(_agent);
     _vault.rejectRedeemRequest(_carol); // ...and so is the request-then-reject route
     assertEq(_vault.balanceOf(_carol), 0);
@@ -2020,7 +2023,7 @@ contract Gated7540VaultIntegration_Escrow is Gated7540VaultIntegrationTest {
     _identity.set(_alice, false);
 
     vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.RECEIVER_NOT_VERIFIED)
+      abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.RECEIVER_NOT_VERIFIED)
     );
     vm.prank(_agent);
     _vault.rejectRedeemRequest(_alice);
@@ -2039,13 +2042,13 @@ contract Gated7540VaultIntegration_Escrow is Gated7540VaultIntegrationTest {
 
     vm.prank(_agent);
     vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.RECEIVER_NOT_VERIFIED)
+      abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.RECEIVER_NOT_VERIFIED)
     );
     _vault.rejectRedeemRequest(_alice);
 
     vm.prank(_agent);
     vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.RECEIVER_NOT_VERIFIED)
+      abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.RECEIVER_NOT_VERIFIED)
     );
     _vault.recoverRedeemRequest(_alice, _eve); // the recovery account must be verified too
 
@@ -2537,7 +2540,7 @@ contract Gated7540VaultIntegration_MinPosition is Gated7540VaultIntegrationTest 
     uint256 _shares = (_MIN - 1) * _PAR;
 
     vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.BELOW_MIN_POSITION)
+      abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.BELOW_MIN_POSITION)
     );
     vm.prank(_alice);
     _vault.mint(_shares, _alice, _alice);
@@ -2552,7 +2555,7 @@ contract Gated7540VaultIntegration_MinPosition is Gated7540VaultIntegrationTest 
     _enableMinPosition();
     _invest(_alice, 2 * _MIN);
     vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.BELOW_MIN_POSITION)
+      abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.BELOW_MIN_POSITION)
     );
     vm.prank(_alice);
     _vault.requestRedeem((_MIN + 1) * _PAR, _alice, _alice);

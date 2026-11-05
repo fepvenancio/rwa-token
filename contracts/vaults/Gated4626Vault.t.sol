@@ -18,6 +18,7 @@ import {IGated4626Vault} from 'interfaces/IGated4626Vault.sol';
 import {IGatedVaultBase} from 'interfaces/IGatedVaultBase.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
+import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
 import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {ITemplated} from 'interfaces/ITemplated.sol';
@@ -509,7 +510,7 @@ contract Gated4626VaultIntegration_MinPosition is Gated4626VaultIntegrationTest 
   function test_WhenADepositWouldLeaveDust_ItRevertsWithTheReasonAndTheMinimumDepositWorks() external {
     _enableMinPosition();
     vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.BELOW_MIN_POSITION)
+      abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.BELOW_MIN_POSITION)
     );
     vm.prank(_alice);
     _vault.deposit(_MIN_ASSETS - 1, _alice);
@@ -535,7 +536,7 @@ contract Gated4626VaultIntegration_MinPosition is Gated4626VaultIntegrationTest 
     _enableMinPosition();
     _deposit(_alice, 2 * _MIN_ASSETS);
     vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.BELOW_MIN_POSITION)
+      abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.BELOW_MIN_POSITION)
     );
     vm.prank(_alice);
     _vault.redeem(_MIN_SHARES + 1, _alice, _alice);
@@ -556,7 +557,7 @@ contract Gated4626VaultIntegration_MinPosition is Gated4626VaultIntegrationTest 
     uint256 _max = _vault.maxRedeem(_alice);
     assertEq(_max, _shares - 5);
     vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGated.PolicyGated_TransferRejected.selector, Reasons.BELOW_MIN_POSITION)
+      abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.BELOW_MIN_POSITION)
     );
     vm.prank(_alice);
     _vault.redeem(_max, _alice, _alice);
