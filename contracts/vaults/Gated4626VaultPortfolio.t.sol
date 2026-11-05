@@ -8,6 +8,7 @@ import {Vm} from 'forge-std/Vm.sol';
 
 import {IAccessControl} from '@openzeppelin/contracts/access/IAccessControl.sol';
 import {Pausable} from '@openzeppelin/contracts/utils/Pausable.sol';
+import {Math} from '@openzeppelin/contracts/utils/math/Math.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IGated4626Vault} from 'interfaces/IGated4626Vault.sol';
@@ -1139,6 +1140,54 @@ contract Gated4626VaultPortfolio_Fees is Gated4626VaultPortfolioTest {
     _vault.accrue();
     // 10% counted, and 20% of that charged.
     assertApproxEqRel(_vault.feesOwed(), 20e6, 0.001e18);
+  }
+
+  /// @dev A soft hurdle: a count inside its catch-up keeps the mark and carries what it charged, and the count that
+  ///      completes it charges what one count would have
+  function test_ASoftHurdleCarriesItsCatchUpAcrossCounts() external {
+    FeeModel _soft = new FeeModel(_recipient, 0, 2000, 1000, true);
+    _registry.attest(address(_soft).codehash, IPolicyRegistry.AttestKind.FEE_MODEL, '');
+    _vault.setMaxRate(_MAX_RATE);
+    _vault.setFeeModel(address(_soft));
+    uint256 _mark = _vault.mark();
+    uint256 _movedAt = block.timestamp;
+    uint256 _supply = _vault.totalSupply();
+
+    // A year on, 10.01% more: just above a 10% hurdle.
+    vm.warp(block.timestamp + _YEAR);
+    _asset.mint(address(_portfolio), _IN * 1001 / 10_000);
+    _vault.accrue();
+    uint256 _first = _vault.feesOwed();
+    assertGt(_first, 0);
+    assertEq(_vault.mark(), _mark, 'the mark waits');
+    assertEq(_vault.paidSinceMark(), Math.mulDiv(_first, 1e18, _supply));
+
+    // A day on, 20% in all: the catch-up completes.
+    vm.warp(block.timestamp + 1 days);
+    _asset.mint(address(_portfolio), _IN * 999 / 10_000);
+    (uint256 _once,,,) = _soft.quote(_portfolio.pricedValue(), _supply, _mark, block.timestamp - _movedAt, 0, 0);
+    _vault.accrue();
+    assertApproxEqAbs(_vault.feesOwed(), _once, 1);
+    assertGt(_vault.mark(), _mark);
+    assertEq(_vault.paidSinceMark(), 0);
+  }
+
+  /// @dev Once everyone has left, what was paid into the catch-up is nobody's, and the next investor must not pay catch-up
+  ///      on their principal
+  function test_WhenEveryoneHasLeftWhatWasPaidRestarts() external {
+    FeeModel _soft = new FeeModel(_recipient, 0, 2000, 1000, true);
+    _registry.attest(address(_soft).codehash, IPolicyRegistry.AttestKind.FEE_MODEL, '');
+    _vault.setMaxRate(_MAX_RATE);
+    _vault.setFeeModel(address(_soft));
+    vm.warp(block.timestamp + _YEAR);
+    _asset.mint(address(_portfolio), _IN * 1001 / 10_000);
+    _vault.accrue();
+    assertGt(_vault.paidSinceMark(), 0);
+    vm.prank(_alice);
+    _vault.redeem(_shares, _alice, _alice);
+    assertEq(_vault.totalSupply(), 0);
+    _vault.accrue();
+    assertEq(_vault.paidSinceMark(), 0);
   }
 
   function test_ASteadyReturnBelowTheHurdlePaysNoPerformanceFeeHoweverManyCalls() external {

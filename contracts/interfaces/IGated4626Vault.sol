@@ -230,6 +230,12 @@ interface IGated4626Vault {
   function mark() external view returns (uint256 _mark);
 
   /**
+   * @notice The performance fee charged since the mark last moved, which a soft hurdle's catch-up counts
+   * @return _paid Assets per 1e18 share units
+   */
+  function paidSinceMark() external view returns (uint256 _paid);
+
+  /**
    * @notice Whether deposits are closed for good, because a portfolio wrote off an adapter or a count found the value fallen
    *         by more than half. Someone depositing at the written-down price would otherwise take part of any recovery from
    *         the holders who bore the loss

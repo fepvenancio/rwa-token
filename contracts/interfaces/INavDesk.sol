@@ -40,6 +40,7 @@ interface INavDesk {
     uint256 fee;
     uint256 mark;
     uint256 markMovedAt;
+    uint256 paidSinceMark;
     bytes32 reportHash;
     address cash;
     address feeRecipient;
@@ -472,6 +473,12 @@ interface INavDesk {
    * @return _at The time
    */
   function markMovedAt() external view returns (uint256 _at);
+
+  /**
+   * @notice The performance fee paid since the mark last moved, which a soft hurdle's catch-up counts
+   * @return _paid Assets per 1e18 share units
+   */
+  function paidSinceMark() external view returns (uint256 _paid);
 
   /**
    * @notice When a fee was last charged

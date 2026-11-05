@@ -4,12 +4,16 @@ pragma solidity ^0.8.28;
 /**
  * @title IFeeModel
  * @notice Computes a period's fee, in assets. Immutable with no storage, so the attested codehash covers the rates; changing
- *         fees means deploying a new one and a timelock swap. The caller keeps the mark and its clocks
+ *         fees means deploying a new one and a timelock swap. The caller keeps the mark, its clocks and what was paid since
+ *         the mark moved
  * @dev Management: the gross value × rate × `feeAge` / one year. Performance: the hurdle runs from when the mark last moved,
- *      `hurdled = mark × (1 + hurdle rate × markAge / one year)`, on the price after the management fee. Below `hurdled` there
- *      is no fee and the mark stays. Above it a hard hurdle charges `rate × (price − hurdled)`, and a soft one
- *      `min(rate × (price − mark), price − hurdled)`: a full catch-up, so the investor keeps everything up to `hurdled` and
- *      net value never falls as gross rises. The mark moves to the price after fees, which is never below `hurdled`. Because the
+ *      `hurdled = mark × (1 + hurdle rate × markAge / one year)`, on the price after the management fee with what was paid
+ *      since the mark moved added back. Below `hurdled` there is no fee and the mark stays. Above it a hard hurdle is due
+ *      `rate × (price − hurdled)`, and a soft one `min(rate × (price − mark), price − hurdled)`: a full catch-up, so the
+ *      investor keeps everything up to `hurdled` and net value never falls as gross rises. What was already paid since the
+ *      mark moved comes off what is due. While a soft hurdle is still catching up the mark and its clock wait and what is
+ *      paid is carried, so a count inside the band does not cost the catch-up; once due is the rate on the whole gain, the
+ *      mark moves to the price after fees, which is never below `hurdled`, and what was paid returns to zero. Because the
  *      hurdle runs on `markAge`, a gain cannot clear it by being sliced across many calls. With no shares there is no fee and
  *      the mark stays. It never reverts: ages are capped and a figure too large to be real gets no fee
  */
@@ -35,17 +39,20 @@ interface IFeeModel {
    * @param _mark The high-water mark: assets per 1e18 share units
    * @param _markAge The seconds since the mark last moved
    * @param _feeAge The seconds since the last fee
+   * @param _paidSince The performance fee paid since the mark last moved: assets per 1e18 share units
    * @return _fee The fee, in assets; never above `_gross`
    * @return _newMark The mark after this fee
    * @return _markMoved Whether the mark moved, which restarts its clock
+   * @return _newPaidSince The performance fee paid since the mark last moved, after this fee; zero when it moved
    */
   function quote(
     uint256 _gross,
     uint256 _supply,
     uint256 _mark,
     uint256 _markAge,
-    uint256 _feeAge
-  ) external view returns (uint256 _fee, uint256 _newMark, bool _markMoved);
+    uint256 _feeAge,
+    uint256 _paidSince
+  ) external view returns (uint256 _fee, uint256 _newMark, bool _markMoved, uint256 _newPaidSince);
 
   /**
    * @notice Who is paid
