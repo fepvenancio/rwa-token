@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: UNLICENSED
 import { QUALS, RULE_ORDER, TOKENS } from "./modules/roles.js";
 
 /** The rules a product can list, by the key each module and parameter uses. */

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: UNLICENSED
 // Reproducibility gate and release manifest. Run with `npm run verify:reproducible`.
 //
 // The same source must compile to the same bytecode however it is built. Compared, from clean:

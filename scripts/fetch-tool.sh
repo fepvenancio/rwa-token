@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: UNLICENSED
 # Fetches a pinned binary listed in tools.lock, verifies its sha256, and installs it into .tools/bin.
 # Usage: scripts/fetch-tool.sh <tool>. Fails on an unknown tool or platform, or on any hash mismatch.
 # In GitHub Actions, .tools/bin is also appended to $GITHUB_PATH.

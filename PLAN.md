@@ -3850,6 +3850,15 @@ The owner asked for the cleaning and a final review of all the docs once `Gated7
 - **A second check** of the 45 changed lines found 2 more, applied.
 - **The brief.** Four places in `CLAUDE.md` differ from the code: §4 shows `pause`, `setPolicyHook`, `policyHook` and `registry` on `IPolicyGated`, which now has them through `IPolicyGatedCore`, and §5's ERC-165 list leaves out `IPolicyGatedCore`, `IGated721` and `IERC7943NonFungible`; §5 calls 721 a future template; rule 4's list of reopenings leaves out 2026-10-17, 10-22 and 10-27; and rule 15 says every source file carries the licence line, which the TypeScript and shell sources do not. The brief is the owner's, so these wait for the owner's word.
 
+## The brief brought in line with the code (approved by the owner 2026-11-05: "Yes, update it")
+
+The four places the review of `6fc1953` found in `CLAUDE.md`:
+
+- §4 shows `IPolicyGatedCore` (pause, unpause, the hook pointer, the registry, `PolicyHookChanged` and the four `PolicyGated_*` errors) and `IPolicyGated is IERC7943Fungible, IPolicyGatedCore` with `mint`, `burn`, `canTransferWithReason` and `ForcedTransferBy`, as the interfaces are.
+- §5: `TransferContext.id` is the token id on `Gated721`, whose amount is then 1, and only 1155 is future. The ERC-165 list names `IPolicyGatedCore`, and what `Gated721` answers instead of `IPolicyGated`.
+- Rule 4 names the reopenings of 2026-10-17, 2026-10-22, 2026-10-24 and 2026-10-27 that `InterfaceFreeze.t.sol` dates.
+- Rule 15: the 25 TypeScript and shell sources gain `SPDX-License-Identifier: UNLICENSED` on their first line (after the shebang in `scripts/fetch-tool.sh`), so the rule holds as written.
+
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
 2. Credential layer: none left. On 2026-10-30 the owner confirmed decisions 11, 12, 13, 15, 16 and 17 as built (17 at the measured +8,179 gas on a transfer). Decision 14 is moot, since `IdentityRule` was removed in the cleanup. Decisions 8 and 9 are recorded in the credential section's table.

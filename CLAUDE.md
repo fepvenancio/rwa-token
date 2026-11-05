@@ -31,7 +31,7 @@ Separate contracts, separate concerns:
 1. OpenZeppelin v5 (`@openzeppelin/contracts`, `@openzeppelin/contracts-upgradeable`) only. No Solady. No other libs without asking.
 2. No refactors outside the task you were given.
 3. Before any change touching more than one file, write or update `PLAN.md` and stop for review.
-4. `contracts/interfaces/*.sol` are frozen after Phase 1. Changing them requires an explicit instruction. (The owner reopened them on 2026-10-23 for the review items S0 to S4, on 2026-10-30 for the portfolio lego and a renamed `Quals` bit, on 2026-10-31 for the agreed order in `PLAN.md`, on 2026-11-01 for the last review items there, and again that day for three new errors and NatSpec, moving no id, on 2026-11-02 for the redemption gate and the 7540's second contract, and on 2026-11-05 for the shared core and the ERC-721 template; `InterfaceFreeze.t.sol` pins every interface id and event topic.)
+4. `contracts/interfaces/*.sol` are frozen after Phase 1. Changing them requires an explicit instruction. (The owner reopened them on 2026-10-17 for the exempt holders, `recoverRedeemRequest` and `recoverClaimable`, on 2026-10-22 for the holder-count seed, on 2026-10-23 and 24 for the review items S0 to S4, on 2026-10-27 for `IProxyDeployer.REGISTRY()`, on 2026-10-30 for the portfolio lego and a renamed `Quals` bit, on 2026-10-31 for the agreed order in `PLAN.md`, on 2026-11-01 for the last review items there, and again that day for three new errors and NatSpec, moving no id, on 2026-11-02 for the redemption gate and the 7540's second contract, and on 2026-11-05 for the shared core and the ERC-721 template; `InterfaceFreeze.t.sol` pins every interface id and event topic.)
 5. Every contract ships with a `.t.sol` next to it. Tests are written before implementation and the failing run is shown.
 6. Run `npx hardhat test` (both runners) before reporting any task as done. Paste the summary line.
 7. `transfer()` never returns `true` without moving balance. Rejections revert with a typed error. A policy rejection is `PolicyGated_TransferRejected(bytes32 reason)`; the token's own frozen-balance check (an amount within the balance but above the unfrozen balance) is the standard's `ERC7943InsufficientUnfrozenBalance(account, amount, unfrozen)`, and an amount above the balance is the base standard's `ERC20InsufficientBalance`. (Amended 2026-10-24.)
@@ -81,7 +81,7 @@ PLAN.md
 
 ## 4. Base: roles and enforcement core (`PolicyGatedERC20Upgradeable`)
 
-Implements ERC-7943 (uRWA, Final) so external tooling (compliance engines, explorers) can discover it via ERC-165: `IPolicyGated` is `IERC7943Fungible` (id `0x3edbb4c4`, the XOR of the standard's six selectors) plus what the standard does not cover:
+Implements ERC-7943 (uRWA, Final) so external tooling (compliance engines, explorers) can discover it via ERC-165: `IPolicyGated` is `IERC7943Fungible` (id `0x3edbb4c4`, the XOR of the standard's six selectors) plus what the standard does not cover. The part that does not depend on amounts, `IPolicyGatedCore`, is its own interface, which `Gated721` shares:
 
 ```solidity
 // ERC-7943 Final, inherited
@@ -101,27 +101,34 @@ interface IERC7943Fungible is IERC165 {
     error ERC7943InsufficientUnfrozenBalance(address account, uint256 amount, uint256 unfrozen);
 }
 
-interface IPolicyGated is IERC7943Fungible {
-    // ---- issuance, pause ----
-    function mint(address to, uint256 amount) external;                              // MINTER_ROLE
-    function burn(address from, uint256 amount) external;                            // BURNER_ROLE; an enforcement action: no allowance, may take frozen tokens
+// Every template, Gated721 included
+interface IPolicyGatedCore {
+    // ---- pause ----
     function pause() external;                                                       // GUARDIAN_ROLE
     function unpause() external;                                                     // timelock or recovery timelock
 
-    // ---- read path for integrators ----
-    function canTransferWithReason(address from, address to, uint256 amount) external view returns (bool ok, bytes32 reason);
-    function policyHook() external view returns (address);
-
     // ---- governance ----
+    function policyHook() external view returns (address);
     function setPolicyHook(address newHook) external;                                // onlyTimelock; newHook must be registry-attested and name the token's registry
     function registry() external view returns (address);                             // fixed at init
 
-    event ForcedTransferBy(address indexed from, address indexed to, uint256 amount, address indexed agent);
     event PolicyHookChanged(address indexed oldHook, address indexed newHook);
     error PolicyGated_NotAttested(address target, AttestKind kind);
     error PolicyGated_HookRegistryMismatch(address hookRegistry, address tokenRegistry);
     error PolicyGated_TransferRejected(bytes32 reason);
     error PolicyGated_ZeroAddress();
+}
+
+// The fungible templates
+interface IPolicyGated is IERC7943Fungible, IPolicyGatedCore {
+    // ---- issuance ----
+    function mint(address to, uint256 amount) external;                              // MINTER_ROLE
+    function burn(address from, uint256 amount) external;                            // BURNER_ROLE; an enforcement action: no allowance, may take frozen tokens
+
+    // ---- read path for integrators ----
+    function canTransferWithReason(address from, address to, uint256 amount) external view returns (bool ok, bytes32 reason);
+
+    event ForcedTransferBy(address indexed from, address indexed to, uint256 amount, address indexed agent);
 }
 ```
 
@@ -158,7 +165,7 @@ struct TransferContext {
     address token;
     address from;        // address(0) on MINT
     address to;          // address(0) on BURN
-    uint256 id;          // 0 for fungibles; tokenId / id for future 721/1155 templates
+    uint256 id;          // 0 for fungibles; the token id on Gated721, whose amount is then 1; an id for a future 1155 template
     uint256 amount;
     address operator;    // msg.sender into the token: holder, spender, agent, minter, or executor
     TransferKind kind;
@@ -240,7 +247,7 @@ Semantics to spec in NatSpec and enforce in tests:
 * Hook address read once per `_move` into a local; mid-tx changes cannot alter the outcome.
 * DvP (owner decision, 2026-10-23): `DvPExecutor` runs two signed legs atomically, the cash leg first, and has no entry point that runs one leg alone. The legs must mirror: the parties are swapped, each amount is the other leg's stated consideration, each stated consideration token is the other leg's token, and the two tokens differ (`DvPExecutor_LegsDoNotMatch`, and `LEGS_DO_NOT_MATCH` in its pre-flights). For an ERC-3009 cash leg the buyer's authorization is payable to the executor and its nonce is `keccak256(abi.encode(securityToken, intentHash))`, never the bare hash: the executor cannot tell an honest token's hash from a counterfeit's. The executor must end with the cash balance it started with, and the payout must raise the seller's balance by exactly the price. A failing leg reverts with `DvPExecutor_LegFailed(leg, reason)`. `IntentExecutor` cannot enforce a payment, so it refuses any intent whose `considerationToken` or `considerationAmount` is non-zero, in `execute` and `executeBatch`, with `IntentExecutor_ConsiderationNotSupported(index)`.
 * Reason codes in `Errors.sol`, ERC-1594 style: `TRANSFER_OK`, `PAUSED`, `INSUFFICIENT_UNFROZEN`, `SENDER_NOT_VERIFIED`, `RECEIVER_NOT_VERIFIED`, `OUTSIDE_SETTLEMENT_WINDOW`, `MAX_HOLDERS`, `LOCKED`, `INTENT_EXPIRED`, `NONCE_USED`, `BAD_SIGNATURE`; appended 2026-10-23: `WRONG_EXECUTOR`, `INTENT_NOT_YET_VALID`, `CONSIDERATION_NEEDS_EXECUTOR`, `LEGS_DO_NOT_MATCH`; appended 2026-10-24: `BELOW_MIN_POSITION`, `SENDER_FROZEN`, `RECEIVER_FROZEN`; appended with the credential layer: `CREDENTIAL_EXPIRED`, `RECEIVER_NOT_ELIGIBLE`; appended 2026-10-31: `NOT_EXECUTOR`, `ZERO_RECEIVER`; appended 2026-11-01: `ABOVE_SUPPLY_CAP`, `TRANSFER_NOT_EXECUTED`; appended 2026-11-05: `NOT_TOKEN_OWNER`.
-* ERC-165 for `IPolicyGated`, `IPolicyHook`, `IComplianceRule`, `IPolicyRegistry`, `ITransferIntent`, and for `IERC7943Fungible` (`0x3edbb4c4`), which `IPolicyGated` inherits.
+* ERC-165 for `IPolicyGatedCore` (every template), `IPolicyGated`, `IPolicyHook`, `IComplianceRule`, `IPolicyRegistry`, `ITransferIntent`, and for `IERC7943Fungible` (`0x3edbb4c4`), which `IPolicyGated` inherits. `Gated721` answers `IPolicyGatedCore`, `IGated721` and `IERC7943NonFungible`, and not `IPolicyGated`.
 * Events and reason codes are frozen with the interfaces. New reason codes may be appended, never renamed or renumbered.
 * FORCED with `from == address(0)` is an enforcement mint; rules treat it as FORCED (exempt from cap, pause, lockup) and still require `to` verified. FORCED with `to == address(0)` is reserved and currently unused. The base announces it with `_mintAs(to, amount, kind)`; `_moveAs` never sees `from == address(0)`.
 

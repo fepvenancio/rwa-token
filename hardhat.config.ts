@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: UNLICENSED
 import hardhatKeystore from "@nomicfoundation/hardhat-keystore";
 import hardhatToolboxViemPlugin from "@nomicfoundation/hardhat-toolbox-viem";
 import { defineConfig } from "hardhat/config";
