@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: UNLICENSED
 import { keccak256, toHex, type Hex } from "viem";
 
 /** Role ids as the contracts define them: `keccak256('<NAME>')`; DEFAULT_ADMIN_ROLE is zero. */

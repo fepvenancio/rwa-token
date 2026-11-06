@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: UNLICENSED
 import assert from "node:assert/strict";
 
 import hre from "hardhat";

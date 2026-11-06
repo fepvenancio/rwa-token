@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: UNLICENSED
 import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
 
 import { activeProfile, type Profile } from "../profiles.js";

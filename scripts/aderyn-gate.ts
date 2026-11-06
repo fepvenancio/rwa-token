@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: UNLICENSED
 // Aderyn CI gate: run with `npm run aderyn`. Aderyn has no fail-on-findings flag, so this reads its JSON report and
 // fails on any high or low issue left after the exclusions in aderyn.toml and the inline suppressions.
 // The binary is the sha256-pinned release asset from tools.lock (`scripts/fetch-tool.sh aderyn`), not an npm installer.
