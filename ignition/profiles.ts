@@ -53,6 +53,11 @@ export type Product = {
   fees?: Fees;
   /** Refuses on-chain yield: only custodians may hold its money, for a fund that sells no such exposure. */
   custodyOnly?: boolean;
+  /**
+   * A `Distributor` for this product's holders: `Legos` deploys it and `Product` grants its maker and its checker. The checker
+   * is the `checker` account, which on a 7540 with a desk also approves prices.
+   */
+  distributor?: boolean;
 };
 
 /** The roles the hand-over check wants held by a Safe of at least two signers. A desk holds the settler's, where there is one. */
@@ -61,9 +66,9 @@ export type SensitiveRole = "minter" | "burner" | "agent" | "settler";
 /**
  * A combination the issuer deploys: what `Core` must contain follows from it. `singleSigners` names roles the hand-over check
  * lets a single key hold, for example an MPC custody wallet whose policy engine does the same job. A real deployment states
- * each one on purpose.
+ * each one on purpose. `signedEntry` adds the one `SignedEntry` the issuer's vaults can be entered through.
  */
-export type Profile = { id: string; products: readonly Product[]; singleSigners?: readonly SensitiveRole[] };
+export type Profile = { id: string; products: readonly Product[]; singleSigners?: readonly SensitiveRole[]; signedEntry?: boolean };
 
 export const DEFAULT_POLICY: Policy = { requireAll: QUALS.KYC, requireAny: 0, forbidAny: 0, attesters: 1n };
 
@@ -125,6 +130,30 @@ export function assertUsable(product: Product) {
   if (!listsFundRule && product.fund !== undefined) throw new Error(`${product.key}: names a fund without fundHoldersRule`);
 }
 
+/** The rules `CoreParts` deploys, in this order. The fund rule comes with its fund, from the `Fund` module. */
+const CORE_RULES: readonly RuleKey[] = ["credentialRule", "minPositionRule", "holderRestrictionRule", "windowRule", "supplyCapRule", "executedOnlyRule"];
+
+/**
+ * What a core needs for these products, by the key each part has in the core and in the parameters: the rules, one
+ * implementation per template, the executors and the signed entry. `credentialRule` brings its `credentialRegistry`.
+ */
+export function partsOf(profile: Pick<Profile, "products" | "signedEntry">): string[] {
+  const rules = new Set(profile.products.flatMap((product) => product.rules));
+  const templates = new Set(profile.products.map((product) => product.template));
+  const executors = new Set(profile.products.flatMap((product) => product.executors ?? []));
+  return [
+    ...CORE_RULES.filter((rule) => rules.has(rule)),
+    ...(Object.keys(IMPLEMENTATION_KEY) as Template[]).filter((template) => templates.has(template)).map((template) => IMPLEMENTATION_KEY[template]),
+    ...(executors.has("intent") ? ["executor"] : []),
+    ...(executors.has("dvp") ? ["dvpExecutor"] : []),
+    ...(profile.signedEntry ? ["signedEntry"] : []),
+  ];
+}
+
+/** The parts these products need that a running core, whose parts are `present`, does not have. */
+export const missingParts = (profile: Pick<Profile, "products" | "signedEntry">, present: readonly string[]) =>
+  partsOf(profile).filter((part) => !present.includes(part));
+
 /** The funds a profile's products name, each once, in the order they first appear. */
 export const fundsOf = (profile: Profile) => [
   ...new Set(profile.products.flatMap((product) => (product.fund === undefined ? [] : [product.fund]))),
@@ -156,6 +185,12 @@ export const PROFILES = {
     id: "nft",
     singleSigners: DEMO_SIGNERS,
     products: [{ key: "nft", template: "Gated721", name: "Gated Note", symbol: "gNOTE", rules: PLAIN_RULES }],
+  },
+  /** One intent token, alone: holder-signed movements through either executor. */
+  intent: {
+    id: "intent",
+    singleSigners: DEMO_SIGNERS,
+    products: [{ key: "intent", template: "IntentToken", ...TOKENS.intent, rules: PLAIN_RULES, executors: ["intent", "dvp"] }],
   },
   /** One instant vault, alone. */
   vault4626: {

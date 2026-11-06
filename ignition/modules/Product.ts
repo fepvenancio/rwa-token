@@ -21,7 +21,8 @@ const TRANSFER = toFunctionSelector("transfer(address,uint256)");
  *    the portfolio's adapters, caps and permissions, and the desk or the vault's plugs. A product never touches a fund, so
  *    its launch cannot fail on one: a class is inert, with every movement refused, until `FundOpen` or a timelock operation
  *    registers it.
- * 2. Grant the token's roles, after the configuration; UPGRADER_ROLE goes to the timelock only.
+ * 2. Grant the token's roles, after the configuration; UPGRADER_ROLE goes to the timelock only. A product with a
+ *    `Distributor` grants its maker and its checker on the token, which the distributor asks at call time.
  * 3. Hand over: DEFAULT_ADMIN_ROLE to the timelock, and the operations account renounces.
  *
  * Outside this module: the KYC attester must credential every holder, and a vault whose asset is gated needs a credential
@@ -136,7 +137,10 @@ export function productModule(product: Product) {
       granted.push(grant("minter", ROLES.MINTER, p("minter")), grant("burner", ROLES.BURNER, p("burner")));
     }
     if (product.template === "Gated7540Vault") granted.push(grant("settler", ROLES.SETTLER, desk ?? p("settler")));
-    if (desk !== undefined) granted.push(grant("reporter", ROLES.REPORTER, p("reporter")), grant("checker", ROLES.CHECKER, p("checker")));
+    if (desk !== undefined) granted.push(grant("reporter", ROLES.REPORTER, p("reporter")));
+    // One checker approves the desk's prices and the distributions, never a price or a distribution of its own.
+    if (desk !== undefined || product.distributor === true) granted.push(grant("checker", ROLES.CHECKER, p("checker")));
+    if (product.distributor === true) granted.push(grant("distribution_maker", ROLES.DISTRIBUTION_MAKER, p("distributionMaker")));
     if (portfolio !== undefined) granted.push(grant("allocator", ROLES.ALLOCATOR, p("allocator")));
     if (product.executors?.includes("intent")) granted.push(grant("executor", ROLES.EXECUTOR, p("executor")));
     if (product.executors?.includes("dvp")) granted.push(grant("dvp_executor", ROLES.EXECUTOR, p("dvpExecutor")));

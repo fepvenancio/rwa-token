@@ -3859,7 +3859,7 @@ The four places the review of `6fc1953` found in `CLAUDE.md`:
 - Rule 4 names the reopenings of 2026-10-17, 2026-10-22, 2026-10-24 and 2026-10-27 that `InterfaceFreeze.t.sol` dates.
 - Rule 15: the 25 TypeScript and shell sources gain `SPDX-License-Identifier: UNLICENSED` on their first line (after the shebang in `scripts/fetch-tool.sh`), so the rule holds as written.
 
-## Every contract deployable alone or as a whole (planned 2026-11-06, waiting for the owner)
+## Every contract deployable alone or as a whole (planned 2026-11-06; approved by the owner the same day: "Yes, as recommended")
 
 The owner, 2026-11-05: "I might want to deploy as a single contract each of them or as a whole." A product always sits on a core (the timelocks, the registry, the shared hook, `ProxyDeployer`), so alone means one product on a core of its own, or added to a core that already runs. The contracts do not change: this is deployment code, its tests and the docs.
 
@@ -3896,6 +3896,17 @@ The owner, 2026-11-05: "I might want to deploy as a single contract each of them
 ### Size
 
 Ignition modules and profiles, the fixture, two test files, and the docs. No contract, interface or test in Solidity changes.
+
+### As built
+
+- **The four answers as recommended.** `intent` deploys both executors; one `SignedEntry` per issuer; a distributor's checker is the `checker` account, the desk's where there is one; `Core` is split.
+- **The split.** `deployParts` in `ignition/parts.ts` deploys the parts, and `Core` calls it for its profile, so a whole deployment has the same contracts and addresses as before. `corePartsModule(parts, present)` throws when `parts` is empty or names a part in `present`. `handOverParts`, in the same file, holds the credential registry's and the executors' steps, and `CoreHandover` calls it; `partsHandoverModule` throws when there is nothing to hand over. `partsOf` and `missingParts` in `profiles.ts` give a profile's parts by key. The command-line entries are `ignition/modules/CoreParts.ts` and `PartsHandover.ts`: `CORE_HAS` must list the running core's parts exactly, both take the same list, and an unset `CORE_HAS` throws, because an empty one would read every part as missing and deploy a second credential registry. The library sits outside `ignition/modules` so the tests import it without building a module from the environment.
+- **`SignedEntry` is a part, not a module of its own.** It deploys through `CoreParts`, alone on a running core or with `Core` for a profile that sets `signedEntry`, which is simpler than a third module for one contract with no constructor argument. The plan said a module.
+- **The check reads code with the immutables left out.** `isRelease` blanks the artifact's immutable positions on both sides and compares, then checks the immutables another way: a sample entry's `entryHash` must equal the EIP-712 hash for `SignedEntry`, version `1`, this chain and this address, which reads every domain immutable, and a distributor's `TOKEN()` must be its product. The plan named the code comparison for the signed entry only; the distributor gets it too, because a funder approves the distributor and a substitute could take the funding.
+- **The pages follow in their own pull request,** pinned to this one's merge commit: they cite `CoreParts.ts` and `PartsHandover.ts`, which do not exist at the pages' current pin. `README.md`, the brief and this file change here.
+- **A separate review** of the change found 8 problems, all fixed: the signed entry's domain was not really checked (`eip712Domain()` reports the chain and the address live), an unset `CORE_HAS` would have deployed every part again, `PartsHandover` could run empty, the tests imported a module file that builds from the environment, and four wording points in `README.md` and the brief. Two of its points are page points and go with the pages.
+- **A fixture lesson.** `loadFixture` rewinds the chain but returns the same object, so a test that adds parts deploys its own stack.
+- **Tests:** seven new in `products.test.ts`, written first and failing on the missing module. `npx hardhat test`: `1984 passing (1798 solidity, 186 nodejs)`. Ten planted bugs in the modules (a present part not refused, an executor left with the deployer, a missing operator, the signed entry or the DvP executor left out, the maker's grant missing or given to the checker, no checker without a desk, the distributor naming another address, `CoreHandover` skipping the parts): 10 of 10 caught.
 
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.

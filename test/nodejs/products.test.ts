@@ -3,13 +3,14 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { network } from "hardhat";
-import { encodeFunctionData, getAddress, isAddressEqual, keccak256, maxUint256, toHex, zeroAddress, zeroHash } from "viem";
+import { encodeAbiParameters, encodeFunctionData, getAddress, isAddressEqual, keccak256, maxUint256, toHex, zeroAddress, zeroHash } from "viem";
 
 import { fundOpenModule } from "../../ignition/modules/FundOpen.js";
 import { productModule } from "../../ignition/modules/Product.js";
 import { QUALS } from "../../ignition/modules/roles.js";
-import { DEMO_SIGNERS, PROFILES, type Product, type Profile } from "../../ignition/profiles.js";
-import { assertHandedOver, deployProduct, deployProfile, deployStack, deverify, PAR, REASONS, RECEIVE_AUTHORIZATION_TYPES, settlePeriod, settleThroughDesk, verify } from "./fixtures.js";
+import { coreHas, corePartsModule, partsHandoverModule } from "../../ignition/parts.js";
+import { DEMO_SIGNERS, missingParts, PROFILES, type Product, type Profile } from "../../ignition/profiles.js";
+import { assertHandedOver, deployProduct, deployProfile, deployStack, deverify, INTENT_TYPES, PAR, REASONS, RECEIVE_AUTHORIZATION_TYPES, settlePeriod, settleThroughDesk, verify } from "./fixtures.js";
 
 const PLAIN = ["credentialRule", "holderRestrictionRule"] as const;
 const CORE = ["credentialRegistry", "credentialRule", "holderRestrictionRule", "hook", "proxyDeployer", "recoveryTimelock", "registry", "timelock"];
@@ -67,6 +68,37 @@ describe("one product alone: the core and that product, and nothing else", async
       "PolicyGated_TransferRejected",
       [REASONS.RECEIVER_NOT_VERIFIED],
     );
+  });
+
+  it("an intent token, with both executors", async function () {
+    const s = await networkHelpers.loadFixture(async function intent() {
+      return deployProfile(connection, PROFILES.intent);
+    });
+    assert.deepEqual(Object.keys(s.components).sort(), [...CORE, "intentImpl", "executor", "dvpExecutor"].sort());
+    assert.equal(s.fund, undefined);
+
+    const token = await viem.getContractAt("IntentToken", s.products.intent.address);
+    const [alice, bob] = [s.holders.alice, s.holders.bob];
+    await verify(s, alice);
+    await verify(s, bob);
+    await token.write.mint([alice.account.address, 100n], { account: s.wallets.minter.account });
+    const [, name, version, chainId, verifyingContract] = await token.read.eip712Domain();
+    const now = (await s.publicClient.getBlock()).timestamp;
+    const intent = {
+      from: alice.account.address,
+      to: bob.account.address,
+      amount: 40n,
+      nonce: keccak256(toHex("one intent")),
+      deadline: now + 3_600n,
+      ref: keccak256(toHex("ref")),
+      executor: zeroAddress,
+      validAfter: 0n,
+      considerationToken: zeroAddress,
+      considerationAmount: 0n,
+    };
+    const sig = await alice.signTypedData({ domain: { name, version, chainId, verifyingContract }, types: INTENT_TYPES, primaryType: "TransferIntent", message: intent });
+    await s.executor!.write.execute([token.address, intent, sig], { account: s.wallets.operator.account });
+    assert.equal(await token.read.balanceOf([bob.account.address]), 40n);
   });
 
   it("an instant vault", async function () {
@@ -510,5 +542,172 @@ describe("a token's decimals", async function () {
     });
     const token = await viem.getContractAt("GatedToken", s.products.token.address);
     assert.equal(await token.read.decimals(), 18);
+  });
+});
+
+describe("adding to a running core", async function () {
+  const connection = await network.create();
+  const { viem, networkHelpers } = connection;
+  const later: Product[] = [
+    { key: "laterFund", template: "Gated4626Vault", name: "Later Fund", symbol: "lFUND", rules: PLAIN },
+    { key: "laterNote", template: "Gated721", name: "Later Note", symbol: "lNOTE", rules: PLAIN },
+    { key: "laterIntent", template: "IntentToken", name: "Later Intent", symbol: "lINT", rules: PLAIN, executors: ["intent", "dvp"] },
+  ];
+
+  async function tokenCore() {
+    return deployProfile(connection, PROFILES.token);
+  }
+
+  it("a token's core later takes a vault, an NFT and an intent token with its executors, and keeps its timelocks and hook", async function () {
+    // Its own deployment: adding parts extends the stack object, which a shared fixture would hand to the next test.
+    const s = await tokenCore();
+    const [timelock, hook, registry] = [s.timelock.address, s.hook.address, s.registry.address];
+    const added = await s.addParts({ products: later });
+    assert.deepEqual([...added].sort(), ["dvpExecutor", "executor", "fundImpl", "intentImpl", "nftImpl"]);
+    for (const product of later) await deployProduct(s, product);
+
+    assert.ok(isAddressEqual(s.timelock.address, timelock) && isAddressEqual(s.hook.address, hook) && isAddressEqual(s.registry.address, registry));
+    for (const product of later) {
+      const placed = await viem.getContractAt("GatedToken", s.products[product.key].address);
+      assert.ok(isAddressEqual(await placed.read.policyHook(), hook), `${product.key} runs another hook`);
+    }
+    await assertHandedOver({ ...s, deployed: [...s.deployed, ...later.map((product) => ({ product, contract: s.products[product.key] }))] });
+
+    const intent = await viem.getContractAt("IntentToken", s.products.laterIntent.address);
+    assert.equal(await intent.read.hasRole([await intent.read.EXECUTOR_ROLE(), s.executor!.address]), true);
+  });
+
+  it("asks only for what the core lacks, and refuses to deploy a part twice", async function () {
+    const s = await networkHelpers.loadFixture(tokenCore);
+    const present = Object.keys(s.components);
+    assert.deepEqual(missingParts({ products: [PROFILES.token.products[0]] }, present), []);
+    assert.deepEqual(missingParts({ products: [later[0]] }, present), ["fundImpl"]);
+    assert.throws(() => corePartsModule(["gatedImpl"], present), /gatedImpl is already in the core/);
+    assert.throws(() => corePartsModule([], present), /nothing to add/);
+    assert.throws(() => partsHandoverModule([]), /nothing to hand over/);
+
+    // On the command line an unset CORE_HAS is refused: an empty list would deploy every part again.
+    const saved = process.env.CORE_HAS;
+    try {
+      delete process.env.CORE_HAS;
+      assert.throws(() => coreHas(), /CORE_HAS must list/);
+      process.env.CORE_HAS = "timelock,gatedImpl";
+      assert.deepEqual(coreHas(), ["timelock", "gatedImpl"]);
+    } finally {
+      if (saved === undefined) delete process.env.CORE_HAS;
+      else process.env.CORE_HAS = saved;
+    }
+  });
+
+  it("a signed entry joins a running core alone, and an investor enters a vault through it", async function () {
+    const usdc = await viem.deployContract("MockERC3009Token");
+    const s = await deployProfile(connection, PROFILES.vault4626, { asset: usdc.address });
+    assert.equal(s.signedEntry, undefined);
+    assert.deepEqual(await s.addParts({ products: [], signedEntry: true }), ["signedEntry"]);
+    await assertHandedOver({ ...s, profile: { ...s.profile, signedEntry: true } });
+
+    const router = s.signedEntry!;
+    const vault = await viem.getContractAt("Gated4626Vault", s.products.fund.address);
+    const alice = s.holders.alice;
+    const a = alice.account.address;
+    await verify(s, alice);
+    await verify(s, router.address);
+    await usdc.write.mint([a, usd(10n)]);
+    const now = (await s.publicClient.getBlock()).timestamp;
+    const entry = {
+      investor: a,
+      vault: vault.address,
+      assets: usd(10n),
+      minShares: 1n,
+      asynchronous: false,
+      nonce: keccak256(toHex("entry")),
+      validAfter: 0n,
+      deadline: now + 3_600n,
+    };
+    const chainId = await s.publicClient.getChainId();
+    const entrySig = await alice.signTypedData({
+      domain: { name: "SignedEntry", version: "1", chainId, verifyingContract: router.address },
+      types: {
+        Entry: [
+          { name: "investor", type: "address" },
+          { name: "vault", type: "address" },
+          { name: "assets", type: "uint256" },
+          { name: "minShares", type: "uint256" },
+          { name: "asynchronous", type: "bool" },
+          { name: "nonce", type: "bytes32" },
+          { name: "validAfter", type: "uint256" },
+          { name: "deadline", type: "uint256" },
+        ],
+      },
+      primaryType: "Entry",
+      message: entry,
+    });
+    const cashSig = await alice.signTypedData({
+      domain: { name: "Mock USD", version: "2", chainId, verifyingContract: usdc.address },
+      types: RECEIVE_AUTHORIZATION_TYPES,
+      primaryType: "ReceiveWithAuthorization",
+      message: { from: a, to: router.address, value: entry.assets, validAfter: 0n, validBefore: entry.deadline, nonce: await router.read.cashNonce([entry]) },
+    });
+    await router.write.enterWith3009([entry, entrySig, cashSig], { account: s.holders.bob.account });
+    assert.ok((await vault.read.balanceOf([a])) > 0n);
+  });
+
+  it("a whole deployment that asks for a signed entry has one, and the check refuses a stack that lost it", async function () {
+    const s = await deployProfile(connection, { ...PROFILES.token, id: "tokenWithEntry", signedEntry: true });
+    assert.ok(s.signedEntry !== undefined);
+    await assert.rejects(assertHandedOver({ ...s, signedEntry: undefined }), /no signed entry/);
+  });
+});
+
+describe("a distribution on a deployed token", async function () {
+  const connection = await network.create();
+  const { viem, networkHelpers } = connection;
+  const bond: Profile = {
+    id: "bond",
+    singleSigners: DEMO_SIGNERS,
+    products: [{ key: "bond", template: "GatedToken", name: "Corporate Bond", symbol: "BOND", rules: PLAIN, distributor: true }],
+  };
+  const leafOf = (holder: `0x${string}`, amount: bigint) =>
+    keccak256(keccak256(encodeAbiParameters([{ type: "address" }, { type: "uint256" }], [holder, amount])));
+
+  async function bondStack() {
+    return deployProfile(connection, bond);
+  }
+
+  it("a maker proposes, a different checker approves and funds it, and a holder claims", async function () {
+    const s = await networkHelpers.loadFixture(bondStack);
+    const distributor = await viem.getContractAt("Distributor", s.legos.bond.distributor);
+    assert.ok(isAddressEqual(await distributor.read.TOKEN(), s.products.bond.address));
+
+    const cash = await viem.deployContract("MockAsset", [6]);
+    const funder = s.wallets.custody;
+    await cash.write.mint([funder.account.address, usd(50n)]);
+    await cash.write.approve([distributor.address, usd(50n)], { account: funder.account });
+    const alice = s.holders.alice;
+    await verify(s, alice);
+
+    const now = (await s.publicClient.getBlock()).timestamp;
+    const root = leafOf(alice.account.address, usd(50n));
+    await distributor.write.propose([root, cash.address, usd(50n), now + 86_400n, funder.account.address], { account: s.wallets.distributionMaker.account });
+    await distributor.write.approve([1n], { account: s.wallets.checker.account });
+    await distributor.write.claim([1n, alice.account.address, usd(50n), []]);
+    assert.equal(await cash.read.balanceOf([alice.account.address]), usd(50n));
+  });
+
+  it("the check refuses a distributor naming another token, a maker who is also the checker, and a stray maker", async function () {
+    const s = await networkHelpers.loadFixture(bondStack);
+    const other = await viem.deployContract("Distributor", [s.timelock.address]);
+    await assert.rejects(assertHandedOver({ ...s, legos: { bond: { ...s.legos.bond, distributor: other.address } } }), /names another token|not the release's/);
+    await assert.rejects(
+      assertHandedOver({ ...s, parameters: { ...s.parameters, distributionMaker: s.wallets.checker.account.address } }),
+      /the distribution maker and checker of .* are the same account/,
+    );
+
+    const token = await viem.getContractAt("GatedToken", s.products.bond.address);
+    const maker = await viem.getContractAt("Distributor", s.legos.bond.distributor).then((d) => d.read.DISTRIBUTION_MAKER_ROLE());
+    await networkHelpers.impersonateAccount(s.timelock.address);
+    await networkHelpers.setBalance(s.timelock.address, 10n ** 18n);
+    await token.write.grantRole([maker, s.wallets.agent.account.address], { account: s.timelock.address });
+    await assert.rejects(assertHandedOver(s), /is also distribution maker/);
   });
 });

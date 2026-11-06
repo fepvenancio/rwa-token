@@ -7,7 +7,7 @@ import { activeProduct, assertUsable, type Product } from "../profiles.js";
 
 /** Whether a product has anything for this module to deploy. */
 export const hasLegos = (product: Product) =>
-  product.nav !== undefined || product.portfolio !== undefined || product.fees !== undefined;
+  product.nav !== undefined || product.portfolio !== undefined || product.fees !== undefined || product.distributor === true;
 
 /**
  * Once per product that has legos, before its `Product` module, run by the operations account. A lego names its vault, so
@@ -19,6 +19,10 @@ export const hasLegos = (product: Product) =>
  * An attested lego's constructor arguments are in its codehash. A portfolio's caps and adapters and a guarded account's
  * permissions are set after it, and no attestation covers them. A desk with no portfolio names
  * its custodian's account here; one with a portfolio is told so by `Product`, while the operations account is the admin.
+ *
+ * A `Distributor` names its token the same way, through the `product` parameter, on any template. It is not attested: it
+ * holds money only between an approval and the claims, and it acts for the maker and the checker `Product` grants on the
+ * token. The hand-over check compares its code with the release.
  */
 export function legosModule(product: Product) {
   assertUsable(product);
@@ -51,6 +55,7 @@ export function legosModule(product: Product) {
       const { managementBps, performanceBps, hurdleBps, softHurdle } = product.fees;
       legos.feeModel = m.contract("FeeModel", [p("feeRecipient"), managementBps, performanceBps, hurdleBps, softHurdle]);
     }
+    if (product.distributor === true) legos.distributor = m.contract("Distributor", [p("product")]);
     return legos;
   });
 }
