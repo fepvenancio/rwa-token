@@ -593,6 +593,19 @@ describe("adding to a running core", async function () {
       assert.throws(() => coreHas(), /CORE_HAS must list/);
       process.env.CORE_HAS = "timelock,gatedImpl";
       assert.deepEqual(coreHas(), ["timelock", "gatedImpl"]);
+      // A list that names nothing would read every part as missing, as an unset one would.
+      for (const empty of ["", " ", " , ", ","]) {
+        process.env.CORE_HAS = empty;
+        assert.throws(() => coreHas(), /CORE_HAS must list/, `CORE_HAS=${JSON.stringify(empty)}`);
+      }
+      // A mistyped key would be ignored and its part deployed again.
+      process.env.CORE_HAS = "timelock,GatedToken";
+      assert.throws(() => coreHas(), /GatedToken is not a part of a core/);
+      process.env.CORE_HAS = " timelock , gatedImpl ,";
+      assert.deepEqual(coreHas(), ["timelock", "gatedImpl"]);
+      // Every key a whole deployment produces is accepted.
+      process.env.CORE_HAS = present.join(",");
+      assert.deepEqual(coreHas(), present);
     } finally {
       if (saved === undefined) delete process.env.CORE_HAS;
       else process.env.CORE_HAS = saved;

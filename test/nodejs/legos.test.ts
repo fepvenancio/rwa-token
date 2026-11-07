@@ -457,6 +457,11 @@ describe("a product that does not make sense does not build", function () {
     ],
     ["a supply cap on a vault", { ...base, template: "Gated4626Vault", rules: ["supplyCapRule"] }, /a vault cannot use supplyCapRule/],
     ["signed-only movement on a plain token", { ...base, template: "GatedToken", rules: ["executedOnlyRule"] }, /executedOnlyRule/],
+    ["an executor on a plain token", { ...base, template: "GatedToken", rules: ["credentialRule"], executors: ["intent"] }, /only an IntentToken has executors/],
+    ["an executor on a vault", { ...base, template: "Gated4626Vault", rules: ["credentialRule"], executors: ["dvp"] }, /only an IntentToken has executors/],
+    ["an executor on an NFT", { ...base, template: "Gated721", rules: ["credentialRule"], executors: ["intent"] }, /only an IntentToken has executors/],
+    ["decimals on a vault", { ...base, template: "Gated7540Vault", rules: ["credentialRule"], decimals: 6 }, /cannot set its decimals/],
+    ["decimals on an NFT", { ...base, template: "Gated721", rules: ["credentialRule"], decimals: 0 }, /cannot set its decimals/],
   ];
   for (const [name, product, message] of refused) {
     it(name, function () {

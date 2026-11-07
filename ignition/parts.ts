@@ -7,7 +7,7 @@
 import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
 import type { CallableContractFuture, ContractCallFuture, IgnitionModuleBuilder, NamedArtifactContractDeploymentFuture } from "@nomicfoundation/ignition-core";
 
-import { IMPLEMENTATION_KEY, type Template } from "./profiles.js";
+import { IMPLEMENTATION_KEY, PART_KEYS, type Template } from "./profiles.js";
 import { ROLES } from "./modules/roles.js";
 
 /** The contract each rule part deploys. `credentialRule` also deploys the `CredentialRegistry` it reads. */
@@ -119,12 +119,19 @@ export function partsHandoverModule(parts: readonly string[]) {
   });
 }
 
+/** The contracts every core has, which `CORE_HAS` may also name. */
+const CORE_CONTRACTS: readonly string[] = ["timelock", "recoveryTimelock", "registry", "hook", "proxyDeployer", "credentialRegistry"];
+
 /**
- * The parts a running core has, from `CORE_HAS` (keys separated by commas), for the command line. Unset is refused: an
- * empty list would read every part as missing and deploy them all again, a second credential registry among them.
+ * The parts a running core has, from `CORE_HAS` (keys separated by commas), for the command line. A list that is unset or
+ * names nothing is refused: it would read every part as missing and deploy them all again, a second credential registry
+ * among them. So is an unknown key, which would leave its part read as missing.
  */
 export function coreHas(): string[] {
-  const listed = process.env.CORE_HAS;
-  if (listed === undefined) throw new Error("CORE_HAS must list the running core's parts, separated by commas");
-  return listed.split(",").filter((part) => part !== "");
+  const listed = (process.env.CORE_HAS ?? "").split(",").map((part) => part.trim()).filter((part) => part !== "");
+  if (listed.length === 0) throw new Error("CORE_HAS must list the running core's parts, separated by commas");
+  for (const part of listed) {
+    if (!CORE_CONTRACTS.includes(part) && !PART_KEYS.includes(part)) throw new Error(`${part} is not a part of a core`);
+  }
+  return listed;
 }
