@@ -3908,6 +3908,10 @@ Ignition modules and profiles, the fixture, two test files, and the docs. No con
 - **A fixture lesson.** `loadFixture` rewinds the chain but returns the same object, so a test that adds parts deploys its own stack.
 - **Tests:** seven new in `products.test.ts`, written first and failing on the missing module. `npx hardhat test`: `1984 passing (1798 solidity, 186 nodejs)`. Ten planted bugs in the modules (a present part not refused, an executor left with the deployer, a missing operator, the signed entry or the DvP executor left out, the maker's grant missing or given to the checker, no checker without a desk, the distributor naming another address, `CoreHandover` skipping the parts): 10 of 10 caught.
 
+## HTML pages at `8eb16b0` (2026-11-07)
+
+The pages pull request after #40, which merged as `8eb16b0`. All 42 pages are pinned to it. `deployment` gains a section on adding parts to a running core (`CoreParts`, `PartsHandover`, `CORE_HAS` and what it trusts), the signed entry in `Core`, the distributor among the legos and its grants, the `intent` profile (eight profiles), and the check's rows for the signed entry and the distributor. `SignedEntry`, `Distributor`, `roles`, `index` and `money` say how each is deployed now; `ComplianceHook` lists the `intent` profile's rules; both executor pages name `intent` and `CoreParts`. The two page points from #40's review are in: the signed entry's check is described as a sample `entryHash`, and `CORE_HAS` as an exact list.
+
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
 2. Credential layer: none left. On 2026-10-30 the owner confirmed decisions 11, 12, 13, 15, 16 and 17 as built (17 at the measured +8,179 gas on a transfer). Decision 14 is moot, since `IdentityRule` was removed in the cleanup. Decisions 8 and 9 are recorded in the credential section's table.

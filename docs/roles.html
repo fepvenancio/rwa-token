@@ -247,14 +247,14 @@
         <tr><td>A <code>NavDesk</code>, or the <code>settler</code> account where there is none</td><td>each <code>Gated7540Vault</code></td><td><code>SETTLER_ROLE</code></td><td><code>Product</code>. With no desk the account sets any price alone, which only the <code>full</code> test profile does.</td></tr>
         <tr><td>Reporter, checker (fund administration, and a second function)</td><td>each vault with a desk</td><td><code>REPORTER_ROLE</code>, <code>CHECKER_ROLE</code></td><td><code>Product</code></td></tr>
         <tr><td>Allocator (the fund manager)</td><td>each vault with a portfolio</td><td><code>ALLOCATOR_ROLE</code></td><td><code>Product</code></td></tr>
-        <tr><td>Nobody yet, except <code>CHECKER_ROLE</code> on a vault with a desk</td><td>a token with a <code>Distributor</code></td><td><code>DISTRIBUTION_MAKER_ROLE</code>, <code>CHECKER_ROLE</code></td><td>No module deploys a <code>Distributor</code> or grants <code>DISTRIBUTION_MAKER_ROLE</code>. <code>Product</code> grants <code>CHECKER_ROLE</code> on a vault with a desk, for <code>NavDesk</code>, and a <code>Distributor</code> over that vault reads the same role, so that checker needs no further grant. The main timelock grants the rest when one is deployed.</td></tr>
+        <tr><td>The <code>distributionMaker</code> and <code>checker</code> accounts</td><td>a token with a <code>Distributor</code></td><td><code>DISTRIBUTION_MAKER_ROLE</code>, <code>CHECKER_ROLE</code></td><td><code>Product</code>, for a product that sets <code>distributor</code>. The checker is the same account that approves a desk's prices on a vault with one. For a distributor added after launch the main timelock grants both, except <code>CHECKER_ROLE</code> on a vault with a desk, which the checker already holds.</td></tr>
       </tbody>
     </table>
   </div>
   <div class="prose">
-    <p>Until <code>CoreHandover</code> finishes, the deployer administers the credential registry, the executors and both timelocks, and owns <code>ProxyDeployer</code>. <a href="deployment.html#handover">Deployment and governance</a> has the order.</p>
+    <p>Until <code>CoreHandover</code> finishes, the deployer administers the credential registry, the executors and both timelocks, and owns <code>ProxyDeployer</code>. <a href="deployment.html#handover">Deployment and governance</a> has the order. For a credential registry or an executor added to a running core, <code>PartsHandover</code> makes the grants and the hand-over that the table credits to <code>CoreHandover</code>.</p>
     <h3>Who must not hold a sensitive role on a single key</h3>
-    <p>The post-deploy check <code>assertHandedOver</code> refuses <code>MINTER_ROLE</code>, <code>BURNER_ROLE</code>, <code>AGENT_ROLE</code> and <code>SETTLER_ROLE</code> on an account that does not answer <code>getThreshold()</code> with 2 or more, as a Safe that requires at least two signatures does. A profile can name any of the four in <code>singleSigners</code> to except it, for example for an MPC custody wallet whose policy engine does the same job. All seven shipped profiles name all four, because they are demo stacks, so a real deployment has to state its own. This is the check's rule, not the contracts': a token accepts any holder its admin grants. The check does not read a Safe's signers, and CI runs it on a local chain only. <a href="deployment.html#check">What it asserts, and who runs it</a>.</p>
+    <p>The post-deploy check <code>assertHandedOver</code> refuses <code>MINTER_ROLE</code>, <code>BURNER_ROLE</code>, <code>AGENT_ROLE</code> and <code>SETTLER_ROLE</code> on an account that does not answer <code>getThreshold()</code> with 2 or more, as a Safe that requires at least two signatures does. A profile can name any of the four in <code>singleSigners</code> to except it, for example for an MPC custody wallet whose policy engine does the same job. All eight shipped profiles name all four, because they are demo stacks, so a real deployment has to state its own. This is the check's rule, not the contracts': a token accepts any holder its admin grants. The check does not read a Safe's signers, and CI runs it on a local chain only. <a href="deployment.html#check">What it asserts, and who runs it</a>.</p>
   </div>
 </section>
 
@@ -635,7 +635,7 @@
   <div class="prose">
     <h2>Source and tests</h2>
     <ul class="plain">
-      <li>Role grants: <code>Core.ts</code>, <code>CoreHandover.ts</code>, <code>Product.ts</code>, <code>FundOpen.ts</code>; role ids in <code>roles.ts</code>; exceptions in <code>profiles.ts</code></li>
+      <li>Role grants: <code>Core.ts</code>, <code>CoreHandover.ts</code>, <code>PartsHandover.ts</code> and <code>handOverParts</code> in <code>ignition/parts.ts</code>, <code>Product.ts</code>, <code>FundOpen.ts</code>; role ids in <code>roles.ts</code>; exceptions in <code>profiles.ts</code></li>
       <li>Hand-over check: <code>assertHandedOver</code> in <code>test/nodejs/fixtures.ts</code></li>
       <li>Role gates in code: <code>PolicyGatedCoreUpgradeable.sol</code>, <code>PolicyGatedERC20Upgradeable.sol</code>, <code>IntentSettledUpgradeable.sol</code>, <code>Gated721.sol</code>, <code>Gated4626Vault.sol</code>, <code>Gated7540Vault.sol</code>, <code>Gated7540Settlement.sol</code>, <code>PolicyRegistry.sol</code>, <code>GovernanceTimelock.sol</code>, <code>CredentialRegistry.sol</code>, <code>IntentExecutor.sol</code>, <code>DvPExecutor.sol</code>, <code>Portfolio.sol</code>, <code>GuardedAccount.sol</code>, <code>NavDesk.sol</code>, <code>Distributor.sol</code>, <code>ComplianceHook.sol</code>, and the rules' setters, which ask the token's roles</li>
       <li>Tests: <code>test/nodejs/governance.test.ts</code> (the delay, the guardian's veto and the recovery batch), <code>test/nodejs/legos.test.ts</code> (what the hand-over check refuses), <code>GovernanceTimelock.t.sol</code>, and behaviour while paused in <code>Gated7540Vault.t.sol</code>, <code>Gated4626Vault.t.sol</code>, <code>NavDesk.t.sol</code>, <code>Portfolio.t.sol</code> and <code>GuardedAccount.t.sol</code></li>
@@ -643,7 +643,7 @@
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>9526fc7</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>8eb16b0</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

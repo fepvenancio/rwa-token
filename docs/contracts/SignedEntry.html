@@ -30,7 +30,7 @@
     <span class="fact"><b>contracts/intents/SignedEntry.sol</b></span>
     <span class="fact">immutable, <b>not a proxy</b></span>
     <span class="fact"><b>no roles</b>, no owner: anyone can submit an entry</span>
-    <span class="fact">not attested, and no deployment module</span>
+    <span class="fact">not attested; one per issuer, from <b>Core</b> or <b>CoreParts</b></span>
   </div>
 </header>
 
@@ -336,7 +336,7 @@ vault.multicall([
       <li><b>Cancelling takes a transaction</b>, so it needs gas, and it can lose the race with the relayer. It does not revoke an allowance.</li>
       <li><b>No claims.</b> A 7540's shares take a later call by the investor or its operator.</li>
       <li><b>No payment to the relayer</b>, and no way to name one.</li>
-      <li><b>No deployment.</b> Nothing in <code>ignition/modules</code> deploys it and no profile names it. An issuer that wants it deploys an instance and has it credentialed on each vault.</li>
+      <li><b>No credential from the modules.</b> <code>Core</code> deploys one when the profile sets <code>signedEntry</code>, and <code>CoreParts</code> adds one to a running core, but no module credentials it, and no shipped profile sets <code>signedEntry</code>. The KYC attester gives it a credential that each vault's policy accepts. The post-deploy check compares its code with the release's and checks that a sample entry hashes under its own EIP-712 domain.</li>
       <li><b>No sweep.</b> It has no function to move tokens sent to it by mistake. A gated token's agent can still take its own token out with <code>forcedTransfer</code>.</li>
     </ul>
   </div>
@@ -360,12 +360,13 @@ vault.multicall([
     <h2>Source and tests</h2>
     <ul class="plain">
       <li>Contract: <code>contracts/intents/SignedEntry.sol</code>, interfaces <code>ISignedEntry.sol</code> and <code>IERC3009.sol</code></li>
-      <li>Tests: <code>SignedEntry.t.sol</code> (both cash forms on real vaults, the window ends, replay, cancelling, the minimum, a contract wallet, the third-party check, and the two relayed exits) and <code>test/nodejs/products.test.ts</code> (a wallet signs both messages and a relayer submits them, on a deployed vault)</li>
+      <li>Tests: <code>SignedEntry.t.sol</code> (both cash forms on real vaults, the window ends, replay, cancelling, the minimum, a contract wallet, the third-party check, and the two relayed exits) and <code>test/nodejs/products.test.ts</code> (a wallet signs both messages and a relayer submits them, on a deployed vault; one added to a running core and used; a whole deployment that asks for one, and the check refusing a stack that lost it)</li>
+      <li>Deployment: <code>ignition/parts.ts</code>, used by <code>Core.ts</code> and <code>CoreParts.ts</code>; the check in <code>assertHandedOver</code>, <code>test/nodejs/fixtures.ts</code></li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>9526fc7</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>8eb16b0</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

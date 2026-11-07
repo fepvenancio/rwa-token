@@ -239,7 +239,7 @@
         <text x="602" y="645" class="m sm">the proxy each token is</text>
       </svg>
     </div>
-    <figcaption><b>The policy sits outside the token, and everything around it is opt-in.</b> Arrows are calls between contracts. The grid of rules shows no order: each token has its own ordered list, and lists only the rules its product needs. Not drawn: <code>Gated7540Settlement</code> and <code>Gated7540Common</code>, which run as part of the 7540 vault; <code>PolicyRegistry</code> is asked whenever attested code is installed, and never on a transfer; the main timelock holds the admin role on each token; <code>DvPExecutor</code> can also take cash from an ERC-3009 token outside the stack; <code>Distributor</code> serves one token, of any template, and has no deployment module yet; <code>NavDesk</code> reads its vault's <code>Portfolio</code> for a value.</figcaption>
+    <figcaption><b>The policy sits outside the token, and everything around it is opt-in.</b> Arrows are calls between contracts. The grid of rules shows no order: each token has its own ordered list, and lists only the rules its product needs. Not drawn: <code>Gated7540Settlement</code> and <code>Gated7540Common</code>, which run as part of the 7540 vault; <code>PolicyRegistry</code> is asked whenever attested code is installed, and never on a transfer; the main timelock holds the admin role on each token; <code>DvPExecutor</code> can also take cash from an ERC-3009 token outside the stack; <code>Distributor</code> serves one token, of any template, and <code>Legos</code> deploys it for a product that asks; <code>NavDesk</code> reads its vault's <code>Portfolio</code> for a value.</figcaption>
   </figure>
   <div class="table-wrap">
     <table>
@@ -345,7 +345,7 @@
     <dt>proxy</dt><dd>A small contract that keeps a token's address and storage and runs the code of another contract, the implementation, for each call. Each token is a <code>TokenProxy</code> (OpenZeppelin's <code>ERC1967Proxy</code>). The upgrade function sits in the implementation (the UUPS pattern).</dd>
     <dt>implementation</dt><dd>The shared code of one template, deployed once per core and used by each proxy of that template. Its constructor disables setup, so a proxy is what gets set up.</dd>
     <dt>product</dt><dd>One token an issuer launches: a proxy over a template, with its own rule list and policy.</dd>
-    <dt>profile</dt><dd>A named combination of products in <code>ignition/profiles.ts</code>, from one plain token (<code>token</code>) or one NFT (<code>nft</code>) to the demo (<code>full</code>): an intent token and both vaults as three classes of one fund, with both executors. The demo has no desk, portfolio or fee model; <code>managed-fund</code> and <code>vault4626-invest</code> show those.</dd>
+    <dt>profile</dt><dd>A named combination of products in <code>ignition/profiles.ts</code>, from one plain token (<code>token</code>), one NFT (<code>nft</code>) or one intent token with both executors (<code>intent</code>) to the demo (<code>full</code>): an intent token and both vaults as three classes of one fund, with both executors. The demo has no desk, portfolio or fee model; <code>managed-fund</code> and <code>vault4626-invest</code> show those.</dd>
     <dt>hook</dt><dd>The contract a token asks before each balance change. Here it is <code>ComplianceHook</code>, one per deployment, holding an ordered rule list for each token.</dd>
     <dt>rule</dt><dd>A small contract that answers one policy question about a movement with a reason code, such as <code>TRANSFER_OK</code> or <code>RECEIVER_FROZEN</code>. One instance serves each token whose list names it, and any setting it keeps is kept per token.</dd>
     <dt>reason code</dt><dd>A <code>bytes32</code> answer, the hash of a name like <code>LOCKED</code>. They are listed in <code>contracts/interfaces/Errors.sol</code> and on <a href="movement.html">One movement</a>.</dd>
@@ -473,12 +473,12 @@
     <ul class="plain">
       <li>Repository: <code>README.md</code> (setup and commands) and <code>SECURITY.md</code> (audit preparation)</li>
       <li>Contracts: <code>contracts/</code>, interfaces in <code>contracts/interfaces/</code></li>
-      <li>Deployment: <code>ignition/modules/</code> (<code>Core.ts</code>, <code>CoreHandover.ts</code>, <code>Fund.ts</code>, <code>Legos.ts</code>, <code>Product.ts</code>, <code>FundOpen.ts</code> and <code>roles.ts</code>), and the combinations in <code>ignition/profiles.ts</code></li>
+      <li>Deployment: <code>ignition/modules/</code> (<code>Core.ts</code>, <code>CoreHandover.ts</code>, <code>CoreParts.ts</code>, <code>PartsHandover.ts</code>, <code>Fund.ts</code>, <code>Legos.ts</code>, <code>Product.ts</code>, <code>FundOpen.ts</code> and <code>roles.ts</code>), the parts of a core in <code>ignition/parts.ts</code>, and the combinations in <code>ignition/profiles.ts</code></li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>9526fc7</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>8eb16b0</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>
