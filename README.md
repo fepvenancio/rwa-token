@@ -28,7 +28,7 @@ PolicyGatedCoreUpgradeable         core: roles, guardian and recovery, pause, ho
 
 ComplianceHook (one per deployment, immutable) ──► per token, an ordered list of ≤16 attested IComplianceRule (first
                                                  rejection wins); a token installs its own list when it is initialised
-CredentialRegistry (one per deployment)          who vouched for an address, what it is, until when, and its standing
+CredentialRegistry (per core, or a named one)    who vouched for an address, what it is, until when, and its standing
 CredentialRule, MinPositionRule, HolderRestrictionRule, SettlementWindowRule, SupplyCapRule, ExecutedOnlyRule
                                                  hook-agnostic, shared across tokens; per-token config authorised live by
                                                  the token's own roles
@@ -151,7 +151,8 @@ two run the same code.
 ## Deployment runbook
 
 One core per issuer, then one product at a time, so an issuer runs many products on one set of timelocks, one guardian, one
-hook and one credential registry, and a client is verified once. Someone who wants one product alone deploys the core and
+hook and one credential registry, and a client is verified once. A core may instead read an existing credential registry,
+another issuer's (**Using an existing credential registry**, below). Someone who wants one product alone deploys the core and
 that product, with the same code. `ignition/profiles.ts` names the combinations: `token`, `nft` (one ERC-721, a certificate or a note per token), `intent` (one intent token with both executors), `vault4626`, `vault7540` (a fund with one custodian and a desk),
 `managed-fund` (custodians, a mandate and fees, no on-chain yield), `vault4626-invest` (an instant vault investing through a
 portfolio), and `full`, which keeps a plain settler account so that a test can price at will.
@@ -169,7 +170,7 @@ exact sequence on the local network, playing the council and the KYC attester, a
    - the one shared `ComplianceHook`, whose only immutable is the registry;
    - `ProxyDeployer` (owner = deployer until `CoreHandover`, registry = the `PolicyRegistry`);
    - and only what the profile's products use:
-     - the `CredentialRegistry` (admin = deployer until `CoreHandover`, guardian = the guardian multisig) and the `CredentialRule` that reads it;
+     - the `CredentialRegistry` (admin = deployer until `CoreHandover`, guardian = the guardian multisig) and the `CredentialRule` that reads it, unless the profile reads an existing registry;
      - each other listed rule: `MinPositionRule`, `HolderRestrictionRule`, `SettlementWindowRule`, `SupplyCapRule`, `ExecutedOnlyRule`;
      - one implementation per template, shared by every product of that template;
      - `IntentExecutor` and `DvPExecutor` (neither is attested);
@@ -218,6 +219,23 @@ exact sequence on the local network, playing the council and the KYC attester, a
    `PartsHandover` (the same account, the same `CORE_HAS`) does for the new credential registry and executors what this
    step does, before the product's `Legos` and `Product`. Another profile's `Core` would build a second set of timelocks,
    registry and hook.
+
+   **Using an existing credential registry.** An issuer may read another core's `CredentialRegistry` instead of deploying
+   its own, so an investor credentialed once there can hold both issuers' tokens. Its profile in `ignition/profiles.ts`
+   sets `credentials: "external"` (no shipped profile does, so the issuer adds its own): `Core` and `CoreParts` then deploy no registry and no `CredentialRule`, and `CoreHandover` and
+   `PartsHandover` configure none. The parameters name the existing rule (`credentialRule`; its `REGISTRY()` is the
+   registry, so the two cannot disagree) and the governance the issuer accepts over that registry: `credentialAdmin`, the
+   account that holds `DEFAULT_ADMIN_ROLE` there, and `credentialGuardian`, the one that holds `GUARDIAN_ROLE`. Choosing a
+   registry gives those accounts a say over the issuer's tokens. The admin adds attesters, sets what each may assert and
+   which account signs under each id, so it decides who does KYC for every token whose policy trusts those ids; the guardian,
+   and the admin too, kill an attester, and the guardian blocks an investor, with no delay, on every token that reads the
+   registry. Records are public, so
+   one address is linked across the issuers that read them, and whether an issuer may rely on another's KYC is for the
+   issuers to settle, not the code. The council reads that registry as in step 2 (its code against the manifest, its admin
+   and guardian the named ones, its attesters) and attests the named rule as `RULE` in its own `PolicyRegistry`: the same
+   codehash any other council attested. Each product's policy names which of that registry's attesters it trusts.
+   Everything else stays the issuer's own: its timelocks, its `PolicyRegistry`, its hook and its upgrades. A token lists one
+   `CredentialRule` (its `ruleId` is fixed, and a hook takes one rule per id), so it reads one registry.
 4. **`Fund`** (the operations account), once per fund, if the products use one: a `Fund` (owner = the operations account) and
    the `FundHoldersRule` that points at it. An issuer has as many as it has funds, each with its own cap, and `FUND` chooses one
    for `hardhat ignition deploy`. Then the council attests the rule as in step 2, after reading the `Fund` it points at
@@ -265,7 +283,7 @@ exact sequence on the local network, playing the council and the KYC attester, a
    vault whose asset is a gated token needs a credential that token's policy accepts. So does a custodian depositing for
    clients, anyone paid a client's redemption cash, and the `SignedEntry`, which pays for the investor.
 8. **Post-deploy checks** (the fixture's `assertHandedOver`):
-   - the deployer and the operations account hold no role on either timelock, the policy registry, the credential registry, the products or the executors;
+   - the deployer and the operations account hold no role on either timelock, the policy registry, the core's own credential registry, the products or the executors;
    - the timelock holds DEFAULT_ADMIN_ROLE everywhere and is the only UPGRADER;
    - every product's `policyHook()` is the hook the council attested, that hook's `REGISTRY()` is the registry, and its
      `rules(token)` equals the rule list in the product's profile. A second hook on the same registry carries the same attested
@@ -273,9 +291,13 @@ exact sequence on the local network, playing the council and the KYC attester, a
    - the guardian can cancel main-timelock operations but cannot propose or execute them, and holds nothing on the
      recovery timelock; on each timelock no known account but governance proposes or executes, and the zero address,
      which would open a role to anyone, holds no proposer, executor or canceller role;
-   - the credential registry's guardian holds only `GUARDIAN_ROLE`; it has one attester, the KYC function, not killed;
-     the credential rule reads that registry and is attested; each product's policy is the one in its profile;
-   - the recovery timelock holds exactly `RECOVERY_ROLE` on each product, the executors, the credential registry and the main timelock,
+   - the credential rule reads the stack's registry and is attested, and each product's policy is the one in its profile
+     and trusts at least one attester, each of which exists and is not killed. With the core's own registry, its guardian
+     holds only `GUARDIAN_ROLE` and it has one attester, the KYC function. With an existing one, the rule is the one the
+     parameters name, the registry is the release's code, `credentialAdmin` holds `DEFAULT_ADMIN_ROLE` and
+     `credentialGuardian` holds `GUARDIAN_ROLE` there, and no other role there is held by one of the stack's named accounts
+     or by either of the core's timelocks;
+   - the recovery timelock holds exactly `RECOVERY_ROLE` on each product, the executors, the core's own credential registry and the main timelock,
      nothing elsewhere, and has no cancellers (governance's automatic one is revoked in `CoreHandover`);
    - each executor's operator and guardian are the stack's, and `EXECUTOR_ROLE` on an `IntentToken` is held by the
      executors it names and by no account the stack knows about;

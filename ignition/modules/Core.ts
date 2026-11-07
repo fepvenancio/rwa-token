@@ -24,7 +24,8 @@ const NO_RECOVERY = "0x0000000000000000000000000000000000000000";
  *
  * - The `CredentialRegistry` (administered by the deployer until `CoreHandover`) and the `CredentialRule` that reads it.
  *   The rule's codehash covers the registry's address and not its code, so the council reads the registry's code, its
- *   admin and its attester list before it attests the rule.
+ *   admin and its attester list before it attests the rule. A profile with `credentials: "external"` deploys neither: its
+ *   parameters name an existing rule, which the council attests after the same reading.
  * - Each other listed rule, and one implementation per template: every product of a template shares it.
  * - The intent executor and the DvP executor, if a product names them (administered by the deployer until
  *   `CoreHandover`). Neither is attested: neither is a hook, a rule or an implementation, and each token authorises it by

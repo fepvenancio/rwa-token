@@ -67,8 +67,19 @@ export type SensitiveRole = "minter" | "burner" | "agent" | "settler";
  * A combination the issuer deploys: what `Core` must contain follows from it. `singleSigners` names roles the hand-over check
  * lets a single key hold, for example an MPC custody wallet whose policy engine does the same job. A real deployment states
  * each one on purpose. `signedEntry` adds the one `SignedEntry` the issuer's vaults can be entered through.
+ *
+ * `credentials` chooses the KYC registry: `"own"` (the default) deploys the core's own `CredentialRegistry` and
+ * `CredentialRule`; `"external"` deploys neither, and the deployment's parameters name an existing `credentialRule` and the
+ * governance the issuer accepts over the registry it reads (`credentialAdmin`, `credentialGuardian`), which the hand-over
+ * check pins. That governance then decides who may receive the issuer's tokens.
  */
-export type Profile = { id: string; products: readonly Product[]; singleSigners?: readonly SensitiveRole[]; signedEntry?: boolean };
+export type Profile = {
+  id: string;
+  products: readonly Product[];
+  singleSigners?: readonly SensitiveRole[];
+  signedEntry?: boolean;
+  credentials?: "own" | "external";
+};
 
 export const DEFAULT_POLICY: Policy = { requireAll: QUALS.KYC, requireAny: 0, forbidAny: 0, attesters: 1n };
 
@@ -146,10 +157,12 @@ export const PART_KEYS: readonly string[] = [...CORE_RULES, ...Object.values(IMP
 
 /**
  * What a core needs for these products, by the key each part has in the core and in the parameters: the rules, one
- * implementation per template, the executors and the signed entry. `credentialRule` brings its `credentialRegistry`.
+ * implementation per template, the executors and the signed entry. `credentialRule` brings its `credentialRegistry`, unless
+ * the profile reads an external one.
  */
-export function partsOf(profile: Pick<Profile, "products" | "signedEntry">): string[] {
+export function partsOf(profile: Pick<Profile, "products" | "signedEntry" | "credentials">): string[] {
   const rules = new Set(profile.products.flatMap((product) => product.rules));
+  if (profile.credentials === "external") rules.delete("credentialRule");
   const templates = new Set(profile.products.map((product) => product.template));
   const executors = new Set(profile.products.flatMap((product) => product.executors ?? []));
   return [
@@ -162,7 +175,7 @@ export function partsOf(profile: Pick<Profile, "products" | "signedEntry">): str
 }
 
 /** The parts these products need that a running core, whose parts are `present`, does not have. */
-export const missingParts = (profile: Pick<Profile, "products" | "signedEntry">, present: readonly string[]) =>
+export const missingParts = (profile: Pick<Profile, "products" | "signedEntry" | "credentials">, present: readonly string[]) =>
   partsOf(profile).filter((part) => !present.includes(part));
 
 /** The funds a profile's products name, each once, in the order they first appear. */
