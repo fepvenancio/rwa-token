@@ -3927,6 +3927,54 @@ Kept: `Legos` takes the same predicted address as `vault` (desk, portfolio) and 
 Tests first: the refusals in `test/nodejs/products.test.ts` (`coreHas`) and `test/nodejs/legos.test.ts` (`assertUsable`), shown failing before the change.
 
 As built: the six tests failed first (5 `assertUsable` cases, and the `coreHas` test on `CORE_HAS=""`), each with "Missing expected exception". `npx hardhat test`: `1989 passing (1798 solidity, 191 nodejs)`; typecheck and format clean. Nine planted bugs, all caught (listed in `SECURITY.md` §5). The pages, pinned to `8eb16b0`, still say `CORE_HAS` is refused only when unset and list `assertUsable`'s refusals without these two; they change with the next re-pin.
+## Each issuer chooses its KYC registry (planned 2026-11-07; waiting for the owner's review)
+
+The owner, 2026-11-07: "The shared registry could be deployed by us, and then whoever uses our whole deployment is using our things automatically whoever deploys solo "pieces" can connect to our centralRegistry, but upgrades should be individual", then "I think it should be their choice, of which Registries to use", then "go for it" on the assessment below.
+
+### What the code already allows, and what it does not
+
+- `CredentialRule` takes its `CredentialRegistry` in its constructor, and `Product` takes each rule's address as a parameter, so a token can already read any registry. The modules cannot: `deployParts` always deploys a new registry and rule when a product lists `credentialRule`, `handOverParts` always configures and hands over that registry, and `assertHandedOver` refuses any registry that is not the core's own (the main timelock must be its admin, the recovery timelock must hold `RECOVERY_ROLE` on it, it must have exactly one attester).
+- A token's `PolicyRegistry` is fixed at `initialize`, and the hook and `ProxyDeployer` must name the same one. It stays each core's own: sharing it would hand another council every install and upgrade on the issuer's tokens, against "upgrades should be individual". Same code has the same codehash, so a solo issuer's council can attest on the strength of a published review.
+- Upgrades are already individual: each token is its own proxy, `UPGRADER_ROLE` sits with its own core's main timelock, and the upgrade must be attested in that core's own `PolicyRegistry`. Nothing changes there.
+
+### The assessment the owner agreed to
+
+Choosing a registry is choosing whose governance decides the token's investors' eligibility, so the choice is explicit and checked:
+
+1. The registry's admin adds attesters, changes what each may assert and which account signs under an attester id (`setAttesterAccount`). A token's policy trusts ids, so that admin decides who does KYC for the token. Its guardian blocks an investor or kills an attester with no delay, on every token reading the registry. The council's attestation of the rule covers the registry's address, not its governance.
+2. One registry per token: `CredentialRule`'s `ruleId` is fixed (`CredentialRule.v1`) and the hook refuses two rules with one id, and a rule list is a conjunction. Accepting investors from either of two registries would need a new rule. Not in this change.
+3. Records are public; a shared registry links one address across issuers.
+4. Whether an issuer may rely on another's KYC is a legal question for the issuers, not something the code settles.
+
+### What changes
+
+No contract and no interface. Deployment scripts, the check, tests and docs.
+
+1. **The profile.** `Profile.credentials?: "own" | "external"`, default `"own"`, which is today's behaviour, so every shipped profile and the whole deployment are unchanged. With `"external"`, the deployment's parameters name the existing rule (`credentialRule`) and the governance the issuer accepts: `credentialAdmin` (the account expected to hold `DEFAULT_ADMIN_ROLE` on the registry) and `credentialGuardian` (the one expected to hold `GUARDIAN_ROLE`). The registry's address is read from the rule's `REGISTRY()`, never given separately, so the two cannot disagree. One choice per deployment: the check pins one registry per core. (`Product` already takes the rule as a parameter, so a product on another registry is possible by hand; the modules do not offer it, as nobody asked.)
+2. **`partsOf`** leaves `credentialRule` out with `"external"`, so `Core` and `CoreParts` deploy no registry and no rule, and `CoreHandover` and `PartsHandover` make no credential calls (they act only on the parts deployed). `assertUsable` is unchanged.
+3. **The council step.** With `"external"` the council attests the named rule as `RULE` in its own `PolicyRegistry` (the codehash is the one any other council attested), after reading the registry's code and who governs it, which the README runbook says.
+4. **`Product`** is unchanged: it sets each token's policy on the named rule, as the token's admin, and the policy names which of that registry's attesters the token trusts.
+5. **The post-deploy check**, for `"external"`:
+   - the product lists the named rule, the rule is attested as `RULE` here, and its `REGISTRY()` is a `CredentialRegistry` (its code compared with the release's);
+   - `credentialAdmin` holds `DEFAULT_ADMIN_ROLE` and `credentialGuardian` holds `GUARDIAN_ROLE` on it;
+   - none of this core's named accounts, its main timelock or its recovery timelock holds any role on it, and the registry is left out of the core's own admin and recovery pins;
+   - each product's policy trusts at least one attester, and every attester its bitmap names exists and is not killed (with `"own"` the existing one-attester check stays);
+   - each product's `policyOf` equals its profile's, as today.
+6. **Tests** (`test/nodejs/products.test.ts`, one stack per test, since `loadFixture` shares objects):
+   - a whole deployment with its own registry, then a solo issuer's `token` core with `"external"` naming that registry's rule: the solo core has no `CredentialRegistry` or `CredentialRule` of its own, and one investor credentialed once holds both issuers' tokens;
+   - the cost made visible: the registry's guardian blocks that investor, and both issuers' tokens refuse to deliver to it;
+   - upgrades stay individual: the solo issuer's timelock upgrades its token to a newly attested implementation while the other issuer's token keeps its implementation, and neither timelock holds `UPGRADER_ROLE` on the other's token;
+   - the check refuses: a rule reading another registry, a registry whose admin or guardian is not the named one, this core's timelock or deployer holding a role on the external registry, a policy trusting no attester, and a policy trusting a killed or missing attester;
+   - `partsOf` with `"external"` has no `credentialRule`, and `CoreHandover` builds with no credential call.
+7. **Docs.** `README.md` (runbook: the choice, the parameters, the council's reading, the check bullets), `PLAN.md` as built, and the brief's Phase 7 and §6 `CredentialRule` paragraph, which are the owner's to approve with this plan: one sentence each saying a core may use an existing credential registry it names, with its governance named and checked. The pages follow in their own pull request, pinned to the merge commit.
+
+### Done when
+
+`npx hardhat test` passes in both runners with the new tests, typecheck, lint and format are clean, the new tests fail when the change is reverted (each new check is shown to catch its planted fault), and a separate review of the code and the added claims finds nothing open.
+
+### Not in this change
+
+A shared `PolicyRegistry`; a rule that accepts either of two registries; a product-by-product choice in the modules; a separate upgrader per fund manager inside one core.
 
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
