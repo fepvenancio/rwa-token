@@ -152,7 +152,7 @@ two run the same code.
 
 One core per issuer, then one product at a time, so an issuer runs many products on one set of timelocks, one guardian, one
 hook and one credential registry, and a client is verified once. Someone who wants one product alone deploys the core and
-that product, with the same code. `ignition/profiles.ts` names the combinations: `token`, `nft` (one ERC-721, a certificate or a note per token), `vault4626`, `vault7540` (a fund with one custodian and a desk),
+that product, with the same code. `ignition/profiles.ts` names the combinations: `token`, `nft` (one ERC-721, a certificate or a note per token), `intent` (one intent token with both executors), `vault4626`, `vault7540` (a fund with one custodian and a desk),
 `managed-fund` (custodians, a mandate and fees, no on-chain yield), `vault4626-invest` (an instant vault investing through a
 portfolio), and `full`, which keeps a plain settler account so that a test can price at will.
 `PROFILE` chooses one for `hardhat ignition deploy`, and `PRODUCT` one of its products; `full` and its first product are the
@@ -172,9 +172,11 @@ exact sequence on the local network, playing the council and the KYC attester, a
      - the `CredentialRegistry` (admin = deployer until `CoreHandover`, guardian = the guardian multisig) and the `CredentialRule` that reads it;
      - each other listed rule: `MinPositionRule`, `HolderRestrictionRule`, `SettlementWindowRule`, `SupplyCapRule`, `ExecutedOnlyRule`;
      - one implementation per template, shared by every product of that template;
-     - `IntentExecutor` and `DvPExecutor` (neither is attested).
+     - `IntentExecutor` and `DvPExecutor` (neither is attested);
+     - the one `SignedEntry`, if the profile sets `signedEntry` (not attested; no role and no money).
 
-   Parameters: `governance`, `council`, `guardian`, `minDelay`.
+   Parameters: `governance`, `council`, `guardian`, `minDelay`. These parts are `deployParts` in `ignition/parts.ts`, which
+   also adds parts to a core that already runs (below).
 2. **Council step.** Attest only when two independent sources agree:
    - **Reproduce:** check out the release tag and run `npm ci && npm run verify:reproducible`. This builds from clean
      several ways, fails unless they all agree, and writes `release-build/manifest.json`.
@@ -208,6 +210,14 @@ exact sequence on the local network, playing the council and the KYC attester, a
      executor to the recovery timelock, OPERATOR on each executor to the relayer;
    - hand over: DEFAULT_ADMIN_ROLE to the timelock on the credential registry and on each executor; the deployer renounces it
      there and on both timelocks; `ProxyDeployer` ownership moves to the operations account (parameter `operations`).
+
+   **Adding to a running core.** A later product whose template, rules or executors the core lacks gets them without a
+   second core. `CoreParts` (any account; parameter `guardian`) deploys every part of the profile that `CORE_HAS` does not
+   list, so `CORE_HAS` must list the core's parts exactly, by key and separated by commas; it throws when `CORE_HAS` is
+   unset or nothing is missing. Then the council attests the new rules and implementations as in step 2, then
+   `PartsHandover` (the same account, the same `CORE_HAS`) does for the new credential registry and executors what this
+   step does, before the product's `Legos` and `Product`. Another profile's `Core` would build a second set of timelocks,
+   registry and hook.
 4. **`Fund`** (the operations account), once per fund, if the products use one: a `Fund` (owner = the operations account) and
    the `FundHoldersRule` that points at it. An issuer has as many as it has funds, each with its own cap, and `FUND` chooses one
    for `hardhat ignition deploy`. Then the council attests the rule as in step 2, after reading the `Fund` it points at
@@ -218,10 +228,11 @@ exact sequence on the local network, playing the council and the KYC attester, a
    and none waits for a timelock, because a launch only adds a proxy over attested code. A product with a desk, a portfolio or
    fees first runs `Legos`, which builds them against `ProxyDeployer.predict(symbol, implementation)`, because each names its
    vault: the `NavDesk`, the `Portfolio`, a `GuardedAccount` and `ERC20CallValidator` per custodian, an `ERC4626Adapter` per
-   outside vault, and the `FeeModel` (parameters `vault`, `asset`, `feeRecipient`, `custodianAccount` for a desk with no
-   portfolio, `custodian_<key>`, `target_<key>`). The council then attests them: the portfolio as `PORTFOLIO`, each account and
-   adapter as `ADAPTER`, each validator as `VALIDATOR`, the fee model as `FEE_MODEL`. The desk is not attested: it acts by the
-   role `Product` grants it. `Product` takes their addresses as parameters and does this:
+   outside vault, the `FeeModel`, and the `Distributor` of a product that sets `distributor` (parameters `vault`, `product`,
+   `asset`, `feeRecipient`, `custodianAccount` for a desk with no portfolio, `custodian_<key>`, `target_<key>`). The council
+   then attests them: the portfolio as `PORTFOLIO`, each account and adapter as `ADAPTER`, each validator as `VALIDATOR`, the
+   fee model as `FEE_MODEL`. The desk and the distributor are not attested: the desk acts by the role `Product` grants it,
+   and the distributor for the maker and the checker `Product` grants on the token. `Product` takes the desk's, the portfolio's, the adapters' and the fee model's addresses as parameters and does this:
    - `ProxyDeployer.deploy(symbol, implementation, initData, hook, expectedRules)`. The init data carries the
      token's rule list, which the token installs on the shared hook itself. `deploy` first refuses an implementation
      that its registry has not attested as `IMPLEMENTATION`. It initialises in the same transaction, then checks that the
@@ -238,7 +249,8 @@ exact sequence on the local network, playing the council and the KYC attester, a
    - grant roles: AGENT to the issuer's account, **UPGRADER to the timelock only**, RECOVERY to the recovery timelock; MINTER and
      BURNER on a `GatedToken`, `IntentToken` or `Gated721`; EXECUTOR on an `IntentToken` to the executors the product names; SETTLER on a
      7540 vault to its `NavDesk`, and REPORTER and CHECKER to two different accounts; ALLOCATOR on a vault with a portfolio to
-     the fund manager;
+     the fund manager; with a distributor, DISTRIBUTION_MAKER to the `distributionMaker` account and CHECKER to the `checker`,
+     the same account that approves a desk's prices;
    - hand over: DEFAULT_ADMIN_ROLE to the timelock, and the operations account renounces it.
 6. **`FundOpen`** (the operations account), once per fund, after its first classes are placed (parameters `fundContract`,
    `fundHoldersRule`, `holderCap`, `timelock` and a `class_<key>` for each class): install the rule, set the cap, register the
@@ -251,7 +263,7 @@ exact sequence on the local network, playing the council and the KYC attester, a
 7. **KYC attester:** credential every holder (`CredentialRegistry.set`, or a signed credential that anyone submits). A
    vault needs no credential for its own shares, because `CredentialRule` does not judge a token's own address, but a
    vault whose asset is a gated token needs a credential that token's policy accepts. So does a custodian depositing for
-   clients, and anyone paid a client's redemption cash.
+   clients, anyone paid a client's redemption cash, and the `SignedEntry`, which pays for the investor.
 8. **Post-deploy checks** (the fixture's `assertHandedOver`):
    - the deployer and the operations account hold no role on either timelock, the policy registry, the credential registry, the products or the executors;
    - the timelock holds DEFAULT_ADMIN_ROLE everywhere and is the only UPGRADER;
@@ -279,6 +291,9 @@ exact sequence on the local network, playing the council and the KYC attester, a
    - `MINTER_ROLE`, `BURNER_ROLE`, `AGENT_ROLE` and a desk-less fund's `SETTLER_ROLE` sit with a Safe of at least 2 signers,
      unless the profile's `singleSigners` names the role, for example for an MPC custody wallet whose policy engine does the same
      job. The demo profiles name all four, so a real deployment has to state its own;
+   - the `SignedEntry`, where the profile asks for one, is the release's code with its own EIP-712 domain;
+   - a product's `Distributor` is the release's code and names that product, and its maker and its checker are different
+     accounts, each the only known account with its role;
    - `getMinDelay() ≥ 24 hours` on both timelocks.
 
    The recovery timelock's proposer and executor is the governance multisig. A compromised governance multisig is

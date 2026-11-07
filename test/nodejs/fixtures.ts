@@ -21,6 +21,7 @@ import {
   type Address,
   type Hex,
   zeroAddress,
+  zeroHash,
   parseAbi,
 } from "viem";
 
@@ -29,6 +30,7 @@ import { hasLegos, legosModule } from "../../ignition/modules/Legos.js";
 import { coreHandoverModule } from "../../ignition/modules/CoreHandover.js";
 import { fundModule } from "../../ignition/modules/Fund.js";
 import { fundOpenModule } from "../../ignition/modules/FundOpen.js";
+import { corePartsModule, partsHandoverModule } from "../../ignition/parts.js";
 import { productModule } from "../../ignition/modules/Product.js";
 import { QUALS, ROLES } from "../../ignition/modules/roles.js";
 import {
@@ -36,6 +38,7 @@ import {
   DEFAULT_POLICY,
   fundsOf,
   IMPLEMENTATION_KEY,
+  missingParts,
   PROFILES,
   type Product,
   type Profile,
@@ -109,6 +112,20 @@ const LEGO_ABI = parseAbi([
   "function redemptionGate() view returns (uint256)",
 ]);
 const SAFE_ABI = parseAbi(["function getThreshold() view returns (uint256)"]);
+const DISTRIBUTOR_ABI = parseAbi(["function TOKEN() view returns (address)"]);
+/** `SignedEntry`'s EIP-712 type, as an investor signs it. */
+export const ENTRY_TYPES = {
+  Entry: [
+    { name: "investor", type: "address" },
+    { name: "vault", type: "address" },
+    { name: "assets", type: "uint256" },
+    { name: "minShares", type: "uint256" },
+    { name: "asynchronous", type: "bool" },
+    { name: "nonce", type: "bytes32" },
+    { name: "validAfter", type: "uint256" },
+    { name: "deadline", type: "uint256" },
+  ],
+} as const;
 const ACCOUNT_ABI = parseAbi([
   "function RISK_ID() view returns (bytes32)",
   "function validatorOf(address, bytes4) view returns (address)",
@@ -180,7 +197,7 @@ export async function deployUntilProducts(connection: NetworkConnection) {
 
 export type Stack = Awaited<ReturnType<typeof deployStack>>;
 export type ProfileStack = Awaited<ReturnType<typeof deployProfile>>;
-type HandedOverKeys = "legos" | "parameters" | "profile" | "publicClient" | "wallets" | "timelock" | "recoveryTimelock" | "registry" | "hook" | "proxyDeployer" | "credentials" | "funds" | "executor" | "dvpExecutor" | "rules" | "deployed";
+type HandedOverKeys = "legos" | "parameters" | "profile" | "publicClient" | "wallets" | "timelock" | "recoveryTimelock" | "registry" | "hook" | "proxyDeployer" | "credentials" | "funds" | "executor" | "dvpExecutor" | "signedEntry" | "rules" | "deployed";
 type Parameters_ = Record<string, Address | bigint | number>;
 
 /** `Core`, then the council step. Returns what the later stages need, and a function that runs them. */
@@ -210,6 +227,7 @@ async function stages(connection: NetworkConnection, profile: Profile) {
     checker,
     allocator,
     feeRecipient,
+    distributionMaker,
   ] = await viem.getWalletClients();
   const address = (w: typeof deployer) => w.account.address;
 
@@ -224,7 +242,9 @@ async function stages(connection: NetworkConnection, profile: Profile) {
   const deployed = await ignition.deploy(core, {
     parameters: { [core.id]: { governance: address(governance), council: address(attester), guardian: address(guardian) } },
   });
-  const components = Object.fromEntries(Object.entries(deployed).map(([key, c]) => [key, { address: c.address as Address }]));
+  const components: Record<string, { address: Address }> = Object.fromEntries(
+    Object.entries(deployed).map(([key, c]) => [key, { address: c.address as Address }]),
+  );
   const has = (key: string) => components[key] !== undefined;
 
   const timelock = await viem.getContractAt("GovernanceTimelock", components.timelock.address);
@@ -232,17 +252,23 @@ async function stages(connection: NetworkConnection, profile: Profile) {
   const registry = await viem.getContractAt("PolicyRegistry", components.registry.address);
   const hook = await viem.getContractAt("ComplianceHook", components.hook.address);
   const proxyDeployer = await viem.getContractAt("ProxyDeployer", components.proxyDeployer.address);
-  const credentials = has("credentialRegistry") ? await viem.getContractAt("CredentialRegistry", components.credentialRegistry.address) : undefined;
-  const executor = has("executor") ? await viem.getContractAt("IntentExecutor", components.executor.address) : undefined;
-  const dvpExecutor = has("dvpExecutor") ? await viem.getContractAt("DvPExecutor", components.dvpExecutor.address) : undefined;
-  const rules = {
+  /** The parts the core has, attached: read again after parts are added to it. */
+  const attachParts = async () => ({
+    credentials: has("credentialRegistry") ? await viem.getContractAt("CredentialRegistry", components.credentialRegistry.address) : undefined,
+    executor: has("executor") ? await viem.getContractAt("IntentExecutor", components.executor.address) : undefined,
+    dvpExecutor: has("dvpExecutor") ? await viem.getContractAt("DvPExecutor", components.dvpExecutor.address) : undefined,
+    signedEntry: has("signedEntry") ? await viem.getContractAt("SignedEntry", components.signedEntry.address) : undefined,
+    rules: await attachRules(),
+  });
+  const attachRules = async () => ({
     credentialRule: has("credentialRule") ? await viem.getContractAt("CredentialRule", components.credentialRule.address) : undefined,
     minPositionRule: has("minPositionRule") ? await viem.getContractAt("MinPositionRule", components.minPositionRule.address) : undefined,
     holderRestrictionRule: has("holderRestrictionRule") ? await viem.getContractAt("HolderRestrictionRule", components.holderRestrictionRule.address) : undefined,
     windowRule: has("windowRule") ? await viem.getContractAt("SettlementWindowRule", components.windowRule.address) : undefined,
     supplyCapRule: has("supplyCapRule") ? await viem.getContractAt("SupplyCapRule", components.supplyCapRule.address) : undefined,
     executedOnlyRule: has("executedOnlyRule") ? await viem.getContractAt("ExecutedOnlyRule", components.executedOnlyRule.address) : undefined,
-  };
+  });
+  let { credentials, executor, dvpExecutor, signedEntry, rules } = await attachParts();
 
   const attest = async (target: Address, kind: number, uri: string) => {
     const code = await publicClient.getCode({ address: target });
@@ -251,13 +277,15 @@ async function stages(connection: NetworkConnection, profile: Profile) {
 
   // Council step: the rules, the one shared hook and the implementations. The credential rule's codehash covers the
   // registry's address and not its code, so the council reads the registry first (its admin, its attesters, its code).
-  for (const rule of Object.values(rules)) {
-    if (rule !== undefined) await attest(rule.address, ATTEST.RULE, `ipfs://rule-review/${rule.address}`);
-  }
+  /** The council's attestations for these parts of the core: its rules and its implementations. */
+  const attestParts = async (keys: readonly string[]) => {
+    for (const key of keys) {
+      if (key in rules) await attest(components[key].address, ATTEST.RULE, `ipfs://rule-review/${components[key].address}`);
+      if (Object.values(IMPLEMENTATION_KEY).includes(key)) await attest(components[key].address, ATTEST.IMPLEMENTATION, `ipfs://impl-review/${components[key].address}`);
+    }
+  };
+  await attestParts(Object.keys(components));
   await attest(hook.address, ATTEST.HOOK, `ipfs://hook-review/${hook.address}`);
-  for (const key of Object.values(IMPLEMENTATION_KEY)) {
-    if (has(key)) await attest(components[key].address, ATTEST.IMPLEMENTATION, `ipfs://impl-review/${components[key].address}`);
-  }
 
   const parameters: Parameters_ = {
     ...Object.fromEntries(Object.entries(components).map(([key, c]) => [key, c.address])),
@@ -274,12 +302,13 @@ async function stages(connection: NetworkConnection, profile: Profile) {
     reporter: address(reporter),
     checker: address(checker),
     allocator: address(allocator),
+    distributionMaker: address(distributionMaker),
     windowOpen: WINDOW_OPEN,
     windowClose: WINDOW_CLOSE,
     windowDays: rules.windowRule === undefined ? 0 : await rules.windowRule.read.MON_TO_FRI(),
   };
 
-  const wallets = { deployer, governance, attester, guardian, minter, burner, agent, operator, settler, custody, recovery, kyc, operations, reporter, checker, allocator, feeRecipient };
+  const wallets = { deployer, governance, attester, guardian, minter, burner, agent, operator, settler, custody, recovery, kyc, operations, reporter, checker, allocator, feeRecipient, distributionMaker };
 
   /** A fund as the stack knows it: its contract, its rule, its intended cap and the classes it opened with. */
   type FundStack = {
@@ -307,7 +336,9 @@ async function stages(connection: NetworkConnection, profile: Profile) {
     }
   };
 
-  const launch = async (p: Parameters_) => {
+  const launch = async (given: Parameters_) => {
+    // A copy: parts added to the core later add their addresses to it.
+    const p: Parameters_ = { ...given };
     const handover = coreHandoverModule(profile);
     await ignition.deploy(handover, { parameters: { [handover.id]: p } });
 
@@ -350,6 +381,7 @@ async function stages(connection: NetworkConnection, profile: Profile) {
           [module.id]: {
             ...p,
             vault,
+            product: vault,
             asset: assetAddress,
             custodianAccount: address(custody),
             feeRecipient: address(feeRecipient),
@@ -364,7 +396,7 @@ async function stages(connection: NetworkConnection, profile: Profile) {
         key === "portfolio" ? ATTEST.PORTFOLIO
         : key.startsWith("validator_") ? ATTEST.VALIDATOR
         : key === "feeModel" ? ATTEST.FEE_MODEL
-        : key === "navDesk" ? undefined
+        : key === "navDesk" || key === "distributor" ? undefined
         : ATTEST.ADAPTER;
       for (const [key, target] of Object.entries(addresses)) {
         const kind = kindOf(key);
@@ -405,6 +437,35 @@ async function stages(connection: NetworkConnection, profile: Profile) {
       return contract;
     };
 
+    /**
+     * Adds to the running core what these products, or a signed entry, need and it lacks, as an issuer would: `CoreParts`,
+     * the council's attestations, then `PartsHandover`. The stack then reads the new parts. Returns the parts added.
+     */
+    const addParts = async (wanted: Pick<Profile, "products" | "signedEntry">) => {
+      const present = Object.keys(components);
+      const parts = missingParts(wanted, present);
+      const module = corePartsModule(parts, present);
+      const added = await ignition.deploy(module, { parameters: { [module.id]: { guardian: address(guardian) } } });
+      for (const [key, c] of Object.entries(added)) {
+        components[key] = { address: (c as { address: Address }).address };
+        p[key] = components[key].address;
+      }
+      await attestParts(Object.keys(added));
+      const partsHandover = partsHandoverModule(parts);
+      await ignition.deploy(partsHandover, { parameters: { [partsHandover.id]: p } });
+      ({ credentials, executor, dvpExecutor, signedEntry, rules } = await attachParts());
+      if (rules.windowRule !== undefined) p.windowDays = await rules.windowRule.read.MON_TO_FRI();
+      Object.assign(stack, {
+        credentials,
+        executor,
+        dvpExecutor,
+        signedEntry,
+        rules: { ...rules, fundHoldersRule: stack.rules.fundHoldersRule },
+        profile: { ...stack.profile, signedEntry: stack.profile.signedEntry === true || wanted.signedEntry === true },
+      });
+      return parts;
+    };
+
     const products: { product: Product; contract: Awaited<ReturnType<typeof attach>> }[] = [];
     for (const product of profile.products) products.push({ product, contract: await place(product) });
 
@@ -439,6 +500,7 @@ async function stages(connection: NetworkConnection, profile: Profile) {
       fund: firstFund?.fund,
       executor,
       dvpExecutor,
+      signedEntry,
       rules: { ...rules, fundHoldersRule: firstFund?.rule },
       asset,
       deployed: products,
@@ -446,7 +508,8 @@ async function stages(connection: NetworkConnection, profile: Profile) {
       legos,
       parameters: p,
       place,
-      profile,
+      addParts,
+      profile: profile as Profile,
     };
     await assertHandedOver(stack);
     return stack;
@@ -481,7 +544,10 @@ async function stages(connection: NetworkConnection, profile: Profile) {
  * - MINTER_ROLE, BURNER_ROLE, AGENT_ROLE and a desk-less vault's SETTLER_ROLE sit with a Safe of at least two signers,
  *   unless the profile names the role as an exception;
  * - the recovery timelock holds exactly RECOVERY_ROLE on each product, the executors, the credential registry and the
- *   main timelock (nothing else, nowhere else), has no cancellers, and the guardian holds nothing on it.
+ *   main timelock (nothing else, nowhere else), has no cancellers, and the guardian holds nothing on it;
+ * - a profile that asks for a signed entry has one, whose code is the release's and whose EIP-712 domain is its own;
+ * - a product's distributor is the release's code, names this product, and its maker and its checker are different
+ *   accounts, each the only account the stack knows to hold its role on the token.
  */
 export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
   const deployer = s.wallets.deployer.account.address;
@@ -559,6 +625,40 @@ export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
   for (const executor of executors) {
     assert.deepEqual(await heldBy(executor, s.wallets.operator.account.address), [ROLES.OPERATOR], `executor operator on ${executor.address}`);
     assert.deepEqual(await heldBy(executor, guardian), [ROLES.GUARDIAN], `executor guardian on ${executor.address}`);
+  }
+  /** Whether the code at `address` is the release's, leaving out its immutables, which the caller checks by reading them. */
+  const isRelease = async (address: Address, name: string) => {
+    const artifact = await hre.artifacts.readArtifact(name);
+    let expected = artifact.deployedBytecode.slice(2).toLowerCase();
+    let actual = ((await s.publicClient.getCode({ address })) ?? "0x").slice(2).toLowerCase();
+    for (const { start, length } of Object.values(artifact.immutableReferences ?? {}).flat()) {
+      const blank = "00".repeat(length);
+      expected = expected.slice(0, start * 2) + blank + expected.slice((start + length) * 2);
+      actual = actual.slice(0, start * 2) + blank + actual.slice((start + length) * 2);
+    }
+    return actual.length > 0 && actual === expected;
+  };
+  // The signed entry. Its immutables are its EIP-712 domain, so a sample entry's hash must be the one an investor signs
+  // for this chain and this address: that reads every one of them.
+  if (s.profile.signedEntry === true || s.signedEntry !== undefined) {
+    assert.ok(s.signedEntry !== undefined, "the profile asks for a signed entry and the stack has no signed entry");
+    assert.ok(await isRelease(s.signedEntry.address, "SignedEntry"), `the signed entry ${s.signedEntry.address} is not the release's`);
+    const sample = {
+      investor: s.signedEntry.address,
+      vault: s.signedEntry.address,
+      assets: 1n,
+      minShares: 1n,
+      asynchronous: false,
+      nonce: zeroHash,
+      validAfter: 0n,
+      deadline: 1n,
+    };
+    const domain = { name: "SignedEntry", version: "1", chainId: await s.publicClient.getChainId(), verifyingContract: s.signedEntry.address };
+    assert.equal(
+      await s.signedEntry.read.entryHash([sample]),
+      hashTypedData({ domain, types: ENTRY_TYPES, primaryType: "Entry", message: sample }),
+      "the signed entry hashes entries for another domain",
+    );
   }
   // EXECUTOR_ROLE on an intent token: the executors it names and no account the stack knows about, so nothing can run a
   // signed intent without going through one of them.
@@ -714,6 +814,16 @@ export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
         await capsAre(account, custodian, `account_${custodian.key}`);
       }
       for (const target of product.portfolio.targets ?? []) await capsAre(legos[`adapter_${target.key}`], target, `adapter_${target.key}`);
+    }
+    if (product.distributor === true) {
+      const { distributor } = legos;
+      assert.ok(distributor !== undefined, `${contract.address} has no distributor`);
+      assert.ok(await isRelease(distributor, "Distributor"), `the distributor of ${contract.address} is not the release's`);
+      const token = await s.publicClient.readContract({ address: distributor, abi: DISTRIBUTOR_ABI, functionName: "TOKEN" });
+      assert.ok(isAddressEqual(token, contract.address), `the distributor of ${contract.address} names another token`);
+      assert.ok(!isAddressEqual(named.distributionMaker, named.checker), `the distribution maker and checker of ${contract.address} are the same account`);
+      await heldOnlyBy(ROLES.DISTRIBUTION_MAKER, named.distributionMaker, "distribution maker");
+      await heldOnlyBy(ROLES.CHECKER, named.checker, "checker");
     }
     if (product.fees !== undefined) {
       assert.ok(await isSame(legos.navDesk ?? contract.address, "feeModel", legos.feeModel), `the fee model of ${contract.address} is not plugged in`);

@@ -14,6 +14,7 @@ export const ROLES = {
   SETTLER: keccak256(toHex("SETTLER_ROLE")),
   REPORTER: keccak256(toHex("REPORTER_ROLE")),
   CHECKER: keccak256(toHex("CHECKER_ROLE")),
+  DISTRIBUTION_MAKER: keccak256(toHex("DISTRIBUTION_MAKER_ROLE")),
   ALLOCATOR: keccak256(toHex("ALLOCATOR_ROLE")),
   OPERATOR: keccak256(toHex("OPERATOR_ROLE")),
   CANCELLER: keccak256(toHex("CANCELLER_ROLE")),

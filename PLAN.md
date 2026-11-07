@@ -3859,6 +3859,55 @@ The four places the review of `6fc1953` found in `CLAUDE.md`:
 - Rule 4 names the reopenings of 2026-10-17, 2026-10-22, 2026-10-24 and 2026-10-27 that `InterfaceFreeze.t.sol` dates.
 - Rule 15: the 25 TypeScript and shell sources gain `SPDX-License-Identifier: UNLICENSED` on their first line (after the shebang in `scripts/fetch-tool.sh`), so the rule holds as written.
 
+## Every contract deployable alone or as a whole (planned 2026-11-06; approved by the owner the same day: "Yes, as recommended")
+
+The owner, 2026-11-05: "I might want to deploy as a single contract each of them or as a whole." A product always sits on a core (the timelocks, the registry, the shared hook, `ProxyDeployer`), so alone means one product on a core of its own, or added to a core that already runs. The contracts do not change: this is deployment code, its tests and the docs.
+
+### What works today
+
+`token` (`GatedToken`), `nft` (`Gated721`), `vault4626`, `vault7540`, `managed-fund`, `vault4626-invest` and `full` each deploy a core and their products, and `test/nodejs/products.test.ts` runs the first four alone. A later product launches on a running core (`one core, many products`), but only one whose template, rules and executors that core already deployed.
+
+### The gaps
+
+1. **`IntentToken` alone.** It is deployed only inside `full`, as a class of the fund with both executors.
+2. **A later product the core was not built for.** `Core` deploys only what its profile's products use. An issuer that started with `token` and later wants a vault, an NFT, an intent token or a rule it has not used has no module that adds the missing implementation, rule or executor to the core it runs: running another profile's `Core` builds a second core, with new timelocks, a new registry and a new hook.
+3. **`SignedEntry`** has no module.
+4. **`Distributor`** has no module. The brief says it waits for the first product with cash flows; the owner's instruction asks for it now.
+
+### What changes
+
+1. **`intent` profile.** One `IntentToken` with the plain rules (`CredentialRule`, `HolderRestrictionRule`) and the executors decision 1 picks. `assertUsable` already covers it.
+2. **The core in two parts.** `Core` keeps the parts every issuer has once (the two timelocks, the registry, the hook, `ProxyDeployer`) and the parts a profile uses move into a module that takes those addresses as parameters (`CoreParts`: the credential registry and rule, the other rules, one implementation per template, the executors). A whole deployment runs both, so its addresses and the hand-over check stay as they are. Adding to a running core runs `CoreParts` with only what is missing: the council attests the new rules and implementations as it does today, and a `PartsHandover` gives the new executors their operator, recovery and guardian and hands them to the timelock. A part the core already has is never deployed twice; the module throws when asked to, before anything is sent. A credential rule cannot be added to a core that has none without a credential registry, so that case deploys both, as `Core` does today.
+3. **`SignedEntry`.** It takes no constructor argument, holds no money and no role, and serves every vault of the chain. A `SignedEntry` module deploys it once per issuer, alone or with a core, when a profile asks for it. A vault accepts it only if its policy does, so the KYC attester credentials its address like any payer, outside the module, as the runbook already says for holders.
+4. **`Distributor`.** One per token, its only argument the token. `Legos` deploys it against `ProxyDeployer.predict`, like the other legos, for a product that sets `distributor: true`, and `Product` grants the token's `DISTRIBUTION_MAKER_ROLE` and `CHECKER_ROLE` to the accounts the parameters name, before the hand-over. It is not attested, as the desk is not: it holds money only between an approval and the claims, and acts by roles the token grants.
+5. **The post-deploy check.** For `SignedEntry`, the code at its address is the artifact's. For a `Distributor`, `TOKEN()` is its product, the maker and the checker are different accounts, and no account the stack knows holds either role besides them. The role scan reads a token's roles from the token's ABI, which does not name `DISTRIBUTION_MAKER_ROLE`, so the check asks for it by name. Adding parts to a running core: the stack still passes the check afterwards.
+6. **Tests first** (`test/nodejs/products.test.ts`, `deployment.test.ts`): the intent token alone; a `token` core that later takes a vault, an NFT and an intent token with its executors, each passing the hand-over check; asking `CoreParts` for a part the core has throws; a signed entry on a vault deployed by the modules; a distribution proposed, approved and claimed on a deployed token; and the check refusing a distributor naming another token, one maker who is also the checker, and a stray maker.
+7. **Docs.** `README.md` runbook and profiles, `docs/deployment.html` (the stages, the profiles, the check), the `SignedEntry` and `Distributor` pages (how each is deployed), and a re-pin. In the brief, §1 item 8 ("no deployment module yet") and Phase 7, which are the owner's to approve with this plan.
+
+### Decisions for the owner (recommendation first)
+
+| # | Question | Recommendation | Alternative |
+|---|---|---|---|
+| 1 | Which executors does the `intent` profile deploy? | Both, the intent executor and the DvP executor, as in `full`: an intent token's point is a signed movement, and a trade against cash is the main one | The intent executor alone, and DvP added later through `CoreParts` |
+| 2 | One `SignedEntry` per issuer, or one per vault? | One per issuer: it has no state about a vault and no role, so one serves them all, and one credential admits it everywhere | One per vault, so each fund credentials its own |
+| 3 | On a 7540 with a desk, the token's `CHECKER_ROLE` is the price checker. A `Distributor` on that vault asks the same role. | Accept it, and have the check refuse a maker who is also the checker: the same person approves prices and distributions, never their own | A role of its own for distribution approvals, which changes `Distributor` and its interface (rule 4) |
+| 4 | Split `Core` as in point 2? | Yes: it is the one way to add a template to a running core without a second set of timelocks | Leave `Core` whole and accept that an issuer picks every template it will ever use on day one (`full`) |
+
+### Size
+
+Ignition modules and profiles, the fixture, two test files, and the docs. No contract, interface or test in Solidity changes.
+
+### As built
+
+- **The four answers as recommended.** `intent` deploys both executors; one `SignedEntry` per issuer; a distributor's checker is the `checker` account, the desk's where there is one; `Core` is split.
+- **The split.** `deployParts` in `ignition/parts.ts` deploys the parts, and `Core` calls it for its profile, so a whole deployment has the same contracts and addresses as before. `corePartsModule(parts, present)` throws when `parts` is empty or names a part in `present`. `handOverParts`, in the same file, holds the credential registry's and the executors' steps, and `CoreHandover` calls it; `partsHandoverModule` throws when there is nothing to hand over. `partsOf` and `missingParts` in `profiles.ts` give a profile's parts by key. The command-line entries are `ignition/modules/CoreParts.ts` and `PartsHandover.ts`: `CORE_HAS` must list the running core's parts exactly, both take the same list, and an unset `CORE_HAS` throws, because an empty one would read every part as missing and deploy a second credential registry. The library sits outside `ignition/modules` so the tests import it without building a module from the environment.
+- **`SignedEntry` is a part, not a module of its own.** It deploys through `CoreParts`, alone on a running core or with `Core` for a profile that sets `signedEntry`, which is simpler than a third module for one contract with no constructor argument. The plan said a module.
+- **The check reads code with the immutables left out.** `isRelease` blanks the artifact's immutable positions on both sides and compares, then checks the immutables another way: a sample entry's `entryHash` must equal the EIP-712 hash for `SignedEntry`, version `1`, this chain and this address, which reads every domain immutable, and a distributor's `TOKEN()` must be its product. The plan named the code comparison for the signed entry only; the distributor gets it too, because a funder approves the distributor and a substitute could take the funding.
+- **The pages follow in their own pull request,** pinned to this one's merge commit: they cite `CoreParts.ts` and `PartsHandover.ts`, which do not exist at the pages' current pin. `README.md`, the brief and this file change here.
+- **A separate review** of the change found 8 problems, all fixed: the signed entry's domain was not really checked (`eip712Domain()` reports the chain and the address live), an unset `CORE_HAS` would have deployed every part again, `PartsHandover` could run empty, the tests imported a module file that builds from the environment, and four wording points in `README.md` and the brief. Two of its points are page points and go with the pages.
+- **A fixture lesson.** `loadFixture` rewinds the chain but returns the same object, so a test that adds parts deploys its own stack.
+- **Tests:** seven new in `products.test.ts`, written first and failing on the missing module. `npx hardhat test`: `1984 passing (1798 solidity, 186 nodejs)`. Ten planted bugs in the modules (a present part not refused, an executor left with the deployer, a missing operator, the signed entry or the DvP executor left out, the maker's grant missing or given to the checker, no checker without a desk, the distributor naming another address, `CoreHandover` skipping the parts): 10 of 10 caught.
+
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
 2. Credential layer: none left. On 2026-10-30 the owner confirmed decisions 11, 12, 13, 15, 16 and 17 as built (17 at the measured +8,179 gas on a transfer). Decision 14 is moot, since `IdentityRule` was removed in the cleanup. Decisions 8 and 9 are recorded in the credential section's table.
