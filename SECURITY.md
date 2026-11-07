@@ -43,8 +43,9 @@ In scope, all under `contracts/` (`.t.sol` files and `contracts/test/` are test 
 | Distribution | `distribution/Distributor` (immutable, one per token, not attested: it holds its own funding and asks the token for roles) |
 | Interfaces | `interfaces/*` (frozen; ERC-165 ids, event topics and reason codes pinned by `contracts/test/InterfaceFreeze.t.sol`; the owner has reopened them on instruction several times, and `InterfaceFreeze.t.sol` dates each re-pin, most recently 2026-11-05 for the shared core and the ERC-721 template; they are frozen again) |
 
-Also in scope: `ignition/modules/{Core,CoreHandover,Fund,Legos,Product,FundOpen,roles}.ts` and `ignition/profiles.ts`, which carry
-the deployment order, role grants, the hand-over to the timelock and each product's rule list.
+Also in scope: `ignition/modules/{Core,CoreHandover,CoreParts,PartsHandover,Fund,Legos,Product,FundOpen,roles}.ts`,
+`ignition/parts.ts` and `ignition/profiles.ts`, which carry the deployment order, the parts a core deploys and their hand-over,
+role grants, the hand-over to the timelock and each product's rule list.
 
 Out of scope: OpenZeppelin 5.6.1 (`@openzeppelin/contracts`, `-upgradeable`; `TimelockController` is the base of `GovernanceTimelock`, which both timelocks are),
 the KYC attesters' off-chain verification, and test mocks.
@@ -512,6 +513,8 @@ Each row is a bug deliberately planted, the tests that caught it, then the file 
 | The outside list of 2026-11-05, small fixes (2026-11-05) | a priced write-off without the liquidity term, at `>` or against zero; the 7540's `maxDeposit` or `maxRedeem` back on what was paid, or always zero; `Fund`'s token or hook code check dropped; `Distributor.approve`'s expiry dropped or at `>=`; `cancelEntry`'s used-nonce check dropped; `adopt` without its own proposal check, a first plug that always or never restarts the clock, the adopted clock not recorded; the zero-to-zero pre-flight dropped or on `||`; in the hand-over check each new question skipped: the zero address, the known accounts, the validator's attestation, the permission, the caps, the targets | 23 of 23 caught |
 | A soft hurdle's catch-up carried (2026-11-05) | in the model what was paid not added back, the comparison with it at `<`, a band count carrying nothing or moving the mark, caught up at `<`, what was paid not cleared when the mark moves, a hard hurdle never caught up, a figure too large let through; on the desk what was paid not passed, not stored at execution, not adopted, left out of the hash, or kept through a period with no shares; on the 4626 not passed, not stored, or kept with no shares | 17 planted, 14 caught at first. Two survivors, what was paid kept once everyone has left on the desk and on the 4626, are caught by `test_WhenEveryoneHasLeftWhatWasPaidRestarts` on each. The third, the 4626 returning zero while there is no price, is equivalent: `_accrue` stops before counting then, and no other caller stores the value |
 | `Gated721` (2026-11-05) | the burner's freeze exemption dropped; approval checked after the hook instead of before; `canTransfer` counting ownership; and, before the fix of the outside review's first point, a burn's pre-flight taking the holder as its operator | 1, 2, 1 and 3 failing |
+| Every product deployable alone or as a whole (2026-11-06) | a part already in the core not refused; an executor left with the deployer; no operator on an executor; the signed entry or the DvP executor left out of the parts; the distribution maker's grant missing or given to the checker; no checker without a desk; the distributor naming another address; `CoreHandover` skipping the parts | 10 planted, all caught |
+| Input checks in the deploy scripts (2026-11-07) | `CORE_HAS` naming nothing accepted, its entries not trimmed, an unknown key accepted, the credential registry or the implementation keys not known; executors allowed on any template or refused on a plain token only; decimals allowed on any template or refused on an intent token | 9 planted, all caught |
 
 ## 6. Toolchain supply chain
 

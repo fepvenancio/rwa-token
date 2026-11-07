@@ -225,9 +225,9 @@ exact sequence on the local network, playing the council and the KYC attester, a
    manifest's `Fund` entry, filling its `immutableSlots` (the registry address) as for the rules, and that its `owner()` is the
    operations account. `Fund` itself is not attested.
 5. **`Legos`, then `Product`** (the operations account), once per product. The first and the fiftieth follow this same path,
-   and none waits for a timelock, because a launch only adds a proxy over attested code. A product with a desk, a portfolio or
-   fees first runs `Legos`, which builds them against `ProxyDeployer.predict(symbol, implementation)`, because each names its
-   vault: the `NavDesk`, the `Portfolio`, a `GuardedAccount` and `ERC20CallValidator` per custodian, an `ERC4626Adapter` per
+   and none waits for a timelock, because a launch only adds a proxy over attested code. A product with a desk, a portfolio,
+   fees or a distributor first runs `Legos`, which builds them against `ProxyDeployer.predict(symbol, implementation)`, because each names its
+   vault or token: the `NavDesk`, the `Portfolio`, a `GuardedAccount` and `ERC20CallValidator` per custodian, an `ERC4626Adapter` per
    outside vault, the `FeeModel`, and the `Distributor` of a product that sets `distributor` (parameters `vault`, `product`,
    `asset`, `feeRecipient`, `custodianAccount` for a desk with no portfolio, `custodian_<key>`, `target_<key>`). The council
    then attests them: the portfolio as `PORTFOLIO`, each account and adapter as `ADAPTER`, each validator as `VALIDATOR`, the

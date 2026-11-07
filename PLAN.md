@@ -3912,8 +3912,24 @@ Ignition modules and profiles, the fixture, two test files, and the docs. No con
 
 The pages pull request after #40, which merged as `8eb16b0`. All 42 pages are pinned to it. `deployment` gains a section on adding parts to a running core (`CoreParts`, `PartsHandover`, `CORE_HAS` and what it trusts), the signed entry in `Core`, the distributor among the legos and its grants, the `intent` profile (eight profiles), and the check's rows for the signed entry and the distributor. `SignedEntry`, `Distributor`, `roles`, `index` and `money` say how each is deployed now; `ComplianceHook` lists the `intent` profile's rules; both executor pages name `intent` and `CoreParts`. The two page points from #40's review are in: the signed entry's check is described as a sample `entryHash`, and `CORE_HAS` as an exact list.
 
+## Input checks in the deploy scripts, from an outside list (approved by the owner 2026-11-07: "Yes, fix them first")
+
+An outside list against `8eb16b0` raised seven points that hold, all low. Six change here; the seventh is kept.
+
+1. **`coreHas()` refuses a list that names nothing or names an unknown key.** `CORE_HAS=""` or `" , "` was read as an empty list, which deploys every part again, a second credential registry among them: the case the unset check exists for. A mistyped key (`GatedToken` for `gatedImpl`) was ignored and its part deployed again. Entries are trimmed; an empty result throws, and so does a key that is neither a core contract (`timelock`, `recoveryTimelock`, `registry`, `hook`, `proxyDeployer`, `credentialRegistry`) nor a part (`PART_KEYS` in `ignition/profiles.ts`: the rule keys, the implementation keys, `executor`, `dvpExecutor`, `signedEntry`).
+2. **`assertUsable` refuses `executors` on anything but an `IntentToken`**, which made `Core` deploy an executor and `Product` grant it `EXECUTOR_ROLE` on a token that cannot run intents, and **`decimals` on anything but a `GatedToken` or an `IntentToken`**, which `Product` ignored. `assertUsable` runs when `Legos` or `Product` is built, as before: `Core` does not call it, so for such a profile `Core` still deploys the executor, and nothing is granted on it.
+3. **`SECURITY.md`:** the deployment scope names `ignition/parts.ts`, `CoreParts.ts` and `PartsHandover.ts`, and the mutation table gains the row for #40's ten planted bugs and one for this change's.
+4. **`README.md`:** the `Legos` step says a product with a distributor runs it too.
+5. **This file:** open question 4 no longer says the NFT pages are to follow; they landed in #36.
+
+Kept: `Legos` takes the same predicted address as `vault` (desk, portfolio) and `product` (distributor). A distributor can sit on a plain token, where `vault` is the wrong word, and renaming a parameter would change what operators pass today.
+
+Tests first: the refusals in `test/nodejs/products.test.ts` (`coreHas`) and `test/nodejs/legos.test.ts` (`assertUsable`), shown failing before the change.
+
+As built: the six tests failed first (5 `assertUsable` cases, and the `coreHas` test on `CORE_HAS=""`), each with "Missing expected exception". `npx hardhat test`: `1989 passing (1798 solidity, 191 nodejs)`; typecheck and format clean. Nine planted bugs, all caught (listed in `SECURITY.md` §5). The pages, pinned to `8eb16b0`, still say `CORE_HAS` is refused only when unset and list `assertUsable`'s refusals without these two; they change with the next re-pin.
+
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
 2. Credential layer: none left. On 2026-10-30 the owner confirmed decisions 11, 12, 13, 15, 16 and 17 as built (17 at the measured +8,179 gas on a transfer). Decision 14 is moot, since `IdentityRule` was removed in the cleanup. Decisions 8 and 9 are recorded in the credential section's table.
 3. Redemption gate and the second contract: built and landed in #24 and #25. Open from its review: dust in a fund everyone has left ends the performance fee. Fixed in #27; the pages at `bfb424e` describe it. What it leaves, dust left on purpose and the 4626's management fee on a small or low-decimal fund, is in `SECURITY.md`.
-4. The NFT template: answered 2026-11-05, A, and built (the core split and `Gated721`). The HTML pages follow.
+4. The NFT template: answered 2026-11-05, A, and built (the core split and `Gated721`); its pages landed in #36.

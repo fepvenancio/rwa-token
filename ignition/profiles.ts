@@ -125,6 +125,14 @@ export function assertUsable(product: Product) {
   if (product.custodyOnly && (product.portfolio?.targets ?? []).length !== 0) {
     throw new Error(`${product.key}: custody only, and an ERC4626Adapter is on-chain yield`);
   }
+  // Only an IntentToken runs signed intents, so an executor's role on anything else would do nothing.
+  if ((product.executors ?? []).length !== 0 && product.template !== "IntentToken") {
+    throw new Error(`${product.key}: only an IntentToken has executors`);
+  }
+  // `Product` passes decimals to the two token templates only: a vault's follow its asset, and an NFT has none.
+  if (product.decimals !== undefined && product.template !== "GatedToken" && product.template !== "IntentToken") {
+    throw new Error(`${product.key}: ${product.template} cannot set its decimals`);
+  }
   const listsFundRule = product.rules.includes("fundHoldersRule");
   if (listsFundRule && product.fund === undefined) throw new Error(`${product.key}: fundHoldersRule needs a fund`);
   if (!listsFundRule && product.fund !== undefined) throw new Error(`${product.key}: names a fund without fundHoldersRule`);
@@ -132,6 +140,9 @@ export function assertUsable(product: Product) {
 
 /** The rules `CoreParts` deploys, in this order. The fund rule comes with its fund, from the `Fund` module. */
 const CORE_RULES: readonly RuleKey[] = ["credentialRule", "minPositionRule", "holderRestrictionRule", "windowRule", "supplyCapRule", "executedOnlyRule"];
+
+/** Every key a part of a core can have: the rules, the implementations, the executors and the signed entry. */
+export const PART_KEYS: readonly string[] = [...CORE_RULES, ...Object.values(IMPLEMENTATION_KEY), "executor", "dvpExecutor", "signedEntry"];
 
 /**
  * What a core needs for these products, by the key each part has in the core and in the parameters: the rules, one
