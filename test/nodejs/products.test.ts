@@ -3,13 +3,13 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { network } from "hardhat";
-import { encodeAbiParameters, encodeFunctionData, getAddress, isAddressEqual, keccak256, maxUint256, toHex, zeroAddress, zeroHash } from "viem";
+import { type Address, encodeAbiParameters, encodeFunctionData, getAddress, isAddressEqual, keccak256, maxUint256, toHex, zeroAddress, zeroHash } from "viem";
 
 import { fundOpenModule } from "../../ignition/modules/FundOpen.js";
 import { productModule } from "../../ignition/modules/Product.js";
 import { QUALS } from "../../ignition/modules/roles.js";
 import { coreHas, corePartsModule, partsHandoverModule } from "../../ignition/parts.js";
-import { DEMO_SIGNERS, missingParts, PROFILES, type Product, type Profile } from "../../ignition/profiles.js";
+import { DEFAULT_POLICY, DEMO_SIGNERS, missingParts, partsOf, PROFILES, type Product, type Profile } from "../../ignition/profiles.js";
 import { assertHandedOver, deployProduct, deployProfile, deployStack, deverify, INTENT_TYPES, PAR, REASONS, RECEIVE_AUTHORIZATION_TYPES, settlePeriod, settleThroughDesk, verify } from "./fixtures.js";
 
 const PLAIN = ["credentialRule", "holderRestrictionRule"] as const;
@@ -722,5 +722,140 @@ describe("a distribution on a deployed token", async function () {
     await networkHelpers.setBalance(s.timelock.address, 10n ** 18n);
     await token.write.grantRole([maker, s.wallets.agent.account.address], { account: s.timelock.address });
     await assert.rejects(assertHandedOver(s), /is also distribution maker/);
+  });
+});
+
+describe("an issuer on another issuer's credential registry", async function () {
+  const connection = await network.create();
+  const { viem, networkHelpers } = connection;
+  const IMPLEMENTATION_SLOT = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
+  const IMPLEMENTATION = 3;
+
+  /** A solo issuer's one token, on a core that names an existing credential rule instead of deploying its own. */
+  const solo: Profile = {
+    id: "solo",
+    singleSigners: DEMO_SIGNERS,
+    credentials: "external",
+    products: [{ key: "solo", template: "GatedToken", name: "Solo Token", symbol: "SOLO", rules: PLAIN }],
+  };
+  /** The parameters that name the registry and the governance the solo issuer accepts: the whole deployment's. */
+  const namedBy = (whole: Awaited<ReturnType<typeof deployProfile>>) => ({
+    credentialRule: whole.rules.credentialRule!.address,
+    credentialAdmin: whole.timelock.address,
+    credentialGuardian: whole.wallets.guardian.account.address,
+  });
+
+  async function twoIssuers() {
+    const whole = await deployProfile(connection, PROFILES.full);
+    const issuer = await deployProfile(connection, solo, namedBy(whole));
+    return { whole, issuer };
+  }
+
+  it("the solo core deploys no registry or rule, and an investor credentialed once holds both issuers' tokens", async function () {
+    const { whole, issuer } = await networkHelpers.loadFixture(twoIssuers);
+    assert.deepEqual(partsOf(solo), ["holderRestrictionRule", "gatedImpl"]);
+    assert.deepEqual(missingParts({ ...solo, products: [...solo.products, PROFILES.intent.products[0]] }, ["holderRestrictionRule", "gatedImpl"]), ["intentImpl", "executor", "dvpExecutor"]);
+    assert.equal(issuer.components.credentialRegistry, undefined);
+    assert.equal(issuer.components.credentialRule, undefined);
+    assert.ok(isAddressEqual(issuer.credentials!.address, whole.credentials!.address));
+
+    const wholeToken = await viem.getContractAt("IntentToken", whole.products.intent.address);
+    const soloToken = await viem.getContractAt("GatedToken", issuer.products.solo.address);
+    const [alice, eve] = [whole.holders.alice, whole.holders.eve];
+    await verify(whole, alice);
+    await wholeToken.write.mint([alice.account.address, 10n], { account: whole.wallets.minter.account });
+    await soloToken.write.mint([alice.account.address, 10n], { account: issuer.wallets.minter.account });
+    assert.equal(await wholeToken.read.balanceOf([alice.account.address]), 10n);
+    assert.equal(await soloToken.read.balanceOf([alice.account.address]), 10n);
+    assert.deepEqual(await soloToken.read.canTransferWithReason([alice.account.address, eve.account.address, 1n]), [false, REASONS.RECEIVER_NOT_VERIFIED]);
+  });
+
+  it("a later product on the solo core adds its implementation and still no registry", async function () {
+    const { whole } = await networkHelpers.loadFixture(twoIssuers);
+    // Its own deployment: adding parts extends the stack object, which a shared fixture would hand to the next test.
+    const issuer = await deployProfile(connection, solo, namedBy(whole));
+    const note: Product = { key: "soloNote", template: "Gated721", name: "Solo Note", symbol: "sNOTE", rules: PLAIN };
+    assert.deepEqual(await issuer.addParts({ products: [note] }), ["nftImpl"]);
+    await deployProduct(issuer, note);
+    assert.equal(issuer.components.credentialRegistry, undefined);
+    await assertHandedOver({ ...issuer, deployed: [...issuer.deployed, { product: note, contract: issuer.products.soloNote }] });
+  });
+
+  it("the registry's guardian blocks an investor, and both issuers' tokens refuse to deliver to it", async function () {
+    const { whole, issuer } = await networkHelpers.loadFixture(twoIssuers);
+    const alice = whole.holders.alice.account.address;
+    await verify(whole, alice);
+    const tokens = [await viem.getContractAt("IntentToken", whole.products.intent.address), await viem.getContractAt("GatedToken", issuer.products.solo.address)];
+    for (const token of tokens) assert.equal(await token.read.canReceive([alice]), true);
+    await whole.credentials!.write.blockSubject([alice], { account: whole.wallets.guardian.account });
+    for (const token of tokens) {
+      assert.equal(await token.read.canReceive([alice]), false);
+      assert.deepEqual(await token.read.canTransferWithReason([zeroAddress, alice, 1n]), [false, REASONS.RECEIVER_NOT_VERIFIED]);
+    }
+  });
+
+  it("upgrades stay with each issuer: the solo timelock upgrades its token and the other issuer's tokens keep theirs", async function () {
+    const { whole, issuer } = await networkHelpers.loadFixture(twoIssuers);
+    const implementationOf = async (proxy: Address) => getAddress(`0x${(await issuer.publicClient.getStorageAt({ address: proxy, slot: IMPLEMENTATION_SLOT }))!.slice(26)}`);
+    const soloToken = await viem.getContractAt("GatedToken", issuer.products.solo.address);
+    const wholeTokens = whole.deployed.map(({ contract }) => contract);
+    const before = await Promise.all(wholeTokens.map((t) => implementationOf(t.address)));
+
+    // The solo issuer's council attests the new implementation in its own registry, and its governance upgrades.
+    const next = await viem.deployContract("GatedToken");
+    const code = await issuer.publicClient.getCode({ address: next.address });
+    await issuer.registry.write.attest([keccak256(code!), IMPLEMENTATION, "ipfs://review"], { account: issuer.wallets.attester.account });
+    const data = encodeFunctionData({ abi: soloToken.abi, functionName: "upgradeToAndCall", args: [next.address, "0x"] });
+    const args = [soloToken.address, 0n, data, zeroHash, keccak256(toHex("solo-upgrade"))] as const;
+    const delay = await issuer.timelock.read.getMinDelay();
+    await issuer.timelock.write.schedule([...args, delay], { account: issuer.wallets.governance.account });
+    await networkHelpers.time.increase(delay);
+    await issuer.timelock.write.execute(args, { account: issuer.wallets.governance.account });
+
+    assert.ok(isAddressEqual(await implementationOf(soloToken.address), next.address));
+    assert.deepEqual(await Promise.all(wholeTokens.map((t) => implementationOf(t.address))), before);
+    const upgrader = await soloToken.read.UPGRADER_ROLE();
+    assert.equal(await soloToken.read.hasRole([upgrader, whole.timelock.address]), false);
+    for (const t of wholeTokens) assert.equal(await t.read.hasRole([upgrader, issuer.timelock.address]), false);
+  });
+
+  it("the check refuses a registry under governance other than the named one, or a role this core holds on it", async function () {
+    const { whole, issuer } = await networkHelpers.loadFixture(twoIssuers);
+    const named = issuer.parameters;
+    await assertHandedOver(issuer);
+    await assert.rejects(assertHandedOver({ ...issuer, parameters: { ...named, credentialAdmin: issuer.timelock.address } }), /credentialAdmin .* does not hold DEFAULT_ADMIN_ROLE/);
+    await assert.rejects(assertHandedOver({ ...issuer, parameters: { ...named, credentialGuardian: issuer.wallets.operator.account.address } }), /credentialGuardian .* does not hold GUARDIAN_ROLE/);
+    const other = await viem.deployContract("CredentialRegistry", [whole.timelock.address, whole.wallets.guardian.account.address]);
+    await assert.rejects(assertHandedOver({ ...issuer, credentials: other }), /the credential rule reads another registry/);
+    await assert.rejects(assertHandedOver({ ...issuer, parameters: { ...named, credentialRule: other.address } }), /not the one the deployment names/);
+
+    // A grant to this core's timelock on the registry it reads gives it powers over the other issuer's investors.
+    const recovery = await whole.credentials!.read.RECOVERY_ROLE();
+    await networkHelpers.impersonateAccount(whole.timelock.address);
+    await networkHelpers.setBalance(whole.timelock.address, 10n ** 18n);
+    await whole.credentials!.write.grantRole([recovery, issuer.timelock.address], { account: whole.timelock.address });
+    await assert.rejects(assertHandedOver(issuer), /holds roles on the external credential registry/);
+    await whole.credentials!.write.revokeRole([recovery, issuer.timelock.address], { account: whole.timelock.address });
+    await assertHandedOver(issuer);
+    await whole.credentials!.write.grantRole([recovery, issuer.recoveryTimelock.address], { account: whole.timelock.address });
+    await assert.rejects(assertHandedOver(issuer), /holds roles on the external credential registry/);
+    await assert.rejects(assertHandedOver({ ...issuer, credentials: undefined }), /the stack has none/);
+  });
+
+  it("the check refuses a policy that trusts no attester, a missing one or a killed one", async function () {
+    const { whole } = await networkHelpers.loadFixture(twoIssuers);
+    const withPolicy = (attesters: bigint): Profile => ({ ...solo, products: [{ ...solo.products[0], policy: { ...DEFAULT_POLICY, attesters } }] });
+    await assert.rejects(deployProfile(connection, withPolicy(0n), namedBy(whole)), /trusts no attester/);
+    await assert.rejects(deployProfile(connection, withPolicy(3n), namedBy(whole)), /trusts attester 1, which does not exist/);
+
+    const issuer = await deployProfile(connection, solo, namedBy(whole));
+    await whole.credentials!.write.killAttester([0], { account: whole.wallets.guardian.account });
+    await assert.rejects(assertHandedOver(issuer), /trusts attester 0, which is killed/);
+  });
+
+  it("the check refuses a rule over a registry that is not the release's", async function () {
+    const { whole } = await networkHelpers.loadFixture(twoIssuers);
+    const counterfeit = await viem.deployContract("CredentialRule", [whole.asset.address]);
+    await assert.rejects(deployProfile(connection, solo, { ...namedBy(whole), credentialRule: counterfeit.address }), /is not the release's CredentialRegistry/);
   });
 });

@@ -3927,7 +3927,7 @@ Kept: `Legos` takes the same predicted address as `vault` (desk, portfolio) and 
 Tests first: the refusals in `test/nodejs/products.test.ts` (`coreHas`) and `test/nodejs/legos.test.ts` (`assertUsable`), shown failing before the change.
 
 As built: the six tests failed first (5 `assertUsable` cases, and the `coreHas` test on `CORE_HAS=""`), each with "Missing expected exception". `npx hardhat test`: `1989 passing (1798 solidity, 191 nodejs)`; typecheck and format clean. Nine planted bugs, all caught (listed in `SECURITY.md` §5). The pages, pinned to `8eb16b0`, still say `CORE_HAS` is refused only when unset and list `assertUsable`'s refusals without these two; they change with the next re-pin.
-## Each issuer chooses its KYC registry (planned 2026-11-07; waiting for the owner's review)
+## Each issuer chooses its KYC registry (planned 2026-11-07; approved by the owner the same day: "ok go for it! lets finish it")
 
 The owner, 2026-11-07: "The shared registry could be deployed by us, and then whoever uses our whole deployment is using our things automatically whoever deploys solo "pieces" can connect to our centralRegistry, but upgrades should be individual", then "I think it should be their choice, of which Registries to use", then "go for it" on the assessment below.
 
@@ -3975,6 +3975,20 @@ No contract and no interface. Deployment scripts, the check, tests and docs.
 ### Not in this change
 
 A shared `PolicyRegistry`; a rule that accepts either of two registries; a product-by-product choice in the modules; a separate upgrader per fund manager inside one core.
+
+### As built
+
+As planned, with no contract or interface change. `Profile.credentials` and the `partsOf` exclusion are in `ignition/profiles.ts`; `Core`, `CoreParts`, `CoreHandover` and `PartsHandover` needed no code change, only a sentence each in `Core` and `CoreHandover`. The check is `assertHandedOver` in `test/nodejs/fixtures.ts`, whose launch has the council attest the named rule and attaches the registry from the rule's `REGISTRY()`; `addParts` keeps the profile's choice. Three differences from the plan:
+
+- The attester check (at least one, each existing and not killed) applies to the core's own registry too, which the one-attester check already implied for the default policy.
+- The check compares the registry's code with the release's, not the rule's: the council attested the rule, and the hook check pins the rule each product lists.
+- The tests share one fixture (a `full` deployment, then the solo `token` core on its rule) where nothing changes the stack object, and deploy their own stack where something does (a part added, a policy or rule the deployment refuses).
+
+Tests (`test/nodejs/products.test.ts`, "an issuer on another issuer's credential registry"): the solo core has no registry or rule, and one investor credentialed once holds both issuers' tokens; a later product on it adds its implementation and still no registry; the registry's guardian blocks an investor and both issuers' tokens refuse delivery; the solo timelock upgrades its token while the other issuer's tokens keep theirs, and neither timelock holds `UPGRADER_ROLE` on the other's tokens; the check refuses a named admin or guardian that does not hold its role, a stack registry the rule does not read, a rule that is not the named one, a role granted to this core's timelock on the registry, a policy trusting no attester, a missing one or a killed one, and a rule over a registry that is not the release's. `CoreHandover` takes no `credentialRegistry` parameter for the solo core, which shows it makes no credential call. The six first tests failed before the change (`ComplianceHook_NotAttested`: the solo core still built its own registry, and the named rule was never attested). `npx hardhat test`: `1996 passing (1798 solidity, 198 nodejs)`; typecheck and format clean. Twelve planted bugs, all caught (listed in `SECURITY.md` §5); the first run left one alive (parts added to an external core ignoring the choice), and the test for a later product on the solo core was added for it.
+
+A separate review found no bug. From it: the check refuses an external profile whose stack attached no registry, the tests also plant a grant to the recovery timelock, and the README says that the registry's admin can kill an attester too and that an issuer adds its own profile for this.
+
+Left as limits: the check runs at deployment, so it does not stop the registry's admin granting a role later; it does not pin who holds `RECOVERY_ROLE` on the external registry, a power the registry's admin already governs. The pages follow in their own pull request.
 
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.

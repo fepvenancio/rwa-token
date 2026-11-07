@@ -194,8 +194,12 @@ Further limits recorded during review:
   able to leave), so a lapse does not stop funds already held: the address freeze, the lockup and `forcedTransfer` do.
   An enforcement burn (operator holds `BURNER_ROLE`) passes the sender check, so the issuer can burn from a blocked
   holder. The council attests `CredentialRule`, whose codehash covers the registry's address and not its code, so it
-  reads the registry (code, admin, attester list) first. Entities are not modelled: one wallet is one holder. Pinned by
-  `CredentialRegistry.t.sol`, `CredentialRule.t.sol` and `test/nodejs/credentials.test.ts`.
+  reads the registry (code, admin, attester list) first. A core may read another core's registry
+  (`credentials: "external"` in its profile): that registry's admin then decides who does KYC for the issuer's tokens, and
+  its guardian can block their investors with no delay. The deployment names both, and the post-deploy check refuses the
+  stack unless they hold those roles and neither the core's named accounts nor its timelocks hold another role there; it
+  does not stop the admin granting a role later. Entities are not modelled: one wallet is one holder. Pinned by `CredentialRegistry.t.sol`,
+  `CredentialRule.t.sol`, `test/nodejs/credentials.test.ts` and, for an external registry, `test/nodejs/products.test.ts`.
 - **A pause blocks mint and burn as well.** Only FORCED movements pass: `forcedTransfer`, and the 7540 vault's `recoverRedeemRequest` and `recoverClaimable`. Enforcement during a pause is `forcedTransfer`
   to a quarantine account (holding an active credential the token's policy accepts, never address-frozen: the freeze on a receiver applies to FORCED), and the
   burn waits for the unpause. The ERC-3643 reference token differs: its agents can mint, burn and force while paused
@@ -515,6 +519,7 @@ Each row is a bug deliberately planted, the tests that caught it, then the file 
 | `Gated721` (2026-11-05) | the burner's freeze exemption dropped; approval checked after the hook instead of before; `canTransfer` counting ownership; and, before the fix of the outside review's first point, a burn's pre-flight taking the holder as its operator | 1, 2, 1 and 3 failing |
 | Every product deployable alone or as a whole (2026-11-06) | a part already in the core not refused; an executor left with the deployer; no operator on an executor; the signed entry or the DvP executor left out of the parts; the distribution maker's grant missing or given to the checker; no checker without a desk; the distributor naming another address; `CoreHandover` skipping the parts | 10 planted, all caught |
 | Input checks in the deploy scripts (2026-11-07) | `CORE_HAS` naming nothing accepted, its entries not trimmed, an unknown key accepted, the credential registry or the implementation keys not known; executors allowed on any template or refused on a plain token only; decimals allowed on any template or refused on an intent token | 9 planted, all caught |
+| An existing credential registry (2026-11-07) | an external profile still deploying its own registry and rule; parts added to an external core ignoring the choice; the check not comparing the named rule or the registry's code, not checking the named admin or guardian, leaving the core's timelocks out of its role scan, skipping the external checks, requiring the external registry to be the timelock's; a policy trusting no attester, a missing one or a killed one accepted | 12 planted, all caught |
 
 ## 6. Toolchain supply chain
 

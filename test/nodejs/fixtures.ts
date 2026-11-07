@@ -252,16 +252,26 @@ async function stages(connection: NetworkConnection, profile: Profile) {
   const registry = await viem.getContractAt("PolicyRegistry", components.registry.address);
   const hook = await viem.getContractAt("ComplianceHook", components.hook.address);
   const proxyDeployer = await viem.getContractAt("ProxyDeployer", components.proxyDeployer.address);
+  /** The credential rule the parameters name, for a profile that reads an external registry. Set when the stack launches. */
+  let externalRule: Address | undefined;
   /** The parts the core has, attached: read again after parts are added to it. */
   const attachParts = async () => ({
-    credentials: has("credentialRegistry") ? await viem.getContractAt("CredentialRegistry", components.credentialRegistry.address) : undefined,
+    credentials: has("credentialRegistry")
+      ? await viem.getContractAt("CredentialRegistry", components.credentialRegistry.address)
+      : externalRule !== undefined
+        ? await viem.getContractAt("CredentialRegistry", await (await viem.getContractAt("CredentialRule", externalRule)).read.REGISTRY())
+        : undefined,
     executor: has("executor") ? await viem.getContractAt("IntentExecutor", components.executor.address) : undefined,
     dvpExecutor: has("dvpExecutor") ? await viem.getContractAt("DvPExecutor", components.dvpExecutor.address) : undefined,
     signedEntry: has("signedEntry") ? await viem.getContractAt("SignedEntry", components.signedEntry.address) : undefined,
     rules: await attachRules(),
   });
   const attachRules = async () => ({
-    credentialRule: has("credentialRule") ? await viem.getContractAt("CredentialRule", components.credentialRule.address) : undefined,
+    credentialRule: has("credentialRule")
+      ? await viem.getContractAt("CredentialRule", components.credentialRule.address)
+      : externalRule !== undefined
+        ? await viem.getContractAt("CredentialRule", externalRule)
+        : undefined,
     minPositionRule: has("minPositionRule") ? await viem.getContractAt("MinPositionRule", components.minPositionRule.address) : undefined,
     holderRestrictionRule: has("holderRestrictionRule") ? await viem.getContractAt("HolderRestrictionRule", components.holderRestrictionRule.address) : undefined,
     windowRule: has("windowRule") ? await viem.getContractAt("SettlementWindowRule", components.windowRule.address) : undefined,
@@ -341,6 +351,15 @@ async function stages(connection: NetworkConnection, profile: Profile) {
     const p: Parameters_ = { ...given };
     const handover = coreHandoverModule(profile);
     await ignition.deploy(handover, { parameters: { [handover.id]: p } });
+
+    // A core on an existing credential registry: the council reads that registry's code and governance, then attests the
+    // credential rule the parameters name in its own registry, as it would any rule.
+    if (profile.credentials === "external") {
+      if (p.credentialRule === undefined) throw new Error("an external credential registry needs the credentialRule parameter");
+      externalRule = p.credentialRule as Address;
+      await attest(externalRule, ATTEST.RULE, `ipfs://rule-review/${externalRule}`);
+      ({ credentials, executor, dvpExecutor, signedEntry, rules } = await attachParts());
+    }
 
     // Each fund, with the council attesting its rule: a class cannot list the rule before that.
     const funds: Record<string, FundStack> = {};
@@ -443,7 +462,7 @@ async function stages(connection: NetworkConnection, profile: Profile) {
      */
     const addParts = async (wanted: Pick<Profile, "products" | "signedEntry">) => {
       const present = Object.keys(components);
-      const parts = missingParts(wanted, present);
+      const parts = missingParts({ ...wanted, credentials: profile.credentials }, present);
       const module = corePartsModule(parts, present);
       const added = await ignition.deploy(module, { parameters: { [module.id]: { guardian: address(guardian) } } });
       for (const [key, c] of Object.entries(added)) {
@@ -543,8 +562,14 @@ async function stages(connection: NetworkConnection, profile: Profile) {
  *   risk has the profile's caps;
  * - MINTER_ROLE, BURNER_ROLE, AGENT_ROLE and a desk-less vault's SETTLER_ROLE sit with a Safe of at least two signers,
  *   unless the profile names the role as an exception;
- * - the recovery timelock holds exactly RECOVERY_ROLE on each product, the executors, the credential registry and the
- *   main timelock (nothing else, nowhere else), has no cancellers, and the guardian holds nothing on it;
+ * - the recovery timelock holds exactly RECOVERY_ROLE on each product, the executors, the core's own credential registry and
+ *   the main timelock (nothing else, nowhere else), has no cancellers, and the guardian holds nothing on it;
+ * - the credential rule reads the stack's registry and the council attested it, and each product's policy is its profile's
+ *   and trusts at least one attester, each of which exists and is not killed. With the core's own registry, the guardian
+ *   holds only GUARDIAN_ROLE there and the one attester is the KYC function. With an external one, the rule is the one the
+ *   parameters name, the registry is the release's code, `credentialAdmin` holds DEFAULT_ADMIN_ROLE and
+ *   `credentialGuardian` GUARDIAN_ROLE there, and no other role there is held by an account the stack knows or by either
+ *   timelock;
  * - a profile that asks for a signed entry has one, whose code is the release's and whose EIP-712 domain is its own;
  * - a product's distributor is the release's code, names this product, and its maker and its checker are different
  *   accounts, each the only account the stack knows to hold its role on the token.
@@ -562,6 +587,8 @@ export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
     "the recovery timelock is not a GovernanceTimelock",
   );
   const known = Object.values(s.wallets).map((w) => w.account.address);
+  const named = s.parameters as Record<string, Address>;
+  const external = s.profile.credentials === "external";
   const tokens = s.deployed.map(({ contract }) => contract);
   const executors = [s.executor, s.dvpExecutor].filter((c) => c !== undefined);
   type Gated = { address: Address; abi: unknown };
@@ -588,7 +615,8 @@ export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
     }
     return held.sort();
   };
-  const administered: Gated[] = [s.timelock, s.registry, ...tokens, ...executors, ...(s.credentials === undefined ? [] : [s.credentials])];
+  // An external credential registry is governed elsewhere: its roles are checked with the credential layer below.
+  const administered: Gated[] = [s.timelock, s.registry, ...tokens, ...executors, ...(s.credentials === undefined || external ? [] : [s.credentials])];
   for (const c of [s.recoveryTimelock, ...administered]) {
     assert.deepEqual(await heldBy(c, deployer), [], `deployer holds roles on ${c.address}`);
     assert.deepEqual(await heldBy(c, operations), [], `the operations account holds roles on ${c.address}`);
@@ -603,7 +631,7 @@ export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
     [s.registry, []],
     ...[...tokens, ...executors].map((c): [Gated, Hex[]] => [c, [ROLES.RECOVERY]]),
     // It may clear a guardian block, revive an attester and remove the guardian.
-    ...(s.credentials === undefined ? [] : [[s.credentials, [ROLES.RECOVERY]] as [Gated, Hex[]]]),
+    ...(s.credentials === undefined || external ? [] : [[s.credentials, [ROLES.RECOVERY]] as [Gated, Hex[]]]),
     [s.recoveryTimelock, [ROLES.DEFAULT_ADMIN]], // OZ makes every timelock its own admin
   ];
   for (const [c, roles] of expectedRecoveryRoles) {
@@ -706,17 +734,42 @@ export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
     }
     assert.ok(isAddressEqual(await fund.read.firstBrokenClass(), zeroAddress), "the fund has a broken class");
   }
-  // The credential layer: the guardian can stop (block, kill) and nothing else; one attester, the KYC function, and each
-  // product trusts it and asks for what it lists; the rule reads this registry and the council attested it.
+  // The credential layer: the rule reads this registry and the council attested it. With the core's own registry the
+  // guardian can stop (block, kill) and nothing else, and the one attester is the KYC function. With an external one, whose
+  // governance decides who may receive every token that reads it, that governance is the one the deployment names.
+  if (external) assert.ok(s.credentials !== undefined && s.rules.credentialRule !== undefined, "the profile reads an external credential registry and the stack has none");
   if (s.credentials !== undefined) {
     const credentialRule = s.rules.credentialRule!;
-    assert.deepEqual(await heldBy(s.credentials, guardian), [ROLES.GUARDIAN], "credential registry guardian");
-    assert.equal(await s.credentials.read.attesterCount(), 1n, "attester count");
-    const kycAttester = await s.credentials.read.attesterAt([0]);
-    assert.ok(isAddressEqual(kycAttester.account, s.wallets.kyc.account.address), "attester 0 is not the KYC provider");
-    assert.equal(kycAttester.killed, false, "the KYC attester is killed");
     assert.ok(isAddressEqual(await credentialRule.read.REGISTRY(), s.credentials.address), "the credential rule reads another registry");
     assert.equal(await s.registry.read.isAttested([credentialRule.address, ATTEST.RULE]), true, "the credential rule is not attested");
+    if (external) {
+      assert.ok(isAddressEqual(credentialRule.address, named.credentialRule), "the credential rule is not the one the deployment names");
+      assert.ok(await isRelease(s.credentials.address, "CredentialRegistry"), `${s.credentials.address} is not the release's CredentialRegistry`);
+      assert.equal(
+        await s.credentials.read.hasRole([ROLES.DEFAULT_ADMIN, named.credentialAdmin]),
+        true,
+        `credentialAdmin ${named.credentialAdmin} does not hold DEFAULT_ADMIN_ROLE on the credential registry`,
+      );
+      assert.equal(
+        await s.credentials.read.hasRole([ROLES.GUARDIAN, named.credentialGuardian]),
+        true,
+        `credentialGuardian ${named.credentialGuardian} does not hold GUARDIAN_ROLE on the credential registry`,
+      );
+      for (const account of [...known, timelock, s.recoveryTimelock.address]) {
+        const allowed = [
+          ...(isAddressEqual(account, named.credentialAdmin) ? [ROLES.DEFAULT_ADMIN] : []),
+          ...(isAddressEqual(account, named.credentialGuardian) ? [ROLES.GUARDIAN] : []),
+        ].sort();
+        assert.deepEqual(await heldBy(s.credentials, account), allowed, `${account} holds roles on the external credential registry`);
+      }
+    } else {
+      assert.deepEqual(await heldBy(s.credentials, guardian), [ROLES.GUARDIAN], "credential registry guardian");
+      assert.equal(await s.credentials.read.attesterCount(), 1n, "attester count");
+      const kycAttester = await s.credentials.read.attesterAt([0]);
+      assert.ok(isAddressEqual(kycAttester.account, s.wallets.kyc.account.address), "attester 0 is not the KYC provider");
+      assert.equal(kycAttester.killed, false, "the KYC attester is killed");
+    }
+    const attesterCount = await s.credentials.read.attesterCount();
     for (const { product, contract } of s.deployed) {
       if (!product.rules.includes("credentialRule")) continue;
       const expected = product.policy ?? DEFAULT_POLICY;
@@ -726,6 +779,15 @@ export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
         [expected.requireAll, expected.requireAny, expected.forbidAny, expected.attesters],
         `policy of ${contract.address}`,
       );
+      // A policy whose attesters are all missing or killed admits nobody, and one that names a missing id would trust
+      // whoever the registry's admin adds under it later.
+      assert.notEqual(policy.attesters, 0n, `the policy of ${contract.address} trusts no attester`);
+      for (let id = 0n; id < 64n; id++) {
+        if (((policy.attesters >> id) & 1n) === 0n) continue;
+        assert.ok(id < attesterCount, `the policy of ${contract.address} trusts attester ${id}, which does not exist`);
+        const attester: { killed: boolean } = await s.credentials.read.attesterAt([Number(id)]);
+        assert.equal(attester.killed, false, `the policy of ${contract.address} trusts attester ${id}, which is killed`);
+      }
     }
   }
   assert.equal(await s.timelock.read.hasRole([await s.timelock.read.CANCELLER_ROLE(), guardian]), true);
@@ -751,7 +813,6 @@ export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
   }
 
   // A product's legos. Their roles live outside the vault's role scan, so they are asked by name.
-  const named = s.parameters as Record<string, Address>;
   const read = <T>(address: Address, functionName: "VAULT" | "portfolio" | "feeModel" | "adapters" | "SETTLEMENT_LOGIC" | "redemptionGate") =>
     s.publicClient.readContract({ address, abi: LEGO_ABI, functionName }) as Promise<T>;
   const isSame = async (address: Address, functionName: "VAULT" | "portfolio" | "feeModel", expected: Address) =>

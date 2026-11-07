@@ -16,7 +16,7 @@ import { ROLES } from "./roles.js";
  *    renounces everywhere. `ProxyDeployer` goes to the operations account: products then launch without waiting.
  *
  * Steps 1 to 3 for the credential registry and the executors are `handOverParts`, which `PartsHandover` also runs for parts
- * added to a running core.
+ * added to a running core. A core on an external credential registry has none of its own to configure or hand over.
  *
  * Next: a `Fund` for each fund and a `Product` for each product, run by the operations account, then a `FundOpen` for each
  * fund.
