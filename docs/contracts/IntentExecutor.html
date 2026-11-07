@@ -202,7 +202,7 @@
 <section id="deployed">
   <div class="prose">
     <h2>As deployed</h2>
-    <p>The executor is deployed only when a product in the profile names it. Of the profiles in <code>ignition/profiles.ts</code>, <code>full</code> does, on its intent token.</p>
+    <p>The executor is deployed only when a product in the profile names it. Of the profiles in <code>ignition/profiles.ts</code>, <code>full</code> and <code>intent</code> do, each on its intent token. For a core built without it, <code>CoreParts</code> adds it and <code>PartsHandover</code> grants its roles and hands it to the main timelock, as <code>CoreHandover</code> does.</p>
     <dl class="kv">
       <dt>Created by</dt><dd><code>Core</code>, as <code>IntentExecutor(deployer, guardian)</code></dd>
       <dt>OPERATOR_ROLE</dt><dd>The account passed as <code>operator</code> to <code>CoreHandover</code>, the same as on the DvP executor</dd>
@@ -296,7 +296,7 @@
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>9526fc7</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>8eb16b0</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

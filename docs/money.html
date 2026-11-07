@@ -808,7 +808,7 @@ withdraw(assets)  shares = ceil(assets × paid / owed)</pre>
 <section id="distributor">
   <div class="prose wrap-any">
     <h2><code>Distributor</code>: funding and paying a distribution</h2>
-    <p><a href="contracts/Distributor.html"><code>Distributor</code></a> pays one token's holders from a list built off-chain at the record date: a Merkle root of <code>(holder, amount)</code>. It asks the token for its roles at call time. The token gains no snapshots, and transfers cost the same. The contract has no deployment module; it is deployed when a product with cash flows needs it.</p>
+    <p><a href="contracts/Distributor.html"><code>Distributor</code></a> pays one token's holders from a list built off-chain at the record date: a Merkle root of <code>(holder, amount)</code>. It asks the token for its roles at call time. The token gains no snapshots, and transfers cost the same. <code>Legos</code> deploys it for a product that sets <code>distributor</code>, and <code>Product</code> grants its maker and its checker on the token.</p>
   </div>
   <figure>
     <div class="fig-scroll">
@@ -932,7 +932,7 @@ withdraw(assets)  shares = ceil(assets × paid / owed)</pre>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>9526fc7</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>8eb16b0</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

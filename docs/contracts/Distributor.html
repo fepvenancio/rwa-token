@@ -32,7 +32,7 @@
     <span class="fact">one per token</span>
     <span class="fact">no role table: it asks the token</span>
     <span class="fact">not attested</span>
-    <span class="fact"><b>no deployment module yet</b></span>
+    <span class="fact">deployed by <b>Legos</b> for a product that asks</span>
   </div>
 </header>
 
@@ -194,7 +194,7 @@
       <li><b>It tells two addresses apart, not two people.</b> The check is that the checker is not this distribution's maker. An account holding both roles can approve another maker's distribution. <code>CHECKER_ROLE</code> here is the same role id as on <a href="NavDesk.html">NavDesk</a>, so on a vault with a desk the same accounts check prices and distributions.</li>
       <li><b>It does not limit a funder's allowance.</b> Any distribution a maker and a checker approve can draw on an allowance the funder has given this contract, up to that distribution's total and in that asset. A funder that approves only the amount of the distribution in hand limits this.</li>
       <li><b>It does not check what the asset does.</b> It trusts the amounts of a transfer and does not compare balances, so a fee-on-transfer asset would leave less than the total, and claims could then draw on another distribution's money in that asset. If the asset is itself a gated token, this contract is an ordinary holder of it: it needs what that token's policy asks of a receiver, and each payment is judged by that token's rules as well.</li>
-      <li><b>It has no deployment module yet.</b> No module in <code>ignition/</code> deploys it or grants <code>DISTRIBUTION_MAKER_ROLE</code>, which is not in <code>roles.ts</code>, and the post-deploy check does not look at it. <code>Product</code> grants <code>CHECKER_ROLE</code> only on a product with a desk. Until a module exists, the deployment and the grants are done by hand, the grants through the token's admin.</li>
+      <li><b><code>Product</code> grants its roles at launch only.</b> <code>Legos</code> deploys it for a product that sets <code>distributor</code>, and <code>Product</code> grants <code>DISTRIBUTION_MAKER_ROLE</code> to the <code>distributionMaker</code> account and <code>CHECKER_ROLE</code> to the <code>checker</code>, the account that also approves a desk's prices. No shipped profile sets <code>distributor</code>. For a product already handed over, the grants are a timelock operation. The post-deploy check compares its code with the release's, reads its <code>TOKEN()</code>, and refuses a maker who is also the checker.</li>
     </ul>
   </div>
 </section>
@@ -215,12 +215,13 @@
     <h2>Source and tests</h2>
     <ul class="plain">
       <li>Contract: <code>contracts/distribution/Distributor.sol</code>, interface <code>IDistributor.sol</code></li>
-      <li>Tests: <code>Distributor.t.sol</code> (unit tests with a real asset and a mocked token)</li>
+      <li>Tests: <code>Distributor.t.sol</code> (unit tests with a real asset and a mocked token) and <code>test/nodejs/products.test.ts</code> (on a deployed token: a maker proposes, a different checker approves and funds it, a holder claims; the check refusing a distributor that names another token, a maker who is also the checker, and a stray maker)</li>
+      <li>Deployment: <code>ignition/modules/Legos.ts</code> (deploys it), <code>Product.ts</code> (grants its roles)</li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>9526fc7</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>8eb16b0</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>
