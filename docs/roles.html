@@ -252,7 +252,7 @@
     </table>
   </div>
   <div class="prose">
-    <p>Until <code>CoreHandover</code> finishes, the deployer administers the credential registry, the executors and both timelocks, and owns <code>ProxyDeployer</code>. <a href="deployment.html#handover">Deployment and governance</a> has the order. For a credential registry or an executor added to a running core, <code>PartsHandover</code> makes the grants and the hand-over that the table credits to <code>CoreHandover</code>.</p>
+    <p>Until <code>CoreHandover</code> finishes, the deployer administers the credential registry, the executors and both timelocks, and owns <code>ProxyDeployer</code>. <a href="deployment.html#handover">Deployment and governance</a> has the order. For a credential registry or an executor added to a running core, <code>PartsHandover</code> makes the grants and the hand-over that the table credits to <code>CoreHandover</code>. A core that reads an existing credential registry has none of its own: the <code>CredentialRegistry</code> rows then describe whoever governs that registry, and the deployment names its admin and guardian (<a href="deployment.html#external">Using an existing credential registry</a>).</p>
     <h3>Who must not hold a sensitive role on a single key</h3>
     <p>The post-deploy check <code>assertHandedOver</code> refuses <code>MINTER_ROLE</code>, <code>BURNER_ROLE</code>, <code>AGENT_ROLE</code> and <code>SETTLER_ROLE</code> on an account that does not answer <code>getThreshold()</code> with 2 or more, as a Safe that requires at least two signatures does. A profile can name any of the four in <code>singleSigners</code> to except it, for example for an MPC custody wallet whose policy engine does the same job. All eight shipped profiles name all four, because they are demo stacks, so a real deployment has to state its own. This is the check's rule, not the contracts': a token accepts any holder its admin grants. The check does not read a Safe's signers, and CI runs it on a local chain only. <a href="deployment.html#check">What it asserts, and who runs it</a>.</p>
   </div>
@@ -643,7 +643,7 @@
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>8eb16b0</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>4a906cc</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>
