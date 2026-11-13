@@ -4208,6 +4208,23 @@ On branch `erc8473-conformance`, after the conformance change left `Gated4626Vau
 
 **Done means** every existing vault test passes untouched, and the vault has real room.
 
+**As built.** As designed, in `contracts/vaults/Gated4626Common.sol`, `Gated4626Management.sol` and the slimmed `Gated4626Vault.sol`. The code moved without being rewritten: the functions' bodies are the ones the vault had, with events and errors named through `IGated4626Vault`.
+
+| Contract | Deployed size | Left under 24,576 | Creation code |
+|---|---|---|---|
+| `Gated4626Vault`, before | 24,556 | 20 | 24,809 |
+| `Gated4626Vault`, after | 22,836 | 1,740 | 43,987 |
+| `Gated4626Management` | 20,754 | 3,822 | 20,815 |
+
+- The vault's creation code now carries the second contract's, as the 7540's does. An EVM at Paris has no limit on it; `ContractSizes.t.sol` still holds both vaults under the 49,152 bytes a later EVM allows, so the same code deploys there.
+- The room gained is 1,720 bytes, not more: the four functions were small, and the counting stays in both contracts because deposits and withdrawals need it. More room would mean moving `_deposit` and `_withdraw` paths, which investors call, and that was not done.
+- `_MAX_RATE_BPS` lives in the second contract, its only user (Slither's one finding on the first cut).
+- Tests first: `Gated4626Management.t.sol` did not compile before the contract existed, since the vault had no `MANAGEMENT_LOGIC`. It has 18 tests: wiring, direct calls on the second contract, the hand-off through the vault, and upgrades. The 141 tests in the two existing vault test files pass untouched.
+- `IGated4626Vault` id `0x7c5d7975` became `0xecc03c50`. `ContractSizes.t.sol`, `scripts/verify-reproducible.ts` and the post-deploy check in `test/nodejs/fixtures.ts` now cover the second contract as they cover the 7540's.
+- Not done: the pages, as for the conformance change above.
+
+**Verified.** `npx hardhat test`: 2040 passing (1842 solidity, 198 nodejs). Format, lint and typecheck clean. Slither 0 results, Aderyn 0 findings, Halmos 22 of 22 checks, `validate:upgrades` 7 of 7, `verify:reproducible` 32 contracts identical, with `Gated4626Management` matching the creation code `Gated4626Vault` embeds.
+
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
 2. Credential layer: none left. On 2026-10-30 the owner confirmed decisions 11, 12, 13, 15, 16 and 17 as built (17 at the measured +8,179 gas on a transfer). Decision 14 is moot, since `IdentityRule` was removed in the cleanup. Decisions 8 and 9 are recorded in the credential section's table.
