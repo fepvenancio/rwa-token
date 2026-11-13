@@ -14,12 +14,13 @@ import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+import {IERC8473} from 'interfaces/IERC8473.sol';
 import {IGated4626Vault} from 'interfaces/IGated4626Vault.sol';
 import {IGatedVaultBase} from 'interfaces/IGatedVaultBase.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {ITemplated} from 'interfaces/ITemplated.sol';
 
@@ -58,7 +59,7 @@ contract Gated4626VaultUnitTest is Helpers {
     );
     vm.mockCall(_hook, abi.encodeCall(IComplianceHook.REGISTRY, ()), abi.encode(_registry));
     _hookDecides(Reasons.TRANSFER_OK);
-    vm.mockCall(_hook, abi.encodeCall(IPolicyHook.wantsAfter, ()), abi.encode(false));
+    vm.mockCall(_hook, abi.encodeCall(IERC8473Policy.wantsAfterTransfer, ()), abi.encode(false));
 
     Gated4626Vault _impl = new Gated4626Vault();
     _vault = Gated4626Vault(
@@ -100,7 +101,7 @@ contract Gated4626VaultUnitTest is Helpers {
   function _hookDecides(
     bytes32 _reason
   ) internal {
-    vm.mockCall(_hook, abi.encodeWithSelector(IPolicyHook.beforeTransfer.selector), abi.encode(_reason));
+    vm.mockCall(_hook, abi.encodeWithSelector(IERC8473Policy.checkTransfer.selector), abi.encode(_reason));
   }
 
   function _deposit(
@@ -112,21 +113,21 @@ contract Gated4626VaultUnitTest is Helpers {
   }
 
   function _ctx(
-    IPolicyHook.TransferKind _kind,
+    IERC8473Policy.TransferKind _kind,
     address _from,
     address _to,
     uint256 _amount,
     address _operator
-  ) internal view returns (IPolicyHook.TransferContext memory _context) {
-    _context = IPolicyHook.TransferContext({
+  ) internal view returns (IERC8473Policy.TransferContext memory _context) {
+    _context = IERC8473Policy.TransferContext({
       token: address(_vault),
       from: _from,
       to: _to,
-      id: 0,
+      tokenId: 0,
       amount: _amount,
       operator: _operator,
       kind: _kind,
-      extra: abi.encode(
+      data: abi.encode(
         _from == address(0) ? 0 : _vault.balanceOf(_from), _to == address(0) ? 0 : _vault.balanceOf(_to)
       )
     });
@@ -139,7 +140,7 @@ contract Gated4626VaultUnit_Initialize is Gated4626VaultUnitTest {
     assertEq(_vault.decimals(), 12); // asset 6 + offset 6
     assertTrue(_vault.hasRole(_vault.DEFAULT_ADMIN_ROLE(), _admin));
     assertTrue(_vault.hasRole(_vault.GUARDIAN_ROLE(), _guardian));
-    assertEq(_vault.policyHook(), _hook);
+    assertEq(_vault.policy(), _hook);
   }
 
   function test_WhenCalledTwice_ItReverts() external {
@@ -185,7 +186,7 @@ contract Gated4626VaultUnit_Flows is Gated4626VaultUnitTest {
     vm.expectCall(
       _hook,
       abi.encodeCall(
-        IPolicyHook.beforeTransfer, (_ctx(IPolicyHook.TransferKind.MINT, address(0), _bob, _shares, _alice))
+        IERC8473Policy.checkTransfer, (_ctx(IERC8473Policy.TransferKind.MINT, address(0), _bob, _shares, _alice))
       )
     );
     vm.prank(_alice);
@@ -201,7 +202,7 @@ contract Gated4626VaultUnit_Flows is Gated4626VaultUnitTest {
     vm.expectCall(
       _hook,
       abi.encodeCall(
-        IPolicyHook.beforeTransfer, (_ctx(IPolicyHook.TransferKind.BURN, _alice, address(0), _shares, _bob))
+        IERC8473Policy.checkTransfer, (_ctx(IERC8473Policy.TransferKind.BURN, _alice, address(0), _shares, _bob))
       )
     );
     vm.prank(_bob);
@@ -289,7 +290,7 @@ contract Gated4626VaultUnit_MaxRedeemWithdraw is Gated4626VaultUnitTest {
     bytes32 _reason
   ) external {
     _deposit(_alice, 5e6);
-    if (_reason == Reasons.TRANSFER_OK) _reason = Reasons.SENDER_NOT_VERIFIED;
+    if (_reason == Reasons.TRANSFER_OK) _reason = Reasons.SENDER_NOT_ELIGIBLE;
     _hookDecides(_reason);
     assertEq(_vault.maxRedeem(_alice), 0);
     assertEq(_vault.maxWithdraw(_alice), 0);
@@ -458,7 +459,7 @@ contract Gated4626VaultIntegration_Exit is Gated4626VaultIntegrationTest {
 
     (bool _ok, bytes32 _reason) = _vault.canTransferWithReason(_alice, address(0), 1);
     assertFalse(_ok);
-    assertEq(_reason, Reasons.LOCKED);
+    assertEq(_reason, Reasons.LOCKED_UP);
     assertFalse(_vault.canSend(_alice), 'the account question says the same as the burn');
     assertEq(_vault.maxRedeem(_alice), 0);
     vm.expectRevert(abi.encodeWithSelector(ERC4626Upgradeable.ERC4626ExceededMaxRedeem.selector, _alice, _shares, 0));
@@ -489,7 +490,7 @@ contract Gated4626VaultIntegration_MinPosition is Gated4626VaultIntegrationTest 
   function _enableMinPosition() internal {
     MinPositionRule _minRule = new MinPositionRule();
     IPolicyRegistry(_vault.registry()).attest(address(_minRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
-    ComplianceHook _hook = ComplianceHook(_vault.policyHook());
+    ComplianceHook _hook = ComplianceHook(_vault.policy());
     IComplianceRule[] memory _old = _hook.rules(address(_vault));
     IComplianceRule[] memory _list = new IComplianceRule[](_old.length + 1);
     _list[0] = _old[0]; // identity first, then the minimum, then the holder rules
@@ -510,7 +511,7 @@ contract Gated4626VaultIntegration_MinPosition is Gated4626VaultIntegrationTest 
   function test_WhenADepositWouldLeaveDust_ItRevertsWithTheReasonAndTheMinimumDepositWorks() external {
     _enableMinPosition();
     vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.BELOW_MIN_POSITION)
+      abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, Reasons.BELOW_MIN_POSITION)
     );
     vm.prank(_alice);
     _vault.deposit(_MIN_ASSETS - 1, _alice);
@@ -536,7 +537,7 @@ contract Gated4626VaultIntegration_MinPosition is Gated4626VaultIntegrationTest 
     _enableMinPosition();
     _deposit(_alice, 2 * _MIN_ASSETS);
     vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.BELOW_MIN_POSITION)
+      abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, Reasons.BELOW_MIN_POSITION)
     );
     vm.prank(_alice);
     _vault.redeem(_MIN_SHARES + 1, _alice, _alice);
@@ -557,7 +558,7 @@ contract Gated4626VaultIntegration_MinPosition is Gated4626VaultIntegrationTest 
     uint256 _max = _vault.maxRedeem(_alice);
     assertEq(_max, _shares - 5);
     vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.BELOW_MIN_POSITION)
+      abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, Reasons.BELOW_MIN_POSITION)
     );
     vm.prank(_alice);
     _vault.redeem(_max, _alice, _alice);

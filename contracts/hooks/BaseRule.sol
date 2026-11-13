@@ -7,7 +7,7 @@ import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 
 /**
  * @title BaseRule
@@ -24,9 +24,9 @@ abstract contract BaseRule is ERC165, IComplianceRule {
    * @param _ctx The movement context naming the token
    */
   modifier onlyHook(
-    IPolicyHook.TransferContext calldata _ctx
+    IERC8473Policy.TransferContext calldata _ctx
   ) {
-    if (IPolicyGated(_ctx.token).policyHook() != msg.sender) revert ComplianceRule_OnlyHook(msg.sender);
+    if (IPolicyGated(_ctx.token).policy() != msg.sender) revert ComplianceRule_OnlyHook(msg.sender);
     _;
   }
 
@@ -34,8 +34,14 @@ abstract contract BaseRule is ERC165, IComplianceRule {
   // Default for rules without wantsAfter(); the hook only calls after_ on rules that opt in.
   // aderyn-ignore-next-line(empty-block)
   function after_(
-    IPolicyHook.TransferContext calldata _ctx
+    IERC8473Policy.TransferContext calldata _ctx
   ) external virtual onlyHook(_ctx) {}
+
+  /// @inheritdoc IComplianceRule
+  function onInstall(
+    address _token,
+    address _previousPolicy
+  ) external virtual {}
 
   /// @inheritdoc IComplianceRule
   function checkReceive(

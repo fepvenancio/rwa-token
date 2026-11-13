@@ -7,7 +7,7 @@ import {IGatedVaultBase} from 'interfaces/IGatedVaultBase.sol';
 // Needed by the compiler to resolve `@inheritdoc IPolicyGated`; solhint does not see NatSpec usage.
 // solhint-disable-next-line no-unused-vars
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 
 import {PolicyGatedERC20Upgradeable} from 'contracts/base/PolicyGatedERC20Upgradeable.sol';
 
@@ -47,7 +47,7 @@ abstract contract GatedVaultBase is PolicyGatedERC20Upgradeable, IGatedVaultBase
     address _account
   ) internal view returns (bytes32 _reason) {
     _reason = _check(
-      _context(address(0), _account, 0, _msgSender(), IPolicyHook.TransferKind.FORCED, bytes32(0), 0), _policyHook()
+      _context(address(0), _account, 0, _msgSender(), IERC8473Policy.TransferKind.FORCED, bytes32(0), 0), _policy()
     );
   }
 

@@ -6,7 +6,7 @@ import {IAccessControl} from '@openzeppelin/contracts/access/IAccessControl.sol'
 import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {ISettlementWindowRule} from 'interfaces/ISettlementWindowRule.sol';
 
 import {BaseRule} from 'contracts/hooks/BaseRule.sol';
@@ -47,12 +47,12 @@ contract SettlementWindowRule is BaseRule, ISettlementWindowRule {
 
   /// @inheritdoc IComplianceRule
   function check(
-    IPolicyHook.TransferContext calldata _ctx
+    IERC8473Policy.TransferContext calldata _ctx
   ) external view returns (bytes32 _reason) {
-    if (_ctx.kind != IPolicyHook.TransferKind.EXECUTED) return Reasons.TRANSFER_OK;
+    if (_ctx.kind != IERC8473Policy.TransferKind.EXECUTED) return Reasons.TRANSFER_OK;
     // A read-only copy of the window into memory; nothing is edited.
     // aderyn-ignore-next-line(storage-array-memory-edit)
-    if (!_isOpen(_windows[_ctx.token], block.timestamp)) return Reasons.OUTSIDE_SETTLEMENT_WINDOW;
+    if (!_isOpen(_windows[_ctx.token], block.timestamp)) return Reasons.WINDOW_CLOSED;
     _reason = Reasons.TRANSFER_OK;
   }
 

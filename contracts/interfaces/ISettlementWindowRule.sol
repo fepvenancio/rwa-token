@@ -6,7 +6,7 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 /**
  * @title ISettlementWindowRule
  * @notice Executor-settled transfers (EXECUTED) only settle inside a token's daily UTC window, on enabled weekdays;
- *         otherwise `Reasons.OUTSIDE_SETTLEMENT_WINDOW`. Other kinds are unaffected
+ *         otherwise `Reasons.WINDOW_CLOSED`. Other kinds are unaffected
  * @dev Weekday = ((timestamp / 1 days) + 3) % 7, with Monday = 0. A same-day window is `[open, close)`. When
  *      `open > close` the window runs overnight and belongs to the day it opened: it is open when today is enabled
  *      and `t >= open`, or when yesterday is enabled and `t < close`. A token with no window configured rejects every

@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {ITemplated} from 'interfaces/ITemplated.sol';
 
 import {PolicyGatedERC20Upgradeable} from 'contracts/base/PolicyGatedERC20Upgradeable.sol';
@@ -58,7 +58,7 @@ contract PolicyGatedHarness is PolicyGatedERC20Upgradeable {
   function mintAs(
     address _to,
     uint256 _amount,
-    IPolicyHook.TransferKind _kind
+    IERC8473Policy.TransferKind _kind
   ) external {
     _mintAs(_to, _amount, _kind);
   }
@@ -76,7 +76,7 @@ contract PolicyGatedHarness is PolicyGatedERC20Upgradeable {
     address _from,
     address _to,
     uint256 _amount,
-    IPolicyHook.TransferKind _kind,
+    IERC8473Policy.TransferKind _kind,
     bytes32 _ref,
     uint256 _deadline
   ) external {

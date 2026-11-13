@@ -4,9 +4,11 @@ pragma solidity ^0.8.28;
 /**
  * @title Reasons
  * @notice Frozen reason-code table (ERC-1594 style). Hooks and rules return these codes, and token rejections carry
- *         them in `IPolicyGated.PolicyGated_TransferRejected`
+ *         them in `IERC8473.ERC8473PolicyRejected`
  * @dev Append only: never rename, reorder or change a value. Each value is the keccak256 of its name, so `TRANSFER_OK`
- *      is non-zero and a hook or rule that forgets to set its return value rejects instead of approving
+ *      is non-zero and a hook or rule that forgets to set its return value rejects instead of approving. The owner
+ *      reopened the table once, on 2026-11-13 and before any deployment, to take the names ERC-8473 recommends:
+ *      `SENDER_NOT_ELIGIBLE`, `LOCKED_UP`, `WINDOW_CLOSED` and `KIND_NOT_ALLOWED`
  */
 // public reason codes, read as `Reasons.X`; `internal` only so they inline
 // solhint-disable private-vars-leading-underscore
@@ -18,15 +20,15 @@ library Reasons {
   /// @notice The sender's unfrozen balance is lower than the amount; a DvP pre-flight also says this of a plain cash shortfall
   bytes32 internal constant INSUFFICIENT_UNFROZEN = keccak256('INSUFFICIENT_UNFROZEN');
   /// @notice The sender is not verified in the credential registry
-  bytes32 internal constant SENDER_NOT_VERIFIED = keccak256('SENDER_NOT_VERIFIED');
+  bytes32 internal constant SENDER_NOT_ELIGIBLE = keccak256('SENDER_NOT_ELIGIBLE');
   /// @notice The receiver is not verified in the credential registry
   bytes32 internal constant RECEIVER_NOT_VERIFIED = keccak256('RECEIVER_NOT_VERIFIED');
   /// @notice The movement happens outside the configured settlement window
-  bytes32 internal constant OUTSIDE_SETTLEMENT_WINDOW = keccak256('OUTSIDE_SETTLEMENT_WINDOW');
+  bytes32 internal constant WINDOW_CLOSED = keccak256('WINDOW_CLOSED');
   /// @notice The movement would exceed the maximum number of holders
   bytes32 internal constant MAX_HOLDERS = keccak256('MAX_HOLDERS');
   /// @notice The sender's tokens are still locked up
-  bytes32 internal constant LOCKED = keccak256('LOCKED');
+  bytes32 internal constant LOCKED_UP = keccak256('LOCKED_UP');
   /// @notice The transfer intent's deadline has passed
   bytes32 internal constant INTENT_EXPIRED = keccak256('INTENT_EXPIRED');
   /// @notice The transfer intent's nonce was already used or cancelled
@@ -65,8 +67,11 @@ library Reasons {
   /// @notice A mint would take the supply above the token's cap
   bytes32 internal constant ABOVE_SUPPLY_CAP = keccak256('ABOVE_SUPPLY_CAP');
   /// @notice The token's movements between holders must be signed intents, and this one is a plain transfer
-  bytes32 internal constant TRANSFER_NOT_EXECUTED = keccak256('TRANSFER_NOT_EXECUTED');
+  bytes32 internal constant KIND_NOT_ALLOWED = keccak256('KIND_NOT_ALLOWED');
   /// @notice An ERC-721 movement names a sender that does not own the token; for a mint, the token already exists
   bytes32 internal constant NOT_TOKEN_OWNER = keccak256('NOT_TOKEN_OWNER');
+  /// @notice The policy could not be asked: its call reverted, ran out of gas, answered fewer than 32 bytes, or the
+  ///         policy has no code
+  bytes32 internal constant CHECK_UNAVAILABLE = keccak256('CHECK_UNAVAILABLE');
 }
 // solhint-enable private-vars-leading-underscore

@@ -22,6 +22,7 @@ import {IERC7540Redeem} from 'interfaces/IERC7540Redeem.sol';
 import {IERC7575} from 'interfaces/IERC7575.sol';
 import {IERC7943Fungible} from 'interfaces/IERC7943Fungible.sol';
 import {IERC7943NonFungible} from 'interfaces/IERC7943NonFungible.sol';
+import {IERC8473} from 'interfaces/IERC8473.sol';
 import {IFeeModel} from 'interfaces/IFeeModel.sol';
 import {IFund} from 'interfaces/IFund.sol';
 import {IFundHoldersRule} from 'interfaces/IFundHoldersRule.sol';
@@ -38,7 +39,7 @@ import {IMinPositionRule} from 'interfaces/IMinPositionRule.sol';
 import {INavDesk} from 'interfaces/INavDesk.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {IPortfolio} from 'interfaces/IPortfolio.sol';
 import {IProxyDeployer} from 'interfaces/IProxyDeployer.sol';
@@ -87,23 +88,37 @@ contract InterfaceFreezeTest is Test {
     // Re-pinned in S2 of the review items (2026-10-24) on owner instruction (RD3): `IPolicyGated` inherits the ERC-7943
     // Final interface, so `forcedTransfer`, `setFrozenTokens`, `getFrozenTokens`, `canSend`, `canReceive` and the
     // boolean `canTransfer` live in `IERC7943Fungible`. What is left in `IPolicyGated` is mint, burn, pause, unpause,
-    // setPolicyHook, canTransferWithReason, policyHook and registry (was 0xf517b40d; `setFrozen`, `getFrozen`,
+    // setPolicy, canTransferWithReason, policy and registry (was 0xf517b40d; `setFrozen`, `getFrozen`,
     // `isUserAllowed` and the tuple `canTransfer` are gone)
-    // Re-pinned 2026-11-05 on owner instruction, for the NFT template: pause, unpause, setPolicyHook, policyHook and
+    // Re-pinned 2026-11-05 on owner instruction, for the NFT template: pause, unpause, setPolicy, policy and
     // registry moved to `IPolicyGatedCore`, which `IPolicyGated` inherits and the ERC-721 template shares. What is left
     // is mint, burn and canTransferWithReason (was 0x02331726, the XOR of the two ids below). No topic or selector moved
     assertEq(type(IPolicyGated).interfaceId, bytes4(0xcebd0f8c), 'IPolicyGated');
-    assertEq(type(IPolicyGatedCore).interfaceId, bytes4(0xcc8e18aa), 'IPolicyGatedCore');
+    // Re-pinned 2026-11-13 on owner instruction (ERC-8473 conformance): `IPolicyGatedCore` inherits `IERC8473`, which
+    // took `policy()`, and `setPolicyHook(address)` became `installPolicy(address,bytes)` (was 0xcc8e18aa)
+    assertEq(type(IPolicyGatedCore).interfaceId, bytes4(0x4116c4d8), 'IPolicyGatedCore');
     // Added 2026-11-05 on owner instruction, for the ERC-721 template. ERC-7943's non-fungible id is the standard's own;
     // `IGated721` is mint, burn, setTokenURI and canTransferWithReason
     assertEq(type(IERC7943NonFungible).interfaceId, bytes4(0xbf1ef5fe), 'IERC7943NonFungible');
     assertEq(type(IGated721).interfaceId, bytes4(0x94f4fff1), 'IGated721');
     // Re-pinned in S1 of the review items (2026-10-24) on owner instruction (RD1 to RD3): `TransferContext` lost `ref` and
-    // `deadline`, `IPolicyHook` and `IComplianceRule` gained `checkSend` and `checkReceive`, and `IComplianceHook` became
+    // `deadline`, `IERC8473Policy` and `IComplianceRule` gained `checkSend` and `checkReceive`, and `IComplianceHook` became
     // the shared hook (per-token `setRules`, `rules` and `ruleCount`; no `ADMIN` or `TOKEN`). Ids computed from the
     // compiled interfaces' signatures with `cast sig` (were 0xb7723023, 0x93d5c2be and 0x2604e338)
-    assertEq(type(IPolicyHook).interfaceId, bytes4(0x4f7b9fbb), 'IPolicyHook');
-    assertEq(type(IComplianceRule).interfaceId, bytes4(0x837a7ec1), 'IComplianceRule');
+    // Re-pinned 2026-11-13 on owner instruction (ERC-8473 conformance). `IPolicyHook` (was 0x4f7b9fbb) gave way to
+    // `IERC8473Policy`; its id, `IERC8473`'s and the seven selectors below are copied by hand from the table in the
+    // draft ERC, not computed here. `IComplianceRule` gained `onInstall(address,address)` (was 0x837a7ec1)
+    assertEq(type(IERC8473Policy).interfaceId, bytes4(0x9cb56a99), 'IERC8473Policy');
+    assertEq(type(IERC8473).interfaceId, bytes4(0x0505c8c9), 'IERC8473');
+    assertEq(IERC8473Policy.checkSend.selector, bytes4(0xec1cb5d7), 'checkSend');
+    assertEq(IERC8473Policy.checkReceive.selector, bytes4(0x8b203e96), 'checkReceive');
+    assertEq(IERC8473Policy.checkTransfer.selector, bytes4(0x64a1a08e), 'checkTransfer');
+    assertEq(IERC8473Policy.wantsAfterTransfer.selector, bytes4(0x38bff1a5), 'wantsAfterTransfer');
+    assertEq(IERC8473Policy.afterTransfer.selector, bytes4(0x2595b359), 'afterTransfer');
+    assertEq(IERC8473Policy.onInstall.selector, bytes4(0x820203aa), 'onInstall');
+    assertEq(IERC8473.policy.selector, bytes4(0x0505c8c9), 'policy');
+    assertEq(IERC8473.ERC8473PolicyRejected.selector, bytes4(0x295e60b5), 'ERC8473PolicyRejected');
+    assertEq(type(IComplianceRule).interfaceId, bytes4(0xaab28dce), 'IComplianceRule');
     assertEq(type(IComplianceHook).interfaceId, bytes4(0xa8f3d563), 'IComplianceHook');
     assertEq(type(IPolicyRegistry).interfaceId, bytes4(0x947f9fc8), 'IPolicyRegistry');
     // Re-pinned 2026-10-23 on owner instruction (intent revision I-1): `TransferIntent` gained executor, validAfter,
@@ -187,7 +202,7 @@ contract InterfaceFreezeTest is Test {
     );
     assertEq(IERC7943NonFungible.Frozen.selector, 0x110a31ef32e319c921a388ad15b3fcbf2dd8f62ab35795b611151ab36ed5b2af);
     assertEq(
-      IPolicyGatedCore.PolicyHookChanged.selector, 0x964de01ec9270e869e61cc2efab9db5a19eac89859423a5963b19266cef000ca
+      IERC8473.PolicyChanged.selector, 0x9fb4639eb3115274c0dca1893a5ffb376a717d9268b31846835ac71bcce5470b
     );
     assertEq(
       ITransferIntent.IntentExecuted.selector, 0xbfb47f4ecbd3340a56ddfb40a6e422e8805e7c3f5f2563dd89154d3da6c8aee8
@@ -335,11 +350,11 @@ contract InterfaceFreezeTest is Test {
     assertEq(Reasons.TRANSFER_OK, keccak256('TRANSFER_OK'));
     assertEq(Reasons.PAUSED, keccak256('PAUSED'));
     assertEq(Reasons.INSUFFICIENT_UNFROZEN, keccak256('INSUFFICIENT_UNFROZEN'));
-    assertEq(Reasons.SENDER_NOT_VERIFIED, keccak256('SENDER_NOT_VERIFIED'));
+    assertEq(Reasons.SENDER_NOT_ELIGIBLE, keccak256('SENDER_NOT_ELIGIBLE'));
     assertEq(Reasons.RECEIVER_NOT_VERIFIED, keccak256('RECEIVER_NOT_VERIFIED'));
-    assertEq(Reasons.OUTSIDE_SETTLEMENT_WINDOW, keccak256('OUTSIDE_SETTLEMENT_WINDOW'));
+    assertEq(Reasons.WINDOW_CLOSED, keccak256('WINDOW_CLOSED'));
     assertEq(Reasons.MAX_HOLDERS, keccak256('MAX_HOLDERS'));
-    assertEq(Reasons.LOCKED, keccak256('LOCKED'));
+    assertEq(Reasons.LOCKED_UP, keccak256('LOCKED_UP'));
     assertEq(Reasons.INTENT_EXPIRED, keccak256('INTENT_EXPIRED'));
     assertEq(Reasons.NONCE_USED, keccak256('NONCE_USED'));
     assertEq(Reasons.BAD_SIGNATURE, keccak256('BAD_SIGNATURE'));
@@ -363,9 +378,13 @@ contract InterfaceFreezeTest is Test {
     assertEq(Reasons.NOT_EXECUTOR, keccak256('NOT_EXECUTOR'));
     assertEq(Reasons.ZERO_RECEIVER, keccak256('ZERO_RECEIVER'));
     assertEq(Reasons.ABOVE_SUPPLY_CAP, keccak256('ABOVE_SUPPLY_CAP'));
-    assertEq(Reasons.TRANSFER_NOT_EXECUTED, keccak256('TRANSFER_NOT_EXECUTED'));
+    assertEq(Reasons.KIND_NOT_ALLOWED, keccak256('KIND_NOT_ALLOWED'));
     // Appended 2026-11-05 on owner instruction, for the ERC-721 template.
     assertEq(Reasons.NOT_TOKEN_OWNER, keccak256('NOT_TOKEN_OWNER'));
+    // Appended 2026-11-13 on owner instruction (ERC-8473 conformance). The same instruction renamed four codes to the
+    // names the draft recommends: SENDER_NOT_ELIGIBLE, LOCKED_UP, WINDOW_CLOSED and KIND_NOT_ALLOWED.
+    assertEq(Reasons.CHECK_UNAVAILABLE, keccak256('CHECK_UNAVAILABLE'));
+    assertEq(Reasons.TRANSFER_OK, 0xf059ed422c5a003e2d831cdef17f0af416cf22aae18c781d82aaacaa5c77fd3f);
   }
 
   /// @dev The qualification bits are part of the frozen vocabulary: a record written under one meaning must never be read

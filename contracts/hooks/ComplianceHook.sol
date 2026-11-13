@@ -3,12 +3,13 @@ pragma solidity ^0.8.28;
 
 import {IAccessControl} from '@openzeppelin/contracts/access/IAccessControl.sol';
 import {ERC165} from '@openzeppelin/contracts/utils/introspection/ERC165.sol';
+import {IERC165} from '@openzeppelin/contracts/utils/introspection/IERC165.sol';
 
 import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 
 /**
@@ -57,9 +58,9 @@ contract ComplianceHook is ERC165, IComplianceHook {
     REGISTRY = _registry;
   }
 
-  /// @inheritdoc IPolicyHook
+  /// @inheritdoc IERC8473Policy
   function afterTransfer(
-    IPolicyHook.TransferContext calldata _ctx
+    IERC8473Policy.TransferContext calldata _ctx
   ) external {
     if (msg.sender != _ctx.token) revert ComplianceHook_OnlyToken(msg.sender);
     RuleSet storage _set = _ruleSets[msg.sender];
@@ -70,6 +71,13 @@ contract ComplianceHook is ERC165, IComplianceHook {
       if (_mask & (1 << _i) != 0) _set.rule[_i].after_(_ctx);
     }
   }
+
+  /// @inheritdoc IERC8473Policy
+  function onInstall(
+    address _token,
+    address _previousPolicy,
+    bytes calldata _data
+  ) external {}
 
   /// @inheritdoc IComplianceHook
   function setRules(
@@ -87,9 +95,9 @@ contract ComplianceHook is ERC165, IComplianceHook {
     _setRules(_token, _newRules);
   }
 
-  /// @inheritdoc IPolicyHook
-  function beforeTransfer(
-    IPolicyHook.TransferContext calldata _ctx
+  /// @inheritdoc IERC8473Policy
+  function checkTransfer(
+    IERC8473Policy.TransferContext calldata _ctx
   ) external view returns (bytes32 _reason) {
     RuleSet storage _set = _ruleSets[_ctx.token];
     uint256 _length = _set.count;
@@ -101,7 +109,7 @@ contract ComplianceHook is ERC165, IComplianceHook {
     _reason = Reasons.TRANSFER_OK;
   }
 
-  /// @inheritdoc IPolicyHook
+  /// @inheritdoc IERC8473Policy
   function checkReceive(
     address _token,
     address _account
@@ -116,7 +124,7 @@ contract ComplianceHook is ERC165, IComplianceHook {
     _reason = Reasons.TRANSFER_OK;
   }
 
-  /// @inheritdoc IPolicyHook
+  /// @inheritdoc IERC8473Policy
   function checkSend(
     address _token,
     address _account
@@ -150,16 +158,16 @@ contract ComplianceHook is ERC165, IComplianceHook {
     }
   }
 
-  /// @inheritdoc IPolicyHook
-  function wantsAfter() external view returns (bool _wantsAfter) {
+  /// @inheritdoc IERC8473Policy
+  function wantsAfterTransfer() external view returns (bool _wantsAfter) {
     _wantsAfter = _ruleSets[msg.sender].afterMask != 0;
   }
 
   /// @inheritdoc ERC165
   function supportsInterface(
     bytes4 _interfaceId
-  ) public view override returns (bool _supported) {
-    _supported = _interfaceId == type(IPolicyHook).interfaceId || _interfaceId == type(IComplianceHook).interfaceId
+  ) public view override(ERC165, IERC165) returns (bool _supported) {
+    _supported = _interfaceId == type(IERC8473Policy).interfaceId || _interfaceId == type(IComplianceHook).interfaceId
       || super.supportsInterface(_interfaceId);
   }
 

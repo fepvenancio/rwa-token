@@ -6,7 +6,7 @@ import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 
 import {BaseRule} from 'contracts/hooks/BaseRule.sol';
 
@@ -17,14 +17,14 @@ import {BaseRule} from 'contracts/hooks/BaseRule.sol';
 contract MockReentrantRule is BaseRule {
   /// @inheritdoc IComplianceRule
   function after_(
-    IPolicyHook.TransferContext calldata _ctx
+    IERC8473Policy.TransferContext calldata _ctx
   ) external override onlyHook(_ctx) {
     IERC20(_ctx.token).transfer(_ctx.to, 0);
   }
 
   /// @inheritdoc IComplianceRule
   function check(
-    IPolicyHook.TransferContext calldata
+    IERC8473Policy.TransferContext calldata
   ) external pure returns (bytes32 _reason) {
     _reason = Reasons.TRANSFER_OK;
   }

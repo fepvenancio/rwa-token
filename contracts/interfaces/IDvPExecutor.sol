@@ -90,7 +90,7 @@ interface IDvPExecutor {
    * @notice Thrown when a leg fails; the whole trade reverts. For the ERC-3009 form the legs are the pull of the cash
    *         and the securities leg; a failing payout to the seller reverts with the cash token's own error
    * @param _leg The failing leg. The cash leg runs first, so a trade whose both legs fail reports the cash leg
-   * @param _reason The token's revert data, e.g. `IPolicyGated.PolicyGated_TransferRejected(reason)`
+   * @param _reason The token's revert data, e.g. `IERC8473.ERC8473PolicyRejected(reason)`
    */
   error DvPExecutor_LegFailed(Leg _leg, bytes _reason);
 

@@ -9,9 +9,10 @@ import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+import {IERC8473} from 'interfaces/IERC8473.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
 
@@ -48,7 +49,7 @@ contract IntentSettledUnitTest is Helpers {
     );
     vm.mockCall(_hook, abi.encodeCall(IComplianceHook.REGISTRY, ()), abi.encode(_registry));
     _hookDecides(Reasons.TRANSFER_OK);
-    vm.mockCall(_hook, abi.encodeCall(IPolicyHook.wantsAfter, ()), abi.encode(false));
+    vm.mockCall(_hook, abi.encodeCall(IERC8473Policy.wantsAfterTransfer, ()), abi.encode(false));
 
     IntentToken _impl = new IntentToken();
     _token = IntentToken(
@@ -74,7 +75,7 @@ contract IntentSettledUnitTest is Helpers {
   function _hookDecides(
     bytes32 _reason
   ) internal {
-    vm.mockCall(_hook, abi.encodeWithSelector(IPolicyHook.beforeTransfer.selector), abi.encode(_reason));
+    vm.mockCall(_hook, abi.encodeWithSelector(IERC8473Policy.checkTransfer.selector), abi.encode(_reason));
   }
 
   function _intent(
@@ -168,7 +169,7 @@ contract IntentSettledUnitTest is Helpers {
   function _rejected(
     bytes32 _reason
   ) internal pure returns (bytes memory _revertData) {
-    _revertData = abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, _reason);
+    _revertData = abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, _reason);
   }
 }
 
@@ -243,17 +244,17 @@ contract IntentSettledUnit_ExecuteTransfer is IntentSettledUnitTest {
     bytes memory _sig = _signed(_i);
     bytes32 _expectedHash = _token.intentHash(_i);
 
-    IPolicyHook.TransferContext memory _ctx = IPolicyHook.TransferContext({
+    IERC8473Policy.TransferContext memory _ctx = IERC8473Policy.TransferContext({
       token: address(_token),
       from: _alice,
       to: _bob,
-      id: 0,
+      tokenId: 0,
       amount: _amount,
       operator: _executor,
-      kind: IPolicyHook.TransferKind.EXECUTED,
-      extra: abi.encode(_token.balanceOf(_alice), _token.balanceOf(_bob), _i.ref, _i.deadline)
+      kind: IERC8473Policy.TransferKind.EXECUTED,
+      data: abi.encode(_token.balanceOf(_alice), _token.balanceOf(_bob), _i.ref, _i.deadline)
     });
-    vm.expectCall(_hook, abi.encodeCall(IPolicyHook.beforeTransfer, (_ctx)));
+    vm.expectCall(_hook, abi.encodeCall(IERC8473Policy.checkTransfer, (_ctx)));
     vm.expectEmit(address(_token));
     emit ITransferIntent.IntentExecuted(_expectedHash, _alice, _bob, _amount, _executor, _i.ref);
 
@@ -268,17 +269,17 @@ contract IntentSettledUnit_ExecuteTransfer is IntentSettledUnitTest {
     ITransferIntent.TransferIntent memory _i = _intent(10, keccak256('n'), block.timestamp + 1 days);
     _execute(_i, _signed(_i));
 
-    IPolicyHook.TransferContext memory _plain = IPolicyHook.TransferContext({
+    IERC8473Policy.TransferContext memory _plain = IERC8473Policy.TransferContext({
       token: address(_token),
       from: _bob,
       to: _alice,
-      id: 0,
+      tokenId: 0,
       amount: 1,
       operator: _bob,
-      kind: IPolicyHook.TransferKind.TRANSFER,
-      extra: abi.encode(_token.balanceOf(_bob), _token.balanceOf(_alice))
+      kind: IERC8473Policy.TransferKind.TRANSFER,
+      data: abi.encode(_token.balanceOf(_bob), _token.balanceOf(_alice))
     });
-    vm.expectCall(_hook, abi.encodeCall(IPolicyHook.beforeTransfer, (_plain)));
+    vm.expectCall(_hook, abi.encodeCall(IERC8473Policy.checkTransfer, (_plain)));
     vm.prank(_bob);
     _token.transfer(_alice, 1);
   }
@@ -372,7 +373,7 @@ contract IntentSettledUnit_ExecuteTransfer is IntentSettledUnitTest {
   function test_WhenHookRejects_ItRevertsAndKeepsTheNonceUnused(
     bytes32 _reason
   ) external {
-    if (_reason == Reasons.TRANSFER_OK) _reason = Reasons.OUTSIDE_SETTLEMENT_WINDOW;
+    if (_reason == Reasons.TRANSFER_OK) _reason = Reasons.WINDOW_CLOSED;
     _hookDecides(_reason);
     ITransferIntent.TransferIntent memory _i = _intent(1, keccak256('n'), block.timestamp);
     bytes memory _sig = _signed(_i);
@@ -522,17 +523,17 @@ contract IntentSettledUnit_Consideration is IntentSettledUnitTest {
     _i.considerationAmount = 777;
     bytes memory _sig = _signed(_i);
 
-    IPolicyHook.TransferContext memory _ctx = IPolicyHook.TransferContext({
+    IERC8473Policy.TransferContext memory _ctx = IERC8473Policy.TransferContext({
       token: address(_token),
       from: _alice,
       to: _bob,
-      id: 0,
+      tokenId: 0,
       amount: 10,
       operator: _executor,
-      kind: IPolicyHook.TransferKind.EXECUTED,
-      extra: abi.encode(_token.balanceOf(_alice), _token.balanceOf(_bob), _i.ref, _i.deadline)
+      kind: IERC8473Policy.TransferKind.EXECUTED,
+      data: abi.encode(_token.balanceOf(_alice), _token.balanceOf(_bob), _i.ref, _i.deadline)
     });
-    vm.expectCall(_hook, abi.encodeCall(IPolicyHook.beforeTransfer, (_ctx)));
+    vm.expectCall(_hook, abi.encodeCall(IERC8473Policy.checkTransfer, (_ctx)));
     vm.expectEmit(address(_token));
     emit ITransferIntent.IntentExecuted(_token.intentHash(_i), _alice, _bob, 10, _executor, _i.ref);
     _executeAs(_executor, _i, _sig);
@@ -602,7 +603,7 @@ contract IntentSettledUnit_CheckOrder is IntentSettledUnitTest {
   }
 
   function test_WhenTheSignatureIsBadAndTheHookRejects_TheSignatureWins() external {
-    _hookDecides(Reasons.OUTSIDE_SETTLEMENT_WINDOW);
+    _hookDecides(Reasons.WINDOW_CLOSED);
     ITransferIntent.TransferIntent memory _i = _intent(1, keccak256('n'), block.timestamp);
     (, uint256 _evePk) = makeAddrAndKey('eve');
     bytes memory _sig = _sign(_evePk, _token.intentHash(_i));
@@ -693,17 +694,17 @@ contract IntentSettledUnit_CanExecute is IntentSettledUnitTest {
   function test_TheRulesSeeTheNamedAccountAsTheOperator() external {
     ITransferIntent.TransferIntent memory _i = _intent(1, keccak256('n'), block.timestamp);
     bytes memory _sig = _signed(_i);
-    IPolicyHook.TransferContext memory _ctx = IPolicyHook.TransferContext({
+    IERC8473Policy.TransferContext memory _ctx = IERC8473Policy.TransferContext({
       token: address(_token),
       from: _alice,
       to: _bob,
-      id: 0,
+      tokenId: 0,
       amount: 1,
       operator: _executor,
-      kind: IPolicyHook.TransferKind.EXECUTED,
-      extra: abi.encode(_token.balanceOf(_alice), _token.balanceOf(_bob), _i.ref, _i.deadline)
+      kind: IERC8473Policy.TransferKind.EXECUTED,
+      data: abi.encode(_token.balanceOf(_alice), _token.balanceOf(_bob), _i.ref, _i.deadline)
     });
-    vm.expectCall(_hook, abi.encodeCall(IPolicyHook.beforeTransfer, (_ctx)));
+    vm.expectCall(_hook, abi.encodeCall(IERC8473Policy.checkTransfer, (_ctx)));
     vm.prank(_stranger);
     _token.canExecute(_i, _sig, _executor);
   }
@@ -748,7 +749,7 @@ contract IntentSettledUnit_CanExecute is IntentSettledUnitTest {
   function test_WhenHookRejects_ItAgreesWithExecuteTransfer(
     bytes32 _reason
   ) external {
-    if (_reason == Reasons.TRANSFER_OK) _reason = Reasons.OUTSIDE_SETTLEMENT_WINDOW;
+    if (_reason == Reasons.TRANSFER_OK) _reason = Reasons.WINDOW_CLOSED;
     _hookDecides(_reason);
     ITransferIntent.TransferIntent memory _i = _intent(1, keccak256('n'), block.timestamp);
     bytes memory _sig = _signed(_i);
@@ -867,7 +868,7 @@ contract IntentSettledUnit_CanExecute is IntentSettledUnitTest {
       vm.prank(_alice);
       _token.cancelIntent(keccak256('n'));
     }
-    if (_hookRejects) _hookDecides(Reasons.OUTSIDE_SETTLEMENT_WINDOW);
+    if (_hookRejects) _hookDecides(Reasons.WINDOW_CLOSED);
 
     address _caller = _callerIsOther ? _otherExecutor : _executor;
     (bool _ok, bytes32 _reason) = _canExecuteAs(_caller, _i, _sig);

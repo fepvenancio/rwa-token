@@ -14,6 +14,7 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IDvPExecutor} from 'interfaces/IDvPExecutor.sol';
 import {IERC3009} from 'interfaces/IERC3009.sol';
 import {IERC7943Fungible} from 'interfaces/IERC7943Fungible.sol';
+import {IERC8473} from 'interfaces/IERC8473.sol';
 import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
@@ -162,7 +163,7 @@ contract DvPExecutorUnitTest is Helpers {
   function _rejected(
     bytes32 _reason
   ) internal pure returns (bytes memory _revertData) {
-    _revertData = abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, _reason);
+    _revertData = abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, _reason);
   }
 
   function _unauthorized(
@@ -268,7 +269,7 @@ contract DvPExecutorUnit_Gated is DvPExecutorUnitTest {
 
   function test_WhenBothLegsFail_TheCashLegIsReportedBecauseItRunsFirst() external {
     vm.mockCallRevert(_cash, _cashCall(), _rejected(Reasons.INSUFFICIENT_UNFROZEN));
-    vm.mockCallRevert(_security, _securitiesCall(), _rejected(Reasons.LOCKED));
+    vm.mockCallRevert(_security, _securitiesCall(), _rejected(Reasons.LOCKED_UP));
     vm.expectRevert(_legFailed(IDvPExecutor.Leg.CASH, _rejected(Reasons.INSUFFICIENT_UNFROZEN)));
     _runGated();
   }
@@ -462,7 +463,7 @@ contract DvPExecutorUnit_PreflightGated is DvPExecutorUnitTest {
     bytes32 _cashReason,
     bytes32 _securitiesReason
   ) external {
-    if (_cashReason == Reasons.TRANSFER_OK) _cashReason = Reasons.LOCKED;
+    if (_cashReason == Reasons.TRANSFER_OK) _cashReason = Reasons.LOCKED_UP;
     if (_securitiesReason == Reasons.TRANSFER_OK) _securitiesReason = Reasons.MAX_HOLDERS;
 
     _legsCan(Reasons.TRANSFER_OK, _securitiesReason);
@@ -571,7 +572,7 @@ contract DvPExecutorUnit_Preflight3009 is DvPExecutorUnitTest {
   function test_WhenTheSecuritiesLegIsRefused_ItReturnsItsReason(
     bytes32 _securitiesReason
   ) external {
-    if (_securitiesReason == Reasons.TRANSFER_OK) _securitiesReason = Reasons.LOCKED;
+    if (_securitiesReason == Reasons.TRANSFER_OK) _securitiesReason = Reasons.LOCKED_UP;
     _securitiesCan(_securitiesReason);
     (bool _ok, bytes32 _reason) = _can();
     assertFalse(_ok);
@@ -580,7 +581,7 @@ contract DvPExecutorUnit_Preflight3009 is DvPExecutorUnitTest {
 
   function test_WhenTheAuthorizationAndTheSecuritiesLegBothFail_TheAuthorizationIsReportedFirst() external {
     _authorizationIs(true, _CASH);
-    _securitiesCan(Reasons.LOCKED);
+    _securitiesCan(Reasons.LOCKED_UP);
     (bool _ok, bytes32 _reason) = _can();
     assertFalse(_ok);
     assertEq(_reason, Reasons.NONCE_USED);
@@ -911,7 +912,7 @@ contract DvPExecutorIntegration_Gated is DvPExecutorIntegrationTest {
   function test_WhenTheSecuritiesLegIsLocked_NothingMovesAndNoNonceIsSpent() external {
     _lock(_alice);
     Trade memory _t = _gatedTrade(_SHARES, _CASH);
-    _assertGatedParity(_t, Reasons.LOCKED, IDvPExecutor.Leg.SECURITIES);
+    _assertGatedParity(_t, Reasons.LOCKED_UP, IDvPExecutor.Leg.SECURITIES);
 
     assertEq(_cashToken.balanceOf(_buyer), 1000e6, 'the cash leg ran first and was undone');
     assertEq(_cashToken.balanceOf(_alice), 0);
@@ -936,7 +937,7 @@ contract DvPExecutorIntegration_Gated is DvPExecutorIntegrationTest {
   function test_WhenOutsideTheSettlementWindow_TheTradeWaitsForTheNextOpening() external {
     vm.warp(_SATURDAY_10AM);
     Trade memory _t = _gatedTrade(_SHARES, _CASH);
-    _assertGatedParity(_t, Reasons.OUTSIDE_SETTLEMENT_WINDOW, IDvPExecutor.Leg.SECURITIES);
+    _assertGatedParity(_t, Reasons.WINDOW_CLOSED, IDvPExecutor.Leg.SECURITIES);
     assertEq(_cashToken.balanceOf(_buyer), 1000e6);
 
     vm.warp(_MONDAY_10AM + 7 days);
@@ -1123,9 +1124,9 @@ contract DvPExecutorIntegration_Authorization is DvPExecutorIntegrationTest {
 
     (bool _ok, bytes32 _reason) = _dvp.canExecuteDvP3009(address(_token), address(_usdc), _s, _sSig, _a);
     assertFalse(_ok);
-    assertEq(_reason, Reasons.LOCKED);
+    assertEq(_reason, Reasons.LOCKED_UP);
 
-    vm.expectRevert(_legFailed(IDvPExecutor.Leg.SECURITIES, Reasons.LOCKED));
+    vm.expectRevert(_legFailed(IDvPExecutor.Leg.SECURITIES, Reasons.LOCKED_UP));
     _run3009(_s, _sSig, _a);
     assertEq(_usdc.balanceOf(_buyer), 1000e6);
     assertFalse(_usdc.authorizationState(_buyer, _a.nonce));

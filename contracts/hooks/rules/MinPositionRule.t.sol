@@ -8,7 +8,7 @@ import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IMinPositionRule} from 'interfaces/IMinPositionRule.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 
 import {MinPositionRule} from 'contracts/hooks/rules/MinPositionRule.sol';
 import {Helpers} from 'contracts/test/Helpers.sol';
@@ -53,22 +53,22 @@ contract MinPositionRuleUnitTest is Helpers {
 
   /// @dev Context of a movement with the balances before it, as the token builds it
   function _ctx(
-    IPolicyHook.TransferKind _kind,
+    IERC8473Policy.TransferKind _kind,
     address _sender,
     address _receiver,
     uint256 _amount,
     uint256 _fromBalance,
     uint256 _toBalance
-  ) internal view returns (IPolicyHook.TransferContext memory _context) {
-    _context = IPolicyHook.TransferContext({
+  ) internal view returns (IERC8473Policy.TransferContext memory _context) {
+    _context = IERC8473Policy.TransferContext({
       token: _token,
       from: _sender,
       to: _receiver,
-      id: 0,
+      tokenId: 0,
       amount: _amount,
       operator: _sender,
       kind: _kind,
-      extra: abi.encode(_fromBalance, _toBalance)
+      data: abi.encode(_fromBalance, _toBalance)
     });
   }
 
@@ -77,7 +77,7 @@ contract MinPositionRuleUnitTest is Helpers {
     uint256 _fromBalance,
     uint256 _toBalance
   ) internal view returns (bytes32 _reason) {
-    _reason = _rule.check(_ctx(IPolicyHook.TransferKind.TRANSFER, _from, _to, _amount, _fromBalance, _toBalance));
+    _reason = _rule.check(_ctx(IERC8473Policy.TransferKind.TRANSFER, _from, _to, _amount, _fromBalance, _toBalance));
   }
 }
 
@@ -108,7 +108,7 @@ contract MinPositionRuleUnit_SetMinPosition is MinPositionRuleUnitTest {
   ) external {
     _setMin(_MIN);
     _setMin(0);
-    IPolicyHook.TransferKind _kind = IPolicyHook.TransferKind(bound(_kindSeed, 0, 4));
+    IERC8473Policy.TransferKind _kind = IERC8473Policy.TransferKind(bound(_kindSeed, 0, 4));
     assertEq(_rule.check(_ctx(_kind, _from, _to, 1, 5, 0)), Reasons.TRANSFER_OK);
   }
 
@@ -225,30 +225,30 @@ contract MinPositionRuleUnit_Check is MinPositionRuleUnitTest {
 
   /// @dev EXECUTED is a holder-driven transfer, and its context carries the reference and deadline after the balances
   function test_WhenTheKindIsExecuted_ItDecidesTheSameAndReadsTheLongerExtra() external view {
-    IPolicyHook.TransferContext memory _context = _ctx(IPolicyHook.TransferKind.EXECUTED, _from, _to, 1, 500 ether, 0);
-    _context.extra = abi.encode(uint256(500 ether), uint256(0), keccak256('ref'), block.timestamp + 1 days);
+    IERC8473Policy.TransferContext memory _context = _ctx(IERC8473Policy.TransferKind.EXECUTED, _from, _to, 1, 500 ether, 0);
+    _context.data = abi.encode(uint256(500 ether), uint256(0), keccak256('ref'), block.timestamp + 1 days);
     assertEq(_rule.check(_context), Reasons.BELOW_MIN_POSITION);
     _context.amount = _MIN;
     assertEq(_rule.check(_context), Reasons.TRANSFER_OK);
   }
 
   function test_WhenMinting_OnlyTheReceiverIsJudged() external view {
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.MINT, address(0), _to, _MIN, 0, 0)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.MINT, address(0), _to, _MIN, 0, 0)), Reasons.TRANSFER_OK);
     assertEq(
-      _rule.check(_ctx(IPolicyHook.TransferKind.MINT, address(0), _to, _MIN - 1, 0, 0)), Reasons.BELOW_MIN_POSITION
+      _rule.check(_ctx(IERC8473Policy.TransferKind.MINT, address(0), _to, _MIN - 1, 0, 0)), Reasons.BELOW_MIN_POSITION
     );
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.MINT, address(0), _to, 1, 0, _MIN)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.MINT, address(0), _to, 1, 0, _MIN)), Reasons.TRANSFER_OK);
   }
 
   function test_WhenAHolderBurns_OnlyTheRemainderIsJudged() external view {
     assertEq(
-      _rule.check(_ctx(IPolicyHook.TransferKind.BURN, _from, address(0), 500 ether, 500 ether, 0)), Reasons.TRANSFER_OK
+      _rule.check(_ctx(IERC8473Policy.TransferKind.BURN, _from, address(0), 500 ether, 500 ether, 0)), Reasons.TRANSFER_OK
     );
     assertEq(
-      _rule.check(_ctx(IPolicyHook.TransferKind.BURN, _from, address(0), 400 ether, 500 ether, 0)), Reasons.TRANSFER_OK
+      _rule.check(_ctx(IERC8473Policy.TransferKind.BURN, _from, address(0), 400 ether, 500 ether, 0)), Reasons.TRANSFER_OK
     );
     assertEq(
-      _rule.check(_ctx(IPolicyHook.TransferKind.BURN, _from, address(0), 500 ether - 1, 500 ether, 0)),
+      _rule.check(_ctx(IERC8473Policy.TransferKind.BURN, _from, address(0), 500 ether - 1, 500 ether, 0)),
       Reasons.BELOW_MIN_POSITION
     );
   }
@@ -256,13 +256,13 @@ contract MinPositionRuleUnit_Check is MinPositionRuleUnitTest {
   /// @dev Nothing moves, so nothing is left behind: a dust holder's zero-amount or self movement is not a new breach
   function test_WhenNothingChangesHands_ItReturnsOk() external view {
     assertEq(_transfer(0, 5, 3), Reasons.TRANSFER_OK);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.TRANSFER, _from, _from, 2, 5, 5)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.TRANSFER, _from, _from, 2, 5, 5)), Reasons.TRANSFER_OK);
   }
 
   function test_WhenTheTokenHasNoMinimum_ItReturnsOkForDustAndNeverAsksTheTokenForRoles() external {
     address _other = _mockContract('other');
     vm.expectCall(_other, abi.encodeWithSelector(IAccessControl.hasRole.selector), 0);
-    IPolicyHook.TransferContext memory _context = _ctx(IPolicyHook.TransferKind.BURN, _from, address(0), 1, 5, 0);
+    IERC8473Policy.TransferContext memory _context = _ctx(IERC8473Policy.TransferKind.BURN, _from, address(0), 1, 5, 0);
     _context.token = _other;
     assertEq(_rule.check(_context), Reasons.TRANSFER_OK);
   }
@@ -270,7 +270,7 @@ contract MinPositionRuleUnit_Check is MinPositionRuleUnitTest {
   /// @dev A check on a view path never reverts on arithmetic: huge amounts and impossible balances are answered
   function test_WhenTheNumbersAreExtreme_ItNeverReverts() external view {
     assertEq(
-      _rule.check(_ctx(IPolicyHook.TransferKind.MINT, address(0), _to, type(uint256).max, 0, type(uint256).max / 2)),
+      _rule.check(_ctx(IERC8473Policy.TransferKind.MINT, address(0), _to, type(uint256).max, 0, type(uint256).max / 2)),
       Reasons.TRANSFER_OK
     );
     assertEq(_transfer(type(uint256).max, type(uint256).max, type(uint256).max), Reasons.TRANSFER_OK);
@@ -282,7 +282,7 @@ contract MinPositionRuleUnit_Check is MinPositionRuleUnitTest {
   function test_WhenCalledWithStaticcall_ItDoesNotWrite() external view {
     (bool _ok, bytes memory _out) = address(_rule)
       .staticcall(
-        abi.encodeCall(IComplianceRule.check, (_ctx(IPolicyHook.TransferKind.TRANSFER, _from, _to, 1, 5 ether, 0)))
+        abi.encodeCall(IComplianceRule.check, (_ctx(IERC8473Policy.TransferKind.TRANSFER, _from, _to, 1, 5 ether, 0)))
       );
     assertTrue(_ok);
     assertEq(abi.decode(_out, (bytes32)), Reasons.BELOW_MIN_POSITION);
@@ -297,21 +297,21 @@ contract MinPositionRuleUnit_Exemptions is MinPositionRuleUnitTest {
   }
 
   function test_WhenForced_BothSidesAreExempt() external view {
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.FORCED, _from, _to, 1, 5, 0)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.FORCED, _from, _to, 1, 5, 0)), Reasons.TRANSFER_OK);
     assertEq(
-      _rule.check(_ctx(IPolicyHook.TransferKind.FORCED, _from, _to, 500 ether - 1, 500 ether, 0)), Reasons.TRANSFER_OK
+      _rule.check(_ctx(IERC8473Policy.TransferKind.FORCED, _from, _to, 500 ether - 1, 500 ether, 0)), Reasons.TRANSFER_OK
     );
   }
 
   /// @dev Brief §5: FORCED with `from == address(0)` is an enforcement mint, exempt like any FORCED move
   function test_WhenAnEnforcementMintLeavesDust_ItIsExempt() external view {
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.FORCED, address(0), _to, 1, 0, 0)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.FORCED, address(0), _to, 1, 0, 0)), Reasons.TRANSFER_OK);
   }
 
   /// @dev The operator holds BURNER_ROLE, as the lockup rule and the token's frozen-balance check define it
   function test_WhenAnEnforcementBurnerLeavesDust_ItIsExempt() external {
-    IPolicyHook.TransferContext memory _context =
-      _ctx(IPolicyHook.TransferKind.BURN, _from, address(0), 450 ether, 500 ether, 0);
+    IERC8473Policy.TransferContext memory _context =
+      _ctx(IERC8473Policy.TransferKind.BURN, _from, address(0), 450 ether, 500 ether, 0);
     _context.operator = _burner;
     vm.expectCall(_token, abi.encodeCall(IAccessControl.hasRole, (_BURNER_ROLE, _burner)), 1);
     assertEq(_rule.check(_context), Reasons.TRANSFER_OK);
@@ -320,7 +320,7 @@ contract MinPositionRuleUnit_Exemptions is MinPositionRuleUnitTest {
   function test_WhenAHolderBurnLeavesDust_TheRoleIsAskedAndTheBurnRejected() external {
     vm.expectCall(_token, abi.encodeCall(IAccessControl.hasRole, (_BURNER_ROLE, _from)), 1);
     assertEq(
-      _rule.check(_ctx(IPolicyHook.TransferKind.BURN, _from, address(0), 450 ether, 500 ether, 0)),
+      _rule.check(_ctx(IERC8473Policy.TransferKind.BURN, _from, address(0), 450 ether, 500 ether, 0)),
       Reasons.BELOW_MIN_POSITION
     );
   }
@@ -328,13 +328,13 @@ contract MinPositionRuleUnit_Exemptions is MinPositionRuleUnitTest {
   /// @dev The role is asked only when a burn would leave a balance below the minimum, so the usual burn pays nothing
   function test_WhenABurnLeavesNothingOrEnoughOrIsNotABurn_TheTokenIsNeverAskedForRoles() external {
     vm.expectCall(_token, abi.encodeWithSelector(IAccessControl.hasRole.selector), 0);
-    IPolicyHook.TransferContext memory _context =
-      _ctx(IPolicyHook.TransferKind.BURN, _from, address(0), 500 ether, 500 ether, 0);
+    IERC8473Policy.TransferContext memory _context =
+      _ctx(IERC8473Policy.TransferKind.BURN, _from, address(0), 500 ether, 500 ether, 0);
     _context.operator = _burner;
     assertEq(_rule.check(_context), Reasons.TRANSFER_OK); // leaves nothing
     _context.amount = 400 ether;
     assertEq(_rule.check(_context), Reasons.TRANSFER_OK); // leaves exactly the minimum
-    _context.kind = IPolicyHook.TransferKind.TRANSFER;
+    _context.kind = IERC8473Policy.TransferKind.TRANSFER;
     _context.to = _to;
     _context.amount = _MIN;
     assertEq(_rule.check(_context), Reasons.TRANSFER_OK); // a transfer is judged on its own terms
@@ -342,22 +342,22 @@ contract MinPositionRuleUnit_Exemptions is MinPositionRuleUnitTest {
 
   /// @dev Only a BURN is an enforcement action: the role does not exempt a transfer
   function test_WhenAnEnforcementBurnerTransfersAndLeavesDust_ItIsRejected() external view {
-    IPolicyHook.TransferContext memory _context =
-      _ctx(IPolicyHook.TransferKind.TRANSFER, _from, _to, 450 ether, 500 ether, 0);
+    IERC8473Policy.TransferContext memory _context =
+      _ctx(IERC8473Policy.TransferKind.TRANSFER, _from, _to, 450 ether, 500 ether, 0);
     _context.operator = _burner;
     assertEq(_rule.check(_context), Reasons.BELOW_MIN_POSITION);
   }
 
   /// @dev The 7540 escrow: a redeem request moves shares to the token below the minimum, and the fulfilment burns them
   function test_WhenTheTokenItselfReceivesOrSends_ItIsExempt() external view {
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.TRANSFER, _from, _token, 1, 500 ether, 0)), Reasons.TRANSFER_OK);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.TRANSFER, _token, _to, _MIN, _MIN + 5, 0)), Reasons.TRANSFER_OK);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.BURN, _token, address(0), 7, 10, 0)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.TRANSFER, _from, _token, 1, 500 ether, 0)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.TRANSFER, _token, _to, _MIN, _MIN + 5, 0)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.BURN, _token, address(0), 7, 10, 0)), Reasons.TRANSFER_OK);
   }
 
   function test_WhenTheTokenSendsToADustReceiver_TheReceiverIsStillJudged() external view {
     assertEq(
-      _rule.check(_ctx(IPolicyHook.TransferKind.TRANSFER, _token, _to, 1, 500 ether, 0)), Reasons.BELOW_MIN_POSITION
+      _rule.check(_ctx(IERC8473Policy.TransferKind.TRANSFER, _token, _to, 1, 500 ether, 0)), Reasons.BELOW_MIN_POSITION
     );
   }
 

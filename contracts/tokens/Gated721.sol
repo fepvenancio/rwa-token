@@ -11,7 +11,7 @@ import {Reasons} from 'interfaces/Errors.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IERC7943NonFungible} from 'interfaces/IERC7943NonFungible.sol';
 import {IGated721} from 'interfaces/IGated721.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {ITemplated} from 'interfaces/ITemplated.sol';
 
 import {PolicyGatedCoreUpgradeable} from 'contracts/base/PolicyGatedCoreUpgradeable.sol';
@@ -118,7 +118,7 @@ contract Gated721 is ERC721URIStorageUpgradeable, PolicyGatedCoreUpgradeable, IG
     address _owner = _requireOwned(_tokenId);
     if (_owner != _from) revert ERC721IncorrectOwner(_from, _tokenId, _owner);
     _releaseFrozen(_from, _tokenId);
-    _move(_from, _to, _tokenId, IPolicyHook.TransferKind.FORCED);
+    _move(_from, _to, _tokenId, IERC8473Policy.TransferKind.FORCED);
     // Emitted after the hook's afterTransfer: re-entry is blocked by `_move`'s guard and the hook is attested.
     // slither-disable-start reentrancy-events
     emit ForcedTransfer(_from, _to, _tokenId);
@@ -233,12 +233,12 @@ contract Gated721 is ERC721URIStorageUpgradeable, PolicyGatedCoreUpgradeable, IG
     address _from,
     address _to,
     uint256 _tokenId,
-    IPolicyHook.TransferKind _kind
+    IERC8473Policy.TransferKind _kind
   ) private nonReentrant {
-    IPolicyHook.TransferContext memory _ctx = _context(_from, _to, _tokenId, _msgSender(), _kind);
+    IERC8473Policy.TransferContext memory _ctx = _context(_from, _to, _tokenId, _msgSender(), _kind);
 
     // Read once: the hook that approves the movement is the hook that sees `afterTransfer`.
-    IPolicyHook _hook = _policyHook();
+    IERC8473Policy _hook = _policy();
     bytes32 _reason = _check(_ctx, _hook);
     if (_reason != Reasons.TRANSFER_OK) {
       // A frozen token reverts with the standard's error; every policy decision keeps the typed rejection that carries
@@ -248,14 +248,14 @@ contract Gated721 is ERC721URIStorageUpgradeable, PolicyGatedCoreUpgradeable, IG
       if (_reason == Reasons.INSUFFICIENT_UNFROZEN && _frozenInTheWay(_ctx)) {
         revert ERC7943InsufficientUnfrozenBalance(_from, _tokenId);
       }
-      revert PolicyGated_TransferRejected(_reason);
+      revert ERC8473PolicyRejected(_reason);
     }
 
     // The previous owner it returns is `_from`, read by the caller before the checks.
     // aderyn-ignore-next-line(unchecked-return)
     super._update(_to, _tokenId, address(0));
 
-    if (_hook.wantsAfter()) _hook.afterTransfer(_ctx);
+    if (_hook.wantsAfterTransfer()) _hook.afterTransfer(_ctx);
   }
 
   /**
@@ -295,7 +295,7 @@ contract Gated721 is ERC721URIStorageUpgradeable, PolicyGatedCoreUpgradeable, IG
     if (_from == address(0) && _to == address(0)) return Reasons.ZERO_RECEIVER;
     if (_ownershipCounts && _ownerOf(_tokenId) != _from) return Reasons.NOT_TOKEN_OWNER;
     address _operator = _from == address(0) || _to == address(0) ? _msgSender() : _from;
-    _reason = _check(_context(_from, _to, _tokenId, _operator, _inferKind(_from, _to)), _policyHook());
+    _reason = _check(_context(_from, _to, _tokenId, _operator, _inferKind(_from, _to)), _policy());
   }
 
   /**
@@ -305,13 +305,13 @@ contract Gated721 is ERC721URIStorageUpgradeable, PolicyGatedCoreUpgradeable, IG
    * @return _reason The reason code
    */
   function _check(
-    IPolicyHook.TransferContext memory _ctx,
-    IPolicyHook _hook
+    IERC8473Policy.TransferContext memory _ctx,
+    IERC8473Policy _hook
   ) private view returns (bytes32 _reason) {
-    if (paused() && _ctx.kind != IPolicyHook.TransferKind.FORCED) return Reasons.PAUSED;
+    if (paused() && _ctx.kind != IERC8473Policy.TransferKind.FORCED) return Reasons.PAUSED;
     if (_frozenInTheWay(_ctx)) return Reasons.INSUFFICIENT_UNFROZEN;
     if (address(_hook) == address(0)) return Reasons.NO_HOOK;
-    _reason = _hook.beforeTransfer(_ctx);
+    _reason = _hook.checkTransfer(_ctx);
   }
 
   /**
@@ -328,21 +328,21 @@ contract Gated721 is ERC721URIStorageUpgradeable, PolicyGatedCoreUpgradeable, IG
     address _to,
     uint256 _tokenId,
     address _operator,
-    IPolicyHook.TransferKind _kind
-  ) private view returns (IPolicyHook.TransferContext memory _ctx) {
+    IERC8473Policy.TransferKind _kind
+  ) private view returns (IERC8473Policy.TransferContext memory _ctx) {
     // The holdings before the move, so rules never call back into the token. Zero for the zero address, for which
     // ERC-721's `balanceOf` reverts.
     uint256 _fromBalance = _from == address(0) ? 0 : balanceOf(_from);
     uint256 _toBalance = _to == address(0) ? 0 : balanceOf(_to);
-    _ctx = IPolicyHook.TransferContext({
+    _ctx = IERC8473Policy.TransferContext({
       token: address(this),
       from: _from,
       to: _to,
-      id: _tokenId,
+      tokenId: _tokenId,
       amount: 1,
       operator: _operator,
       kind: _kind,
-      extra: abi.encode(_fromBalance, _toBalance)
+      data: abi.encode(_fromBalance, _toBalance)
     });
   }
 
@@ -353,13 +353,13 @@ contract Gated721 is ERC721URIStorageUpgradeable, PolicyGatedCoreUpgradeable, IG
    * @return _inTheWay True if the freeze stops the movement
    */
   function _frozenInTheWay(
-    IPolicyHook.TransferContext memory _ctx
+    IERC8473Policy.TransferContext memory _ctx
   ) private view returns (bool _inTheWay) {
-    if (_ctx.from == address(0) || !_getGated721Storage().frozen[_ctx.from][_ctx.id]) return false;
+    if (_ctx.from == address(0) || !_getGated721Storage().frozen[_ctx.from][_ctx.tokenId]) return false;
     // Compares movement kinds, not balances.
     // slither-disable-next-line incorrect-equality
-    bool _enforcement = _ctx.kind == IPolicyHook.TransferKind.FORCED
-      || (_ctx.kind == IPolicyHook.TransferKind.BURN && hasRole(BURNER_ROLE, _ctx.operator));
+    bool _enforcement = _ctx.kind == IERC8473Policy.TransferKind.FORCED
+      || (_ctx.kind == IERC8473Policy.TransferKind.BURN && hasRole(BURNER_ROLE, _ctx.operator));
     _inTheWay = !_enforcement;
   }
 

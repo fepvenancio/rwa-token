@@ -16,7 +16,7 @@ interface IPolicyRegistry {
   /**
    * @notice What a codehash is attested as
    * @param NONE Not attested
-   * @param HOOK A policy hook, installable with `IPolicyGated.setPolicyHook`
+   * @param HOOK A policy hook, installable with `IPolicyGated.setPolicy`
    * @param RULE A compliance rule, installable in a compliance hook
    * @param IMPLEMENTATION A token implementation, installable with a UUPS upgrade
    * @param PORTFOLIO A portfolio, which a vault can plug in and another portfolio can migrate to

@@ -11,6 +11,7 @@ import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IERC7943Fungible} from 'interfaces/IERC7943Fungible.sol';
+import {IERC8473} from 'interfaces/IERC8473.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
@@ -138,7 +139,7 @@ contract IntentTokenIntegrationTest is Test {
   function _rejected(
     bytes32 _reason
   ) internal pure returns (bytes memory _revertData) {
-    _revertData = abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, _reason);
+    _revertData = abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, _reason);
   }
 
   function _signedIntent(
@@ -203,14 +204,14 @@ contract IntentTokenIntegration_Deployment is IntentTokenIntegrationTest {
       )
     );
     vm.prank(_admin);
-    _token.setPolicyHook(address(_clone));
+    _token.installPolicy(address(_clone), '');
   }
 
   function test_WhenAnIdenticalHookIsInstalled_ItIsAccepted() external {
     ComplianceHook _twin = new ComplianceHook(_registry);
     vm.prank(_admin);
-    _token.setPolicyHook(address(_twin));
-    assertEq(_token.policyHook(), address(_twin));
+    _token.installPolicy(address(_twin), '');
+    assertEq(_token.policy(), address(_twin));
   }
 }
 
@@ -530,7 +531,7 @@ contract IntentTokenIntegration_Safety is IntentTokenIntegrationTest {
     vm.prank(_admin);
     _token.upgradeToAndCall(address(_next), '');
     assertEq(_token.balanceOf(_alice), 1000 ether);
-    assertEq(_token.policyHook(), address(_hook));
+    assertEq(_token.policy(), address(_hook));
   }
 }
 

@@ -204,7 +204,7 @@ contract CredentialRuleIntegration_Enforcement is CredentialRuleIntegrationTest 
 
     (bool _ok, bytes32 _reason) = _transferWithParity(_alice, _bob, 1 ether);
     assertFalse(_ok);
-    assertEq(_reason, Reasons.SENDER_NOT_VERIFIED);
+    assertEq(_reason, Reasons.SENDER_NOT_ELIGIBLE);
 
     assertFalse(_token.canSend(_alice)); // the token-level probe agrees with the real call
     assertTrue(_token.canSend(_bob));
@@ -257,7 +257,7 @@ contract CredentialRuleIntegration_Enforcement is CredentialRuleIntegrationTest 
     _creds.setStatus(_alice, ICredentialRegistry.Status.ACTIVE);
     (bool _ok, bytes32 _reason) = _transferWithParity(_alice, _bob, 1 ether);
     assertFalse(_ok);
-    assertEq(_reason, Reasons.SENDER_NOT_VERIFIED);
+    assertEq(_reason, Reasons.SENDER_NOT_ELIGIBLE);
   }
 }
 
