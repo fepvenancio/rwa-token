@@ -104,8 +104,8 @@ contract Gated4626Management is Gated4626Common {
   }
 
   /**
-   * @notice Plugs, replaces or removes the fee model, as `IGated4626Vault.setFeeModel` specifies
-   * @param _feeModel The fee model, or zero for none
+   * @notice Plugs a fee model, or replaces one, as `IGated4626Vault.setFeeModel` specifies
+   * @param _feeModel The fee model, which must be attested: the vault has no way to go back to none
    */
   function setFeeModel(
     address _feeModel
