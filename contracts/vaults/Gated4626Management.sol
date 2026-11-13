@@ -32,6 +32,9 @@ import {Gated4626Common} from 'contracts/vaults/Gated4626Common.sol';
 contract Gated4626Management is Gated4626Common {
   using SafeERC20 for IERC20;
 
+  /// @notice The ceiling on the limit, so the arithmetic cannot overflow. It leaves the timelock room to raise the limit
+  uint256 private constant _MAX_RATE_BPS = 1e9;
+
   /**
    * @notice Plugs a portfolio, or replaces one, as `IGated4626Vault.setPortfolio` specifies
    * @param _portfolio The portfolio
