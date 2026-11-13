@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import {AccessControlUpgradeable} from '@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol';
 import {UUPSUpgradeable} from '@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol';
+import {IERC165} from '@openzeppelin/contracts/utils/introspection/IERC165.sol';
 import {MulticallUpgradeable} from '@openzeppelin/contracts-upgradeable/utils/MulticallUpgradeable.sol';
 import {PausableUpgradeable} from '@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol';
 import {ReentrancyGuardUpgradeable} from '@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol';
@@ -11,8 +12,9 @@ import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+import {IERC8473} from 'interfaces/IERC8473.sol';
 import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {ITemplated} from 'interfaces/ITemplated.sol';
 
@@ -42,7 +44,7 @@ abstract contract PolicyGatedCoreUpgradeable is
    */
   struct PolicyGatedCoreStorage {
     IPolicyRegistry registry;
-    IPolicyHook hook;
+    IERC8473Policy hook;
   }
 
   /// @notice Role allowed to mint
@@ -83,15 +85,16 @@ abstract contract PolicyGatedCoreUpgradeable is
   }
 
   /// @inheritdoc IPolicyGatedCore
-  function setPolicyHook(
-    address _newHook
+  function installPolicy(
+    address _newPolicy,
+    bytes calldata
   ) external onlyRole(DEFAULT_ADMIN_ROLE) {
-    _setHook(_newHook);
+    _setHook(_newPolicy);
   }
 
-  /// @inheritdoc IPolicyGatedCore
-  function policyHook() external view returns (address _hook) {
-    _hook = address(_policyHook());
+  /// @inheritdoc IERC8473
+  function policy() external view returns (address _installed) {
+    _installed = address(_policy());
   }
 
   /**
@@ -119,8 +122,9 @@ abstract contract PolicyGatedCoreUpgradeable is
   /// @inheritdoc AccessControlUpgradeable
   function supportsInterface(
     bytes4 _interfaceId
-  ) public view virtual override returns (bool _supported) {
-    _supported = _interfaceId == type(IPolicyGatedCore).interfaceId || super.supportsInterface(_interfaceId);
+  ) public view virtual override(AccessControlUpgradeable, IERC165) returns (bool _supported) {
+    _supported = _interfaceId == type(IPolicyGatedCore).interfaceId || _interfaceId == type(IERC8473).interfaceId
+      || super.supportsInterface(_interfaceId);
   }
 
   /// @inheritdoc ITemplated
@@ -202,7 +206,7 @@ abstract contract PolicyGatedCoreUpgradeable is
    * @notice The current policy hook
    * @return _hook The hook
    */
-  function _policyHook() internal view returns (IPolicyHook _hook) {
+  function _policy() internal view returns (IERC8473Policy _hook) {
     _hook = _getPolicyGatedCoreStorage().hook;
   }
 
@@ -218,7 +222,7 @@ abstract contract PolicyGatedCoreUpgradeable is
     address _account,
     bool _sending
   ) internal view returns (bool _allowed) {
-    IPolicyHook _hook = _policyHook();
+    IERC8473Policy _hook = _policy();
     if (paused() || address(_hook) == address(0)) return false;
     bytes32 _reason = _sending ? _hook.checkSend(address(this), _account) : _hook.checkReceive(address(this), _account);
     // Compares a reason code with a constant, not a balance.
@@ -235,10 +239,10 @@ abstract contract PolicyGatedCoreUpgradeable is
   function _inferKind(
     address _from,
     address _to
-  ) internal pure returns (IPolicyHook.TransferKind _kind) {
-    if (_from == address(0)) return IPolicyHook.TransferKind.MINT;
-    if (_to == address(0)) return IPolicyHook.TransferKind.BURN;
-    _kind = IPolicyHook.TransferKind.TRANSFER;
+  ) internal pure returns (IERC8473Policy.TransferKind _kind) {
+    if (_from == address(0)) return IERC8473Policy.TransferKind.MINT;
+    if (_to == address(0)) return IERC8473Policy.TransferKind.BURN;
+    _kind = IERC8473Policy.TransferKind.TRANSFER;
   }
 
   /**
@@ -259,8 +263,8 @@ abstract contract PolicyGatedCoreUpgradeable is
       revert PolicyGated_HookRegistryMismatch(_hookRegistry, address($.registry));
     }
     address _oldHook = address($.hook);
-    $.hook = IPolicyHook(_newHook);
-    emit PolicyHookChanged(_oldHook, _newHook);
+    $.hook = IERC8473Policy(_newHook);
+    emit PolicyChanged(_oldHook, _newHook);
   }
 
   /**

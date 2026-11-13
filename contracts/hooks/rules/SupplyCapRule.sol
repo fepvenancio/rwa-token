@@ -7,7 +7,7 @@ import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {ISupplyCapRule} from 'interfaces/ISupplyCapRule.sol';
 
 import {BaseRule} from 'contracts/hooks/BaseRule.sol';
@@ -39,10 +39,10 @@ contract SupplyCapRule is BaseRule, ISupplyCapRule {
 
   /// @inheritdoc IComplianceRule
   function check(
-    IPolicyHook.TransferContext calldata _ctx
+    IERC8473Policy.TransferContext calldata _ctx
   ) external view returns (bytes32 _reason) {
     _reason = Reasons.TRANSFER_OK;
-    if (_ctx.kind != IPolicyHook.TransferKind.MINT) return _reason;
+    if (_ctx.kind != IERC8473Policy.TransferKind.MINT) return _reason;
     uint256 _cap = supplyCap[_ctx.token];
     uint256 _supply = IERC20(_ctx.token).totalSupply();
     // Compared before subtracting, so no amount can make this revert.

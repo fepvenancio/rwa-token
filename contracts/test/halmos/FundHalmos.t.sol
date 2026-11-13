@@ -36,7 +36,7 @@ contract FundHalmosClass {
     _supported = _interfaceId == 0x01ffc9a7 || _interfaceId == type(IPolicyGated).interfaceId;
   }
 
-  function policyHook() external view returns (address _hook) {
+  function policy() external view returns (address _hook) {
     _hook = HOOK;
   }
 

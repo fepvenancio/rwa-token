@@ -6,7 +6,7 @@ import {Reasons} from 'interfaces/Errors.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IFund} from 'interfaces/IFund.sol';
 import {IFundHoldersRule} from 'interfaces/IFundHoldersRule.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 
 import {BaseRule} from 'contracts/hooks/BaseRule.sol';
 
@@ -41,10 +41,10 @@ contract FundHoldersRule is BaseRule, IFundHoldersRule {
    *      token that is not a registered class
    */
   function after_(
-    IPolicyHook.TransferContext calldata _ctx
+    IERC8473Policy.TransferContext calldata _ctx
   ) external override(BaseRule, IComplianceRule) onlyHook(_ctx) {
     if (_ctx.amount == 0 || _ctx.from == _ctx.to) return;
-    (uint256 _fromBalance, uint256 _toBalance) = abi.decode(_ctx.extra, (uint256, uint256));
+    (uint256 _fromBalance, uint256 _toBalance) = abi.decode(_ctx.data, (uint256, uint256));
     // Exact equalities are the holder definition: the receiver holds the class only if its balance before the move
     // was 0, and the sender leaves it if the move takes its whole balance (balance after == 0).
     // slither-disable-start incorrect-equality
@@ -58,7 +58,7 @@ contract FundHoldersRule is BaseRule, IFundHoldersRule {
    * @dev Uses pre-movement balances. The cheap tests come first, and the sender is read only when the cap is full
    */
   function check(
-    IPolicyHook.TransferContext calldata _ctx
+    IERC8473Policy.TransferContext calldata _ctx
   ) external view returns (bytes32 _reason) {
     (uint256 _index, uint256 _held, bool _exempt, uint256 _count, uint256 _cap, address _installed) =
       FUND.admission(_ctx.token, _ctx.to);
@@ -69,7 +69,7 @@ contract FundHoldersRule is BaseRule, IFundHoldersRule {
     // Not a new investor: nothing to count, or the receiver is already counted or never counted. FORCED is exempt from
     // the cap and still counted in `after_`. The class itself is the 7540 escrow.
     if (
-      _ctx.amount == 0 || _ctx.from == _ctx.to || _ctx.to == address(0) || _ctx.kind == IPolicyHook.TransferKind.FORCED
+      _ctx.amount == 0 || _ctx.from == _ctx.to || _ctx.to == address(0) || _ctx.kind == IERC8473Policy.TransferKind.FORCED
         || _ctx.to == _ctx.token || _exempt || _held != 0
     ) return Reasons.TRANSFER_OK;
 
@@ -146,7 +146,7 @@ contract FundHoldersRule is BaseRule, IFundHoldersRule {
    * @return _leaves True if the sender leaves the fund
    */
   function _senderLeavesFund(
-    IPolicyHook.TransferContext calldata _ctx,
+    IERC8473Policy.TransferContext calldata _ctx,
     uint256 _index
   ) internal view returns (bool _leaves) {
     if (_ctx.from == address(0) || _ctx.from == _ctx.token) return false;
@@ -155,7 +155,7 @@ contract FundHoldersRule is BaseRule, IFundHoldersRule {
     (, uint256 _fromHeld, bool _fromExempt,,,) = FUND.admission(_ctx.token, _ctx.from);
     if (_fromExempt || _fromHeld != 1 << (_index - 1)) return false;
     // The exact equality is the definition of "sender leaves" (balance == amount); see after_.
-    (uint256 _fromBalance,) = abi.decode(_ctx.extra, (uint256, uint256));
+    (uint256 _fromBalance,) = abi.decode(_ctx.data, (uint256, uint256));
     // slither-disable-next-line incorrect-equality
     _leaves = _fromBalance == _ctx.amount;
   }

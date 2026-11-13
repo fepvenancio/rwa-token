@@ -21,12 +21,13 @@ import {IERC7540Operator} from 'interfaces/IERC7540Operator.sol';
 import {IERC7540Redeem} from 'interfaces/IERC7540Redeem.sol';
 import {IERC7575} from 'interfaces/IERC7575.sol';
 import {IERC7943Fungible} from 'interfaces/IERC7943Fungible.sol';
+import {IERC8473} from 'interfaces/IERC8473.sol';
 import {IGated7540Vault} from 'interfaces/IGated7540Vault.sol';
 import {IGatedVaultBase} from 'interfaces/IGatedVaultBase.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {ITemplated} from 'interfaces/ITemplated.sol';
 
@@ -73,7 +74,7 @@ contract Gated7540VaultUnitTest is Helpers {
     );
     vm.mockCall(_hook, abi.encodeCall(IComplianceHook.REGISTRY, ()), abi.encode(_registry));
     _hookDecides(Reasons.TRANSFER_OK);
-    vm.mockCall(_hook, abi.encodeCall(IPolicyHook.wantsAfter, ()), abi.encode(false));
+    vm.mockCall(_hook, abi.encodeCall(IERC8473Policy.wantsAfterTransfer, ()), abi.encode(false));
     _vault = _deployVault(_asset);
     vm.startPrank(_admin);
     _vault.grantRole(_vault.SETTLER_ROLE(), _settler);
@@ -123,7 +124,7 @@ contract Gated7540VaultUnitTest is Helpers {
   function _hookDecides(
     bytes32 _reason
   ) internal {
-    vm.mockCall(_hook, abi.encodeWithSelector(IPolicyHook.beforeTransfer.selector), abi.encode(_reason));
+    vm.mockCall(_hook, abi.encodeWithSelector(IERC8473Policy.checkTransfer.selector), abi.encode(_reason));
   }
 
   function _requestDeposit(
@@ -176,21 +177,21 @@ contract Gated7540VaultUnitTest is Helpers {
   }
 
   function _ctx(
-    IPolicyHook.TransferKind _kind,
+    IERC8473Policy.TransferKind _kind,
     address _from,
     address _to,
     uint256 _amount,
     address _operator
-  ) internal view returns (IPolicyHook.TransferContext memory _context) {
-    _context = IPolicyHook.TransferContext({
+  ) internal view returns (IERC8473Policy.TransferContext memory _context) {
+    _context = IERC8473Policy.TransferContext({
       token: address(_vault),
       from: _from,
       to: _to,
-      id: 0,
+      tokenId: 0,
       amount: _amount,
       operator: _operator,
       kind: _kind,
-      extra: abi.encode(
+      data: abi.encode(
         _from == address(0) ? 0 : _vault.balanceOf(_from), _to == address(0) ? 0 : _vault.balanceOf(_to)
       )
     });
@@ -215,7 +216,7 @@ contract Gated7540VaultUnit_Initialize is Gated7540VaultUnitTest {
     assertEq(_vault.asset(), address(_asset));
     assertEq(_vault.share(), address(_vault));
     assertEq(_vault.decimals(), 12);
-    assertEq(_vault.policyHook(), _hook);
+    assertEq(_vault.policy(), _hook);
     (uint64 _open, uint64 _settled, uint256 _unclaimed) = _vault.dealingState();
     assertEq(_open, 1);
     assertEq(_settled, 0);
@@ -697,8 +698,8 @@ contract Gated7540VaultUnit_Netting is Gated7540VaultUnitTest {
     vm.expectCall(
       _hook,
       abi.encodeCall(
-        IPolicyHook.beforeTransfer,
-        (_ctx(IPolicyHook.TransferKind.BURN, address(_vault), address(0), 500 * _PAR, _settler))
+        IERC8473Policy.checkTransfer,
+        (_ctx(IERC8473Policy.TransferKind.BURN, address(_vault), address(0), 500 * _PAR, _settler))
       )
     );
     vm.prank(_settler);
@@ -888,7 +889,7 @@ contract Gated7540VaultUnit_ClaimDeposit is Gated7540VaultUnitTest {
     vm.expectCall(
       _hook,
       abi.encodeCall(
-        IPolicyHook.beforeTransfer, (_ctx(IPolicyHook.TransferKind.MINT, address(0), _bob, _shares, _alice))
+        IERC8473Policy.checkTransfer, (_ctx(IERC8473Policy.TransferKind.MINT, address(0), _bob, _shares, _alice))
       )
     );
     vm.expectEmit(address(_vault));
@@ -1042,7 +1043,7 @@ contract Gated7540VaultUnit_RequestRedeem is Gated7540VaultUnitTest {
     vm.expectCall(
       _hook,
       abi.encodeCall(
-        IPolicyHook.beforeTransfer, (_ctx(IPolicyHook.TransferKind.TRANSFER, _alice, address(_vault), _shares, _alice))
+        IERC8473Policy.checkTransfer, (_ctx(IERC8473Policy.TransferKind.TRANSFER, _alice, address(_vault), _shares, _alice))
       )
     );
     vm.expectEmit(address(_vault));
@@ -1472,7 +1473,7 @@ contract Gated7540VaultUnit_Rejects is Gated7540VaultUnitTest {
     vm.expectCall(
       _hook,
       abi.encodeCall(
-        IPolicyHook.beforeTransfer, (_ctx(IPolicyHook.TransferKind.TRANSFER, address(_vault), _alice, 30, _agent))
+        IERC8473Policy.checkTransfer, (_ctx(IERC8473Policy.TransferKind.TRANSFER, address(_vault), _alice, 30, _agent))
       )
     );
     vm.expectEmit(address(_vault));
@@ -1489,7 +1490,7 @@ contract Gated7540VaultUnit_Rejects is Gated7540VaultUnitTest {
     _requestRedeem(_alice, 30);
     vm.prank(_guardian);
     _vault.pause();
-    vm.expectRevert(abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.PAUSED));
+    vm.expectRevert(abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, Reasons.PAUSED));
     vm.prank(_agent);
     _vault.rejectRedeemRequest(_alice);
     assertEq(_vault.balanceOf(address(_vault)), 30);
@@ -1624,7 +1625,7 @@ contract Gated7540VaultUnit_Recover is Gated7540VaultUnitTest {
     vm.expectCall(
       _hook,
       abi.encodeCall(
-        IPolicyHook.beforeTransfer, (_ctx(IPolicyHook.TransferKind.FORCED, address(_vault), _bob, _shares, _agent))
+        IERC8473Policy.checkTransfer, (_ctx(IERC8473Policy.TransferKind.FORCED, address(_vault), _bob, _shares, _agent))
       )
     );
     vm.expectEmit(address(_vault));
@@ -1929,7 +1930,7 @@ contract Gated7540VaultIntegration_Escrow is Gated7540VaultIntegrationTest {
     _invest(_alice, 100);
     vm.prank(_agent);
     _restrictionRule.setLockup(address(_vault), _alice, block.timestamp + 30 days);
-    vm.expectRevert(abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.LOCKED));
+    vm.expectRevert(abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, Reasons.LOCKED_UP));
     vm.prank(_alice);
     _vault.requestRedeem(100, _alice, _alice);
   }
@@ -1954,7 +1955,7 @@ contract Gated7540VaultIntegration_Escrow is Gated7540VaultIntegrationTest {
     vm.startPrank(_settler);
     _vault.closePeriod();
     vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.SENDER_FROZEN)
+      abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, Reasons.SENDER_FROZEN)
     );
     _vault.settlePeriod(_nav, 0, _cash, address(0), type(uint256).max);
     vm.stopPrank();
@@ -1975,7 +1976,7 @@ contract Gated7540VaultIntegration_Escrow is Gated7540VaultIntegrationTest {
     vm.prank(_carol);
     _vault.mint(100 * _PAR, _carol, _carol); // the cap is full again without alice
 
-    vm.expectRevert(abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.MAX_HOLDERS));
+    vm.expectRevert(abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, Reasons.MAX_HOLDERS));
     vm.prank(_agent);
     _vault.rejectRedeemRequest(_alice);
     assertEq(_vault.pendingRedeemRequest(0, _alice), 100 * _PAR);
@@ -2002,13 +2003,13 @@ contract Gated7540VaultIntegration_Escrow is Gated7540VaultIntegrationTest {
   function test_WhenAHolderNamesANewControllerAtAFullCap_TheRejectCannotBypassTheCap() external {
     _invest(_alice, 100);
     _invest(_bob, 100); // cap full; carol is verified but holds nothing
-    vm.expectRevert(abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.MAX_HOLDERS));
+    vm.expectRevert(abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, Reasons.MAX_HOLDERS));
     vm.prank(_alice);
     _vault.transfer(_carol, 10); // the direct route is refused...
 
     vm.prank(_alice);
     _vault.requestRedeem(10, _carol, _alice);
-    vm.expectRevert(abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.MAX_HOLDERS));
+    vm.expectRevert(abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, Reasons.MAX_HOLDERS));
     vm.prank(_agent);
     _vault.rejectRedeemRequest(_carol); // ...and so is the request-then-reject route
     assertEq(_vault.balanceOf(_carol), 0);
@@ -2023,7 +2024,7 @@ contract Gated7540VaultIntegration_Escrow is Gated7540VaultIntegrationTest {
     _identity.set(_alice, false);
 
     vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.RECEIVER_NOT_VERIFIED)
+      abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, Reasons.RECEIVER_NOT_VERIFIED)
     );
     vm.prank(_agent);
     _vault.rejectRedeemRequest(_alice);
@@ -2042,13 +2043,13 @@ contract Gated7540VaultIntegration_Escrow is Gated7540VaultIntegrationTest {
 
     vm.prank(_agent);
     vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.RECEIVER_NOT_VERIFIED)
+      abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, Reasons.RECEIVER_NOT_VERIFIED)
     );
     _vault.rejectRedeemRequest(_alice);
 
     vm.prank(_agent);
     vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.RECEIVER_NOT_VERIFIED)
+      abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, Reasons.RECEIVER_NOT_VERIFIED)
     );
     _vault.recoverRedeemRequest(_alice, _eve); // the recovery account must be verified too
 
@@ -2499,7 +2500,7 @@ contract Gated7540VaultIntegration_MinPosition is Gated7540VaultIntegrationTest 
   function _enableMinPosition() internal {
     MinPositionRule _minRule = new MinPositionRule();
     IPolicyRegistry(_vault.registry()).attest(address(_minRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
-    ComplianceHook _hook = ComplianceHook(_vault.policyHook());
+    ComplianceHook _hook = ComplianceHook(_vault.policy());
     IComplianceRule[] memory _old = _hook.rules(address(_vault));
     IComplianceRule[] memory _list = new IComplianceRule[](_old.length + 1);
     _list[0] = _old[0]; // identity first, then the minimum, then the holder rules
@@ -2540,7 +2541,7 @@ contract Gated7540VaultIntegration_MinPosition is Gated7540VaultIntegrationTest 
     uint256 _shares = (_MIN - 1) * _PAR;
 
     vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.BELOW_MIN_POSITION)
+      abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, Reasons.BELOW_MIN_POSITION)
     );
     vm.prank(_alice);
     _vault.mint(_shares, _alice, _alice);
@@ -2555,7 +2556,7 @@ contract Gated7540VaultIntegration_MinPosition is Gated7540VaultIntegrationTest 
     _enableMinPosition();
     _invest(_alice, 2 * _MIN);
     vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.BELOW_MIN_POSITION)
+      abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, Reasons.BELOW_MIN_POSITION)
     );
     vm.prank(_alice);
     _vault.requestRedeem((_MIN + 1) * _PAR, _alice, _alice);
@@ -2621,7 +2622,7 @@ contract Gated7540VaultIntegration_Claimable is Gated7540VaultIntegrationTest {
     _identity.set(_alice, false);
     assertEq(_vault.maxRedeem(_alice) + _vault.maxWithdraw(_alice), 0);
     bytes memory _refused = abi.encodeWithSelector(
-      IGated7540Vault.Gated7540Vault_ControllerNotEligible.selector, Reasons.SENDER_NOT_VERIFIED
+      IGated7540Vault.Gated7540Vault_ControllerNotEligible.selector, Reasons.SENDER_NOT_ELIGIBLE
     );
     vm.startPrank(_alice);
     vm.expectRevert(_refused);
@@ -2649,7 +2650,7 @@ contract Gated7540VaultIntegration_Claimable is Gated7540VaultIntegrationTest {
     _restrictionRule.setLockup(address(_vault), _alice, block.timestamp + 1 days);
     assertEq(_vault.maxRedeem(_alice), 0);
     vm.expectRevert(
-      abi.encodeWithSelector(IGated7540Vault.Gated7540Vault_ControllerNotEligible.selector, Reasons.LOCKED)
+      abi.encodeWithSelector(IGated7540Vault.Gated7540Vault_ControllerNotEligible.selector, Reasons.LOCKED_UP)
     );
     vm.prank(_alice);
     _vault.redeem(100 * _PAR, _alice, _alice);

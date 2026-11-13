@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 
 /**
  * @title IComplianceRule
@@ -29,7 +29,20 @@ interface IComplianceRule {
    * @param _ctx The movement context
    */
   function after_(
-    IPolicyHook.TransferContext calldata _ctx
+    IERC8473Policy.TransferContext calldata _ctx
+  ) external;
+
+  /**
+   * @notice Called by the hook when a token installs it, for every rule in that token's list
+   * @dev Only the token's installed policy may call it. A rule that keeps state derived from the token's movements
+   *      must confirm here that the state is current, or revert, which undoes the installation. `BaseRule` does
+   *      nothing
+   * @param _token The token installing the policy
+   * @param _previousPolicy The policy the token consulted until now; address(0) on the first installation
+   */
+  function onInstall(
+    address _token,
+    address _previousPolicy
   ) external;
 
   /**
@@ -40,7 +53,7 @@ interface IComplianceRule {
    * @return _reason `Reasons.TRANSFER_OK` to allow, any other reason code to reject
    */
   function check(
-    IPolicyHook.TransferContext calldata _ctx
+    IERC8473Policy.TransferContext calldata _ctx
   ) external view returns (bytes32 _reason);
 
   /**

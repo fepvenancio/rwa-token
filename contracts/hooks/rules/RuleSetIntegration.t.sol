@@ -95,9 +95,9 @@ contract RuleSetIntegration_Lockup is RuleSetIntegrationTest {
     // The standard's account question agrees: a locked holder cannot send, and can still be paid.
     assertFalse(_token.canSend(_alice));
     assertTrue(_token.canReceive(_alice));
-    _assertTransferParity(_alice, _bob, 1 ether, Reasons.LOCKED);
+    _assertTransferParity(_alice, _bob, 1 ether, Reasons.LOCKED_UP);
     (ITransferIntent.TransferIntent memory _i, bytes memory _sig) = _signedIntent(_bob, 1 ether, keccak256('n'));
-    _assertExecuteParity(_i, _sig, Reasons.LOCKED);
+    _assertExecuteParity(_i, _sig, Reasons.LOCKED_UP);
 
     vm.prank(_agent);
     _token.forcedTransfer(_alice, _bob, 1 ether); // FORCED is exempt
@@ -113,7 +113,7 @@ contract RuleSetIntegration_SettlementWindow is RuleSetIntegrationTest {
   function test_WhenOutsideTheWindow_IntentsAreRejectedButPlainTransfersAreNot() external {
     vm.warp(_SATURDAY_10AM);
     (ITransferIntent.TransferIntent memory _i, bytes memory _sig) = _signedIntent(_bob, 1 ether, keccak256('n'));
-    _assertExecuteParity(_i, _sig, Reasons.OUTSIDE_SETTLEMENT_WINDOW);
+    _assertExecuteParity(_i, _sig, Reasons.WINDOW_CLOSED);
     _assertTransferParity(_alice, _bob, 1 ether, Reasons.TRANSFER_OK);
   }
 

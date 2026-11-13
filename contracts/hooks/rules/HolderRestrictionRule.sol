@@ -7,7 +7,7 @@ import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IHolderRestrictionRule} from 'interfaces/IHolderRestrictionRule.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 
 import {BaseRule} from 'contracts/hooks/BaseRule.sol';
 
@@ -92,12 +92,12 @@ contract HolderRestrictionRule is BaseRule, IHolderRestrictionRule {
    *      the role only while a lockup is active on a burn
    */
   function check(
-    IPolicyHook.TransferContext calldata _ctx
+    IERC8473Policy.TransferContext calldata _ctx
   ) external view returns (bytes32 _reason) {
-    if (_ctx.kind != IPolicyHook.TransferKind.FORCED && _ctx.from != address(0)) {
+    if (_ctx.kind != IERC8473Policy.TransferKind.FORCED && _ctx.from != address(0)) {
       Restriction memory _sender = _restrictions[_ctx.token][_ctx.from];
       if (_sender.frozen) return Reasons.SENDER_FROZEN;
-      if (block.timestamp < _sender.unlockTime && _lockApplies(_ctx)) return Reasons.LOCKED;
+      if (block.timestamp < _sender.unlockTime && _lockApplies(_ctx)) return Reasons.LOCKED_UP;
     }
     if (_ctx.to != address(0) && _restrictions[_ctx.token][_ctx.to].frozen) return Reasons.RECEIVER_FROZEN;
     _reason = Reasons.TRANSFER_OK;
@@ -124,7 +124,7 @@ contract HolderRestrictionRule is BaseRule, IHolderRestrictionRule {
   ) external view override(BaseRule, IComplianceRule) returns (bytes32 _reason) {
     Restriction memory _restriction = _restrictions[_token][_account];
     if (_restriction.frozen) return Reasons.SENDER_FROZEN;
-    _reason = block.timestamp < _restriction.unlockTime ? Reasons.LOCKED : Reasons.TRANSFER_OK;
+    _reason = block.timestamp < _restriction.unlockTime ? Reasons.LOCKED_UP : Reasons.TRANSFER_OK;
   }
 
   /// @inheritdoc IHolderRestrictionRule
@@ -164,10 +164,10 @@ contract HolderRestrictionRule is BaseRule, IHolderRestrictionRule {
    * @return _applies True if the lockup stops the movement
    */
   function _lockApplies(
-    IPolicyHook.TransferContext calldata _ctx
+    IERC8473Policy.TransferContext calldata _ctx
   ) private view returns (bool _applies) {
-    if (_ctx.kind == IPolicyHook.TransferKind.TRANSFER || _ctx.kind == IPolicyHook.TransferKind.EXECUTED) return true;
+    if (_ctx.kind == IERC8473Policy.TransferKind.TRANSFER || _ctx.kind == IERC8473Policy.TransferKind.EXECUTED) return true;
     _applies =
-      _ctx.kind == IPolicyHook.TransferKind.BURN && !IAccessControl(_ctx.token).hasRole(_BURNER_ROLE, _ctx.operator);
+      _ctx.kind == IERC8473Policy.TransferKind.BURN && !IAccessControl(_ctx.token).hasRole(_BURNER_ROLE, _ctx.operator);
   }
 }

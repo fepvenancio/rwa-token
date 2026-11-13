@@ -142,7 +142,7 @@ contract ProxyDeployerUnit_Deploy is ProxyDeployerUnitTest {
 
     assertEq(_proxy, _predicted);
     assertEq(address(uint160(uint256(vm.load(_proxy, ERC1967Utils.IMPLEMENTATION_SLOT)))), address(_impl));
-    assertEq(IPolicyGated(_proxy).policyHook(), _hook);
+    assertEq(IPolicyGated(_proxy).policy(), _hook);
     assertTrue(IAccessControl(_proxy).hasRole(0x00, _admin));
     assertFalse(IAccessControl(_proxy).hasRole(0x00, address(_deployer)), 'the helper holds no role');
     assertTrue(_deployer.saltUsed(keccak256('INT')));
@@ -258,7 +258,7 @@ contract ProxyDeployerUnit_Deploy is ProxyDeployerUnitTest {
 
     _setAttested(_hook, IPolicyRegistry.AttestKind.HOOK, true);
     assertEq(_deploy('INT', _init('INT', _hook), _hook), _predicted);
-    assertEq(IPolicyGated(_predicted).policyHook(), _hook);
+    assertEq(IPolicyGated(_predicted).policy(), _hook);
   }
 
   /// @dev After the hand-over the deployer EOA cannot place a token outside governance

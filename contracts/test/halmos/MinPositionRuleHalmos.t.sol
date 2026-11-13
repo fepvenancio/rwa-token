@@ -5,7 +5,7 @@ import {Test} from 'forge-std/Test.sol';
 
 import {Reasons} from 'interfaces/Errors.sol';
 
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 
 import {MinPositionRule} from 'contracts/hooks/rules/MinPositionRule.sol';
 
@@ -47,7 +47,7 @@ contract MinPositionRuleHalmos is Test {
     vm.assume(_min > 0 && _amount > 0 && _fromBalance >= _amount && _toBalance <= type(uint256).max - _amount);
     _rule.setMinPosition(_token, _min);
 
-    bytes32 _reason = _rule.check(_context(IPolicyHook.TransferKind.TRANSFER, _fromBalance, _toBalance, _amount));
+    bytes32 _reason = _rule.check(_context(IERC8473Policy.TransferKind.TRANSFER, _fromBalance, _toBalance, _amount));
 
     uint256 _fromAfter = _fromBalance - _amount;
     uint256 _toAfter = _toBalance + _amount;
@@ -66,7 +66,7 @@ contract MinPositionRuleHalmos is Test {
     vm.assume(_kind < 5);
     _rule.setMinPosition(_token, _min);
 
-    try _rule.check(_context(IPolicyHook.TransferKind(_kind), _fromBalance, _toBalance, _amount)) returns (
+    try _rule.check(_context(IERC8473Policy.TransferKind(_kind), _fromBalance, _toBalance, _amount)) returns (
       bytes32 _reason
     ) {
       assert(_reason == Reasons.TRANSFER_OK || _reason == Reasons.BELOW_MIN_POSITION);
@@ -84,25 +84,25 @@ contract MinPositionRuleHalmos is Test {
   ) public {
     _rule.setMinPosition(_token, _min);
     assert(
-      _rule.check(_context(IPolicyHook.TransferKind.FORCED, _fromBalance, _toBalance, _amount)) == Reasons.TRANSFER_OK
+      _rule.check(_context(IERC8473Policy.TransferKind.FORCED, _fromBalance, _toBalance, _amount)) == Reasons.TRANSFER_OK
     );
   }
 
   function _context(
-    IPolicyHook.TransferKind _kind,
+    IERC8473Policy.TransferKind _kind,
     uint256 _fromBalance,
     uint256 _toBalance,
     uint256 _amount
-  ) internal view returns (IPolicyHook.TransferContext memory _ctx) {
-    _ctx = IPolicyHook.TransferContext({
+  ) internal view returns (IERC8473Policy.TransferContext memory _ctx) {
+    _ctx = IERC8473Policy.TransferContext({
       token: _token,
       from: _sender,
       to: _receiver,
-      id: 0,
+      tokenId: 0,
       amount: _amount,
       operator: _sender,
       kind: _kind,
-      extra: abi.encode(_fromBalance, _toBalance)
+      data: abi.encode(_fromBalance, _toBalance)
     });
   }
 }

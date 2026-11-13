@@ -330,7 +330,7 @@ contract Fund is Ownable, ERC165, IFund {
     address _token,
     address _candidate
   ) internal view returns (bool _listed) {
-    IComplianceRule[] memory _list = IComplianceHook(IPolicyGated(_token).policyHook()).rules(_token);
+    IComplianceRule[] memory _list = IComplianceHook(IPolicyGated(_token).policy()).rules(_token);
     uint256 _length = _list.length;
     for (uint256 _i; _i < _length; ++_i) {
       if (address(_list[_i]) == _candidate) return true;
@@ -353,7 +353,7 @@ contract Fund is Ownable, ERC165, IFund {
     // with no code would fail in decoding its answer, which no catch block reaches, so that is asked first.
     if (_token.code.length == 0) return false;
     // aderyn-ignore-next-line(empty-block)
-    try IPolicyGated(_token).policyHook() returns (address _hook) {
+    try IPolicyGated(_token).policy() returns (address _hook) {
       if (_hook.code.length == 0) return false;
       // aderyn-ignore-next-line(empty-block)
       try IComplianceHook(_hook).rules(_token) returns (IComplianceRule[] memory _list) {

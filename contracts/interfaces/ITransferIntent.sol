@@ -5,7 +5,7 @@ pragma solidity ^0.8.28;
  * @title ITransferIntent
  * @notice Executor-settled transfers: the holder signs an EIP-712 `TransferIntent`, EXECUTOR_ROLE executes it.
  *         Settlement finality is at execution, not at signing
- * @dev Rejections revert with `IPolicyGated.PolicyGated_TransferRejected` carrying a reason code
+ * @dev Rejections revert with `IERC8473.ERC8473PolicyRejected` carrying a reason code
  */
 interface ITransferIntent {
   /*///////////////////////////////////////////////////////////////
@@ -84,7 +84,7 @@ interface ITransferIntent {
    * @notice Executes a signed intent
    * @dev Only EXECUTOR_ROLE. Checks the deadline, the nonce, the consideration, the executor, the window and a zero
    *      receiver, then the signature (ECDSA or ERC-1271), then moves the tokens as EXECUTED through the policy hook. The executor cannot
-   *      alter the intent. Reverts with `PolicyGated_TransferRejected` carrying the reason `canExecute` returns
+   *      alter the intent. Reverts with `ERC8473PolicyRejected` carrying the reason `canExecute` returns
    * @param _intent The intent
    * @param _sig The holder's signature over `intentHash(_intent)`
    * @return _intentHash The EIP-712 digest of the intent

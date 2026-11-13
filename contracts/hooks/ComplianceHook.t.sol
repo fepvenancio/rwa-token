@@ -8,7 +8,7 @@ import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 
 import {ComplianceHook} from 'contracts/hooks/ComplianceHook.sol';
@@ -96,20 +96,20 @@ contract ComplianceHookUnitTest is Helpers {
 
   function _ctxFor(
     address _tokenAddress
-  ) internal view returns (IPolicyHook.TransferContext memory _context) {
-    _context = IPolicyHook.TransferContext({
+  ) internal view returns (IERC8473Policy.TransferContext memory _context) {
+    _context = IERC8473Policy.TransferContext({
       token: _tokenAddress,
       from: _from,
       to: _to,
-      id: 0,
+      tokenId: 0,
       amount: 1,
       operator: _from,
-      kind: IPolicyHook.TransferKind.TRANSFER,
-      extra: abi.encode(uint256(0), uint256(0))
+      kind: IERC8473Policy.TransferKind.TRANSFER,
+      data: abi.encode(uint256(0), uint256(0))
     });
   }
 
-  function _ctx() internal view returns (IPolicyHook.TransferContext memory _context) {
+  function _ctx() internal view returns (IERC8473Policy.TransferContext memory _context) {
     _context = _ctxFor(_token);
   }
 }
@@ -247,7 +247,7 @@ contract ComplianceHookUnit_SetRules is ComplianceHookUnitTest {
     assertEq(address(_installed[0]), address(_a));
     assertEq(address(_installed[1]), address(_b));
     vm.prank(_token);
-    assertTrue(_hook.wantsAfter());
+    assertTrue(_hook.wantsAfterTransfer());
   }
 
   function test_WhenReplaced_ItDropsThePreviousSet() external {
@@ -255,7 +255,7 @@ contract ComplianceHookUnit_SetRules is ComplianceHookUnitTest {
     _install(_one(_newRule('c', false)));
     assertEq(_hook.ruleCount(_token), 1);
     vm.prank(_token);
-    assertFalse(_hook.wantsAfter());
+    assertFalse(_hook.wantsAfterTransfer());
   }
 
   /// @dev Rule sets are keyed by token: setting one leaves the other untouched
@@ -269,9 +269,9 @@ contract ComplianceHookUnit_SetRules is ComplianceHookUnitTest {
     assertEq(address(_hook.rules(_token)[0]), address(_a));
     assertEq(address(_hook.rules(_otherToken)[0]), address(_b));
     vm.prank(_token);
-    assertTrue(_hook.wantsAfter());
+    assertTrue(_hook.wantsAfterTransfer());
     vm.prank(_otherToken);
-    assertFalse(_hook.wantsAfter());
+    assertFalse(_hook.wantsAfterTransfer());
   }
 
   /// @dev Replacing one token's rules must not clear another token's after mask
@@ -281,14 +281,14 @@ contract ComplianceHookUnit_SetRules is ComplianceHookUnitTest {
     _hook.setRules(_otherToken, _one(_newRule('b', true)));
     _install(_none());
     vm.prank(_otherToken);
-    assertTrue(_hook.wantsAfter());
+    assertTrue(_hook.wantsAfterTransfer());
   }
 }
 
 contract ComplianceHookUnit_BeforeTransfer is ComplianceHookUnitTest {
   /// @dev Regression: an unconfigured hook approved every movement
   function test_WhenNoRules_ItReturnsNoRules() external view {
-    assertEq(_hook.beforeTransfer(_ctx()), Reasons.NO_RULES);
+    assertEq(_hook.checkTransfer(_ctx()), Reasons.NO_RULES);
   }
 
   /// @dev A token that was never configured fails closed even when another token has rules
@@ -297,8 +297,8 @@ contract ComplianceHookUnit_BeforeTransfer is ComplianceHookUnitTest {
     vm.prank(_otherToken);
     _hook.setRules(_otherToken, _one(_a));
     _mockCheck(_a, Reasons.TRANSFER_OK);
-    assertEq(_hook.beforeTransfer(_ctx()), Reasons.NO_RULES);
-    assertEq(_hook.beforeTransfer(_ctxFor(_otherToken)), Reasons.TRANSFER_OK);
+    assertEq(_hook.checkTransfer(_ctx()), Reasons.NO_RULES);
+    assertEq(_hook.checkTransfer(_ctxFor(_otherToken)), Reasons.TRANSFER_OK);
   }
 
   function test_WhenEveryRuleAccepts_ItReturnsOk() external {
@@ -307,13 +307,13 @@ contract ComplianceHookUnit_BeforeTransfer is ComplianceHookUnitTest {
     _install(_two(_a, _b));
     _mockCheck(_a, Reasons.TRANSFER_OK);
     _mockCheck(_b, Reasons.TRANSFER_OK);
-    assertEq(_hook.beforeTransfer(_ctx()), Reasons.TRANSFER_OK);
+    assertEq(_hook.checkTransfer(_ctx()), Reasons.TRANSFER_OK);
   }
 
   function test_WhenARuleRejects_ItReturnsTheFirstReasonAndShortCircuits(
     bytes32 _reason
   ) external {
-    if (_reason == Reasons.TRANSFER_OK) _reason = Reasons.LOCKED;
+    if (_reason == Reasons.TRANSFER_OK) _reason = Reasons.LOCKED_UP;
     IComplianceRule _a = _newRule('a', false);
     IComplianceRule _b = _newRule('b', false);
     _install(_two(_a, _b));
@@ -321,7 +321,7 @@ contract ComplianceHookUnit_BeforeTransfer is ComplianceHookUnitTest {
     _mockCheck(_b, Reasons.MAX_HOLDERS);
 
     vm.expectCall(address(_b), abi.encodeWithSelector(IComplianceRule.check.selector), 0);
-    assertEq(_hook.beforeTransfer(_ctx()), _reason);
+    assertEq(_hook.checkTransfer(_ctx()), _reason);
   }
 }
 
@@ -381,19 +381,19 @@ contract ComplianceHookUnit_WantsAfter is ComplianceHookUnitTest {
   function test_WhenAskedByATokenWithAfterRules_ItReturnsTrue() external {
     _install(_one(_newRule('a', true)));
     vm.prank(_token);
-    assertTrue(_hook.wantsAfter());
+    assertTrue(_hook.wantsAfterTransfer());
   }
 
   function test_WhenAskedByATokenWithoutAfterRules_ItReturnsFalse() external {
     _install(_one(_newRule('a', false)));
     vm.prank(_token);
-    assertFalse(_hook.wantsAfter());
+    assertFalse(_hook.wantsAfterTransfer());
   }
 
   function test_WhenAskedByAnAccountThatIsNotAConfiguredToken_ItReturnsFalse() external {
     _install(_one(_newRule('a', true)));
     vm.prank(makeAddr('stranger'));
-    assertFalse(_hook.wantsAfter());
+    assertFalse(_hook.wantsAfterTransfer());
   }
 }
 
@@ -432,12 +432,12 @@ contract ComplianceHookUnit_AccountChecks is ComplianceHookUnitTest {
   function test_WhenARuleRejectsTheSender_ItReturnsTheFirstReasonAndShortCircuits(
     bytes32 _reason
   ) external {
-    if (_reason == Reasons.TRANSFER_OK) _reason = Reasons.SENDER_NOT_VERIFIED;
+    if (_reason == Reasons.TRANSFER_OK) _reason = Reasons.SENDER_NOT_ELIGIBLE;
     IComplianceRule _a = _newRule('a', false);
     IComplianceRule _b = _newRule('b', false);
     _install(_two(_a, _b));
     _mockSend(_a, _reason);
-    _mockSend(_b, Reasons.SENDER_NOT_VERIFIED);
+    _mockSend(_b, Reasons.SENDER_NOT_ELIGIBLE);
 
     vm.expectCall(address(_b), abi.encodeWithSelector(IComplianceRule.checkSend.selector), 0);
     assertEq(_hook.checkSend(_token, _from), _reason);
@@ -469,7 +469,7 @@ contract ComplianceHookUnit_AccountChecks is ComplianceHookUnitTest {
 
 contract ComplianceHookUnit_SupportsInterface is ComplianceHookUnitTest {
   function test_WhenQueried_ItSupportsItsInterfaces() external view {
-    assertTrue(_hook.supportsInterface(type(IPolicyHook).interfaceId));
+    assertTrue(_hook.supportsInterface(type(IERC8473Policy).interfaceId));
     assertTrue(_hook.supportsInterface(type(IComplianceHook).interfaceId));
     assertTrue(_hook.supportsInterface(type(IERC165).interfaceId));
     assertFalse(_hook.supportsInterface(0xdeadbeef));

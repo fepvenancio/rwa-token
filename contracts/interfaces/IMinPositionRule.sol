@@ -13,7 +13,7 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
  *      define it), which may leave any remainder; the role is asked only when a burn would leave a balance below the
  *      minimum, so the usual path pays nothing for it. The token itself (the 7540 escrow, which holds the shares of
  *      pending redemptions) and the accounts the token's admin lists are exempt too. The post-move balances are derived
- *      from the balances in `TransferContext.extra` and the amount, so the rule makes no call back into the token. State
+ *      from the balances in `TransferContext.data` and the amount, so the rule makes no call back into the token. State
  *      is keyed by token and authorised live by the token's own DEFAULT_ADMIN_ROLE. The rule has no account-level
  *      opinion (`checkSend` and `checkReceive` accept): a minimum depends on the amount. The vaults' `maxDeposit` and
  *      `maxMint` probe a mint above any minimum up to `type(uint128).max`, so they are not told "no" because a single wei would be dust

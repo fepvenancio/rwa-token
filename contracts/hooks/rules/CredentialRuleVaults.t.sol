@@ -8,6 +8,7 @@ import {Test} from 'forge-std/Test.sol';
 import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+import {IERC8473} from 'interfaces/IERC8473.sol';
 import {IGated7540Vault} from 'interfaces/IGated7540Vault.sol';
 import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
@@ -84,7 +85,7 @@ abstract contract CredentialVaultsTest is Test {
   function _rejected(
     bytes32 _reason
   ) internal pure returns (bytes memory _data) {
-    _data = abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, _reason);
+    _data = abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, _reason);
   }
 }
 
@@ -240,7 +241,7 @@ contract CredentialRuleVaults_7540 is CredentialVaultsTest {
     _creds.blockSubject(_alice);
 
     vm.expectRevert(
-      abi.encodeWithSelector(IGated7540Vault.Gated7540Vault_ControllerNotEligible.selector, Reasons.SENDER_NOT_VERIFIED)
+      abi.encodeWithSelector(IGated7540Vault.Gated7540Vault_ControllerNotEligible.selector, Reasons.SENDER_NOT_ELIGIBLE)
     );
     vm.prank(_alice);
     _vault.redeem(1000 * _PAR, _alice, _alice);

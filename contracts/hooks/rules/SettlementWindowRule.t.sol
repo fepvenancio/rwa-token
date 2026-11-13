@@ -7,7 +7,7 @@ import {IERC165} from '@openzeppelin/contracts/utils/introspection/IERC165.sol';
 import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {ISettlementWindowRule} from 'interfaces/ISettlementWindowRule.sol';
 
 import {SettlementWindowRule} from 'contracts/hooks/rules/SettlementWindowRule.sol';
@@ -62,17 +62,17 @@ contract SettlementWindowRuleUnitTest is Helpers {
   }
 
   function _ctx(
-    IPolicyHook.TransferKind _kind
-  ) internal view returns (IPolicyHook.TransferContext memory _context) {
-    _context = IPolicyHook.TransferContext({
+    IERC8473Policy.TransferKind _kind
+  ) internal view returns (IERC8473Policy.TransferContext memory _context) {
+    _context = IERC8473Policy.TransferContext({
       token: _token,
       from: address(0xF0),
       to: address(0x70),
-      id: 0,
+      tokenId: 0,
       amount: 1,
       operator: address(0xE0),
       kind: _kind,
-      extra: abi.encode(uint256(0), uint256(0))
+      data: abi.encode(uint256(0), uint256(0))
     });
   }
 
@@ -80,7 +80,7 @@ contract SettlementWindowRuleUnitTest is Helpers {
     uint256 _ts
   ) internal returns (bytes32 _reason) {
     vm.warp(_ts);
-    _reason = _rule.check(_ctx(IPolicyHook.TransferKind.EXECUTED));
+    _reason = _rule.check(_ctx(IERC8473Policy.TransferKind.EXECUTED));
   }
 }
 
@@ -155,26 +155,26 @@ contract SettlementWindowRuleUnit_SetWindow is SettlementWindowRuleUnitTest {
 contract SettlementWindowRuleUnit_Check is SettlementWindowRuleUnitTest {
   function test_WhenTheMovementIsNotExecuted_ItIsAlwaysOkEvenUnconfigured() external {
     vm.warp(_at(5, 3 hours)); // Saturday night
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.TRANSFER)), Reasons.TRANSFER_OK);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.FORCED)), Reasons.TRANSFER_OK);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.MINT)), Reasons.TRANSFER_OK);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.BURN)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.TRANSFER)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.FORCED)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.MINT)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.BURN)), Reasons.TRANSFER_OK);
   }
 
   function test_WhenUnconfigured_ExecutedFailsClosed(
     uint256 _ts
   ) external {
     _ts = bound(_ts, _MONDAY, _MONDAY + 52 weeks);
-    assertEq(_executedAt(_ts), Reasons.OUTSIDE_SETTLEMENT_WINDOW);
+    assertEq(_executedAt(_ts), Reasons.WINDOW_CLOSED);
     assertFalse(_rule.isOpen(_token, _ts));
   }
 
   function test_WhenSameDayWindow_ItIsOpenFromOpenInclusiveToCloseExclusive() external {
     _window(_NINE, _FIVE_PM, _MON_TO_FRI);
-    assertEq(_executedAt(_at(0, _NINE - 1)), Reasons.OUTSIDE_SETTLEMENT_WINDOW);
+    assertEq(_executedAt(_at(0, _NINE - 1)), Reasons.WINDOW_CLOSED);
     assertEq(_executedAt(_at(0, _NINE)), Reasons.TRANSFER_OK);
     assertEq(_executedAt(_at(0, _FIVE_PM - 1)), Reasons.TRANSFER_OK);
-    assertEq(_executedAt(_at(0, _FIVE_PM)), Reasons.OUTSIDE_SETTLEMENT_WINDOW);
+    assertEq(_executedAt(_at(0, _FIVE_PM)), Reasons.WINDOW_CLOSED);
   }
 
   function test_WhenSameDayWindowOnAWeekday_InsideTimesAreOpen(
@@ -198,13 +198,13 @@ contract SettlementWindowRuleUnit_Check is SettlementWindowRuleUnitTest {
     _day = bound(_day, 5, 6);
     _second = bound(_second, _NINE, _FIVE_PM - 1);
     _week = bound(_week, 0, 520);
-    assertEq(_executedAt(_at(_day + _week * 7, _second)), Reasons.OUTSIDE_SETTLEMENT_WINDOW);
+    assertEq(_executedAt(_at(_day + _week * 7, _second)), Reasons.WINDOW_CLOSED);
   }
 
   /// @dev Owner-specified cases: the overnight session belongs to the day it opened
   function test_WhenOvernightWindow_MondayOneAmIsClosedBecauseSundayIsDisabled() external {
     _window(_TEN_PM, _TWO_AM, _MON_TO_FRI);
-    assertEq(_executedAt(1_791_766_800), Reasons.OUTSIDE_SETTLEMENT_WINDOW); // Mon 2026-10-12 01:00
+    assertEq(_executedAt(1_791_766_800), Reasons.WINDOW_CLOSED); // Mon 2026-10-12 01:00
   }
 
   function test_WhenOvernightWindow_SaturdayOneAmIsOpenBecauseFridayIsEnabled() external {
@@ -215,12 +215,12 @@ contract SettlementWindowRuleUnit_Check is SettlementWindowRuleUnitTest {
   function test_WhenOvernightWindow_TheEdgesAndTheDaytimeGapBehave() external {
     _window(_TEN_PM, _TWO_AM, _MON_TO_FRI);
     assertEq(_executedAt(_at(4, 23 hours)), Reasons.TRANSFER_OK); // Fri 23:00, opened today
-    assertEq(_executedAt(_at(6, 23 hours)), Reasons.OUTSIDE_SETTLEMENT_WINDOW); // Sun 23:00
+    assertEq(_executedAt(_at(6, 23 hours)), Reasons.WINDOW_CLOSED); // Sun 23:00
     assertEq(_executedAt(_at(0, _TEN_PM)), Reasons.TRANSFER_OK); // Mon 22:00, open is inclusive
-    assertEq(_executedAt(_at(0, _TEN_PM - 1)), Reasons.OUTSIDE_SETTLEMENT_WINDOW);
+    assertEq(_executedAt(_at(0, _TEN_PM - 1)), Reasons.WINDOW_CLOSED);
     assertEq(_executedAt(_at(1, _TWO_AM - 1)), Reasons.TRANSFER_OK); // Tue 01:59:59, Monday's session
-    assertEq(_executedAt(_at(1, _TWO_AM)), Reasons.OUTSIDE_SETTLEMENT_WINDOW); // close is exclusive
-    assertEq(_executedAt(_at(1, 12 hours)), Reasons.OUTSIDE_SETTLEMENT_WINDOW); // daytime gap
+    assertEq(_executedAt(_at(1, _TWO_AM)), Reasons.WINDOW_CLOSED); // close is exclusive
+    assertEq(_executedAt(_at(1, 12 hours)), Reasons.WINDOW_CLOSED); // daytime gap
   }
 
   function test_WhenQueried_IsOpenAgreesWithCheck(
@@ -231,14 +231,14 @@ contract SettlementWindowRuleUnit_Check is SettlementWindowRuleUnitTest {
     else _window(_NINE, _FIVE_PM, _MON_TO_FRI);
     _ts = bound(_ts, _MONDAY, _MONDAY + 520 weeks);
     bool _open = _rule.isOpen(_token, _ts);
-    assertEq(_executedAt(_ts), _open ? Reasons.TRANSFER_OK : Reasons.OUTSIDE_SETTLEMENT_WINDOW);
+    assertEq(_executedAt(_ts), _open ? Reasons.TRANSFER_OK : Reasons.WINDOW_CLOSED);
   }
 
   function test_WhenCalledWithStaticcall_ItDoesNotWrite() external {
     _window(_NINE, _FIVE_PM, _MON_TO_FRI);
     vm.warp(_at(0, 10 hours));
     (bool _ok, bytes memory _out) =
-      address(_rule).staticcall(abi.encodeCall(IComplianceRule.check, (_ctx(IPolicyHook.TransferKind.EXECUTED))));
+      address(_rule).staticcall(abi.encodeCall(IComplianceRule.check, (_ctx(IERC8473Policy.TransferKind.EXECUTED))));
     assertTrue(_ok);
     assertEq(abi.decode(_out, (bytes32)), Reasons.TRANSFER_OK);
   }
@@ -269,7 +269,7 @@ contract SettlementWindowRuleUnit_TokenCallsAreStatic is SettlementWindowRuleUni
 /// @dev Brief §5: FORCED with `from == address(0)` is an enforcement mint; the window gates EXECUTED only
 contract SettlementWindowRuleUnit_ForcedMint is SettlementWindowRuleUnitTest {
   function test_WhenAnEnforcementMintHappensOutsideTheWindow_ItIsOk() external {
-    IPolicyHook.TransferContext memory _context = _ctx(IPolicyHook.TransferKind.FORCED);
+    IERC8473Policy.TransferContext memory _context = _ctx(IERC8473Policy.TransferKind.FORCED);
     _context.from = address(0);
     assertEq(_rule.check(_context), Reasons.TRANSFER_OK); // unconfigured window: EXECUTED would fail closed
   }

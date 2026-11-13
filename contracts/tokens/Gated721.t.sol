@@ -19,10 +19,11 @@ import {Reasons} from 'interfaces/Errors.sol';
 import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IERC7943NonFungible} from 'interfaces/IERC7943NonFungible.sol';
+import {IERC8473} from 'interfaces/IERC8473.sol';
 import {IGated721} from 'interfaces/IGated721.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {ITemplated} from 'interfaces/ITemplated.sol';
 import {Quals} from 'interfaces/Quals.sol';
@@ -56,20 +57,32 @@ contract MockReentrantHook {
     token = _token;
   }
 
-  function beforeTransfer(
-    IPolicyHook.TransferContext calldata
+  function checkTransfer(
+    IERC8473Policy.TransferContext calldata
   ) external pure returns (bytes32 _reason) {
     _reason = Reasons.TRANSFER_OK;
   }
 
-  function wantsAfter() external pure returns (bool _wants) {
+  function wantsAfterTransfer() external pure returns (bool _wants) {
     _wants = true;
   }
 
+  function onInstall(
+    address,
+    address,
+    bytes calldata
+  ) external {}
+
+  function supportsInterface(
+    bytes4
+  ) external pure returns (bool _supported) {
+    _supported = true;
+  }
+
   function afterTransfer(
-    IPolicyHook.TransferContext calldata _ctx
+    IERC8473Policy.TransferContext calldata _ctx
   ) external {
-    if (_ctx.to != address(0)) token.transferFrom(_ctx.to, address(0xbeef), _ctx.id);
+    if (_ctx.to != address(0)) token.transferFrom(_ctx.to, address(0xbeef), _ctx.tokenId);
   }
 
   function checkSend(
@@ -136,7 +149,7 @@ contract Gated721UnitTest is Helpers {
     vm.mockCall(_hook, abi.encodeCall(IComplianceHook.REGISTRY, ()), abi.encode(_registry));
     _hookAccountChecksDecide(Reasons.TRANSFER_OK, Reasons.TRANSFER_OK);
     _hookDecides(Reasons.TRANSFER_OK);
-    vm.mockCall(_hook, abi.encodeCall(IPolicyHook.wantsAfter, ()), abi.encode(false));
+    vm.mockCall(_hook, abi.encodeCall(IERC8473Policy.wantsAfterTransfer, ()), abi.encode(false));
 
     _token = _deploy(_hook);
 
@@ -181,14 +194,14 @@ contract Gated721UnitTest is Helpers {
     bytes32 _sendReason,
     bytes32 _receiveReason
   ) internal {
-    vm.mockCall(_hook, abi.encodeWithSelector(IPolicyHook.checkSend.selector), abi.encode(_sendReason));
-    vm.mockCall(_hook, abi.encodeWithSelector(IPolicyHook.checkReceive.selector), abi.encode(_receiveReason));
+    vm.mockCall(_hook, abi.encodeWithSelector(IERC8473Policy.checkSend.selector), abi.encode(_sendReason));
+    vm.mockCall(_hook, abi.encodeWithSelector(IERC8473Policy.checkReceive.selector), abi.encode(_receiveReason));
   }
 
   function _hookDecides(
     bytes32 _reason
   ) internal {
-    vm.mockCall(_hook, abi.encodeWithSelector(IPolicyHook.beforeTransfer.selector), abi.encode(_reason));
+    vm.mockCall(_hook, abi.encodeWithSelector(IERC8473Policy.checkTransfer.selector), abi.encode(_reason));
   }
 
   /// @dev The context the token builds: `id` is the token, `amount` one, `extra` the holdings before the move
@@ -197,17 +210,17 @@ contract Gated721UnitTest is Helpers {
     address _to,
     uint256 _tokenId,
     address _operator,
-    IPolicyHook.TransferKind _kind
-  ) internal view returns (IPolicyHook.TransferContext memory _context) {
-    _context = IPolicyHook.TransferContext({
+    IERC8473Policy.TransferKind _kind
+  ) internal view returns (IERC8473Policy.TransferContext memory _context) {
+    _context = IERC8473Policy.TransferContext({
       token: address(_token),
       from: _from,
       to: _to,
-      id: _tokenId,
+      tokenId: _tokenId,
       amount: 1,
       operator: _operator,
       kind: _kind,
-      extra: abi.encode(
+      data: abi.encode(
         _from == address(0) ? 0 : _token.balanceOf(_from), _to == address(0) ? 0 : _token.balanceOf(_to)
       )
     });
@@ -223,7 +236,7 @@ contract Gated721UnitTest is Helpers {
   function _rejected(
     bytes32 _reason
   ) internal pure returns (bytes memory _revertData) {
-    _revertData = abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, _reason);
+    _revertData = abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, _reason);
   }
 
   function _frozenError(
@@ -249,7 +262,7 @@ contract Gated721Unit_Initialize is Gated721UnitTest {
     assertEq(_token.symbol(), 'gNOTE');
     assertTrue(_token.hasRole(_token.DEFAULT_ADMIN_ROLE(), _admin));
     assertTrue(_token.hasRole(_token.GUARDIAN_ROLE(), _guardian));
-    assertEq(_token.policyHook(), _hook);
+    assertEq(_token.policy(), _hook);
     assertEq(_token.registry(), _registry);
     assertEq(_token.templateId(), keccak256('Gated721'));
   }
@@ -306,7 +319,7 @@ contract Gated721Unit_Mint is Gated721UnitTest {
   function test_WhenTheMinterMints_TheHookSeesAMintOfOneAndTheTokenHasItsUri() external {
     vm.expectCall(
       _hook,
-      abi.encodeCall(IPolicyHook.beforeTransfer, (_ctx(address(0), _bob, 2, _minter, IPolicyHook.TransferKind.MINT)))
+      abi.encodeCall(IERC8473Policy.checkTransfer, (_ctx(address(0), _bob, 2, _minter, IERC8473Policy.TransferKind.MINT)))
     );
     vm.expectEmit(address(_token));
     emit IERC721.Transfer(address(0), _bob, 2);
@@ -326,7 +339,7 @@ contract Gated721Unit_Mint is Gated721UnitTest {
   }
 
   function test_WhenTheTokenExists_ItRevertsWithoutAskingTheHook() external {
-    vm.expectCall(_hook, abi.encodeWithSelector(IPolicyHook.beforeTransfer.selector), 0);
+    vm.expectCall(_hook, abi.encodeWithSelector(IERC8473Policy.checkTransfer.selector), 0);
     vm.expectRevert(abi.encodeWithSelector(IERC721Errors.ERC721InvalidSender.selector, address(0)));
     vm.prank(_minter);
     _token.mint(_bob, _ID, '');
@@ -353,7 +366,7 @@ contract Gated721Unit_Transfer is Gated721UnitTest {
   function test_WhenTheOwnerTransfers_TheHookSeesATransferWithTheHoldings() external {
     vm.expectCall(
       _hook,
-      abi.encodeCall(IPolicyHook.beforeTransfer, (_ctx(_alice, _bob, _ID, _alice, IPolicyHook.TransferKind.TRANSFER)))
+      abi.encodeCall(IERC8473Policy.checkTransfer, (_ctx(_alice, _bob, _ID, _alice, IERC8473Policy.TransferKind.TRANSFER)))
     );
     vm.prank(_alice);
     _token.transferFrom(_alice, _bob, _ID);
@@ -366,7 +379,7 @@ contract Gated721Unit_Transfer is Gated721UnitTest {
     _token.approve(_carol, _ID);
     vm.expectCall(
       _hook,
-      abi.encodeCall(IPolicyHook.beforeTransfer, (_ctx(_alice, _bob, _ID, _carol, IPolicyHook.TransferKind.TRANSFER)))
+      abi.encodeCall(IERC8473Policy.checkTransfer, (_ctx(_alice, _bob, _ID, _carol, IERC8473Policy.TransferKind.TRANSFER)))
     );
     vm.prank(_carol);
     _token.transferFrom(_alice, _bob, _ID);
@@ -375,7 +388,7 @@ contract Gated721Unit_Transfer is Gated721UnitTest {
   }
 
   function test_WhenTheCallerIsNotApproved_ErcSevenTwentyOneRevertsBeforeTheHookIsAsked() external {
-    vm.expectCall(_hook, abi.encodeWithSelector(IPolicyHook.beforeTransfer.selector), 0);
+    vm.expectCall(_hook, abi.encodeWithSelector(IERC8473Policy.checkTransfer.selector), 0);
     vm.expectRevert(abi.encodeWithSelector(IERC721Errors.ERC721InsufficientApproval.selector, _stranger, _ID));
     vm.prank(_stranger);
     _token.transferFrom(_alice, _bob, _ID);
@@ -388,17 +401,17 @@ contract Gated721Unit_Transfer is Gated721UnitTest {
   }
 
   function test_WhenTheHookRejects_NothingMoves() external {
-    _hookDecides(Reasons.LOCKED);
-    vm.expectRevert(_rejected(Reasons.LOCKED));
+    _hookDecides(Reasons.LOCKED_UP);
+    vm.expectRevert(_rejected(Reasons.LOCKED_UP));
     vm.prank(_alice);
     _token.transferFrom(_alice, _bob, _ID);
     assertEq(_token.ownerOf(_ID), _alice);
   }
 
   function test_WhenTheHookWantsAfter_ItIsCalledWithTheSameContext() external {
-    vm.mockCall(_hook, abi.encodeCall(IPolicyHook.wantsAfter, ()), abi.encode(true));
-    IPolicyHook.TransferContext memory _context = _ctx(_alice, _bob, _ID, _alice, IPolicyHook.TransferKind.TRANSFER);
-    _mockAndExpect(_hook, abi.encodeCall(IPolicyHook.afterTransfer, (_context)), '');
+    vm.mockCall(_hook, abi.encodeCall(IERC8473Policy.wantsAfterTransfer, ()), abi.encode(true));
+    IERC8473Policy.TransferContext memory _context = _ctx(_alice, _bob, _ID, _alice, IERC8473Policy.TransferKind.TRANSFER);
+    _mockAndExpect(_hook, abi.encodeCall(IERC8473Policy.afterTransfer, (_context)), '');
     vm.prank(_alice);
     _token.transferFrom(_alice, _bob, _ID);
   }
@@ -412,10 +425,10 @@ contract Gated721Unit_Transfer is Gated721UnitTest {
     // The second move is refused on its own: the whole transfer reverts.
     vm.prank(_minter);
     _token.mint(_alice, 2, '');
-    IPolicyHook.TransferContext memory _onward =
-      _ctx(address(_receiver), _carol, 2, address(_receiver), IPolicyHook.TransferKind.TRANSFER);
-    _onward.extra = abi.encode(uint256(1), _token.balanceOf(_carol));
-    vm.mockCall(_hook, abi.encodeCall(IPolicyHook.beforeTransfer, (_onward)), abi.encode(Reasons.RECEIVER_FROZEN));
+    IERC8473Policy.TransferContext memory _onward =
+      _ctx(address(_receiver), _carol, 2, address(_receiver), IERC8473Policy.TransferKind.TRANSFER);
+    _onward.data = abi.encode(uint256(1), _token.balanceOf(_carol));
+    vm.mockCall(_hook, abi.encodeCall(IERC8473Policy.checkTransfer, (_onward)), abi.encode(Reasons.RECEIVER_FROZEN));
     vm.expectRevert(_rejected(Reasons.RECEIVER_FROZEN));
     vm.prank(_alice);
     _token.safeTransferFrom(_alice, address(_receiver), 2);
@@ -426,7 +439,7 @@ contract Gated721Unit_Transfer is Gated721UnitTest {
     MockReentrantHook _reentrant = new MockReentrantHook(_registry);
     _attested(address(_reentrant), IPolicyRegistry.AttestKind.HOOK, true);
     vm.prank(_admin);
-    _token.setPolicyHook(address(_reentrant));
+    _token.installPolicy(address(_reentrant), '');
     _reentrant.setToken(_token);
     vm.prank(_bob);
     _token.setApprovalForAll(address(_reentrant), true);
@@ -442,7 +455,7 @@ contract Gated721Unit_Burn is Gated721UnitTest {
     vm.expectCall(
       _hook,
       abi.encodeCall(
-        IPolicyHook.beforeTransfer, (_ctx(_alice, address(0), _ID, _burner, IPolicyHook.TransferKind.BURN))
+        IERC8473Policy.checkTransfer, (_ctx(_alice, address(0), _ID, _burner, IERC8473Policy.TransferKind.BURN))
       )
     );
     vm.prank(_burner);
@@ -459,7 +472,7 @@ contract Gated721Unit_Burn is Gated721UnitTest {
   }
 
   function test_WhenTheTokenDoesNotExist_ItRevertsWithoutAskingTheHook() external {
-    vm.expectCall(_hook, abi.encodeWithSelector(IPolicyHook.beforeTransfer.selector), 0);
+    vm.expectCall(_hook, abi.encodeWithSelector(IERC8473Policy.checkTransfer.selector), 0);
     vm.expectRevert(abi.encodeWithSelector(IERC721Errors.ERC721NonexistentToken.selector, 2));
     vm.prank(_burner);
     _token.burn(2);
@@ -491,7 +504,7 @@ contract Gated721Unit_ForcedTransfer is Gated721UnitTest {
   function test_WhenTheAgentForces_TheHookSeesAForcedMoveAndBothEventsCarryTheToken() external {
     vm.expectCall(
       _hook,
-      abi.encodeCall(IPolicyHook.beforeTransfer, (_ctx(_alice, _bob, _ID, _agent, IPolicyHook.TransferKind.FORCED)))
+      abi.encodeCall(IERC8473Policy.checkTransfer, (_ctx(_alice, _bob, _ID, _agent, IERC8473Policy.TransferKind.FORCED)))
     );
     vm.expectEmit(address(_token));
     emit IERC721.Transfer(_alice, _bob, _ID);
@@ -700,7 +713,7 @@ contract Gated721Unit_Preflight is Gated721UnitTest {
     vm.expectCall(
       _hook,
       abi.encodeCall(
-        IPolicyHook.beforeTransfer, (_ctx(_alice, address(0), _ID, _burner, IPolicyHook.TransferKind.BURN))
+        IERC8473Policy.checkTransfer, (_ctx(_alice, address(0), _ID, _burner, IERC8473Policy.TransferKind.BURN))
       )
     );
     vm.prank(_burner);
@@ -734,7 +747,7 @@ contract Gated721Unit_Preflight is Gated721UnitTest {
   }
 
   function test_TheAccountAnswersAreTheHooks() external {
-    _hookAccountChecksDecide(Reasons.LOCKED, Reasons.RECEIVER_NOT_VERIFIED);
+    _hookAccountChecksDecide(Reasons.LOCKED_UP, Reasons.RECEIVER_NOT_VERIFIED);
     assertFalse(_token.canSend(_alice));
     assertFalse(_token.canReceive(_bob));
     _hookAccountChecksDecide(Reasons.TRANSFER_OK, Reasons.TRANSFER_OK);
@@ -748,7 +761,7 @@ contract Gated721Unit_Preflight is Gated721UnitTest {
     bool _paused,
     uint256 _reasonSeed
   ) external {
-    bytes32[3] memory _answers = [Reasons.TRANSFER_OK, Reasons.LOCKED, Reasons.SENDER_FROZEN];
+    bytes32[3] memory _answers = [Reasons.TRANSFER_OK, Reasons.LOCKED_UP, Reasons.SENDER_FROZEN];
     _hookDecides(_answers[bound(_reasonSeed, 0, 2)]);
     if (_frozen) _freeze(_alice, _ID);
     if (_paused) {
@@ -772,7 +785,7 @@ contract Gated721Unit_Preflight is Gated721UnitTest {
   ) external {
     address[3] memory _senders = [_alice, _bob, _stranger];
     address _from = _senders[bound(_fromSeed, 0, 2)];
-    bytes32[3] memory _answers = [Reasons.TRANSFER_OK, Reasons.LOCKED, Reasons.RECEIVER_NOT_VERIFIED];
+    bytes32[3] memory _answers = [Reasons.TRANSFER_OK, Reasons.LOCKED_UP, Reasons.RECEIVER_NOT_VERIFIED];
     _hookDecides(_answers[bound(_reasonSeed, 0, 2)]);
     if (_frozen) _freeze(_from, _ID);
     if (_paused) {
@@ -793,10 +806,10 @@ contract Gated721Unit_Governance is Gated721UnitTest {
     _attested(_next, IPolicyRegistry.AttestKind.HOOK, true);
     vm.mockCall(_next, abi.encodeCall(IComplianceHook.REGISTRY, ()), abi.encode(_registry));
     vm.expectEmit(address(_token));
-    emit IPolicyGatedCore.PolicyHookChanged(_hook, _next);
+    emit IERC8473.PolicyChanged(_hook, _next);
     vm.prank(_admin);
-    _token.setPolicyHook(_next);
-    assertEq(_token.policyHook(), _next);
+    _token.installPolicy(_next, '');
+    assertEq(_token.policy(), _next);
   }
 
   function test_WhenTheHookIsNotAttestedOrNamesAnotherRegistry_ItIsRefused() external {
@@ -806,7 +819,7 @@ contract Gated721Unit_Governance is Gated721UnitTest {
       abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_NotAttested.selector, _next, IPolicyRegistry.AttestKind.HOOK)
     );
     vm.prank(_admin);
-    _token.setPolicyHook(_next);
+    _token.installPolicy(_next, '');
 
     address _otherRegistry = makeAddr('otherRegistry');
     _attested(_next, IPolicyRegistry.AttestKind.HOOK, true);
@@ -815,13 +828,13 @@ contract Gated721Unit_Governance is Gated721UnitTest {
       abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_HookRegistryMismatch.selector, _otherRegistry, _registry)
     );
     vm.prank(_admin);
-    _token.setPolicyHook(_next);
+    _token.installPolicy(_next, '');
   }
 
   function test_WhenTheCallerIsNotTheTimelock_ItCannotSetTheHook() external {
     vm.expectRevert(_unauthorized(_guardian, _token.DEFAULT_ADMIN_ROLE()));
     vm.prank(_guardian);
-    _token.setPolicyHook(_hook);
+    _token.installPolicy(_hook, '');
   }
 
   function test_WhenUpgradedToAnAttestedImplementationOfTheSameTemplate_ItKeepsItsTokens() external {
@@ -1075,7 +1088,7 @@ contract Gated721IntegrationTest is Test {
     uint256 _tokenId
   ) internal returns (bool _ok, bytes32 _reason) {
     (_ok, _reason) = _nft.canTransferWithReason(_from, _to, _tokenId);
-    if (!_ok) vm.expectRevert(abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, _reason));
+    if (!_ok) vm.expectRevert(abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, _reason));
     vm.prank(_from);
     _nft.transferFrom(_from, _to, _tokenId);
   }
@@ -1083,7 +1096,7 @@ contract Gated721IntegrationTest is Test {
 
 contract Gated721Integration_Rules is Gated721IntegrationTest {
   function test_WhenDeployed_TheHookHoldsTheProductsRules() external view {
-    assertEq(_nft.policyHook(), address(_hook));
+    assertEq(_nft.policy(), address(_hook));
     assertEq(_hook.ruleCount(address(_nft)), 2);
   }
 
@@ -1100,7 +1113,7 @@ contract Gated721Integration_Rules is Gated721IntegrationTest {
     assertEq(_reason, Reasons.RECEIVER_NOT_VERIFIED);
 
     vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.RECEIVER_NOT_VERIFIED)
+      abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, Reasons.RECEIVER_NOT_VERIFIED)
     );
     vm.prank(_minter);
     _nft.mint(_eve, 2, '');
@@ -1112,7 +1125,7 @@ contract Gated721Integration_Rules is Gated721IntegrationTest {
     assertFalse(_nft.canSend(_alice));
     (bool _ok, bytes32 _reason) = _transferWithParity(_alice, _bob, _ID);
     assertFalse(_ok);
-    assertEq(_reason, Reasons.LOCKED);
+    assertEq(_reason, Reasons.LOCKED_UP);
 
     vm.prank(_agent);
     _nft.forcedTransfer(_alice, _bob, _ID);
@@ -1128,7 +1141,7 @@ contract Gated721Integration_Rules is Gated721IntegrationTest {
     assertEq(_reason, Reasons.RECEIVER_FROZEN);
 
     vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.RECEIVER_FROZEN)
+      abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, Reasons.RECEIVER_FROZEN)
     );
     vm.prank(_agent);
     _nft.forcedTransfer(_alice, _bob, _ID);
@@ -1136,7 +1149,7 @@ contract Gated721Integration_Rules is Gated721IntegrationTest {
 
   function test_WhenTheAgentForcesToAnUnverifiedAccount_ItIsRefused() external {
     vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.RECEIVER_NOT_VERIFIED)
+      abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, Reasons.RECEIVER_NOT_VERIFIED)
     );
     vm.prank(_agent);
     _nft.forcedTransfer(_alice, _eve, _ID);
@@ -1150,7 +1163,7 @@ contract Gated721Integration_Rules is Gated721IntegrationTest {
     assertTrue(_ok, 'the burner is the operator of the burn it asks about');
     vm.prank(_alice);
     (, bytes32 _reason) = _nft.canTransferWithReason(_alice, address(0), _ID);
-    assertEq(_reason, Reasons.LOCKED);
+    assertEq(_reason, Reasons.LOCKED_UP);
     vm.prank(_burner);
     _nft.burn(_ID);
     assertEq(_nft.balanceOf(_alice), 0);

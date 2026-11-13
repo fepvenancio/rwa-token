@@ -7,7 +7,7 @@ import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IMinPositionRule} from 'interfaces/IMinPositionRule.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 
 import {BaseRule} from 'contracts/hooks/BaseRule.sol';
 
@@ -15,7 +15,7 @@ import {BaseRule} from 'contracts/hooks/BaseRule.sol';
  * @title MinPositionRule
  * @notice Per-token minimum position: no account is left holding a balance above zero and below the minimum, as
  *         specified in `IMinPositionRule`
- * @dev Reads the balances before the move from `TransferContext.extra` and judges the balances after it, so it makes no
+ * @dev Reads the balances before the move from `TransferContext.data` and judges the balances after it, so it makes no
  *      call back into the token on the usual path. It holds no per-holder state and needs no `after_`
  */
 contract MinPositionRule is BaseRule, IMinPositionRule {
@@ -77,13 +77,13 @@ contract MinPositionRule is BaseRule, IMinPositionRule {
    *      once a position would breach
    */
   function check(
-    IPolicyHook.TransferContext calldata _ctx
+    IERC8473Policy.TransferContext calldata _ctx
   ) external view returns (bytes32 _reason) {
     uint256 _min = _minPositions[_ctx.token];
-    if (_min == 0 || _ctx.amount == 0 || _ctx.from == _ctx.to || _ctx.kind == IPolicyHook.TransferKind.FORCED) {
+    if (_min == 0 || _ctx.amount == 0 || _ctx.from == _ctx.to || _ctx.kind == IERC8473Policy.TransferKind.FORCED) {
       return Reasons.TRANSFER_OK;
     }
-    (uint256 _fromBalance, uint256 _toBalance) = abi.decode(_ctx.extra, (uint256, uint256));
+    (uint256 _fromBalance, uint256 _toBalance) = abi.decode(_ctx.data, (uint256, uint256));
 
     if (
       _ctx.to != address(0) && _ctx.amount < _min && _toBalance < _min - _ctx.amount && !_isExempt(_ctx.token, _ctx.to)
@@ -144,9 +144,9 @@ contract MinPositionRule is BaseRule, IMinPositionRule {
    * @return _enforcement True for a burn by a BURNER_ROLE holder
    */
   function _isEnforcementBurn(
-    IPolicyHook.TransferContext calldata _ctx
+    IERC8473Policy.TransferContext calldata _ctx
   ) internal view returns (bool _enforcement) {
     _enforcement =
-      _ctx.kind == IPolicyHook.TransferKind.BURN && IAccessControl(_ctx.token).hasRole(_BURNER_ROLE, _ctx.operator);
+      _ctx.kind == IERC8473Policy.TransferKind.BURN && IAccessControl(_ctx.token).hasRole(_BURNER_ROLE, _ctx.operator);
   }
 }

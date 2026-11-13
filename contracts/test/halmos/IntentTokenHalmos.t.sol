@@ -7,7 +7,7 @@ import {Test} from 'forge-std/Test.sol';
 import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
 
@@ -34,14 +34,26 @@ contract HalmosAcceptAllHook {
     REGISTRY = _registry;
   }
 
-  function beforeTransfer(
-    IPolicyHook.TransferContext calldata
+  function checkTransfer(
+    IERC8473Policy.TransferContext calldata
   ) external pure returns (bytes32 _reason) {
     _reason = Reasons.TRANSFER_OK;
   }
 
-  function wantsAfter() external pure returns (bool _wantsAfter) {
+  function wantsAfterTransfer() external pure returns (bool _wantsAfter) {
     _wantsAfter = false;
+  }
+
+  function onInstall(
+    address,
+    address,
+    bytes calldata
+  ) external {}
+
+  function supportsInterface(
+    bytes4
+  ) external pure returns (bool _supported) {
+    _supported = true;
   }
 }
 

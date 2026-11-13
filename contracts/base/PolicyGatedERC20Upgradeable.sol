@@ -12,7 +12,7 @@ import {Reasons} from 'interfaces/Errors.sol';
 
 import {IERC7943Fungible} from 'interfaces/IERC7943Fungible.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 
 import {PolicyGatedCoreUpgradeable} from 'contracts/base/PolicyGatedCoreUpgradeable.sol';
 
@@ -112,7 +112,7 @@ abstract contract PolicyGatedERC20Upgradeable is ERC20PermitUpgradeable, PolicyG
     uint256 _amount
   ) public virtual onlyRole(AGENT_ROLE) returns (bool _result) {
     _releaseFrozen(_from, _amount);
-    _moveAs(_from, _to, _amount, IPolicyHook.TransferKind.FORCED, bytes32(0), 0);
+    _moveAs(_from, _to, _amount, IERC8473Policy.TransferKind.FORCED, bytes32(0), 0);
     // Emitted after the hook's afterTransfer: re-entry is blocked by `_move`'s guard and the hook is attested.
     // slither-disable-start reentrancy-events
     emit ForcedTransfer(_from, _to, _amount);
@@ -176,14 +176,14 @@ abstract contract PolicyGatedERC20Upgradeable is ERC20PermitUpgradeable, PolicyG
     address _from,
     address _to,
     uint256 _value,
-    IPolicyHook.TransferKind _kind,
+    IERC8473Policy.TransferKind _kind,
     bytes32 _ref,
     uint256 _deadline
   ) internal virtual nonReentrant {
-    IPolicyHook.TransferContext memory _ctx = _context(_from, _to, _value, _msgSender(), _kind, _ref, _deadline);
+    IERC8473Policy.TransferContext memory _ctx = _context(_from, _to, _value, _msgSender(), _kind, _ref, _deadline);
 
     // Read once: the hook that approves the movement is the hook that sees `afterTransfer`.
-    IPolicyHook _hook = _policyHook();
+    IERC8473Policy _hook = _policy();
     bytes32 _reason = _check(_ctx, _hook);
     if (_reason != Reasons.TRANSFER_OK) {
       // The token's own balance checks revert with the standard's error for an amount within the balance, which a frozen
@@ -196,12 +196,12 @@ abstract contract PolicyGatedERC20Upgradeable is ERC20PermitUpgradeable, PolicyG
         if (_value > _balance) revert ERC20InsufficientBalance(_from, _balance, _value);
         revert ERC7943InsufficientUnfrozenBalance(_from, _value, _unfrozenBalance(_from));
       }
-      revert PolicyGated_TransferRejected(_reason);
+      revert ERC8473PolicyRejected(_reason);
     }
 
     super._update(_from, _to, _value);
 
-    if (_hook.wantsAfter()) _hook.afterTransfer(_ctx);
+    if (_hook.wantsAfterTransfer()) _hook.afterTransfer(_ctx);
   }
 
   /**
@@ -218,7 +218,7 @@ abstract contract PolicyGatedERC20Upgradeable is ERC20PermitUpgradeable, PolicyG
     address _from,
     address _to,
     uint256 _amount,
-    IPolicyHook.TransferKind _kind,
+    IERC8473Policy.TransferKind _kind,
     bytes32 _ref,
     uint256 _deadline
   ) internal {
@@ -239,7 +239,7 @@ abstract contract PolicyGatedERC20Upgradeable is ERC20PermitUpgradeable, PolicyG
   function _mintAs(
     address _to,
     uint256 _amount,
-    IPolicyHook.TransferKind _kind
+    IERC8473Policy.TransferKind _kind
   ) internal {
     if (_to == address(0)) revert ERC20InvalidReceiver(address(0));
     _move(address(0), _to, _amount, _kind, bytes32(0), 0);
@@ -317,7 +317,7 @@ abstract contract PolicyGatedERC20Upgradeable is ERC20PermitUpgradeable, PolicyG
     if (_from == address(0) && _to == address(0)) return Reasons.ZERO_RECEIVER;
     address _operator = _from == address(0) ? _msgSender() : _from;
     _reason = _check(
-      _context(_from, _to, _amount, _operator, _inferKind(_from, _to), bytes32(0), 0), _policyHook(), _balanceCounts
+      _context(_from, _to, _amount, _operator, _inferKind(_from, _to), bytes32(0), 0), _policy(), _balanceCounts
     );
   }
 
@@ -344,8 +344,8 @@ abstract contract PolicyGatedERC20Upgradeable is ERC20PermitUpgradeable, PolicyG
    * @return _reason The reason code
    */
   function _check(
-    IPolicyHook.TransferContext memory _ctx,
-    IPolicyHook _hook
+    IERC8473Policy.TransferContext memory _ctx,
+    IERC8473Policy _hook
   ) internal view returns (bytes32 _reason) {
     _reason = _check(_ctx, _hook, true);
   }
@@ -364,11 +364,11 @@ abstract contract PolicyGatedERC20Upgradeable is ERC20PermitUpgradeable, PolicyG
    * @return _reason The reason code
    */
   function _check(
-    IPolicyHook.TransferContext memory _ctx,
-    IPolicyHook _hook,
+    IERC8473Policy.TransferContext memory _ctx,
+    IERC8473Policy _hook,
     bool _balanceCounts
   ) internal view returns (bytes32 _reason) {
-    if (paused() && _ctx.kind != IPolicyHook.TransferKind.FORCED) return Reasons.PAUSED;
+    if (paused() && _ctx.kind != IERC8473Policy.TransferKind.FORCED) return Reasons.PAUSED;
 
     if (_ctx.from != address(0) && _availableToMove(_ctx) < _ctx.amount) {
       if (_balanceCounts || (!_takesFrozenTokens(_ctx) && _getPolicyGatedStorage().frozen[_ctx.from] > 0)) {
@@ -377,7 +377,7 @@ abstract contract PolicyGatedERC20Upgradeable is ERC20PermitUpgradeable, PolicyG
     }
 
     if (address(_hook) == address(0)) return Reasons.NO_HOOK;
-    _reason = _hook.beforeTransfer(_ctx);
+    _reason = _hook.checkTransfer(_ctx);
   }
 
   /**
@@ -396,23 +396,23 @@ abstract contract PolicyGatedERC20Upgradeable is ERC20PermitUpgradeable, PolicyG
     address _to,
     uint256 _amount,
     address _operator,
-    IPolicyHook.TransferKind _kind,
+    IERC8473Policy.TransferKind _kind,
     bytes32 _ref,
     uint256 _deadline
-  ) internal view returns (IPolicyHook.TransferContext memory _ctx) {
+  ) internal view returns (IERC8473Policy.TransferContext memory _ctx) {
     // The balances before the move, so rules never call back into the token. Zero for the zero address, which holds
     // nothing. EXECUTED continues with the intent's reference and deadline.
     uint256 _fromBalance = _from == address(0) ? 0 : balanceOf(_from);
     uint256 _toBalance = _to == address(0) ? 0 : balanceOf(_to);
-    _ctx = IPolicyHook.TransferContext({
+    _ctx = IERC8473Policy.TransferContext({
       token: address(this),
       from: _from,
       to: _to,
-      id: 0,
+      tokenId: 0,
       amount: _amount,
       operator: _operator,
       kind: _kind,
-      extra: _kind == IPolicyHook.TransferKind.EXECUTED
+      data: _kind == IERC8473Policy.TransferKind.EXECUTED
         ? abi.encode(_fromBalance, _toBalance, _ref, _deadline)
         : abi.encode(_fromBalance, _toBalance)
     });
@@ -425,7 +425,7 @@ abstract contract PolicyGatedERC20Upgradeable is ERC20PermitUpgradeable, PolicyG
    * @return _available The amount the sender can move
    */
   function _availableToMove(
-    IPolicyHook.TransferContext memory _ctx
+    IERC8473Policy.TransferContext memory _ctx
   ) private view returns (uint256 _available) {
     _available = _takesFrozenTokens(_ctx) ? balanceOf(_ctx.from) : _unfrozenBalance(_ctx.from);
   }
@@ -436,12 +436,12 @@ abstract contract PolicyGatedERC20Upgradeable is ERC20PermitUpgradeable, PolicyG
    * @return _takes True for FORCED, and for a BURN driven by an account holding BURNER_ROLE
    */
   function _takesFrozenTokens(
-    IPolicyHook.TransferContext memory _ctx
+    IERC8473Policy.TransferContext memory _ctx
   ) private view returns (bool _takes) {
     // Compares movement kinds, not balances.
     // slither-disable-next-line incorrect-equality
-    _takes = _ctx.kind == IPolicyHook.TransferKind.FORCED
-      || (_ctx.kind == IPolicyHook.TransferKind.BURN && hasRole(BURNER_ROLE, _ctx.operator));
+    _takes = _ctx.kind == IERC8473Policy.TransferKind.FORCED
+      || (_ctx.kind == IERC8473Policy.TransferKind.BURN && hasRole(BURNER_ROLE, _ctx.operator));
   }
 
   /**

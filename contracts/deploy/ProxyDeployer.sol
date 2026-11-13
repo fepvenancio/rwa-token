@@ -76,7 +76,7 @@ contract ProxyDeployer is Ownable, IProxyDeployer {
     address _tokenRegistry = IPolicyGated(_proxy).registry();
     if (_tokenRegistry != address(REGISTRY)) revert ProxyDeployer_RegistryMismatch(address(REGISTRY), _tokenRegistry);
 
-    address _installed = IPolicyGated(_proxy).policyHook();
+    address _installed = IPolicyGated(_proxy).policy();
     if (_installed != _hook) revert ProxyDeployer_HookNotInstalled(_hook, _installed);
     if (!_rulesMatch(_hook, _proxy, _expectedRules)) revert ProxyDeployer_RulesMismatch(_hook, _proxy);
     string memory _actual = IERC20Metadata(_proxy).symbol();
