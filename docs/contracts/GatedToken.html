@@ -49,7 +49,7 @@
   </div>
   <ol class="steps wrap-any">
     <li><div><b><a href="TokenProxy.html"><code>TokenProxy</code></a></b> is the proxy. <a href="ProxyDeployer.html"><code>ProxyDeployer</code></a> places it at an address that follows from the deployer, the symbol and the implementation, and sets it up in the same transaction.</div></li>
-    <li><div><b><code>initialize</code></b> takes the name and symbol, the decimals, the admin, the guardian, the registry, the hook and the initial rule list. It sets up OpenZeppelin's ERC-20 and <code>permit</code>, then the <a href="PolicyGatedCoreUpgradeable.html#setup">shared core</a>, which grants the admin and guardian roles, fixes the registry, checks and installs the hook, and installs the rules on it for this token.</div></li>
+    <li><div><b><code>initialize</code></b> takes the name and symbol, the decimals, the admin, the guardian, the registry, the hook and the initial rule list. It sets up OpenZeppelin's ERC-20 and <code>permit</code>, then the <a href="PolicyGatedCoreUpgradeable.html#setup">shared core</a>, which grants the admin and guardian roles, fixes the registry, checks and installs the hook, and passes it the rule list as the installation's data, so the hook installs the rules for this token in its <code>onInstall</code>.</div></li>
     <li><div><b><code>decimals()</code></b> returns the value given at setup, kept in the token's own ERC-7201 namespace (<code>gated.storage.GatedToken</code>). No function changes it. For a cash token it is the precision of its ledger. Any <code>uint8</code> is accepted (<code>testFuzz_ItReportsTheDecimalsItWasGiven</code>), and the <code>Product</code> deployment module uses 18 when a product states none.</div></li>
     <li><div><b><code>templateId()</code></b> returns <code>keccak256('GatedToken')</code>. An upgrade must target attested code that reports the same id, so a <code>GatedToken</code> cannot be moved onto another template's code (<code>test_WhenUpgradedToAnotherTemplate_ItReverts</code>).</div></li>
   </ol>
@@ -68,7 +68,7 @@
       <thead><tr><th></th><th><code>GatedToken</code></th><th><code>IntentToken</code></th></tr></thead>
       <tbody>
         <tr><td>How a holder moves tokens</td><td>Sends <code>transfer</code>, or lets a spender use <code>transferFrom</code> after <code>approve</code> or a signed <code>permit</code></td><td>The same, or signs an intent that an executor submits, so the holder pays no gas</td></tr>
-        <tr><td>Movement kinds</td><td><span class="k k-transfer">TRANSFER</span> <span class="k k-mint">MINT</span> <span class="k k-burn">BURN</span> <span class="k k-forced">FORCED</span></td><td>Those, and <span class="k k-executed">EXECUTED</span></td></tr>
+        <tr><td>Movement kinds</td><td><span class="k k-transfer">TRANSFER</span> <span class="k k-mint">MINT</span> <span class="k k-forced">FORCED</span>. The burner's <code>burn</code> is <span class="k k-forced">FORCED</span>, and a holder has no burn, so nothing moves as <span class="k k-burn">BURN</span></td><td>Those, and <span class="k k-executed">EXECUTED</span></td></tr>
         <tr><td>Signed-intent functions and <code>ITransferIntent</code></td><td>None (<code>test_ItOffersTheStandardsAndNoSignedIntents</code>)</td><td><code>executeTransfer</code>, <code>canExecute</code>, <code>cancelIntent</code> and the rest</td></tr>
         <tr><td>Off-chain reference on a transfer</td><td>None</td><td><code>ref</code>, signed by the holder, in the event and the context</td></tr>
         <tr><td>Settlement hours (<code>SettlementWindowRule</code>)</td><td>The rule judges <span class="k k-executed">EXECUTED</span> only, so it would judge nothing here. <code>Product</code> refuses to list it.</td><td>Can list it. It binds signed intents, not a plain <code>transfer</code>.</td></tr>
@@ -111,7 +111,7 @@
       <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
       <tbody>
         <tr><td><code>constructor()</code></td><td>Runs once, when the implementation is deployed</td><td>Disables the initialiser on the implementation itself, so only a proxy can be set up (<code>test_TheImplementationCannotBeInitialised</code>).</td></tr>
-        <tr><td><code>initialize(name, symbol, decimals, admin, guardian, registry, hook, _initialRules)</code></td><td>Once per proxy; <code>ProxyDeployer</code> runs it in the transaction that creates the proxy</td><td>Sets the name (also the EIP-712 domain name), symbol and decimals, grants <code>DEFAULT_ADMIN_ROLE</code> to <code>admin</code> and <code>GUARDIAN_ROLE</code> to <code>guardian</code>, fixes the registry, installs the hook after checking it, and installs <code>_initialRules</code> on the hook for this token. An empty list installs none, and the hook then refuses every movement. Reverts with <code>PolicyGated_ZeroAddress</code>, <code>PolicyGated_NotAttested</code>, <code>PolicyGated_HookRegistryMismatch</code>, the hook's own refusals of a rule list (<code>ComplianceHook_NotAttested</code>, <code>ComplianceHook_TooManyRules</code>, <code>ComplianceHook_DuplicateRule</code>), or <code>InvalidInitialization</code> on a second call.</td></tr>
+        <tr><td><code>initialize(name, symbol, decimals, admin, guardian, registry, hook, _initialRules)</code></td><td>Once per proxy; <code>ProxyDeployer</code> runs it in the transaction that creates the proxy</td><td>Sets the name (also the EIP-712 domain name), symbol and decimals, grants <code>DEFAULT_ADMIN_ROLE</code> to <code>admin</code> and <code>GUARDIAN_ROLE</code> to <code>guardian</code>, fixes the registry, installs the hook after checking it, and passes it <code>abi.encode(_initialRules)</code> as the installation's data, which the hook installs as this token's rule list. An empty list sends empty data and installs none, and the hook then refuses every movement. Reverts with <code>PolicyGated_ZeroAddress</code>, <code>PolicyGated_NotAttested</code>, <code>PolicyGated_HookRegistryMismatch</code>, <code>PolicyGated_NotAPolicy</code>, the hook's own refusals of a rule list (<code>ComplianceHook_NotAttested</code>, <code>ComplianceHook_TooManyRules</code>, <code>ComplianceHook_DuplicateRule</code>), or <code>InvalidInitialization</code> on a second call.</td></tr>
         <tr><td><code>decimals()</code></td><td>Anyone (read-only)</td><td>The decimals given at setup.</td></tr>
         <tr><td><code>templateId()</code></td><td>Anyone (read-only)</td><td>Returns <code>keccak256('GatedToken')</code>.</td></tr>
         <tr><td>Everything else</td><td colspan="2">From <a href="PolicyGatedERC20Upgradeable.html#functions">the base</a>: transfers, mint, burn, forced transfer, frozen amounts, pause, pre-flights, hook, multicall, roles, upgrades, and its events and errors.</td></tr>
@@ -169,7 +169,7 @@
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>4a906cc</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>6ef0d4e</code> on <code>erc8473-conformance</code>.</footer>
 </main>
 </body>
 </html>

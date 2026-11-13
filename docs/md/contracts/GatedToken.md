@@ -25,7 +25,7 @@ The plain gated token: the shared base with its own decimals, and no signed tran
 The token's address is a **proxy**, which holds all the state and runs shared implementation code for every call. That code is the base plus this small contract.
 
 1. **[`TokenProxy`](TokenProxy.md)** is the proxy. [`ProxyDeployer`](ProxyDeployer.md) places it at an address that follows from the deployer, the symbol and the implementation, and sets it up in the same transaction.
-2. **`initialize`** takes the name and symbol, the decimals, the admin, the guardian, the registry, the hook and the initial rule list. It sets up OpenZeppelin's ERC-20 and `permit`, then the [shared core](PolicyGatedCoreUpgradeable.md#setup), which grants the admin and guardian roles, fixes the registry, checks and installs the hook, and installs the rules on it for this token.
+2. **`initialize`** takes the name and symbol, the decimals, the admin, the guardian, the registry, the hook and the initial rule list. It sets up OpenZeppelin's ERC-20 and `permit`, then the [shared core](PolicyGatedCoreUpgradeable.md#setup), which grants the admin and guardian roles, fixes the registry, checks and installs the hook, and passes it the rule list as the installation's data, so the hook installs the rules for this token in its `onInstall`.
 3. **`decimals()`** returns the value given at setup, kept in the token's own ERC-7201 namespace (`gated.storage.GatedToken`). No function changes it. For a cash token it is the precision of its ledger. Any `uint8` is accepted (`testFuzz_ItReportsTheDecimalsItWasGiven`), and the `Product` deployment module uses 18 when a product states none.
 4. **`templateId()`** returns `keccak256('GatedToken')`. An upgrade must target attested code that reports the same id, so a `GatedToken` cannot be moved onto another template's code (`test_WhenUpgradedToAnotherTemplate_ItReverts`).
 
@@ -39,7 +39,7 @@ The two templates share the base, and take the same arguments in `initialize`. T
 |  | `GatedToken` | `IntentToken` |
 |---|---|---|
 | How a holder moves tokens | Sends `transfer`, or lets a spender use `transferFrom` after `approve` or a signed `permit` | The same, or signs an intent that an executor submits, so the holder pays no gas |
-| Movement kinds | TRANSFER MINT BURN FORCED | Those, and EXECUTED |
+| Movement kinds | TRANSFER MINT FORCED. The burner's `burn` is FORCED, and a holder has no burn, so nothing moves as BURN | Those, and EXECUTED |
 | Signed-intent functions and `ITransferIntent` | None (`test_ItOffersTheStandardsAndNoSignedIntents`) | `executeTransfer`, `canExecute`, `cancelIntent` and the rest |
 | Off-chain reference on a transfer | None | `ref`, signed by the holder, in the event and the context |
 | Settlement hours (`SettlementWindowRule`) | The rule judges EXECUTED only, so it would judge nothing here. `Product` refuses to list it. | Can list it. It binds signed intents, not a plain `transfer`. |
@@ -70,7 +70,7 @@ The two templates share the base, and take the same arguments in `initialize`. T
 | Function | Who can call | What it does |
 |---|---|---|
 | `constructor()` | Runs once, when the implementation is deployed | Disables the initialiser on the implementation itself, so only a proxy can be set up (`test_TheImplementationCannotBeInitialised`). |
-| `initialize(name, symbol, decimals, admin, guardian, registry, hook, _initialRules)` | Once per proxy; `ProxyDeployer` runs it in the transaction that creates the proxy | Sets the name (also the EIP-712 domain name), symbol and decimals, grants `DEFAULT_ADMIN_ROLE` to `admin` and `GUARDIAN_ROLE` to `guardian`, fixes the registry, installs the hook after checking it, and installs `_initialRules` on the hook for this token. An empty list installs none, and the hook then refuses every movement. Reverts with `PolicyGated_ZeroAddress`, `PolicyGated_NotAttested`, `PolicyGated_HookRegistryMismatch`, the hook's own refusals of a rule list (`ComplianceHook_NotAttested`, `ComplianceHook_TooManyRules`, `ComplianceHook_DuplicateRule`), or `InvalidInitialization` on a second call. |
+| `initialize(name, symbol, decimals, admin, guardian, registry, hook, _initialRules)` | Once per proxy; `ProxyDeployer` runs it in the transaction that creates the proxy | Sets the name (also the EIP-712 domain name), symbol and decimals, grants `DEFAULT_ADMIN_ROLE` to `admin` and `GUARDIAN_ROLE` to `guardian`, fixes the registry, installs the hook after checking it, and passes it `abi.encode(_initialRules)` as the installation's data, which the hook installs as this token's rule list. An empty list sends empty data and installs none, and the hook then refuses every movement. Reverts with `PolicyGated_ZeroAddress`, `PolicyGated_NotAttested`, `PolicyGated_HookRegistryMismatch`, `PolicyGated_NotAPolicy`, the hook's own refusals of a rule list (`ComplianceHook_NotAttested`, `ComplianceHook_TooManyRules`, `ComplianceHook_DuplicateRule`), or `InvalidInitialization` on a second call. |
 | `decimals()` | Anyone (read-only) | The decimals given at setup. |
 | `templateId()` | Anyone (read-only) | Returns `keccak256('GatedToken')`. |
 | Everything else | From [the base](PolicyGatedERC20Upgradeable.md#functions): transfers, mint, burn, forced transfer, frozen amounts, pause, pre-flights, hook, multicall, roles, upgrades, and its events and errors. |  |
@@ -113,4 +113,4 @@ The token takes no ether. It has no `receive` function and no payable function o
 
 ---
 
-Describes the contracts at commit `4a906cc` on `main`.
+Describes the contracts at commit `6ef0d4e` on `erc8473-conformance`.

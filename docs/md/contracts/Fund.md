@@ -43,7 +43,7 @@ The sequence an integration test runs on one fund with the three templates regis
 | The minter mints INT to Alice | MINT | `join(INT, Alice)`: her first class | 1 | 1 |
 | Alice deposits into the gFUND vault | MINT | `join(gFUND, Alice)` | 3 | 1 |
 | Alice claims her settled gASYNC deposit | MINT | `join(gASYNC, Alice)` | 7 | 1 |
-| The burner burns all her INT | BURN | `leave(INT, Alice)` | 6 | 1 |
+| The burner burns all her INT | FORCED | `leave(INT, Alice)` | 6 | 1 |
 | Alice redeems all her gFUND shares | BURN | `leave(gFUND, Alice)` | 4 | 1 |
 | Alice requests redemption of all her gASYNC shares, which move to the vault's escrow | TRANSFER | `leave(gASYNC, Alice)`, then `join(gASYNC, vault)`, which the fund ignores because the vault is the class itself | 0 | 0 |
 
@@ -164,7 +164,7 @@ Together with the class tokens' own `Transfer` events, `HolderClassesUpdated` an
 <a id="limits"></a>
 ## What it does not do
 
-- **It does not stop a class dropping the rule.** The hook accepts a list without `FundHoldersRule`, and then the class stops counting investors and stops enforcing the cap. The monitor detects it, and nothing prevents it (`test_WhenAClassDropsTheFundRule_ItIsUncappedAndTheMonitorNamesIt`). The same is true of a hook swap.
+- **It does not stop a class dropping the rule.** The hook accepts a list without `FundHoldersRule`, and then the class stops counting investors and stops enforcing the cap. The monitor detects it, and nothing prevents it (`test_WhenAClassDropsTheFundRule_ItIsUncappedAndTheMonitorNamesIt`). The same is true of a swap to a hook whose list for the class lacks the rule. A swap to a hook that lists the rule is refused by the rule's `onInstall` with `FundHoldersRule_CountNotCurrent` when the class has a supply and the hook it leaves does not list the rule.
 - **It does not repair a gap.** While a class's list lacks the rule its movements are not recorded, and no function sets a mask directly. A seller in the gap stays counted until a later full exit, or until the fund's owner exempts it with `setExempt`, which takes it out of the count. A buyer with no other class stays uncounted, with the cap treating it as new, until it takes up another class, or its balance reaches zero and it receives again.
 - **The cap is not an absolute ceiling on the count.** A forced move is exempt from the cap and still counted, so the agent's recovery of a stranded position can put the count above the cap, where it stays until investors leave. Ending an exemption can do the same. A monitor should alert when `holderCount()` is above `holderCap()`.
 - **It holds no place for an open request.** A full `requestRedeem` on a 7540 class takes the investor out of the count while the shares wait in the escrow, and `requestDeposit` reserves nothing. If the fund fills up meanwhile, a reject that returns the shares, or a deposit claim, is refused with `MAX_HOLDERS` (`test_WhenARejectedRedemptionReturnsSharesToAnInvestorWhoWasReplaced_TheFundCapAppliesAndRecoveryIsCounted`). The agent's recovery path still works. Whether a redeeming investor still counts as a holder is for counsel.
@@ -193,4 +193,4 @@ Together with the class tokens' own `Transfer` events, `HolderClassesUpdated` an
 
 ---
 
-Describes the contracts at commit `4a906cc` on `main`.
+Describes the contracts at commit `6ef0d4e` on `erc8473-conformance`.

@@ -24,7 +24,7 @@ Lets a holder authorise a transfer by signing a message instead of sending a tra
 
 In the deployment four parties take part. The holder signs. An operator key (an issuer or relayer key with `OPERATOR_ROLE` on the executor) submits. The executor contract holds the token's `EXECUTOR_ROLE` and calls the token. The token runs the checks and asks the hook.
 
-> **Diagram.** Sequence of a signed intent. The holder signs the intent off-chain with EIP-712 and hands the intent and signature to the operator key. The operator may first ask the token canExecute, naming the executor, and gets true or a reason code. The operator calls execute on the IntentExecutor, which checks its operator role, that it is not paused and that the intent states no consideration, then calls executeTransfer on the token. The token runs its checks and marks the nonce used, asks the hook beforeTransfer with kind EXECUTED, gets TRANSFER_OK, moves the balances, calls afterTransfer if the hook wants it, and returns the intent hash with the event IntentExecuted. The executor returns the intent hash to the operator.
+> **Diagram.** Sequence of a signed intent. The holder signs the intent off-chain with EIP-712 and hands the intent and signature to the operator key. The operator may first ask the token canExecute, naming the executor, and gets true or a reason code. The operator calls execute on the IntentExecutor, which checks its operator role, that it is not paused and that the intent states no consideration, then calls executeTransfer on the token. The token runs its checks and marks the nonce used, asks the hook checkTransfer with kind EXECUTED, gets TRANSFER_OK, moves the balances, calls afterTransfer if the hook wants it, and returns the intent hash with the event IntentExecuted. The executor returns the intent hash to the operator.
 >
 > **The holder signs once; the token checks everything.** Dashed lines are off-chain hand-overs, read-only calls and returns. `afterTransfer` runs if the hook asks for it. The executor passes the intent on unchanged; its own check is that the intent states no payment, which it could not enforce.
 
@@ -41,7 +41,7 @@ In the deployment four parties take part. The holder signs. An operator key (an 
 
 > **Diagram.** The checks of executeTransfer in order. 0: the caller must hold EXECUTOR_ROLE, or AccessControlUnauthorizedAccount. 1: after the deadline gives INTENT_EXPIRED. 2: a used or cancelled nonce gives NONCE_USED. 3: a stated consideration with no executor named gives CONSIDERATION_NEEDS_EXECUTOR. 4: a named executor that is not the caller gives WRONG_EXECUTOR. 5: before validAfter gives INTENT_NOT_YET_VALID. 6: a zero receiver gives ZERO_RECEIVER. 7: a signature that is not valid for from gives BAD_SIGNATURE. 8: the nonce is marked used. 9: the tokens move as EXECUTED through \_moveAs and \_move, with the pause, unfrozen balance and hook checks, which can give PAUSED, a balance error or a rule's reason. Then IntentExecuted is emitted and the intent hash returned.
 >
-> **Message checks first, then the policy.** Checks 1 to 7, and the pause and the hook in step 9, revert with `PolicyGated_TransferRejected(reason)` carrying the code in the red box. `canExecute` returns the same codes without reverting. At step 0 it answers `NOT_EXECUTOR` when the account it names lacks the role, and at step 8 it writes nothing.
+> **Message checks first, then the policy.** Checks 1 to 7, and the pause and the hook in step 9, revert with `ERC8473PolicyRejected(reason)` carrying the code in the red box. `canExecute` returns the same codes without reverting. At step 0 it answers `NOT_EXECUTOR` when the account it names lacks the role, and at step 8 it writes nothing.
 
 - **The role comes first in both.** A caller without the role gets the access error whatever else is wrong (`test_WhenTheCallerLacksTheRole_TheRoleCheckComesFirst`), and `canExecute` says `NOT_EXECUTOR` before it looks at anything else (`test_TheRoleIsCheckedBeforeEverythingElseAsInTheCall`).
 - **Times are inclusive.** The intent can run at the exact second of `deadline` and at the exact second of `validAfter` (`test_WhenDeadlineIsNow_ItExecutes`, `test_WhenValidAfterIsNow_ItExecutes`). An intent whose `validAfter` is later than its `deadline` does not run at any time (`test_WhenTheWindowIsEmpty_ItNeverExecutes`).
@@ -77,7 +77,7 @@ TransferIntent(address from,address to,uint256 amount,bytes32 nonce,uint256 dead
 A **nonce** here is a random 32-byte value that makes each intent unique, in the style of ERC-3009. The token keeps one used-or-not flag per signer and nonce, and nothing else. Because nonces are random rather than counted, the signer needs nothing from the chain to sign, can sign many intents at once, and the executor can run them in any order.
 
 - Executing an intent marks its nonce used, so the same intent does not run twice (`NONCE_USED`; `check_executedIntentCannotReplay`).
-- `cancelIntent(nonce)` marks one of the caller's own nonces used, so no intent that account signed with it can run. It needs no other field, works while the token is paused, and emits `IntentCancelled(from, nonce)`. Cancelling a nonce that is already used reverts with `PolicyGated_TransferRejected(NONCE_USED)`. An account that cancels a value has no effect on another signer's nonce of the same value (`test_WhenAnotherAccountCancels_ItDoesNotAffectTheSigner`).
+- `cancelIntent(nonce)` marks one of the caller's own nonces used, so no intent that account signed with it can run. It needs no other field, works while the token is paused, and emits `IntentCancelled(from, nonce)`. Cancelling a nonce that is already used reverts with `ERC8473PolicyRejected(NONCE_USED)`. An account that cancels a value has no effect on another signer's nonce of the same value (`test_WhenAnotherAccountCancels_ItDoesNotAffectTheSigner`).
 - A cancel and an execution race: whichever transaction is mined first wins. A used nonce stays used, and nothing undoes an execution.
 - `nonceUsed(signer, nonce)` tells whether a nonce is spent. These nonces are separate from the counter `nonces(owner)` that `permit` uses.
 
@@ -116,7 +116,7 @@ The mixin moves the tokens with the base's `_moveAs(from, to, amount, EXECUTED, 
 | `kind` | EXECUTED |
 | `from`, `to`, `amount` | From the intent. |
 | `operator` | The account that called `executeTransfer`: the executor, not the holder. In `canExecute`, the account it names (`test_TheRulesSeeTheNamedAccountAsTheOperator`). |
-| `extra` | `abi.encode(fromBalance, toBalance, ref, deadline)`: the two balances before the move, then the intent's reference and deadline. Rules that read the balances decode the first two words. |
+| `data` | `abi.encode(fromBalance, toBalance, ref, deadline)`: the two balances before the move, then the intent's reference and deadline. Rules that read the balances decode the first two words. |
 
 Among the shipped rules, [`SettlementWindowRule`](SettlementWindowRule.md) judges this kind and no other: an executed intent passes inside the token's daily window, on its enabled weekdays. [`ExecutedOnlyRule`](ExecutedOnlyRule.md) looks at the same field from the other side: it refuses a plain transfer, so that movements between holders go through signed intents.
 
@@ -137,7 +137,7 @@ Among the shipped rules, [`SettlementWindowRule`](SettlementWindowRule.md) judge
 |---|---|
 | `IntentExecuted(intentHash, from, to, amount, executor, ref)` | After the balances have moved and the hook's `afterTransfer` has run. |
 | `IntentCancelled(from, nonce)` | A signer cancels a nonce. |
-| `PolicyGated_TransferRejected(reason)` | Any check above that carries a reason code: `INTENT_EXPIRED`, `NONCE_USED`, `CONSIDERATION_NEEDS_EXECUTOR`, `WRONG_EXECUTOR`, `INTENT_NOT_YET_VALID`, `ZERO_RECEIVER`, `BAD_SIGNATURE`, `PAUSED`, or a rule's reason. `NOT_EXECUTOR` is `canExecute`'s answer; the write reverts with the access error instead. |
+| `ERC8473PolicyRejected(reason)` | Any check above that carries a reason code: `INTENT_EXPIRED`, `NONCE_USED`, `CONSIDERATION_NEEDS_EXECUTOR`, `WRONG_EXECUTOR`, `INTENT_NOT_YET_VALID`, `ZERO_RECEIVER`, `BAD_SIGNATURE`, `PAUSED`, a rule's reason, or `CHECK_UNAVAILABLE` when the hook cannot be asked. `NOT_EXECUTOR` is `canExecute`'s answer; the write reverts with the access error instead. |
 | `AccessControlUnauthorizedAccount` | `executeTransfer` from an account without the role. |
 | `ERC7943InsufficientUnfrozenBalance`, `ERC20InsufficientBalance` | The amount does not fit, as in any movement. |
 
@@ -184,4 +184,4 @@ Among the shipped rules, [`SettlementWindowRule`](SettlementWindowRule.md) judge
 
 ---
 
-Describes the contracts at commit `4a906cc` on `main`.
+Describes the contracts at commit `6ef0d4e` on `erc8473-conformance`.

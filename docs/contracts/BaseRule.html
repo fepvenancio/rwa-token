@@ -44,11 +44,11 @@
 <section id="how">
   <div class="prose">
     <h2>How the hook check works</h2>
-    <p>Rules have two kinds of entry point. <code>check</code>, <code>checkSend</code> and <code>checkReceive</code> only read, so anyone may call them. <code>after_</code> is the one that may write: the hook calls it after the balances moved, for rules that asked for it. <code>BaseRule</code> guards it with the <code>onlyHook(ctx)</code> modifier, which asks <code>ctx.token</code> for its current hook (<code>policyHook()</code>, a read-only call) and compares the answer with the caller.</p>
+    <p>Rules have two kinds of entry point. <code>check</code>, <code>checkSend</code> and <code>checkReceive</code> only read, so anyone may call them. <code>after_</code> is the one that may write: the hook calls it after the balances moved, for rules that asked for it. <code>BaseRule</code> guards it with the <code>onlyHook(ctx)</code> modifier, which asks <code>ctx.token</code> for its current hook (<code>policy()</code>, a read-only call) and compares the answer with the caller. A third entry point, <code>onInstall</code>, is called by the hook when a token installs it. In <code>BaseRule</code> it does nothing and has no guard.</p>
   </div>
   <figure>
     <div class="fig-scroll">
-      <svg class="d" viewBox="0 0 780 316" role="img" aria-label="Three callers of after_. First, the hook H calls after_ with ctx.token set to the real token T; the rule asks T for its hook, T answers H, H is the caller, so the rule runs and writes under the key T. Second, an attacker A calls after_ naming T; T answers H, A is not H, so the call reverts with ComplianceRule_OnlyHook(A). Third, the attacker deploys a fake token F whose policyHook returns A and calls after_ naming F; the check passes, but the rule writes only under the key F, and T's records are untouched.">
+      <svg class="d" viewBox="0 0 780 316" role="img" aria-label="Three callers of after_. First, the hook H calls after_ with ctx.token set to the real token T; the rule asks T for its hook, T answers H, H is the caller, so the rule runs and writes under the key T. Second, an attacker A calls after_ naming T; T answers H, A is not H, so the call reverts with ComplianceRule_OnlyHook(A). Third, the attacker deploys a fake token F whose policy returns A and calls after_ naming F; the check passes, but the rule writes only under the key F, and T's records are untouched.">
         <defs>
           <marker id="br-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
         </defs>
@@ -64,7 +64,7 @@
         <text x="254" y="60" class="mono bold">onlyHook(ctx)</text>
         <text x="254" y="78" class="sm m">asks ctx.token</text>
         <line class="ln" x1="390" y1="65" x2="476" y2="65" marker-end="url(#br-arrow)"/>
-        <text x="394" y="57" class="mono sm">policyHook()</text>
+        <text x="394" y="57" class="mono sm">policy()</text>
         <rect class="b" x="480" y="36" width="110" height="58" rx="8"/>
         <text x="494" y="60" class="bold">Token T</text>
         <text x="494" y="78" class="sm m">answers H</text>
@@ -84,7 +84,7 @@
         <text x="254" y="164" class="mono bold">onlyHook(ctx)</text>
         <text x="254" y="182" class="sm m">asks ctx.token</text>
         <line class="ln" x1="390" y1="169" x2="476" y2="169" marker-end="url(#br-arrow)"/>
-        <text x="394" y="161" class="mono sm">policyHook()</text>
+        <text x="394" y="161" class="mono sm">policy()</text>
         <rect class="b" x="480" y="140" width="110" height="58" rx="8"/>
         <text x="494" y="164" class="bold">Token T</text>
         <text x="494" y="182" class="sm m">answers H</text>
@@ -105,7 +105,7 @@
         <text x="254" y="268" class="mono bold">onlyHook(ctx)</text>
         <text x="254" y="286" class="sm m">asks ctx.token</text>
         <line class="ln" x1="390" y1="273" x2="476" y2="273" marker-end="url(#br-arrow)"/>
-        <text x="394" y="265" class="mono sm">policyHook()</text>
+        <text x="394" y="265" class="mono sm">policy()</text>
         <rect class="b" x="480" y="244" width="110" height="58" rx="8"/>
         <text x="494" y="268" class="bold">Fake token F</text>
         <text x="494" y="286" class="sm m">answers A</text>
@@ -134,8 +134,9 @@
     <table>
       <thead><tr><th>Item</th><th>Who can call</th><th>Default</th></tr></thead>
       <tbody>
-        <tr><td><code>onlyHook(ctx)</code></td><td>A modifier, used on <code>after_</code></td><td>Lets the call through if the caller is <code>IPolicyGated(ctx.token).policyHook()</code>; otherwise reverts with <code>ComplianceRule_OnlyHook(caller)</code>.</td></tr>
+        <tr><td><code>onlyHook(ctx)</code></td><td>A modifier, used on <code>after_</code></td><td>Lets the call through if the caller is <code>IPolicyGated(ctx.token).policy()</code>; otherwise reverts with <code>ComplianceRule_OnlyHook(caller)</code>.</td></tr>
         <tr><td><code>after_(ctx)</code></td><td>The hook of <code>ctx.token</code></td><td>Does nothing. Kept behind <code>onlyHook</code> even when empty.</td></tr>
+        <tr><td><code>onInstall(token, previousPolicy)</code></td><td>Anyone; the hook calls it for every rule of a token's list when the token installs the hook</td><td>Does nothing. A rule that keeps state derived from a token's movements replaces it, to confirm that state is current or revert, which undoes the installation.</td></tr>
         <tr><td><code>wantsAfter()</code></td><td>Anyone (read-only)</td><td>False: the hook will not call <code>after_</code>. The hook reads this once, when a list is installed, so a rule must keep it constant.</td></tr>
         <tr><td><code>checkSend(token, account)</code></td><td>Anyone (read-only)</td><td><code>TRANSFER_OK</code>: no opinion about a sender on its own.</td></tr>
         <tr><td><code>checkReceive(token, account)</code></td><td>Anyone (read-only)</td><td><code>TRANSFER_OK</code>: no opinion about a receiver on its own.</td></tr>
@@ -166,24 +167,24 @@
     </table>
   </div>
   <div class="prose">
-    <p>"Default" means the behaviour in the table above. <code>after_</code> stays reachable on all of them, but the hook calls it on <code>FundHoldersRule</code> alone, because that is the one rule whose <code>wantsAfter()</code> is true. The first six add their own interface to <code>supportsInterface</code>. <code>ExecutedOnlyRule</code> keeps the <code>BaseRule</code> answer.</p>
+    <p>"Default" means the behaviour in the table above. <code>after_</code> stays reachable on all of them, but the hook calls it on <code>FundHoldersRule</code> alone, because that is the one rule whose <code>wantsAfter()</code> is true. <code>FundHoldersRule</code> is also the one rule with its own <code>onInstall</code>: it reverts unless the class has no supply or the token's previous hook listed it. The other six keep the default. The first six add their own interface to <code>supportsInterface</code>. <code>ExecutedOnlyRule</code> keeps the <code>BaseRule</code> answer.</p>
   </div>
 </section>
 
 <section id="context">
   <div class="prose">
     <h2>What a rule is told about a movement</h2>
-    <p>The token builds a <code>TransferContext</code> for every movement and the hook hands it to each rule unchanged. The fields are <code>token</code>, <code>from</code>, <code>to</code>, <code>id</code> (0 for these fungible tokens), <code>amount</code>, <code>operator</code> (the account driving the movement), <code>kind</code> and <code>extra</code>. <code>extra</code> starts with both balances before the move, so a rule works out the balances after it from <code>amount</code> and does not call back into the token for them. Anyone can call <code>check</code> with a context of their own, which only reads. The kind says what sort of movement it is:</p>
+    <p>The token builds a <code>TransferContext</code> for every movement and the hook hands it to each rule unchanged. The fields are <code>token</code>, <code>from</code>, <code>to</code>, <code>tokenId</code> (0 for these fungible tokens), <code>amount</code>, <code>operator</code> (the account driving the movement), <code>kind</code> and <code>data</code>. <code>data</code> starts with both balances before the move, so a rule works out the balances after it from <code>amount</code> and does not call back into the token for them. Anyone can call <code>check</code> with a context of their own, which only reads. The kind says what sort of movement it is:</p>
   </div>
   <div class="table-wrap">
     <table>
       <thead><tr><th>Kind</th><th>What it is</th><th>Sender and receiver</th></tr></thead>
       <tbody>
         <tr><td><span class="k k-transfer">TRANSFER</span></td><td><code>transfer</code> or <code>transferFrom</code> by the holder or a spender, and the 7540 vault's moves of shares into its escrow (<code>requestRedeem</code>) and back out (<code>rejectRedeemRequest</code>)</td><td>both set</td></tr>
-        <tr><td><span class="k k-executed">EXECUTED</span></td><td>A transfer the holder signed in advance (an intent), carried out by an executor through <code>executeTransfer</code>. <code>extra</code> also carries the intent's reference and deadline.</td><td>both set</td></tr>
-        <tr><td><span class="k k-forced">FORCED</span></td><td>An enforcement move: the agent's <code>forcedTransfer</code>, the 7540 vault's <code>recoverRedeemRequest</code>, and its <code>recoverClaimable</code>, which is an enforcement mint</td><td>both set; no sender on an enforcement mint</td></tr>
+        <tr><td><span class="k k-executed">EXECUTED</span></td><td>A transfer the holder signed in advance (an intent), carried out by an executor through <code>executeTransfer</code>. <code>data</code> also carries the intent's reference and deadline.</td><td>both set</td></tr>
+        <tr><td><span class="k k-forced">FORCED</span></td><td>An enforcement move: the agent's <code>forcedTransfer</code>, the burner's <code>burn</code> on a token, the 7540 vault's <code>recoverRedeemRequest</code>, and its <code>recoverClaimable</code>, which is an enforcement mint</td><td>both set; no sender on an enforcement mint, no receiver on the burner's burn</td></tr>
         <tr><td><span class="k k-mint">MINT</span></td><td>New units: the minter's <code>mint</code> on a token, a 4626 deposit, a 7540 deposit claim</td><td>no sender (<code>address(0)</code>)</td></tr>
-        <tr><td><span class="k k-burn">BURN</span></td><td>Units destroyed: the burner's <code>burn</code> on a token, a 4626 redemption, and the burn of the escrowed shares in a 7540 <code>settlePeriod</code></td><td>no receiver (<code>address(0)</code>)</td></tr>
+        <tr><td><span class="k k-burn">BURN</span></td><td>A holder's own burn: a 4626 redemption, and the burn of the escrowed shares in a 7540 <code>settlePeriod</code></td><td>no receiver (<code>address(0)</code>)</td></tr>
       </tbody>
     </table>
   </div>
@@ -197,6 +198,7 @@
       <li><b><code>check</code> is read-only and does not revert on a decision.</b> It returns <code>TRANSFER_OK</code> or a reason code. It must not revert even for an amount above the sender's balance: the write does not offer the hook such an amount, but the token's <code>canTransfer</code> does, so a rule compares before it subtracts.</li>
       <li><b>The account questions agree with <code>check</code>.</b> If <code>checkSend</code> or <code>checkReceive</code> refuses an account, <code>check</code> refuses every movement on that side of a kind the rule does not exempt. They take no amount and must not encode a quantitative rule. ERC-7943 keeps those out of the account questions and names balance checks and amount limits, and <code>IComplianceRule</code> reads a holder count the same way.</li>
       <li><b>State is keyed by <code>ctx.token</code>.</b> The rules with per-token settings authorise them by the token's own roles, asked live with <code>hasRole</code>. <code>FundHoldersRule</code> has no settings: its cap and exemptions are on the fund, under the fund's owner. The post-deploy check (<code>assertHandedOver</code>) asserts that none of the core's rules has a <code>hasRole</code> or <code>owner</code> function of its own.</li>
+      <li><b><code>onInstall</code> answers for state derived from movements.</b> A rule that keeps such state confirms there that it is current for the token, or reverts, and the installation is undone. A rule that writes state there must accept only the token's installed policy as the caller.</li>
       <li><b><code>after_</code> moves nothing in the token.</b> It runs inside the token's reentrancy guard, so a transfer from it reverts.</li>
       <li><b><code>ruleId()</code> names the rule type.</b> A hook takes one rule of each type per token.</li>
     </ul>
@@ -230,7 +232,7 @@
   <div class="prose"><h2>Connected to</h2></div>
   <div class="cards">
     <a class="card" href="ComplianceHook.html"><span class="name">ComplianceHook</span><p>The shared hook that calls the rules in order and calls <code>after_</code> on the ones that asked for it.</p></a>
-    <a class="card" href="PolicyGatedERC20Upgradeable.html"><span class="name">PolicyGatedERC20Upgradeable</span><p>The token base that answers <code>policyHook()</code> and builds the context every rule receives.</p></a>
+    <a class="card" href="PolicyGatedERC20Upgradeable.html"><span class="name">PolicyGatedERC20Upgradeable</span><p>The token base that answers <code>policy()</code> and builds the context every rule receives.</p></a>
     <a class="card" href="FundHoldersRule.html"><span class="name">FundHoldersRule</span><p>The one shipped rule that uses <code>after_</code>.</p></a>
     <a class="card" href="PolicyRegistry.html"><span class="name">PolicyRegistry</span><p>Where each rule's code hash is attested as <code>RULE</code> before a hook will install it.</p></a>
   </div>
@@ -240,13 +242,13 @@
   <div class="prose">
     <h2>Source and tests</h2>
     <ul class="plain">
-      <li>Contract: <code>contracts/hooks/BaseRule.sol</code>, interfaces <code>IComplianceRule.sol</code> and <code>IPolicyHook.sol</code> (the context and the kinds), reason codes in <code>Errors.sol</code></li>
-      <li>Tests: <code>BaseRule</code> has no test file of its own, being abstract; it is tested through the rules built on it. <code>FundHoldersRule.t.sol</code> covers <code>onlyHook</code> (<code>FundHoldersRuleGate</code>: an attacker naming the real class, and a fake token naming itself and its hook). <code>SupplyCapRule.t.sol</code> and <code>ExecutedOnlyRule.t.sol</code> pin the account-question defaults. The test files of <code>CredentialRule</code>, <code>MinPositionRule</code>, <code>HolderRestrictionRule</code> and <code>SettlementWindowRule</code> each have a test that a fake token changes only its own records.</li>
+      <li>Contract: <code>contracts/hooks/BaseRule.sol</code>, interfaces <code>IComplianceRule.sol</code> and <code>IERC8473Policy.sol</code> (the context and the kinds), reason codes in <code>Errors.sol</code></li>
+      <li>Tests: <code>BaseRule</code> has no test file of its own, being abstract; it is tested through the rules built on it. <code>FundHoldersRule.t.sol</code> covers <code>onlyHook</code> (<code>FundHoldersRuleGate</code>: an attacker naming the real class, and a fake token naming itself and its hook) and a rule's own <code>onInstall</code> (<code>FundHoldersRuleUnit_OnInstall</code>). <code>SupplyCapRule.t.sol</code> and <code>ExecutedOnlyRule.t.sol</code> pin the account-question defaults. The test files of <code>CredentialRule</code>, <code>MinPositionRule</code>, <code>HolderRestrictionRule</code> and <code>SettlementWindowRule</code> each have a test that a fake token changes only its own records.</li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>4a906cc</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>6ef0d4e</code> on <code>erc8473-conformance</code>.</footer>
 </main>
 </body>
 </html>
