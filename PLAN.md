@@ -4051,9 +4051,9 @@ Method: the import closure of the contracts that ship is 71 OpenZeppelin files. 
 
 Nothing here is a fix this code needs, so the pin to 5.3.0 costs one piece of hardening, the bounded ERC-1271 read. The review covers the files as released; it is no substitute for following the library's advisories from here on, since a fix that lands after 5.6.1 will not reach a pin at 5.3.0 by itself.
 
-## ERC-8473 conformance (plan, 2026-11-13; nothing built)
+## ERC-8473 conformance (planned and built 2026-11-13)
 
-Branch `erc8473-conformance`, cut from `paris` (`3010880`). This section is the plan the brief's rule 3 asks for before a change across files. No contract, test or page changes until the owner has answered the decisions below.
+Branch `erc8473-conformance`, cut from `paris` (`3010880`). This section is the plan the brief's rule 3 asks for before a change across files, as the owner approved it; "As built" at its end says what was done and what was not.
 
 ### Goal
 
@@ -4125,6 +4125,46 @@ The counts are files. The read of whether the operator holds the burner role is 
 - The draft's reference tests are not ported: they are written against its example token. Step 3 writes the stack's own.
 - An ERC-1155 template, and so the draft's batch rule.
 - An adapter that presents an ERC-3643 compliance contract as a policy.
+
+### As built (2026-11-13)
+
+The owner accepted the seven recommendations on 2026-11-13 ("Yes, start"): D1 the interfaces reopened; D2 option A; D3 verify continuity, with the draft's wording to follow; D4 option B here and A proposed for the draft; D5 the draft's error; D6 the draft's four names; D7 the branch stays on `paris`.
+
+**Size, measured first.** A throwaway version of the core change added about 220 bytes to each fungible template. As built:
+
+| Contract | Before | After | Left |
+|---|---|---|---|
+| `Gated4626Vault` | 24,305 | 24,556 | 20 |
+| `Gated7540Vault` | 22,832 | 23,126 | 1,450 |
+| `IntentToken` | 18,915 | 19,120 | 5,456 |
+| `Gated721` | 16,055 | 16,220 | 8,356 |
+| `GatedToken` | 15,692 | 15,980 | 8,596 |
+| `ComplianceHook` | 4,173 | 4,832 | 19,744 |
+
+The 4626 fits, by 20 bytes, so the second contract was not built here. It has no room for a fix: moving its fee and rate-limit accounting to a second contract, as the 7540 has, is the next change this branch needs before anything else touches the vault.
+
+**What each gap became.**
+
+- **G1, G2, G3.** `contracts/interfaces/IERC8473.sol` and `IERC8473Policy.sol`, written here with the draft's ABI; `IPolicyHook.sol` is gone. `IPolicyGatedCore` inherits `IERC8473`. The setter is `installPolicy(newPolicy, data)`, not `setPolicy`, because `CredentialRule` already has a `setPolicy` for its own credential policy and the draft calls the act an installation. New error `PolicyGated_NotAPolicy(target)` for a contract that does not answer `0x9cb56a99`. `InterfaceFreeze.t.sol` pins the seven selectors and two ids copied by hand from the draft's table, and the compiled interfaces match them.
+- **G4.** `burn` announces `FORCED` with a zero receiver on the fungible base and on `Gated721`. The base's frozen bound is `kind == FORCED`. `CredentialRule`, `MinPositionRule` and `HolderRestrictionRule` lost their `BURNER_ROLE` reads and the constant. `CredentialRule` judges a receiver whenever `to` is not zero. This also closes a weakness `SECURITY.md` listed: a burner that redeemed its own vault shares passed its own lockup and minimum.
+- **G5.** `_installPolicy` in the core, private and under the reentrancy guard: attestation, registry match, interface id, set, `PolicyChanged`, `onInstall`. The initialiser passes `abi.encode(rules)` as the data, or nothing. `ComplianceHook.onInstall` accepts only the token, installs a list from non-empty data, and calls each rule's `onInstall`.
+- **G6.** `IComplianceRule.onInstall(token, previousPolicy)`; `BaseRule`'s is empty. `FundHoldersRule`'s is a view: it returns when the class's `totalSupply()` is zero or the previous policy's `rules(token)` holds this rule, and otherwise reverts with the new `FundHoldersRule_CountNotCurrent(token)`. It writes nothing, so it has no caller check.
+- **G7.** `_ask(policy, call)` in the core: one static call, one word copied to the scratch space, `CHECK_UNAVAILABLE` on any failure. Both the views and `_move` go through it, so a movement whose policy cannot be asked reverts with `ERC8473PolicyRejected(CHECK_UNAVAILABLE)` and the policy's own revert data is no longer bubbled. `wantsAfterTransfer` and `afterTransfer` stay high-level calls, which revert as the draft's token rule 4 asks.
+- **G8, G9.** As planned.
+- **G10.** `ComplianceHook.wantsAfterTransfer()` is `pure` and true. A token's after mask is no longer visible through it, so the hook's tests observe the mask through `afterTransfer`.
+- **G11.** No gap. `RuleSetIntegration_PolicyRequirement4` fuzzes TRANSFER, EXECUTED, MINT and BURN over senders, receivers, freezes, lockups and operators against the hook, and `CredentialRule.t.sol` already pinned `check` as the two account answers in order; both pass. Not covered by a fuzz: a list with `FundHoldersRule`, whose account answers are the class check that `check` returns first, read by hand.
+- **G12.** `SENDER_NOT_ELIGIBLE`, `LOCKED_UP`, `WINDOW_CLOSED`, `KIND_NOT_ALLOWED`, and `CHECK_UNAVAILABLE` appended. `RECEIVER_NOT_VERIFIED` keeps its name beside `RECEIVER_NOT_ELIGIBLE`: they are two different reasons here, and the draft's list has one.
+
+**Tests first.** The 16 token tests in `PolicyGatedUnit_Erc8473` were run against the renamed, unchanged code: 15 failed and the interface-id one passed. The 9 hook tests in `ComplianceHookUnit_OnInstall`: 7 failed against the stub. Then the change, then 25 older tests that described the old behaviour were rewritten to the new one, each named for what it now says.
+
+**Not done.**
+
+- **The pages.** `docs/` and `docs/md` are untouched and still describe the code at their pin. About 130 lines of prose and several flowcharts in some 20 pages describe behaviour this change moves (the burner's burn, the pause, the frozen-sender route, the callback flag, the initial rule list, the pre-flight operator). Pages have followed the code in their own change, pinned to the code's commit, and that is what this needs.
+- **The 4626's second contract**, above.
+- **The draft itself.** D3 and D4 ask for two changes to the draft's text, in its own repository.
+- **An upgrade from a deployed token.** A token deployed before this change has its hook installed without `onInstall` having run; nothing is deployed, so no migration is written.
+
+**Verified.** `npx hardhat test`: 2022 passing (1824 solidity, 198 nodejs). Format, lint and typecheck clean. Slither 0 results, Aderyn 0 findings, Halmos 22 of 22 checks, `validate:upgrades` 6 of 6, `verify:reproducible` 31 contracts identical. The size test passes with the 4626 at 24,556 bytes.
 
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
