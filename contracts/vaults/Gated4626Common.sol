@@ -50,9 +50,6 @@ abstract contract Gated4626Common is ERC4626Upgradeable, GatedVaultBase {
   /// @notice A year's worth of the rate's denominator: basis points per year, in seconds
   uint256 internal constant _RATE_DENOMINATOR = 1e4 * 365 days;
 
-  /// @notice The ceiling on the limit, so the arithmetic cannot overflow. It leaves the timelock room to raise the limit
-  uint256 internal constant _MAX_RATE_BPS = 1e9;
-
   /// @notice A price's scale: assets per this many share units
   uint256 internal constant _PRICE_SCALE = 1e18;
 
