@@ -18,8 +18,8 @@ import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
  *         rejection wins. Not a proxy
  * @dev Fails closed: a token with no rules installed has every movement rejected with `Reasons.NO_RULES`. `REGISTRY` is
  *      the only immutable, so one attestation of the codehash serves every token. A token's rules are set by whoever holds
- *      that token's DEFAULT_ADMIN_ROLE (asked live, as the rules do for their own configuration) or by the token itself,
- *      so that its initialiser can install the hook and the initial rules in one call. All state is keyed by token, so a
+ *      that token's DEFAULT_ADMIN_ROLE (asked live, as the rules do for their own configuration) or by the token itself.
+ *      A token's first list arrives as the data of its first installation, through `onInstall`. All state is keyed by token, so a
  *      token can set its own rules and nobody else's. A rule list's count and its after mask share one storage word
  */
 contract ComplianceHook is ERC165, IComplianceHook {
@@ -76,8 +76,8 @@ contract ComplianceHook is ERC165, IComplianceHook {
    * @inheritdoc IERC8473Policy
    * @dev Non-empty `_data` is `abi.encode` of the token's ordered rule list, installed as `setRules` installs one, so a
    *      token is live with its policy in the call that installs the hook. Empty `_data` keeps the list the hook
-   *      already holds for the token. Every rule in the list is then told, and one that refuses to go live reverts the
-   *      installation. The list is configuration, not state derived from movements; a rule that keeps such state
+   *      already holds for the token. Every rule in the list is told, before a new list is stored, and one that refuses
+   *      to go live reverts the installation. The list is configuration, not state derived from movements; a rule that keeps such state
    *      answers for it in its own `onInstall`
    */
   function onInstall(
@@ -86,14 +86,27 @@ contract ComplianceHook is ERC165, IComplianceHook {
     bytes calldata _data
   ) external {
     if (msg.sender != _token) revert ComplianceHook_OnlyToken(msg.sender);
-    if (_data.length != 0) _setRules(_token, abi.decode(_data, (IComplianceRule[])));
-    RuleSet storage _set = _ruleSets[_token];
-    uint256 _length = _set.count;
+    bool _replaces = _data.length != 0;
+    IComplianceRule[] memory _list = _replaces ? abi.decode(_data, (IComplianceRule[])) : _rulesOf(_token);
+    uint256 _length = _list.length;
+    if (_length > MAX_RULES) revert ComplianceHook_TooManyRules(_length);
+    // Every rule is told before a new list is stored. A rule may ask the previous policy which rules it held for the
+    // token, and when the token installs the hook it already has, that previous policy is this hook: it must still
+    // answer with the list it held. A rule from the data is attested before it is called.
     // At most MAX_RULES (16) iterations; a rule that refuses must revert the installation (fail closed).
     // aderyn-ignore-next-line(costly-loop, require-revert-in-loop)
     for (uint256 _i; _i < _length; ++_i) {
-      _set.rule[_i].onInstall(_token, _previousPolicy);
+      IComplianceRule _rule = _list[_i];
+      if (_replaces && !REGISTRY.isAttested(address(_rule), IPolicyRegistry.AttestKind.RULE)) {
+        revert ComplianceHook_NotAttested(address(_rule));
+      }
+      _rule.onInstall(_token, _previousPolicy);
     }
+    // The list is stored after the rules are called, on purpose (see above). A rule is attested and cannot come back in:
+    // this function accepts only the token, which holds its reentrancy guard for the whole installation, and `setRules`
+    // only the token or its admin.
+    // slither-disable-next-line reentrancy-no-eth,reentrancy-events
+    if (_replaces) _setRules(_token, _list);
   }
 
   /// @inheritdoc IComplianceHook
@@ -167,12 +180,7 @@ contract ComplianceHook is ERC165, IComplianceHook {
   function rules(
     address _token
   ) external view returns (IComplianceRule[] memory _ruleList) {
-    RuleSet storage _set = _ruleSets[_token];
-    uint256 _length = _set.count;
-    _ruleList = new IComplianceRule[](_length);
-    for (uint256 _i; _i < _length; ++_i) {
-      _ruleList[_i] = _set.rule[_i];
-    }
+    _ruleList = _rulesOf(_token);
   }
 
   /**
@@ -242,5 +250,21 @@ contract ComplianceHook is ERC165, IComplianceHook {
     // aderyn-ignore-next-line(unsafe-casting)
     _set.afterMask = uint16(_mask);
     emit RuleSetChanged(_token, _ruleIds);
+  }
+
+  /**
+   * @notice The ordered rule list of a token
+   * @param _token The token
+   * @return _ruleList The rules, in evaluation order
+   */
+  function _rulesOf(
+    address _token
+  ) internal view returns (IComplianceRule[] memory _ruleList) {
+    RuleSet storage _set = _ruleSets[_token];
+    uint256 _length = _set.count;
+    _ruleList = new IComplianceRule[](_length);
+    for (uint256 _i; _i < _length; ++_i) {
+      _ruleList[_i] = _set.rule[_i];
+    }
   }
 }

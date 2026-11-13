@@ -328,8 +328,8 @@ abstract contract PolicyGatedERC20Upgradeable is ERC20PermitUpgradeable, PolicyG
    * @dev The amount is `_MINT_PROBE`: it is not zero, so a rule that caps holders sees a new holder, and it is above
    *      any minimum position up to `type(uint128).max`, so such a minimum does not read as a block (one wei would; a
    *      minimum set above that would refuse the probe). A rule that bounds the size of a position, such as a supply
-   *      cap or a maximum balance, would refuse it and zero the `max*` that use it. The operator is the caller, as in
-   *      `_canTransfer`
+   *      cap or a maximum balance, would refuse it and zero the `max*` that use it. The operator is the zero address, as
+   *      in `_canTransfer`, so the answer does not depend on who asks
    * @param _receiver The account that would receive the shares
    * @return _reason TRANSFER_OK, or the reason a mint to `_receiver` would be rejected
    */

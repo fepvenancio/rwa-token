@@ -314,8 +314,9 @@ contract HolderRestrictionRuleUnit_CheckFreeze is HolderRestrictionRuleUnitTest 
     assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.BURN)), Reasons.SENDER_FROZEN);
   }
 
-  /// @dev RD4: the enforcement route out of a frozen account is a forced transfer, not a burn
-  function test_WhenTheSenderIsFrozen_AnEnforcementBurnIsRejectedToo() external {
+  /// @dev A BURN is the holder's own, and a frozen holder cannot burn, whoever the operator is. The burner's enforcement
+  ///      burn arrives as FORCED, which the next test covers
+  function test_WhenTheSenderIsFrozen_AHoldersBurnIsRejectedWhoeverTheOperator() external {
     _freeze(_holder, true);
     IERC8473Policy.TransferContext memory _burnCtx = _ctx(IERC8473Policy.TransferKind.BURN);
     _burnCtx.operator = _burner;

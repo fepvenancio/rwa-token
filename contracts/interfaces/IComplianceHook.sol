@@ -11,7 +11,7 @@ import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
  *         its own after mask; the first rejection wins, and a token with no rules rejects every movement
  * @dev The registry is the only immutable, so one attestation of the hook's codehash serves every token. A token's rules
  *      are set by that token's own DEFAULT_ADMIN_ROLE, checked live as the rules do for their own configuration, or by
- *      the token itself, so that its initialiser can install the hook and the initial rules in one call
+ *      the token itself. A token's first list arrives as the data of its first installation, through `onInstall`
  */
 interface IComplianceHook is IERC8473Policy {
   /*///////////////////////////////////////////////////////////////

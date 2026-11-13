@@ -70,8 +70,8 @@ contract MinPositionRule is BaseRule, IMinPositionRule {
    *      minimum. The sender ends with `fromBalance - amount`, which breaches when it is above zero and below the
    *      minimum. Neither sum is computed where it could overflow or underflow: the sender's sum is taken only when it holds
    *      more than the amount, so an amount above its balance is judged without reverting. The write refuses that amount
-   *      before the hook is asked, but `canTransfer` asks the hook with it. The exemptions and the role are read only
-   *      once a position would breach
+   *      before the hook is asked, but `canTransfer` asks the hook with it. The exemptions are read only once a
+   *      position would breach, and the token is asked nothing
    */
   function check(
     IERC8473Policy.TransferContext calldata _ctx
