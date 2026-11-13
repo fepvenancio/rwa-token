@@ -4029,8 +4029,27 @@ Result: **24,305 bytes, 271 left.** Refused: fewer optimizer runs (1 run fits wi
 ### Limits
 
 - A token already deployed from the Cancun build has no reentrancy flag written; the guard reads zero as not entered, so an upgrade onto this build would still work, but no such upgrade was tested.
-- OpenZeppelin 5.3.0 lacks the fixes made between 5.3.0 and 5.6.1; nothing in their changelogs was reviewed for this branch.
+- OpenZeppelin 5.3.0 lacks what 5.4.0 to 5.6.1 changed. Reviewed on 2026-11-13 (below): nothing this code needs.
 - The pages in `docs/` were edited where they named the transient guard, 5.6.1 or the proxy override; their pin to a commit was not moved.
+
+### OpenZeppelin 5.3.0 against 5.6.1 (reviewed 2026-11-13)
+
+Method: the import closure of the contracts that ship is 71 OpenZeppelin files. Each was diffed against 5.6.1 with comments and pragmas left out: 37 are identical, 33 differ, and one, `ReentrancyGuardUpgradeable`, no longer exists there (its flag moved into `ReentrancyGuard`). The changelogs of 5.4.0, 5.5.0, 5.6.0 and 5.6.1 and the library's published advisories were read beside the diffs.
+
+| Change in a later release | Where this code meets it | Verdict |
+|---|---|---|
+| Advisory GHSA-9rcw-c2f9-2j55 (low): `Bytes.lastIndexOf` reads out of bounds, 5.2.0 until 5.4.0. The only advisory whose range covers 5.3.0 | `Bytes` is not in the closure at 5.3.0 | Not affected |
+| 5.5.0 fix: `ERC165Checker.supportsERC165` said yes for a target that reverts on the `0xffffffff` query | `Fund.registerClass`, the only use | No effect on the templates, which answer false. It matters only for a contract that answers true for `IPolicyGated` and reverts on the invalid id, which the owner would have to register on purpose, and the checks after it (the hook lists the rule, supply zero) still run |
+| 5.6.0: `ERC721._setApprovalForAll` refuses a zero owner | `Gated721` never calls the internal function, and the public one uses the caller | Not reachable |
+| 5.6.0: `ERC1967Proxy` refuses empty init data unless `_unsafeAllowUninitialized` is overridden | `TokenProxy` overrode it to allow that, so both builds deploy the proxy empty and `ProxyDeployer` initialises it in the same call | Same behaviour |
+| By 5.6.1 `SignatureChecker` reads only one word of an ERC-1271 answer; 5.3.0 copies the whole answer | `IntentSettled`, `SignedEntry`, `CredentialRegistry` | Hardening this build lacks. A contract signer can answer with a long payload and make the check cost gas, paid by whoever submits and bounded by the gas they give. It cannot change the verdict. The pre-flights (`canExecute`) show the cost before sending |
+| 5.5.0: `ERC4626.maxWithdraw` is `previewRedeem(maxRedeem(owner))` | `Gated4626Vault` overrides `maxWithdraw` | No effect |
+| 5.6.0: `ERC4626` gains `_transferIn` and `_transferOut` | Not used | No effect |
+| 5.5.0: `ReentrancyGuard` moves its flag to the ERC-7201 slot `ReentrancyGuardUpgradeable` already uses in 5.3.0 | The templates | A later return to a newer release finds the flag in the same slot |
+| 5.6.0: `Strings.escapeJSON` escapes every control character; `MerkleProof` multiproofs allocate later | Neither function is called (`Distributor` uses `verifyCalldata`) | No effect |
+| `SafeERC20`, `Address`, `Create2`, `Math`, `Proxy`, `ShortStrings`, `EIP712Upgradeable`, `ECDSA`, `MessageHashUtils`, `EnumerableSet`, `Arrays`, `TimelockController`, `UUPSUpgradeable`, `MulticallUpgradeable`, `ERC20PermitUpgradeable`, `ERC721URIStorageUpgradeable` | Throughout | Rewrites in assembly, added functions, visibility and import paths. Read line by line: the same results for the same inputs. `Initializable` is identical |
+
+Nothing here is a fix this code needs, so the pin to 5.3.0 costs one piece of hardening, the bounded ERC-1271 read. The review covers the files as released; it is no substitute for following the library's advisories from here on, since a fix that lands after 5.6.1 will not reach a pin at 5.3.0 by itself.
 
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
