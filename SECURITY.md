@@ -227,7 +227,10 @@ Further limits recorded during review:
   no movement-derived state from an earlier installation; the fund's investor count is kept on purpose, and
   `FundHoldersRule.onInstall` refuses to go live unless the class has no supply or the previous policy listed the rule.
   A hook replacement that lists the rule on both sides therefore keeps the count; one that dropped it in between cannot
-  bring it back without emptying the class.
+  bring it back without emptying the class. The hook tells every rule before it stores a list from the installation's data, so
+  installing the same hook again with the rule added is refused too. `setRules` is the gap: it calls no rule's
+  `onInstall`, so a list that drops the rule and later takes it back leaves the count without the movements in between.
+  `Fund.isClassIntact` and `firstBrokenClass` show a class whose list lacks the rule.
 - **`installPolicy` runs the new policy's code.** The token calls the policy's `onInstall` while holding its reentrancy
   guard, so the policy cannot move tokens or install another policy from there, and a revert undoes the installation.
   The policy is attested and the call is the timelock's.
@@ -415,6 +418,7 @@ Inline suppressions (each carries its reason on the line above, in the source):
 | `Gated7540Vault` `_toSettlement`, `Gated4626Vault` `_toManagement` | `unused-return` | The functions handed to the second contract return nothing, and the target is the implementation's own immutable |
 | `SettlementWindowRule` | `weak-prng` | Calendar arithmetic on the timestamp, not randomness |
 | `ComplianceHook` `_setRules` | `uninitialized-local` | The after-mask starts at zero by design |
+| `ComplianceHook` `onInstall` | `reentrancy-no-eth`, `reentrancy-events` | The list from the installation's data is stored after every rule has been told, on purpose: a rule may ask the previous policy for the list it held, and that policy can be this hook. A rule is attested and cannot re-enter: `onInstall` accepts only the token, which holds its reentrancy guard throughout, and `setRules` only the token or its admin (`test_WhenTheSameHookIsInstalledWithANewList_TheRulesAreToldBeforeTheListIsStored`) |
 | `Portfolio` `_allocate`, `_deallocate` | `reentrancy-benign`, `reentrancy-events`, `reentrancy-balance` | The guard is held, the adapter is attested, and what the move changed can only be measured after the call: the balance read before it is the point of the comparison. A reentrant target is refused (`test_AReentrantTargetCannotAllocateAgainMidCall`) |
 | `Portfolio` `allocate`, `_deallocate`, `removeAdapter` | `incorrect-equality` | A zero test on a caller's argument, and the definition of an empty adapter. A donation only delays a removal until the allocator brings it back |
 | `Portfolio` `_takeOff`, `ERC4626Adapter` `allocate`, `deallocate`, `_ask` | `unused-return` | The list removal is false only if the adapter was not there, which the caller has checked; the portfolio measures what a target move changed; a read needs only the first word of the answer |

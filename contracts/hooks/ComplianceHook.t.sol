@@ -18,6 +18,27 @@ import {Helpers} from 'contracts/test/Helpers.sol';
  * @notice One hook serves many tokens: the rules and the after mask are keyed by token, and a token's rules are set by
  *         that token's own DEFAULT_ADMIN_ROLE or by the token itself (so its initialiser can install them)
  */
+/// @notice A rule that records, from its `onInstall`, how many rules the calling hook holds for the token at that moment
+contract InstallObservingRule {
+  /// @notice The rule count the hook reported during `onInstall`; the maximum until it has been called
+  uint256 public seen = type(uint256).max;
+
+  function onInstall(
+    address _token,
+    address
+  ) external {
+    seen = IComplianceHook(msg.sender).ruleCount(_token);
+  }
+
+  function ruleId() external pure returns (bytes32 _ruleId) {
+    _ruleId = keccak256('InstallObservingRule');
+  }
+
+  function wantsAfter() external pure returns (bool _wantsAfter) {
+    _wantsAfter = false;
+  }
+}
+
 contract ComplianceHookUnitTest is Helpers {
   ComplianceHook internal _hook;
   address internal _tokenAdmin = makeAddr('tokenAdmin');
@@ -556,6 +577,36 @@ contract ComplianceHookUnit_OnInstall is ComplianceHookUnitTest {
     vm.prank(_token);
     _hook.onInstall(_token, _previous, '');
     assertEq(_hook.ruleCount(_token), 1);
+  }
+
+  /// @dev A rule may ask the previous policy which rules it held for the token, to tell whether it saw every movement.
+  ///      When the token installs the hook it already has, with a new list, that previous policy is this hook, so every
+  ///      rule is told before the new list is stored: a rule added by the data sees the list that lacked it
+  function test_WhenTheSameHookIsInstalledWithANewList_TheRulesAreToldBeforeTheListIsStored() external {
+    IComplianceRule _a = _newRule('a', false);
+    _install(_one(_a));
+    InstallObservingRule _observer = new InstallObservingRule();
+    vm.mockCall(
+      _registry,
+      abi.encodeCall(IPolicyRegistry.isAttested, (address(_observer), IPolicyRegistry.AttestKind.RULE)),
+      abi.encode(true)
+    );
+    vm.mockCall(address(_a), abi.encodeWithSelector(IComplianceRule.onInstall.selector), '');
+    vm.prank(_token);
+    _hook.onInstall(_token, address(_hook), abi.encode(_two(_a, IComplianceRule(address(_observer)))));
+    assertEq(_observer.seen(), 1, 'the rule saw the new list');
+    assertEq(_hook.ruleCount(_token), 2);
+  }
+
+  /// @dev The data is checked before any rule in it is called
+  function test_WhenTheDataHoldsTooManyRules_ItRevertsBeforeCallingAny() external {
+    IComplianceRule[] memory _many = new IComplianceRule[](17);
+    for (uint256 _i; _i < 17; ++_i) {
+      _many[_i] = IComplianceRule(makeAddr(string.concat('rule', vm.toString(_i))));
+    }
+    vm.expectRevert(abi.encodeWithSelector(IComplianceHook.ComplianceHook_TooManyRules.selector, 17));
+    vm.prank(_token);
+    _hook.onInstall(_token, _previous, abi.encode(_many));
   }
 
   /// @dev A rule that refuses to go live undoes the installation

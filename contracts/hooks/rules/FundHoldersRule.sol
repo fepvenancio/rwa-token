@@ -19,7 +19,7 @@ import {BaseRule} from 'contracts/hooks/BaseRule.sol';
  * @dev Holds no state of its own: every read and write goes to the fund, so replacing this rule keeps the count. A
  *      replaced rule rejects every movement until the classes' hooks list the new one.
  *      `check` reads the fund once, with `admission`, and reads it again for the sender only when the cap is already
- *      full. `after_` reads the balances from before the move in `extra`, and works out what it changed
+ *      full. `after_` reads the balances from before the move in `data`, and works out what it changed
  */
 contract FundHoldersRule is BaseRule, IFundHoldersRule {
   /// @inheritdoc IFundHoldersRule

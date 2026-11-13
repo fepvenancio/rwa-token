@@ -85,8 +85,8 @@ contract HolderRestrictionRule is BaseRule, IHolderRestrictionRule {
   /**
    * @inheritdoc IComplianceRule
    * @dev The sender is judged first, then the receiver. A forced transfer ignores the sender's freeze and lockup, and a
-   *      mint has no sender; a burn has no receiver. The storage word is read before the token is asked for a role, and
-   *      the role only while a lockup is active on a burn
+   *      mint has no sender; a burn has no receiver. The burner's enforcement burn arrives as FORCED. The token is asked
+   *      nothing
    */
   function check(
     IERC8473Policy.TransferContext calldata _ctx
@@ -112,8 +112,8 @@ contract HolderRestrictionRule is BaseRule, IHolderRestrictionRule {
 
   /**
    * @inheritdoc IComplianceRule
-   * @dev A holder whose lockup is running cannot send in any holder-driven kind, so the answer is `LOCKED`, after the
-   *      freeze as in `check`. The kinds the lockup exempts (FORCED, an enforcement burn) are decided by the movement, which
+   * @dev A holder whose lockup is running cannot send in any holder-driven kind, so the answer is `LOCKED_UP`, after
+   *      the freeze as in `check`. The kind the lockup exempts (FORCED, the burner's burn included) is decided by the movement, which
    *      an account question cannot know, and `check` still passes them. The holder's word is the one `check` reads, and
    *      no role is asked
    */
