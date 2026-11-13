@@ -112,6 +112,18 @@ contract ComplianceHookUnitTest is Helpers {
   function _ctx() internal view returns (IERC8473Policy.TransferContext memory _context) {
     _context = _ctxFor(_token);
   }
+
+  /// @dev Observes a token's after mask: its `afterTransfer` must call `_rule.after_` exactly `_times` times
+  function _assertAfterReaches(
+    address _tokenAddress,
+    IComplianceRule _rule,
+    uint64 _times
+  ) internal {
+    vm.mockCall(address(_rule), abi.encodeWithSelector(IComplianceRule.after_.selector), '');
+    vm.expectCall(address(_rule), abi.encodeWithSelector(IComplianceRule.after_.selector), _times);
+    vm.prank(_tokenAddress);
+    _hook.afterTransfer(_ctxFor(_tokenAddress));
+  }
 }
 
 contract ComplianceHookUnit_Constructor is ComplianceHookUnitTest {
@@ -246,16 +258,15 @@ contract ComplianceHookUnit_SetRules is ComplianceHookUnitTest {
     assertEq(_installed.length, 2);
     assertEq(address(_installed[0]), address(_a));
     assertEq(address(_installed[1]), address(_b));
-    vm.prank(_token);
-    assertTrue(_hook.wantsAfterTransfer());
+    _assertAfterReaches(_token, _b, 1);
   }
 
   function test_WhenReplaced_ItDropsThePreviousSet() external {
-    _install(_two(_newRule('a', true), _newRule('b', false)));
+    IComplianceRule _a = _newRule('a', true);
+    _install(_two(_a, _newRule('b', false)));
     _install(_one(_newRule('c', false)));
     assertEq(_hook.ruleCount(_token), 1);
-    vm.prank(_token);
-    assertFalse(_hook.wantsAfterTransfer());
+    _assertAfterReaches(_token, _a, 0);
   }
 
   /// @dev Rule sets are keyed by token: setting one leaves the other untouched
@@ -268,20 +279,18 @@ contract ComplianceHookUnit_SetRules is ComplianceHookUnitTest {
 
     assertEq(address(_hook.rules(_token)[0]), address(_a));
     assertEq(address(_hook.rules(_otherToken)[0]), address(_b));
-    vm.prank(_token);
-    assertTrue(_hook.wantsAfterTransfer());
-    vm.prank(_otherToken);
-    assertFalse(_hook.wantsAfterTransfer());
+    _assertAfterReaches(_token, _a, 1);
+    _assertAfterReaches(_otherToken, _b, 0);
   }
 
   /// @dev Replacing one token's rules must not clear another token's after mask
   function test_WhenOneTokenIsReplaced_AnotherTokensAfterMaskIsKept() external {
     _install(_one(_newRule('a', true)));
+    IComplianceRule _b = _newRule('b', true);
     vm.prank(_otherToken);
-    _hook.setRules(_otherToken, _one(_newRule('b', true)));
+    _hook.setRules(_otherToken, _one(_b));
     _install(_none());
-    vm.prank(_otherToken);
-    assertTrue(_hook.wantsAfterTransfer());
+    _assertAfterReaches(_otherToken, _b, 1);
   }
 }
 
@@ -377,23 +386,28 @@ contract ComplianceHookUnit_AfterTransfer is ComplianceHookUnitTest {
 }
 
 contract ComplianceHookUnit_WantsAfter is ComplianceHookUnitTest {
-  /// @dev The token asks `wantsAfter()` with no argument, so the hook answers for the caller
-  function test_WhenAskedByATokenWithAfterRules_ItReturnsTrue() external {
+  /// @dev `wantsAfterTransfer()` takes no token and may not read the caller (ERC-8473, policy requirement 2), so the
+  ///      shared hook says yes to everyone, whatever any token's rules want
+  function test_ItReturnsTrueForATokenWithAfterRulesOneWithoutAndAStranger() external {
     _install(_one(_newRule('a', true)));
+    _setAdmin(_otherToken, _tokenAdmin, true);
+    vm.prank(_tokenAdmin);
+    _hook.setRules(_otherToken, _one(_newRule('b', false)));
     vm.prank(_token);
+    assertTrue(_hook.wantsAfterTransfer());
+    vm.prank(_otherToken);
+    assertTrue(_hook.wantsAfterTransfer());
+    vm.prank(makeAddr('stranger'));
     assertTrue(_hook.wantsAfterTransfer());
   }
 
-  function test_WhenAskedByATokenWithoutAfterRules_ItReturnsFalse() external {
-    _install(_one(_newRule('a', false)));
+  /// @dev The price of that answer: a token with no rule that wants the callback still calls it, and nothing happens
+  function test_WhenATokenWithoutAfterRulesCallsAfterTransfer_NoRuleIsCalled() external {
+    IComplianceRule _a = _newRule('a', false);
+    _install(_one(_a));
+    vm.expectCall(address(_a), abi.encodeWithSelector(IComplianceRule.after_.selector), 0);
     vm.prank(_token);
-    assertFalse(_hook.wantsAfterTransfer());
-  }
-
-  function test_WhenAskedByAnAccountThatIsNotAConfiguredToken_ItReturnsFalse() external {
-    _install(_one(_newRule('a', true)));
-    vm.prank(makeAddr('stranger'));
-    assertFalse(_hook.wantsAfterTransfer());
+    _hook.afterTransfer(_ctx());
   }
 }
 
@@ -473,5 +487,110 @@ contract ComplianceHookUnit_SupportsInterface is ComplianceHookUnitTest {
     assertTrue(_hook.supportsInterface(type(IComplianceHook).interfaceId));
     assertTrue(_hook.supportsInterface(type(IERC165).interfaceId));
     assertFalse(_hook.supportsInterface(0xdeadbeef));
+  }
+}
+
+/// @dev ERC-8473, installing a policy: what the hook does when a token installs it
+contract ComplianceHookUnit_OnInstall is ComplianceHookUnitTest {
+  address internal _previous = makeAddr('previousPolicy');
+
+  function _expectRuleInstall(
+    IComplianceRule _rule
+  ) internal {
+    vm.mockCall(address(_rule), abi.encodeWithSelector(IComplianceRule.onInstall.selector), '');
+    vm.expectCall(address(_rule), abi.encodeCall(IComplianceRule.onInstall, (_token, _previous)));
+  }
+
+  /// @dev Policy requirement 15: only the token itself
+  function test_WhenTheCallerIsNotTheToken_ItReverts() external {
+    address _caller = makeAddr('stranger');
+    vm.expectRevert(abi.encodeWithSelector(IComplianceHook.ComplianceHook_OnlyToken.selector, _caller));
+    vm.prank(_caller);
+    _hook.onInstall(_token, _previous, '');
+  }
+
+  /// @dev Not even the token's admin, who may call `setRules`
+  function test_WhenTheCallerIsTheTokensAdmin_ItReverts() external {
+    vm.expectRevert(abi.encodeWithSelector(IComplianceHook.ComplianceHook_OnlyToken.selector, _tokenAdmin));
+    vm.prank(_tokenAdmin);
+    _hook.onInstall(_token, _previous, '');
+  }
+
+  /// @dev The data is the token's ordered rule list
+  function test_WhenTheDataHoldsARuleList_ItInstallsItInOrderAndEmits() external {
+    IComplianceRule _a = _newRule('a', true);
+    IComplianceRule _b = _newRule('b', false);
+    _expectRuleInstall(_a);
+    _expectRuleInstall(_b);
+    bytes32[] memory _ids = new bytes32[](2);
+    _ids[0] = keccak256('a');
+    _ids[1] = keccak256('b');
+    vm.expectEmit(address(_hook));
+    emit IComplianceHook.RuleSetChanged(_token, _ids);
+    vm.prank(_token);
+    _hook.onInstall(_token, _previous, abi.encode(_two(_a, _b)));
+    IComplianceRule[] memory _installed = _hook.rules(_token);
+    assertEq(_installed.length, 2);
+    assertEq(address(_installed[0]), address(_a));
+    assertEq(address(_installed[1]), address(_b));
+  }
+
+  /// @dev A rule in the data that is not attested undoes the installation, as it does in `setRules`
+  function test_WhenTheDataNamesAnUnattestedRule_ItReverts() external {
+    IComplianceRule _rogue = IComplianceRule(_mockContract('rogue'));
+    vm.mockCall(
+      _registry,
+      abi.encodeCall(IPolicyRegistry.isAttested, (address(_rogue), IPolicyRegistry.AttestKind.RULE)),
+      abi.encode(false)
+    );
+    vm.expectRevert(abi.encodeWithSelector(IComplianceHook.ComplianceHook_NotAttested.selector, address(_rogue)));
+    vm.prank(_token);
+    _hook.onInstall(_token, _previous, abi.encode(_one(_rogue)));
+  }
+
+  /// @dev Empty data keeps the list the hook already holds for the token, and each rule in it is still told
+  function test_WhenTheDataIsEmpty_ItKeepsTheListAndTellsEveryRule() external {
+    IComplianceRule _a = _newRule('a', false);
+    _install(_one(_a));
+    _expectRuleInstall(_a);
+    vm.prank(_token);
+    _hook.onInstall(_token, _previous, '');
+    assertEq(_hook.ruleCount(_token), 1);
+  }
+
+  /// @dev A rule that refuses to go live undoes the installation
+  function test_WhenARuleRevertsItsOnInstall_ItReverts() external {
+    IComplianceRule _a = _newRule('a', false);
+    vm.mockCallRevert(address(_a), abi.encodeWithSelector(IComplianceRule.onInstall.selector), 'stale');
+    vm.expectRevert('stale');
+    vm.prank(_token);
+    _hook.onInstall(_token, _previous, abi.encode(_one(_a)));
+  }
+
+  /// @dev One token's installation leaves another token's rules alone
+  function test_WhenOneTokenInstalls_AnotherTokenKeepsItsRules() external {
+    _setAdmin(_otherToken, _tokenAdmin, true);
+    IComplianceRule _a = _newRule('a', false);
+    vm.prank(_tokenAdmin);
+    _hook.setRules(_otherToken, _one(_a));
+    IComplianceRule _b = _newRule('b', false);
+    vm.mockCall(address(_b), abi.encodeWithSelector(IComplianceRule.onInstall.selector), '');
+    vm.prank(_token);
+    _hook.onInstall(_token, _previous, abi.encode(_one(_b)));
+    assertEq(address(_hook.rules(_otherToken)[0]), address(_a));
+  }
+
+  /// @dev Policy requirement 2: the answer does not depend on who asks, so a hook shared by many tokens says yes for
+  ///      all of them, and `afterTransfer` does nothing for a token with no rule that wants it
+  function test_TheCallbackFlagIsTrueWhoeverAsks(
+    address _caller
+  ) external {
+    vm.prank(_caller);
+    assertTrue(_hook.wantsAfterTransfer());
+  }
+
+  /// @dev Policy requirement 13
+  function test_ItAnswersThePolicyInterfaceId() external view {
+    assertTrue(_hook.supportsInterface(0x9cb56a99));
   }
 }

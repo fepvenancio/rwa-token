@@ -308,24 +308,28 @@ contract MinPositionRuleUnit_Exemptions is MinPositionRuleUnitTest {
     assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.FORCED, address(0), _to, 1, 0, 0)), Reasons.TRANSFER_OK);
   }
 
-  /// @dev The operator holds BURNER_ROLE, as the lockup rule and the token's frozen-balance check define it
-  function test_WhenAnEnforcementBurnerLeavesDust_ItIsExempt() external {
+  /// @dev The burner's burn is enforcement, which the token announces as FORCED with no receiver: exempt like any
+  ///      FORCED movement, and the token is never asked who the operator is
+  function test_WhenAnEnforcementBurnLeavesDust_ItIsExempt() external {
     IERC8473Policy.TransferContext memory _context =
-      _ctx(IERC8473Policy.TransferKind.BURN, _from, address(0), 450 ether, 500 ether, 0);
+      _ctx(IERC8473Policy.TransferKind.FORCED, _from, address(0), 450 ether, 500 ether, 0);
     _context.operator = _burner;
-    vm.expectCall(_token, abi.encodeCall(IAccessControl.hasRole, (_BURNER_ROLE, _burner)), 1);
+    vm.expectCall(_token, abi.encodeWithSelector(IAccessControl.hasRole.selector), 0);
     assertEq(_rule.check(_context), Reasons.TRANSFER_OK);
   }
 
-  function test_WhenAHolderBurnLeavesDust_TheRoleIsAskedAndTheBurnRejected() external {
-    vm.expectCall(_token, abi.encodeCall(IAccessControl.hasRole, (_BURNER_ROLE, _from)), 1);
-    assertEq(
-      _rule.check(_ctx(IERC8473Policy.TransferKind.BURN, _from, address(0), 450 ether, 500 ether, 0)),
-      Reasons.BELOW_MIN_POSITION
-    );
+  /// @dev A BURN is the holder's own, and it may not leave dust, whoever the operator is
+  function test_WhenAHolderBurnLeavesDust_ItIsRejectedWhoeverTheOperator(
+    bool _operatorIsTheBurner
+  ) external {
+    IERC8473Policy.TransferContext memory _context =
+      _ctx(IERC8473Policy.TransferKind.BURN, _from, address(0), 450 ether, 500 ether, 0);
+    _context.operator = _operatorIsTheBurner ? _burner : _from;
+    vm.expectCall(_token, abi.encodeWithSelector(IAccessControl.hasRole.selector), 0);
+    assertEq(_rule.check(_context), Reasons.BELOW_MIN_POSITION);
   }
 
-  /// @dev The role is asked only when a burn would leave a balance below the minimum, so the usual burn pays nothing
+  /// @dev The rule never asks the token for a role on the movement path
   function test_WhenABurnLeavesNothingOrEnoughOrIsNotABurn_TheTokenIsNeverAskedForRoles() external {
     vm.expectCall(_token, abi.encodeWithSelector(IAccessControl.hasRole.selector), 0);
     IERC8473Policy.TransferContext memory _context =

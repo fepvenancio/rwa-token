@@ -22,9 +22,6 @@ contract MinPositionRule is BaseRule, IMinPositionRule {
   /// @notice The token role allowed to set the minimum and the exemptions (OZ DEFAULT_ADMIN_ROLE)
   bytes32 private constant _DEFAULT_ADMIN_ROLE = 0x00;
 
-  /// @notice The token role whose burns are enforcement actions, exempt from the minimum
-  bytes32 private constant _BURNER_ROLE = keccak256('BURNER_ROLE');
-
   /// @notice The minimum position per token; 0 when off
   mapping(address _token => uint256 _amount) internal _minPositions;
 
@@ -91,7 +88,7 @@ contract MinPositionRule is BaseRule, IMinPositionRule {
 
     if (
       _ctx.from != address(0) && _fromBalance > _ctx.amount && _fromBalance - _ctx.amount < _min
-        && !_isExempt(_ctx.token, _ctx.from) && !_isEnforcementBurn(_ctx)
+        && !_isExempt(_ctx.token, _ctx.from)
     ) return Reasons.BELOW_MIN_POSITION;
 
     _reason = Reasons.TRANSFER_OK;
@@ -137,16 +134,4 @@ contract MinPositionRule is BaseRule, IMinPositionRule {
     _exempt = _account == _token || _exempts[_token][_account];
   }
 
-  /**
-   * @notice Whether the movement is a burn driven by an account holding the token's BURNER_ROLE
-   * @dev A holder-initiated burn (e.g. an ERC-4626 redeem) is not an enforcement action and is judged like any other
-   * @param _ctx The movement context
-   * @return _enforcement True for a burn by a BURNER_ROLE holder
-   */
-  function _isEnforcementBurn(
-    IERC8473Policy.TransferContext calldata _ctx
-  ) internal view returns (bool _enforcement) {
-    _enforcement =
-      _ctx.kind == IERC8473Policy.TransferKind.BURN && IAccessControl(_ctx.token).hasRole(_BURNER_ROLE, _ctx.operator);
-  }
 }

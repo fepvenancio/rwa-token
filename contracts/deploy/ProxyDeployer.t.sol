@@ -10,6 +10,7 @@ import {IERC20Metadata} from '@openzeppelin/contracts/token/ERC20/extensions/IER
 import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
@@ -56,6 +57,7 @@ contract ProxyDeployerUnitTest is Helpers {
     address _named
   ) internal {
     vm.mockCall(_target, abi.encodeCall(IComplianceHook.REGISTRY, ()), abi.encode(_named));
+    _mockPolicy(_target);
   }
 
   /// @dev What the hook reports as the token's rules, and the hook accepting the token's own `setRules`
@@ -163,10 +165,11 @@ contract ProxyDeployerUnit_Deploy is ProxyDeployerUnitTest {
     _deployer.deploy('INT', address(_impl), _init('INT', _hook), _hook, _rules);
   }
 
-  /// @dev The token installs its initial rules on the hook itself, in the init call, as its own address
+  /// @dev The token hands its initial rules to the hook itself, in the init call: they are the data of the first
+  ///      installation, which the hook's `onInstall` accepts only from the token
   function test_WhenInitialising_TheTokenInstallsItsRulesOnTheHookAsItself() external {
     address _predicted = _deployer.predict('INT', address(_impl));
-    vm.expectCall(_hook, abi.encodeCall(IComplianceHook.setRules, (_predicted, _rules)));
+    vm.expectCall(_hook, abi.encodeCall(IERC8473Policy.onInstall, (_predicted, address(0), abi.encode(_rules))));
     _deploy('INT', _init('INT', _hook), _hook);
   }
 

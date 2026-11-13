@@ -87,9 +87,9 @@ abstract contract PolicyGatedCoreUpgradeable is
   /// @inheritdoc IPolicyGatedCore
   function installPolicy(
     address _newPolicy,
-    bytes calldata
+    bytes calldata _data
   ) external onlyRole(DEFAULT_ADMIN_ROLE) {
-    _setHook(_newPolicy);
+    _installPolicy(_newPolicy, _data);
   }
 
   /// @inheritdoc IERC8473
@@ -176,10 +176,10 @@ abstract contract PolicyGatedCoreUpgradeable is
     // As above.
     // aderyn-ignore-next-line(unchecked-return)
     _grantRole(GUARDIAN_ROLE, _guardian);
-    _setHook(_hook);
-    // A shared hook accepts the rules of a token from the token itself, so the token is live with its policy as soon as
-    // it is initialised. Nothing to install means the hook's own state stands: no rules, every movement rejected.
-    if (_initialRules.length != 0) IComplianceHook(_hook).setRules(address(this), _initialRules);
+    // The rule list travels as the installation's data, which the hook's `onInstall` accepts from the token itself, so
+    // the token is live with its policy as soon as it is initialised. Nothing to install means the hook's own state
+    // stands: no rules, every movement rejected.
+    _installPolicy(_hook, _initialRules.length != 0 ? abi.encode(_initialRules) : bytes(''));
   }
 
   /**
@@ -210,9 +210,31 @@ abstract contract PolicyGatedCoreUpgradeable is
   }
 
   /**
-   * @notice Whether the hook lets an account send, or receive, at all; the account-level question of ERC-7943
-   * @dev False while paused and when the token has no hook. Never reverts of its own: a reverting hook or rule, which
-   *      attested ones do not, would revert it
+   * @notice Asks the policy for one decision, treating any failure as a rejection
+   * @dev A bounded static call: one word of the answer is copied, to the scratch space. A policy that reverts, runs out
+   *      of gas, answers fewer than 32 bytes or has no code is `CHECK_UNAVAILABLE`, so a pre-flight reads false and
+   *      never reverts, and a movement reverts (ERC-8473, check rule 5 and token rule 4)
+   * @param _policyAddress The policy, read once by the caller
+   * @param _call The encoded check
+   * @return _reason The policy's answer, or `CHECK_UNAVAILABLE`
+   */
+  function _ask(
+    address _policyAddress,
+    bytes memory _call
+  ) internal view returns (bytes32 _reason) {
+    _reason = Reasons.CHECK_UNAVAILABLE;
+    assembly ('memory-safe') {
+      if staticcall(gas(), _policyAddress, add(_call, 0x20), mload(_call), 0x00, 0x20) {
+        if gt(returndatasize(), 0x1f) { _reason := mload(0x00) }
+      }
+    }
+  }
+
+  /**
+   * @notice Whether an account may send, or receive, at all; the account-level question of ERC-7943
+   * @dev True for the zero address, without asking the policy: the zero side of a mint or a burn is no account
+   *      (ERC-8473, check rules 1 and 2). False while paused and when the token has no policy. Never reverts: a policy
+   *      that cannot be asked reads false
    * @param _account The account
    * @param _sending True to ask about sending, false about receiving
    * @return _allowed True if the account may
@@ -222,8 +244,14 @@ abstract contract PolicyGatedCoreUpgradeable is
     bool _sending
   ) internal view returns (bool _allowed) {
     IERC8473Policy _hook = _policy();
+    if (_account == address(0)) return true;
     if (paused() || address(_hook) == address(0)) return false;
-    bytes32 _reason = _sending ? _hook.checkSend(address(this), _account) : _hook.checkReceive(address(this), _account);
+    bytes32 _reason = _ask(
+      address(_hook),
+      _sending
+        ? abi.encodeCall(IERC8473Policy.checkSend, (address(this), _account))
+        : abi.encodeCall(IERC8473Policy.checkReceive, (address(this), _account))
+    );
     // Compares a reason code with a constant, not a balance.
     // slither-disable-next-line incorrect-equality
     _allowed = _reason == Reasons.TRANSFER_OK;
@@ -245,25 +273,35 @@ abstract contract PolicyGatedCoreUpgradeable is
   }
 
   /**
-   * @notice Installs a hook after checking its attestation
-   * @param _newHook The new hook
+   * @notice Installs a policy: checks it, sets it, announces it, then lets it initialise
+   * @dev ERC-8473, installing a policy. The policy must be attested as HOOK, name the token's registry and answer the
+   *      policy interface id. `onInstall` is called once `policy()` returns the new policy, with the policy consulted
+   *      until now; if it reverts, so does the installation. The guard is held throughout, so no movement and no other
+   *      installation can begin while `onInstall` runs. The outgoing policy is never called
+   * @param _newPolicy The new policy
+   * @param _data Passed to `onInstall` unchanged
    */
-  function _setHook(
-    address _newHook
-  ) private {
-    if (_newHook == address(0)) revert PolicyGated_ZeroAddress();
+  function _installPolicy(
+    address _newPolicy,
+    bytes memory _data
+  ) private nonReentrant {
+    if (_newPolicy == address(0)) revert PolicyGated_ZeroAddress();
     PolicyGatedCoreStorage storage $ = _getPolicyGatedCoreStorage();
-    if (!$.registry.isAttested(_newHook, IPolicyRegistry.AttestKind.HOOK)) {
-      revert PolicyGated_NotAttested(_newHook, IPolicyRegistry.AttestKind.HOOK);
+    if (!$.registry.isAttested(_newPolicy, IPolicyRegistry.AttestKind.HOOK)) {
+      revert PolicyGated_NotAttested(_newPolicy, IPolicyRegistry.AttestKind.HOOK);
     }
     // A hook shared by several tokens vets their rules against its own registry, so it must be the token's.
-    address _hookRegistry = address(IComplianceHook(_newHook).REGISTRY());
+    address _hookRegistry = address(IComplianceHook(_newPolicy).REGISTRY());
     if (_hookRegistry != address($.registry)) {
       revert PolicyGated_HookRegistryMismatch(_hookRegistry, address($.registry));
     }
-    address _oldHook = address($.hook);
-    $.hook = IERC8473Policy(_newHook);
-    emit PolicyChanged(_oldHook, _newHook);
+    if (!IERC165(_newPolicy).supportsInterface(type(IERC8473Policy).interfaceId)) {
+      revert PolicyGated_NotAPolicy(_newPolicy);
+    }
+    address _previous = address($.hook);
+    $.hook = IERC8473Policy(_newPolicy);
+    emit PolicyChanged(_previous, _newPolicy);
+    IERC8473Policy(_newPolicy).onInstall(address(this), _previous, _data);
   }
 
   /**

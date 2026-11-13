@@ -35,4 +35,18 @@ abstract contract Helpers is Test {
     _contract = makeAddr(_name);
     vm.etch(_contract, hex'01');
   }
+
+  /**
+   * @notice Makes a mocked contract answer what a token asks of a policy when it installs it: the ERC-8473 policy
+   *         interface id through ERC-165, and an `onInstall` that returns
+   * @param _policyAddress The mocked policy
+   */
+  function _mockPolicy(
+    address _policyAddress
+  ) internal {
+    // supportsInterface(0x9cb56a99), the ERC-8473 policy id
+    vm.mockCall(_policyAddress, abi.encodeWithSelector(0x01ffc9a7, bytes4(0x9cb56a99)), abi.encode(true));
+    // onInstall(address,address,bytes), with any arguments
+    vm.mockCall(_policyAddress, abi.encodeWithSelector(0x820203aa), '');
+  }
 }

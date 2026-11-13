@@ -737,3 +737,67 @@ contract FundHoldersRuleUnit_AccountChecks is FundHoldersRuleUnitTest {
     assertEq(_check(_kind, _from, _to, _amount), Reasons.NOT_FUND_CLASS);
   }
 }
+
+/// @dev ERC-8473, policy requirement 16: the investor count is derived from the class's movements, so the rule goes
+///      live only when it can tell that no movement went unseen
+contract FundHoldersRuleUnit_OnInstall is FundHoldersRuleUnitTest {
+  address internal _previous;
+
+  function setUp() public override {
+    super.setUp();
+    _previous = _mockContract('previousPolicy');
+  }
+
+  function _supplyIs(
+    uint256 _supply
+  ) internal {
+    vm.mockCall(_token, abi.encodeCall(IERC20.totalSupply, ()), abi.encode(_supply));
+  }
+
+  function _previousLists(
+    address _listed
+  ) internal {
+    IComplianceRule[] memory _list = new IComplianceRule[](2);
+    _list[0] = IComplianceRule(makeAddr('anotherRule'));
+    _list[1] = IComplianceRule(_listed);
+    vm.mockCall(_previous, abi.encodeCall(IComplianceHook.rules, (_token)), abi.encode(_list));
+  }
+
+  /// @dev Nothing issued: nothing to count
+  function test_WhenTheClassHasNoSupply_ItAccepts() external {
+    _supplyIs(0);
+    _rule.onInstall(_token, address(0));
+  }
+
+  /// @dev A first installation on a class that already has holders: they were never counted
+  function test_WhenTheClassHasSupplyAndNoPreviousPolicy_ItReverts() external {
+    _supplyIs(1);
+    vm.expectRevert(abi.encodeWithSelector(IFundHoldersRule.FundHoldersRule_CountNotCurrent.selector, _token));
+    _rule.onInstall(_token, address(0));
+  }
+
+  /// @dev The policy consulted until now listed this rule for the class, so every movement was counted
+  function test_WhenThePreviousPolicyListedThisRule_ItAccepts() external {
+    _supplyIs(1);
+    _previousLists(address(_rule));
+    _rule.onInstall(_token, _previous);
+  }
+
+  /// @dev The policy consulted until now did not list this rule: movements went uncounted
+  function test_WhenThePreviousPolicyDidNotListThisRule_ItReverts() external {
+    _supplyIs(1);
+    _previousLists(makeAddr('yetAnotherRule'));
+    vm.expectRevert(abi.encodeWithSelector(IFundHoldersRule.FundHoldersRule_CountNotCurrent.selector, _token));
+    _rule.onInstall(_token, _previous);
+  }
+
+  /// @dev It writes nothing, so it needs no caller check, and it changes no state whoever calls
+  function test_ItWritesNothing() external {
+    _supplyIs(0);
+    vm.record();
+    vm.prank(_stranger);
+    _rule.onInstall(_token, address(0));
+    (, bytes32[] memory _writes) = vm.accesses(address(_rule));
+    assertEq(_writes.length, 0);
+  }
+}

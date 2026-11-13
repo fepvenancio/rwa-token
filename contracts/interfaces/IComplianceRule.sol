@@ -34,9 +34,9 @@ interface IComplianceRule {
 
   /**
    * @notice Called by the hook when a token installs it, for every rule in that token's list
-   * @dev Only the token's installed policy may call it. A rule that keeps state derived from the token's movements
-   *      must confirm here that the state is current, or revert, which undoes the installation. `BaseRule` does
-   *      nothing
+   * @dev A rule that keeps state derived from the token's movements must confirm here that the state is current, or
+   *      revert, which undoes the installation (ERC-8473, policy requirement 16). `BaseRule` does nothing. A rule that
+   *      writes state here must accept only the token's installed policy as the caller
    * @param _token The token installing the policy
    * @param _previousPolicy The policy the token consulted until now; address(0) on the first installation
    */

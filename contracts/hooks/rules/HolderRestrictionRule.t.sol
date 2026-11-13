@@ -263,11 +263,22 @@ contract HolderRestrictionRuleUnit_CheckLockup is HolderRestrictionRuleUnitTest 
     assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.BURN)), Reasons.LOCKED_UP);
   }
 
-  function test_WhenLockedAndAnEnforcementBurnerBurns_ItIsExempt() external {
+  /// @dev The burner's burn is enforcement, which the token announces as FORCED with no receiver
+  function test_WhenLockedAndAnEnforcementBurnHappens_ItIsExempt() external {
+    _lock(_holder, _NOW + 30 days);
+    IERC8473Policy.TransferContext memory _burnCtx = _ctx(IERC8473Policy.TransferKind.FORCED);
+    _burnCtx.to = address(0);
+    _burnCtx.operator = _burner;
+    assertEq(_rule.check(_burnCtx), Reasons.TRANSFER_OK);
+  }
+
+  /// @dev A BURN is the holder's own and respects the lockup, whoever the operator is
+  function test_WhenLockedAndTheOperatorOfABurnHoldsTheBurnerRole_ItIsStillLocked() external {
     _lock(_holder, _NOW + 30 days);
     IERC8473Policy.TransferContext memory _burnCtx = _ctx(IERC8473Policy.TransferKind.BURN);
     _burnCtx.operator = _burner;
-    assertEq(_rule.check(_burnCtx), Reasons.TRANSFER_OK);
+    vm.expectCall(_token, abi.encodeWithSelector(IAccessControl.hasRole.selector), 0);
+    assertEq(_rule.check(_burnCtx), Reasons.LOCKED_UP);
   }
 
   function test_WhenNotLocked_ABurnNeverAsksTheTokenForRoles() external {
@@ -443,8 +454,8 @@ contract HolderRestrictionRuleUnit_AccountChecks is HolderRestrictionRuleUnitTes
     _lock(_holder, block.timestamp + 1 days);
     assertEq(_rule.checkSend(_token, _holder), Reasons.LOCKED_UP);
     assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.FORCED)), Reasons.TRANSFER_OK);
-    IERC8473Policy.TransferContext memory _burnCtx = _ctx(IERC8473Policy.TransferKind.BURN);
-    _burnCtx.operator = _burner;
+    IERC8473Policy.TransferContext memory _burnCtx = _ctx(IERC8473Policy.TransferKind.FORCED);
+    _burnCtx.to = address(0);
     assertEq(_rule.check(_burnCtx), Reasons.TRANSFER_OK);
   }
 

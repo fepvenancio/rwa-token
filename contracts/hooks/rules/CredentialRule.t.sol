@@ -233,30 +233,36 @@ contract CredentialRuleUnit_Sender is CredentialRuleUnitTest {
   }
 }
 
+/// @dev The burner's burn is enforcement: the token announces it as FORCED with no receiver (ERC-8473, transfer kinds)
 contract CredentialRuleUnit_EnforcementBurn is CredentialRuleUnitTest {
+  function _forcedBurn() internal view returns (IERC8473Policy.TransferContext memory _context) {
+    _context = _ctx(IERC8473Policy.TransferKind.FORCED);
+    _context.to = address(0);
+    _context.operator = _burner;
+  }
+
   function test_WhenTheBurnerBurnsFromAnyStanding_ItIsOk(
     uint8 _statusSeed
   ) external {
     _stand(_from, _statusOf(_statusSeed));
-    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.BURN)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_forcedBurn()), Reasons.TRANSFER_OK);
   }
 
-  function test_WhenTheSenderCanLeave_TheBurnerRoleIsNotLookedUp() external {
-    _stand(_from, ICredentialRegistry.Status.ACTIVE);
-    vm.expectCall(_token, abi.encodeCall(IAccessControl.hasRole, (_BURNER_ROLE, _burner)), 0);
-    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.BURN)), Reasons.TRANSFER_OK);
+  /// @dev No receiver, so the registry is not asked about one, and the rule never asks the token who the operator is
+  function test_WhenTheBurnerBurns_NeitherTheRegistryNorTheTokenIsAsked() external {
+    vm.expectCall(_registry, _call(address(0)), 0);
+    vm.expectCall(_token, abi.encodeWithSelector(IAccessControl.hasRole.selector), 0);
+    assertEq(_rule.check(_forcedBurn()), Reasons.TRANSFER_OK);
   }
 
-  function test_WhenTheSenderCannotLeave_TheBurnerRoleIsLookedUpOnce() external {
-    _stand(_from, ICredentialRegistry.Status.BLOCKED);
-    vm.expectCall(_token, abi.encodeCall(IAccessControl.hasRole, (_BURNER_ROLE, _burner)), 1);
-    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.BURN)), Reasons.TRANSFER_OK);
-  }
-
-  function test_WhenTheOperatorIsNotTheBurner_TheBurnIsRejected() external {
+  /// @dev A BURN is the holder's own: a holder that cannot leave cannot burn, whoever the operator is
+  function test_WhenAHolderThatCannotLeaveBurns_ItIsRejectedWhoeverTheOperator(
+    bool _operatorIsTheBurner
+  ) external {
     _stand(_from, ICredentialRegistry.Status.BLOCKED);
     IERC8473Policy.TransferContext memory _burn = _ctx(IERC8473Policy.TransferKind.BURN);
-    _burn.operator = _from;
+    _burn.operator = _operatorIsTheBurner ? _burner : _from;
+    vm.expectCall(_token, abi.encodeWithSelector(IAccessControl.hasRole.selector), 0);
     assertEq(_rule.check(_burn), Reasons.SENDER_NOT_ELIGIBLE);
   }
 
@@ -481,15 +487,14 @@ contract CredentialRuleUnit_Model is CredentialRuleUnitTest {
     IERC8473Policy.TransferKind _k,
     ICredentialRegistry.Status _sender,
     ICredentialRegistry.Status _receiver,
-    bool _isBurner
+    bool
   ) internal pure returns (bytes32 _reason) {
     bool _checksSender = _k == IERC8473Policy.TransferKind.TRANSFER || _k == IERC8473Policy.TransferKind.EXECUTED
       || _k == IERC8473Policy.TransferKind.BURN;
     if (_checksSender) {
       bool _canLeave = _sender == ICredentialRegistry.Status.ACTIVE || _sender == ICredentialRegistry.Status.EXIT_ONLY
         || _sender == ICredentialRegistry.Status.LAPSED;
-      bool _enforcement = _k == IERC8473Policy.TransferKind.BURN && _isBurner;
-      if (!_canLeave && !_enforcement) return Reasons.SENDER_NOT_ELIGIBLE;
+      if (!_canLeave) return Reasons.SENDER_NOT_ELIGIBLE;
     }
     if (_k != IERC8473Policy.TransferKind.BURN) {
       if (_receiver == ICredentialRegistry.Status.LAPSED) return Reasons.CREDENTIAL_EXPIRED;
@@ -526,16 +531,6 @@ contract CredentialRuleUnit_TokenCallsAreStatic is CredentialRuleUnitTest {
     vm.prank(_admin);
     _rule.setPolicy(address(_stateful), 1, 0, 0, 1);
     assertEq(_rule.policyOf(address(_stateful)).attesters, 0);
-  }
-
-  function test_WhenTheTokenTriesToWriteDuringTheBurnerCheck_CheckReverts() external {
-    MockStatefulToken _stateful = new MockStatefulToken();
-    _stand(_from, ICredentialRegistry.Status.BLOCKED);
-    IERC8473Policy.TransferContext memory _c = _ctx(IERC8473Policy.TransferKind.BURN);
-    _c.token = address(_stateful);
-    vm.expectRevert(bytes(''));
-    _rule.check(_c);
-    assertEq(_stateful.writes(), 0);
   }
 
   function test_WhenCalledWithStaticcall_CheckSucceeds() external {
@@ -636,7 +631,9 @@ contract CredentialRuleUnit_AccountProbes is CredentialRuleUnitTest {
     _rule.checkReceive(_token, _to);
   }
 
-  function test_WhenKindStandingsAndPolicyAreFuzzed_CheckIsTheProbesInOrderWithTheEnforcementBurnExempt(
+  /// @dev ERC-8473, policy requirement 4, for this rule: `check` is the two account answers in order for every kind
+  ///      that has the account, whoever the operator is. Only FORCED skips the sender
+  function test_WhenKindStandingsAndPolicyAreFuzzed_CheckIsTheProbesInOrderWhoeverTheOperator(
     uint8 _kindSeed,
     uint8 _senderSeed,
     uint8 _receiverSeed,
@@ -657,7 +654,7 @@ contract CredentialRuleUnit_AccountProbes is CredentialRuleUnitTest {
     if (_k == IERC8473Policy.TransferKind.TRANSFER || _k == IERC8473Policy.TransferKind.EXECUTED) {
       _expected = _send != Reasons.TRANSFER_OK ? _send : _receive;
     } else if (_k == IERC8473Policy.TransferKind.BURN) {
-      _expected = _isBurner ? Reasons.TRANSFER_OK : _send;
+      _expected = _send; // no receiver, and the operator's role changes nothing
     } else {
       _expected = _receive; // MINT and FORCED check the receiver only
     }

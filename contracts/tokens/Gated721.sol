@@ -93,8 +93,11 @@ contract Gated721 is ERC721URIStorageUpgradeable, PolicyGatedCoreUpgradeable, IG
   function burn(
     uint256 _tokenId
   ) external onlyRole(BURNER_ROLE) {
-    _releaseFrozen(_requireOwned(_tokenId), _tokenId);
-    _burn(_tokenId);
+    address _owner = _requireOwned(_tokenId);
+    _releaseFrozen(_owner, _tokenId);
+    // An enforcement burn takes the token without its owner directing it, so the policy sees FORCED with a zero
+    // receiver (ERC-8473, transfer kinds). `_move` burns through ERC-721's `_update`, as `_burn` would.
+    _move(_owner, address(0), _tokenId, IERC8473Policy.TransferKind.FORCED);
   }
 
   /// @inheritdoc IGated721
@@ -276,9 +279,9 @@ contract Gated721 is ERC721URIStorageUpgradeable, PolicyGatedCoreUpgradeable, IG
 
   /**
    * @notice The pre-flight behind `canTransfer` and `canTransferWithReason`
-   * @dev A transfer is simulated as one by its owner, so the operator is `_from`. A mint and a burn are driven only by
-   *      a role holder, so their operator is the caller, whose role is not judged: asked by the burner, a burn's
-   *      pre-flight answers for `burn`, which takes a frozen token and passes a holder's lockup
+   * @dev The operator is `_from`, which is zero for a mint, so the answer does not depend on who asks (ERC-8473, check
+   *      rule 3). It models TRANSFER, MINT and BURN. `burn` here is the burner's enforcement action, a FORCED movement
+   *      that no pre-flight predicts, so a burn asked about is answered as a holder's would be
    * @param _from The sender, or address(0) for a mint
    * @param _to The receiver, or address(0) for a burn
    * @param _tokenId The token
@@ -294,8 +297,7 @@ contract Gated721 is ERC721URIStorageUpgradeable, PolicyGatedCoreUpgradeable, IG
     // A mint to the zero address cannot happen, so the hook is not asked about one.
     if (_from == address(0) && _to == address(0)) return Reasons.ZERO_RECEIVER;
     if (_ownershipCounts && _ownerOf(_tokenId) != _from) return Reasons.NOT_TOKEN_OWNER;
-    address _operator = _from == address(0) || _to == address(0) ? _msgSender() : _from;
-    _reason = _check(_context(_from, _to, _tokenId, _operator, _inferKind(_from, _to)), _policy());
+    _reason = _check(_context(_from, _to, _tokenId, _from, _inferKind(_from, _to)), _policy());
   }
 
   /**
@@ -311,7 +313,7 @@ contract Gated721 is ERC721URIStorageUpgradeable, PolicyGatedCoreUpgradeable, IG
     if (paused() && _ctx.kind != IERC8473Policy.TransferKind.FORCED) return Reasons.PAUSED;
     if (_frozenInTheWay(_ctx)) return Reasons.INSUFFICIENT_UNFROZEN;
     if (address(_hook) == address(0)) return Reasons.NO_HOOK;
-    _reason = _hook.checkTransfer(_ctx);
+    _reason = _ask(address(_hook), abi.encodeCall(IERC8473Policy.checkTransfer, (_ctx)));
   }
 
   /**
@@ -348,7 +350,7 @@ contract Gated721 is ERC721URIStorageUpgradeable, PolicyGatedCoreUpgradeable, IG
 
   /**
    * @notice Whether the token is frozen for its sender and the movement may not take a frozen token
-   * @dev A forced transfer and a burn driven by BURNER_ROLE may: the enforcement paths clear the freeze first
+   * @dev A FORCED movement may (a forced transfer or the burner's burn): the enforcement paths clear the freeze first
    * @param _ctx The movement context
    * @return _inTheWay True if the freeze stops the movement
    */
@@ -356,11 +358,8 @@ contract Gated721 is ERC721URIStorageUpgradeable, PolicyGatedCoreUpgradeable, IG
     IERC8473Policy.TransferContext memory _ctx
   ) private view returns (bool _inTheWay) {
     if (_ctx.from == address(0) || !_getGated721Storage().frozen[_ctx.from][_ctx.tokenId]) return false;
-    // Compares movement kinds, not balances.
-    // slither-disable-next-line incorrect-equality
-    bool _enforcement = _ctx.kind == IERC8473Policy.TransferKind.FORCED
-      || (_ctx.kind == IERC8473Policy.TransferKind.BURN && hasRole(BURNER_ROLE, _ctx.operator));
-    _inTheWay = !_enforcement;
+    // FORCED, the token's enforcement authority, may take a frozen token.
+    _inTheWay = _ctx.kind != IERC8473Policy.TransferKind.FORCED;
   }
 
   /**

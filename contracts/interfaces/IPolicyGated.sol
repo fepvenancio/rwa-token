@@ -33,9 +33,9 @@ interface IPolicyGated is IERC7943Fungible, IPolicyGatedCore {
 
   /**
    * @notice Burns tokens from an account
-   * @dev Only BURNER_ROLE. An enforcement action: no allowance is needed and frozen tokens can be burned, lowering the
-   *      frozen amount by the part of `_amount` that was frozen. The hook still decides, with `from` set and `to` ==
-   *      address(0)
+   * @dev Only BURNER_ROLE. An enforcement action: no allowance is needed, frozen tokens can be burned, lowering the
+   *      frozen amount by the part of `_amount` that was frozen, and the pause does not stop it. The policy still
+   *      decides, and sees a FORCED movement with `from` set and `to` == address(0)
    * @param _from The account to burn from
    * @param _amount The amount to burn
    */
@@ -57,10 +57,11 @@ interface IPolicyGated is IERC7943Fungible, IPolicyGatedCore {
 
   /**
    * @notice Pre-flight for a plain transfer by `_from`, a mint (`_from` == 0) or a burn (`_to` == 0), with the reason
-   * @dev Runs the same mechanical checks and hook call as the state-changing path, minus the write. The operator in
-   *      the context is `_from`, or the caller for a mint. It models holder-driven movements only: a burn
-   *      (`_to` == 0) is simulated as a holder or vault burn, so frozen tokens count against `_amount` unless `_from` holds
-   *      BURNER_ROLE. The enforcement paths differ: `burn` and `forcedTransfer` release frozen tokens first, and `forcedTransfer` also bypasses pause.
+   * @dev Runs the same mechanical checks and policy call as the state-changing path, minus the write. The operator in
+   *      the context is `_from`, which is zero for a mint, so the answer does not depend on who asks. It models
+   *      TRANSFER, MINT and BURN only: a burn (`_to` == 0) is simulated as a holder or vault burn, so frozen tokens
+   *      count against `_amount`. The enforcement paths are FORCED and no pre-flight predicts them: `burn` and
+   *      `forcedTransfer` release frozen tokens first and are not stopped by the pause.
    *      Every shortfall counts here, an amount above the balance included. The boolean `canTransfer` is this function's
    *      first value except for a balance shortfall with no frozen amount in the way, which it leaves to the base standard
    * @param _from The sender, or address(0) for a mint

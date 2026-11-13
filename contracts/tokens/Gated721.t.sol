@@ -147,6 +147,7 @@ contract Gated721UnitTest is Helpers {
     _hook = _mockContract('hook');
     _attested(_hook, IPolicyRegistry.AttestKind.HOOK, true);
     vm.mockCall(_hook, abi.encodeCall(IComplianceHook.REGISTRY, ()), abi.encode(_registry));
+    _mockPolicy(_hook);
     _hookAccountChecksDecide(Reasons.TRANSFER_OK, Reasons.TRANSFER_OK);
     _hookDecides(Reasons.TRANSFER_OK);
     vm.mockCall(_hook, abi.encodeCall(IERC8473Policy.wantsAfterTransfer, ()), abi.encode(false));
@@ -451,11 +452,12 @@ contract Gated721Unit_Transfer is Gated721UnitTest {
 }
 
 contract Gated721Unit_Burn is Gated721UnitTest {
-  function test_WhenTheBurnerBurns_TheHookSeesABurnAndTheTokenIsGone() external {
+  /// @dev The burner's burn is enforcement, so the policy sees FORCED with no receiver (ERC-8473, transfer kinds)
+  function test_WhenTheBurnerBurns_ThePolicySeesAForcedMovementToZeroAndTheTokenIsGone() external {
     vm.expectCall(
       _hook,
       abi.encodeCall(
-        IERC8473Policy.checkTransfer, (_ctx(_alice, address(0), _ID, _burner, IERC8473Policy.TransferKind.BURN))
+        IERC8473Policy.checkTransfer, (_ctx(_alice, address(0), _ID, _burner, IERC8473Policy.TransferKind.FORCED))
       )
     );
     vm.prank(_burner);
@@ -635,7 +637,7 @@ contract Gated721Unit_Freeze is Gated721UnitTest {
 }
 
 contract Gated721Unit_Pause is Gated721UnitTest {
-  function test_WhenPaused_TransfersMintsAndBurnsAreRejected() external {
+  function test_WhenPaused_TransfersAndMintsAreRejectedAndTheEnforcementBurnPasses() external {
     vm.prank(_guardian);
     _token.pause();
     vm.expectRevert(_rejected(Reasons.PAUSED));
@@ -644,11 +646,12 @@ contract Gated721Unit_Pause is Gated721UnitTest {
     vm.expectRevert(_rejected(Reasons.PAUSED));
     vm.prank(_minter);
     _token.mint(_bob, 2, '');
-    vm.expectRevert(_rejected(Reasons.PAUSED));
-    vm.prank(_burner);
-    _token.burn(_ID);
     assertFalse(_token.canSend(_alice));
     assertFalse(_token.canReceive(_bob));
+    // An enforcement burn is FORCED, which the pause does not stop, as it does not stop a forced transfer.
+    vm.prank(_burner);
+    _token.burn(_ID);
+    assertEq(_token.balanceOf(_alice), 0);
   }
 
   function test_WhenTheCallerIsNotTheGuardian_ItCannotPause() external {
@@ -706,29 +709,38 @@ contract Gated721Unit_Preflight is Gated721UnitTest {
     assertEq(_reason, Reasons.ZERO_RECEIVER);
   }
 
-  /// @dev The only burn is the burner's, so a burn's operator is the caller, as a mint's is: asked by the burner, the
-  ///      pre-flight answers for `burn`, which takes a frozen token
-  function test_WhenTheBurnerAsksAboutBurningAFrozenToken_ThePreflightAgreesWithTheBurn() external {
+  /// @dev A pre-flight simulates TRANSFER, MINT and BURN with `_from` as the operator, whoever asks. The burner's burn
+  ///      is FORCED, which no pre-flight predicts: asked about a frozen token, the answer is the holder's, and `burn`
+  ///      still takes the token
+  function test_WhenTheBurnerAsksAboutBurningAFrozenToken_ItGetsTheHoldersAnswerAndTheBurnStillPasses() external {
     _freeze(_alice, _ID);
-    vm.expectCall(
-      _hook,
-      abi.encodeCall(
-        IERC8473Policy.checkTransfer, (_ctx(_alice, address(0), _ID, _burner, IERC8473Policy.TransferKind.BURN))
-      )
-    );
     vm.prank(_burner);
     (bool _ok, bytes32 _reason) = _token.canTransferWithReason(_alice, address(0), _ID);
-    assertTrue(_ok);
-    assertEq(_reason, Reasons.TRANSFER_OK);
+    assertFalse(_ok);
+    assertEq(_reason, Reasons.INSUFFICIENT_UNFROZEN);
     vm.prank(_burner);
-    assertTrue(_token.canTransfer(_alice, address(0), _ID));
+    assertFalse(_token.canTransfer(_alice, address(0), _ID));
 
     vm.prank(_burner);
     _token.burn(_ID);
+    assertEq(_token.balanceOf(_alice), 0);
   }
 
-  /// @dev As for a mint, the caller's role is not judged: asked by an account without BURNER_ROLE, the pre-flight
-  ///      models a burn that account drives, which a frozen token stops
+  /// @dev The operator of a burn pre-flight is `_from`, not the caller
+  function test_WhenAnyoneAsksAboutABurn_TheOperatorIsTheSender(
+    address _caller
+  ) external {
+    vm.expectCall(
+      _hook,
+      abi.encodeCall(
+        IERC8473Policy.checkTransfer, (_ctx(_alice, address(0), _ID, _alice, IERC8473Policy.TransferKind.BURN))
+      )
+    );
+    vm.prank(_caller);
+    assertTrue(_token.canTransfer(_alice, address(0), _ID));
+  }
+
+  /// @dev Asked by the holder, the same answer: a frozen token stops a holder's burn
   function test_WhenAnAccountWithoutTheRoleAsksAboutBurningAFrozenToken_TheFreezeCounts() external {
     _freeze(_alice, _ID);
     vm.prank(_alice);
@@ -755,14 +767,17 @@ contract Gated721Unit_Preflight is Gated721UnitTest {
     assertTrue(_token.canReceive(_bob));
   }
 
-  /// @dev Asked by the burner, the burn pre-flight agrees with `burn` for any freeze, pause and hook answer
-  function testFuzz_TheBurnPreflightAgreesWithTheBurn(
+  /// @dev `burn` is FORCED: for any freeze and pause it succeeds exactly when the policy permits it, and the burn
+  ///      pre-flight gives one answer whoever asks
+  function testFuzz_TheEnforcementBurnFollowsThePolicyAlone(
     bool _frozen,
     bool _paused,
-    uint256 _reasonSeed
+    uint256 _reasonSeed,
+    address _caller
   ) external {
     bytes32[3] memory _answers = [Reasons.TRANSFER_OK, Reasons.LOCKED_UP, Reasons.SENDER_FROZEN];
-    _hookDecides(_answers[bound(_reasonSeed, 0, 2)]);
+    bytes32 _answer = _answers[bound(_reasonSeed, 0, 2)];
+    _hookDecides(_answer);
     if (_frozen) _freeze(_alice, _ID);
     if (_paused) {
       vm.prank(_guardian);
@@ -770,10 +785,14 @@ contract Gated721Unit_Preflight is Gated721UnitTest {
     }
 
     vm.prank(_burner);
-    (bool _ok,) = _token.canTransferWithReason(_alice, address(0), _ID);
+    (bool _askedByTheBurner,) = _token.canTransferWithReason(_alice, address(0), _ID);
+    vm.prank(_caller);
+    (bool _askedByAnyone,) = _token.canTransferWithReason(_alice, address(0), _ID);
+    assertEq(_askedByTheBurner, _askedByAnyone);
+
     vm.prank(_burner);
     (bool _wrote,) = address(_token).call(abi.encodeCall(Gated721.burn, (_ID)));
-    assertEq(_wrote, _ok);
+    assertEq(_wrote, _answer == Reasons.TRANSFER_OK);
   }
 
   /// @dev Pre-flight never lies: for any owner, freeze, pause and hook answer, it agrees with the write
@@ -805,6 +824,7 @@ contract Gated721Unit_Governance is Gated721UnitTest {
     address _next = _mockContract('nextHook');
     _attested(_next, IPolicyRegistry.AttestKind.HOOK, true);
     vm.mockCall(_next, abi.encodeCall(IComplianceHook.REGISTRY, ()), abi.encode(_registry));
+    _mockPolicy(_next);
     vm.expectEmit(address(_token));
     emit IERC8473.PolicyChanged(_hook, _next);
     vm.prank(_admin);
@@ -824,6 +844,7 @@ contract Gated721Unit_Governance is Gated721UnitTest {
     address _otherRegistry = makeAddr('otherRegistry');
     _attested(_next, IPolicyRegistry.AttestKind.HOOK, true);
     vm.mockCall(_next, abi.encodeCall(IComplianceHook.REGISTRY, ()), abi.encode(_otherRegistry));
+    _mockPolicy(_next);
     vm.expectRevert(
       abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_HookRegistryMismatch.selector, _otherRegistry, _registry)
     );
@@ -1158,9 +1179,10 @@ contract Gated721Integration_Rules is Gated721IntegrationTest {
   function test_WhenTheHolderIsLocked_TheBurnerCanStillBurn() external {
     vm.prank(_agent);
     _restrictionRule.setLockup(address(_nft), _alice, block.timestamp + 30 days);
+    // The pre-flight answers for a holder's burn, whoever asks; the burner's burn is FORCED and is not predicted.
     vm.prank(_burner);
-    (bool _ok,) = _nft.canTransferWithReason(_alice, address(0), _ID);
-    assertTrue(_ok, 'the burner is the operator of the burn it asks about');
+    (, bytes32 _askedByTheBurner) = _nft.canTransferWithReason(_alice, address(0), _ID);
+    assertEq(_askedByTheBurner, Reasons.LOCKED_UP);
     vm.prank(_alice);
     (, bytes32 _reason) = _nft.canTransferWithReason(_alice, address(0), _ID);
     assertEq(_reason, Reasons.LOCKED_UP);

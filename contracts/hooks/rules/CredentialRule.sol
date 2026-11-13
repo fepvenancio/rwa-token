@@ -22,9 +22,6 @@ contract CredentialRule is BaseRule, ICredentialRule {
   /// @notice The token role allowed to set its policy (OZ DEFAULT_ADMIN_ROLE)
   bytes32 private constant _DEFAULT_ADMIN_ROLE = 0x00;
 
-  /// @notice The token role whose burns are enforcement actions, exempt from the sender check
-  bytes32 private constant _BURNER_ROLE = keccak256('BURNER_ROLE');
-
   /// @inheritdoc ICredentialRule
   ICredentialRegistry public immutable REGISTRY;
 
@@ -65,13 +62,14 @@ contract CredentialRule is BaseRule, ICredentialRule {
     IERC8473Policy.TransferContext calldata _ctx
   ) external view returns (bytes32 _reason) {
     IERC8473Policy.TransferKind _kind = _ctx.kind;
-    // The sender is checked on every kind except MINT (no sender) and FORCED (an enforcement move must be able to take
-    // from a blocked holder). The receiver is checked on every kind except BURN (no receiver).
+    // The sender is checked on every kind except MINT (no sender) and FORCED (an enforcement move, the burner's burn
+    // included, must be able to take from a blocked holder). The receiver is checked whenever there is one.
     if (_kind != IERC8473Policy.TransferKind.MINT && _kind != IERC8473Policy.TransferKind.FORCED) {
-      _reason = _checkSender(_ctx);
+      _reason = _sendReason(_ctx.token, _ctx.from);
       if (_reason != Reasons.TRANSFER_OK) return _reason;
     }
-    _reason = _kind == IERC8473Policy.TransferKind.BURN ? Reasons.TRANSFER_OK : _receiveReason(_ctx.token, _ctx.to);
+    // No receiver to judge when tokens are destroyed: a holder's burn, or a FORCED movement to the zero address.
+    _reason = _ctx.to == address(0) ? Reasons.TRANSFER_OK : _receiveReason(_ctx.token, _ctx.to);
   }
 
   /// @inheritdoc IComplianceRule
@@ -107,24 +105,6 @@ contract CredentialRule is BaseRule, ICredentialRule {
     bytes4 _interfaceId
   ) public view override returns (bool _supported) {
     _supported = _interfaceId == type(ICredentialRule).interfaceId || super.supportsInterface(_interfaceId);
-  }
-
-  /**
-   * @notice The sender of a movement: the account must be able to leave, or the movement must be an enforcement burn
-   * @dev The BURNER_ROLE lookup happens only when the account cannot leave
-   * @param _ctx The movement context
-   * @return _reason `TRANSFER_OK` or `SENDER_NOT_ELIGIBLE`
-   */
-  function _checkSender(
-    IERC8473Policy.TransferContext calldata _ctx
-  ) internal view returns (bytes32 _reason) {
-    _reason = _sendReason(_ctx.token, _ctx.from);
-    if (_reason == Reasons.TRANSFER_OK) return _reason;
-    // View interface: compiled to STATICCALL, so the token cannot change any state (test: *_TokenCallsAreStatic).
-    // aderyn-ignore-next-line(reentrancy-state-change)
-    if (_ctx.kind == IERC8473Policy.TransferKind.BURN && IAccessControl(_ctx.token).hasRole(_BURNER_ROLE, _ctx.operator)) {
-      _reason = Reasons.TRANSFER_OK;
-    }
   }
 
   /**
