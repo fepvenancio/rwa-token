@@ -194,6 +194,15 @@ interface IGated4626Vault {
   ) external;
 
   /**
+   * @notice The second contract, which runs `setPortfolio`, `setMaxRate`, `setFeeModel` and `collectFees` on the vault's
+   *         storage. The implementation's constructor creates it, so the attested codehash pins it
+   * @return _logic The second contract
+   */
+  // getter of an UPPER_SNAKE constant/immutable
+  // solhint-disable-next-line style-guide-casing
+  function MANAGEMENT_LOGIC() external view returns (address _logic);
+
+  /**
    * @notice The portfolio
    * @return _portfolio The portfolio; zero while the vault keeps its own money
    */

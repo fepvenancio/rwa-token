@@ -4166,6 +4166,22 @@ The 4626 fits, by 20 bytes, so the second contract was not built here. It has no
 
 **Verified.** `npx hardhat test`: 2022 passing (1824 solidity, 198 nodejs). Format, lint and typecheck clean. Slither 0 results, Aderyn 0 findings, Halmos 22 of 22 checks, `validate:upgrades` 6 of 6, `verify:reproducible` 31 contracts identical. The size test passes with the 4626 at 24,556 bytes.
 
+## The 4626's second contract (2026-11-13)
+
+On branch `erc8473-conformance`, after the conformance change left `Gated4626Vault` 20 bytes under the limit. The owner asked for the split on 2026-11-13.
+
+**Design, as the 7540 has it.** Nothing an investor calls moves, and no behaviour changes.
+
+- `Gated4626Common` (abstract; `ERC4626Upgradeable` + `GatedVaultBase`): the storage struct and its ERC-7201 accessor, the constants, and the accounting both contracts need (`_accrue`, `_counting`, `_dealingStopped`, `_fellTooFar` and the two portfolio reads), with the overrides the inheritance needs.
+- `Gated4626Management` (is `Gated4626Common`): `setPortfolio`, `setMaxRate`, `setFeeModel` and `collectFees`, with the helpers only they use. These are the timelock's, the guardian's or an occasional caller's, so the cost of a hand-off falls on few calls.
+- `Gated4626Vault` keeps the four names and hands each to `MANAGEMENT_LOGIC` by delegatecall, unchanged, passing back a revert as it came. Its constructor creates the second contract, so the attested codehash pins the address, each implementation has its own, and it has no role, storage or admin function of its own. Reached directly it does nothing.
+
+**Interface.** `IGated4626Vault` gains `MANAGEMENT_LOGIC()`, as `IGated7540Vault` has `SETTLEMENT_LOGIC()`; its id is re-pinned. No other interface changes.
+
+**Steps.** Tests first in `Gated4626Management.t.sol` (wiring, direct calls, hand-off, upgrade), shown failing. Then the three contracts. Then `ContractSizes.t.sol`, `scripts/verify-reproducible.ts` (the vault embeds the second contract's creation code), the post-deploy check in `test/nodejs/fixtures.ts`, the brief, `README.md`, `SECURITY.md`. Then every gate.
+
+**Done means** every existing vault test passes untouched, and the vault has real room.
+
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
 2. Credential layer: none left. On 2026-10-30 the owner confirmed decisions 11, 12, 13, 15, 16 and 17 as built (17 at the measured +8,179 gas on a transfer). Decision 14 is moot, since `IdentityRule` was removed in the cleanup. Decisions 8 and 9 are recorded in the credential section's table.

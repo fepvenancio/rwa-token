@@ -137,7 +137,8 @@ contract InterfaceFreezeTest is Test {
     // Added in Phase 5a (2026-10-17)
     // Re-pinned in S1 of the review items (2026-10-24): `initialize` takes the token's initial rules (was 0xb008690c)
     // Re-pinned 2026-11-01 on owner instruction: the portfolio plug.
-    assertEq(type(IGated4626Vault).interfaceId, bytes4(0x7c5d7975), 'IGated4626Vault');
+    // Re-pinned 2026-11-13 on owner instruction: `MANAGEMENT_LOGIC` added, the vault's second contract (was 0x7c5d7975)
+    assertEq(type(IGated4626Vault).interfaceId, bytes4(0xecc03c50), 'IGated4626Vault');
     // Added in Phase 5b (2026-10-17). The four ERC-7540 / ERC-7575 ids are the standard's own values.
     assertEq(type(IERC7540Operator).interfaceId, bytes4(0xe3bc4e65), 'IERC7540Operator');
     assertEq(type(IERC7540Deposit).interfaceId, bytes4(0xce3bbe50), 'IERC7540Deposit');

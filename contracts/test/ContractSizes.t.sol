@@ -59,7 +59,10 @@ contract ContractSizesTest is Test {
     _assertFits('GatedToken', address(new GatedToken()));
     _assertFits('IntentToken', address(new IntentToken()));
     _assertFits('Gated721', address(new Gated721()));
-    _assertFits('Gated4626Vault', address(new Gated4626Vault()));
+    Gated4626Vault _syncVault = new Gated4626Vault();
+    _assertFits('Gated4626Vault', address(_syncVault));
+    assertGt(_syncVault.MANAGEMENT_LOGIC().code.length, 0, 'Gated4626Management has no code');
+    _assertFits('Gated4626Management', _syncVault.MANAGEMENT_LOGIC());
     Gated7540Vault _asyncVault = new Gated7540Vault();
     _assertFits('Gated7540Vault', address(_asyncVault));
     assertGt(_asyncVault.SETTLEMENT_LOGIC().code.length, 0, 'Gated7540Settlement has no code');
@@ -99,10 +102,12 @@ contract ContractSizesTest is Test {
     );
   }
 
-  /// @dev The 7540's creation code carries its second contract's, so it is the one close to this limit
-  function test_WhenDeployed_TheVaultWithASecondContractFitsTheEip3860Limit() external {
+  /// @dev Each vault's creation code carries its second contract's, so they are the ones close to this limit. An EVM at
+  ///      Paris has no such limit; it is kept so the same code deploys on a later one
+  function test_WhenDeployed_TheVaultsWithASecondContractFitTheEip3860Limit() external {
     vm.skip(_isInstrumented(address(new IntentToken()).code));
     assertLe(type(Gated7540Vault).creationCode.length, _EIP3860_LIMIT);
+    assertLe(type(Gated4626Vault).creationCode.length, _EIP3860_LIMIT);
   }
 
   function _isInstrumented(
