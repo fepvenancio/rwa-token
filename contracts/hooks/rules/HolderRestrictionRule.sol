@@ -32,9 +32,6 @@ contract HolderRestrictionRule is BaseRule, IHolderRestrictionRule {
   /// @inheritdoc IHolderRestrictionRule
   bytes32 public constant AGENT_ROLE = keccak256('AGENT_ROLE');
 
-  /// @notice The token role whose burns are enforcement actions, exempt from lockups
-  bytes32 private constant _BURNER_ROLE = keccak256('BURNER_ROLE');
-
   /// @notice The restrictions per token and holder
   mapping(address _token => mapping(address _holder => Restriction _restriction)) internal _restrictions;
 
@@ -97,7 +94,9 @@ contract HolderRestrictionRule is BaseRule, IHolderRestrictionRule {
     if (_ctx.kind != IERC8473Policy.TransferKind.FORCED && _ctx.from != address(0)) {
       Restriction memory _sender = _restrictions[_ctx.token][_ctx.from];
       if (_sender.frozen) return Reasons.SENDER_FROZEN;
-      if (block.timestamp < _sender.unlockTime && _lockApplies(_ctx)) return Reasons.LOCKED_UP;
+      // A lockup stops every movement the holder directs: a transfer, an executed intent and the holder's own burn (an
+      // ERC-4626 redeem). The burner's enforcement burn is FORCED and is not judged here; a mint has no sender.
+      if (block.timestamp < _sender.unlockTime) return Reasons.LOCKED_UP;
     }
     if (_ctx.to != address(0) && _restrictions[_ctx.token][_ctx.to].frozen) return Reasons.RECEIVER_FROZEN;
     _reason = Reasons.TRANSFER_OK;
@@ -153,21 +152,5 @@ contract HolderRestrictionRule is BaseRule, IHolderRestrictionRule {
     bytes4 _interfaceId
   ) public view override returns (bool _supported) {
     _supported = _interfaceId == type(IHolderRestrictionRule).interfaceId || super.supportsInterface(_interfaceId);
-  }
-
-  /**
-   * @notice Whether an active lockup stops this movement
-   * @dev A transfer and an executed intent are stopped. A burn is an enforcement action only when the token's BURNER_ROLE
-   *      drives it; a holder-initiated burn (e.g. an ERC-4626 redeem) is an exit and respects the lockup. Other kinds
-   *      never reach here
-   * @param _ctx The movement context
-   * @return _applies True if the lockup stops the movement
-   */
-  function _lockApplies(
-    IERC8473Policy.TransferContext calldata _ctx
-  ) private view returns (bool _applies) {
-    if (_ctx.kind == IERC8473Policy.TransferKind.TRANSFER || _ctx.kind == IERC8473Policy.TransferKind.EXECUTED) return true;
-    _applies =
-      _ctx.kind == IERC8473Policy.TransferKind.BURN && !IAccessControl(_ctx.token).hasRole(_BURNER_ROLE, _ctx.operator);
   }
 }

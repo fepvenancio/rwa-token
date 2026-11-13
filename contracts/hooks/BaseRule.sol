@@ -38,6 +38,8 @@ abstract contract BaseRule is ERC165, IComplianceRule {
   ) external virtual onlyHook(_ctx) {}
 
   /// @inheritdoc IComplianceRule
+  // Default for rules that keep no state derived from a token's movements: nothing to confirm.
+  // aderyn-ignore-next-line(empty-block)
   function onInstall(
     address _token,
     address _previousPolicy

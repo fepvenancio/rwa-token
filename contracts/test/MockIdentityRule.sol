@@ -37,7 +37,7 @@ contract MockIdentityRule is BaseRule {
   ) external view returns (bytes32 _reason) {
     bool _checksSender = _ctx.kind != IERC8473Policy.TransferKind.MINT && _ctx.kind != IERC8473Policy.TransferKind.FORCED;
     if (_checksSender && !IDENTITY.isVerified(_ctx.from)) return Reasons.SENDER_NOT_ELIGIBLE;
-    if (_ctx.kind != IERC8473Policy.TransferKind.BURN && !IDENTITY.isVerified(_ctx.to)) {
+    if (_ctx.to != address(0) && !IDENTITY.isVerified(_ctx.to)) {
       return Reasons.RECEIVER_NOT_VERIFIED;
     }
     _reason = Reasons.TRANSFER_OK;

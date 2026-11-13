@@ -72,12 +72,29 @@ contract ComplianceHook is ERC165, IComplianceHook {
     }
   }
 
-  /// @inheritdoc IERC8473Policy
+  /**
+   * @inheritdoc IERC8473Policy
+   * @dev Non-empty `_data` is `abi.encode` of the token's ordered rule list, installed as `setRules` installs one, so a
+   *      token is live with its policy in the call that installs the hook. Empty `_data` keeps the list the hook
+   *      already holds for the token. Every rule in the list is then told, and one that refuses to go live reverts the
+   *      installation. The list is configuration, not state derived from movements; a rule that keeps such state
+   *      answers for it in its own `onInstall`
+   */
   function onInstall(
     address _token,
     address _previousPolicy,
     bytes calldata _data
-  ) external {}
+  ) external {
+    if (msg.sender != _token) revert ComplianceHook_OnlyToken(msg.sender);
+    if (_data.length != 0) _setRules(_token, abi.decode(_data, (IComplianceRule[])));
+    RuleSet storage _set = _ruleSets[_token];
+    uint256 _length = _set.count;
+    // At most MAX_RULES (16) iterations; a rule that refuses must revert the installation (fail closed).
+    // aderyn-ignore-next-line(costly-loop, require-revert-in-loop)
+    for (uint256 _i; _i < _length; ++_i) {
+      _set.rule[_i].onInstall(_token, _previousPolicy);
+    }
+  }
 
   /// @inheritdoc IComplianceHook
   function setRules(
@@ -158,9 +175,14 @@ contract ComplianceHook is ERC165, IComplianceHook {
     }
   }
 
-  /// @inheritdoc IERC8473Policy
-  function wantsAfterTransfer() external view returns (bool _wantsAfter) {
-    _wantsAfter = _ruleSets[msg.sender].afterMask != 0;
+  /**
+   * @inheritdoc IERC8473Policy
+   * @dev Always true. The answer may not depend on the caller (ERC-8473, policy requirement 2) and the function takes
+   *      no token, so a hook shared by many tokens cannot answer for one of them: it says yes, and `afterTransfer`
+   *      returns at once for a token none of whose rules wants it
+   */
+  function wantsAfterTransfer() external pure returns (bool _wantsAfter) {
+    _wantsAfter = true;
   }
 
   /// @inheritdoc ERC165
@@ -178,7 +200,7 @@ contract ComplianceHook is ERC165, IComplianceHook {
    */
   function _setRules(
     address _token,
-    IComplianceRule[] calldata _newRules
+    IComplianceRule[] memory _newRules
   ) internal {
     uint256 _length = _newRules.length;
     if (_length > MAX_RULES) revert ComplianceHook_TooManyRules(_length);

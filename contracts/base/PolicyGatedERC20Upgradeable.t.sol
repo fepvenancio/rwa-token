@@ -9,6 +9,7 @@ import {Initializable} from '@openzeppelin/contracts/proxy/utils/Initializable.s
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {IERC20Permit} from '@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol';
 import {Pausable} from '@openzeppelin/contracts/utils/Pausable.sol';
+import {ReentrancyGuard} from '@openzeppelin/contracts/utils/ReentrancyGuard.sol';
 import {IERC165} from '@openzeppelin/contracts/utils/introspection/IERC165.sol';
 import {Test} from 'forge-std/Test.sol';
 import {Vm} from 'forge-std/Vm.sol';
@@ -26,6 +27,7 @@ import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {ITemplated} from 'interfaces/ITemplated.sol';
 
 import {Helpers} from 'contracts/test/Helpers.sol';
+import {MockInstallReentrantPolicy} from 'contracts/test/MockInstallReentrantPolicy.sol';
 import {PolicyGatedHarness} from 'contracts/test/PolicyGatedHarness.sol';
 
 contract PolicyGatedUnitTest is Helpers {
@@ -55,6 +57,7 @@ contract PolicyGatedUnitTest is Helpers {
     _hook = _mockContract('hook');
     _attested(_hook, IPolicyRegistry.AttestKind.HOOK, true);
     _hookNamesRegistry(_hook, _registry);
+    _mockPolicy(_hook);
     _hookAccountChecksDecide(Reasons.TRANSFER_OK, Reasons.TRANSFER_OK);
     _hookDecides(Reasons.TRANSFER_OK);
     vm.mockCall(_hook, abi.encodeCall(IERC8473Policy.wantsAfterTransfer, ()), abi.encode(false));
@@ -280,21 +283,6 @@ contract PolicyGatedUnit_Burn is PolicyGatedUnitTest {
     );
     vm.prank(_burner);
     _token.burn(_alice, _INITIAL + 1);
-  }
-
-  function test_WhenHookAccepts_ItBurnsWithABurnContext(
-    uint256 _amount
-  ) external {
-    _amount = bound(_amount, 0, _INITIAL);
-    vm.expectCall(
-      _hook,
-      abi.encodeCall(
-        IERC8473Policy.checkTransfer, (_ctx(_alice, address(0), _amount, _burner, IERC8473Policy.TransferKind.BURN))
-      )
-    );
-    vm.prank(_burner);
-    _token.burn(_alice, _amount);
-    assertEq(_token.balanceOf(_alice), _INITIAL - _amount);
   }
 
   /// @dev Regression: a BURNER could not burn frozen tokens (the brief exempts enforcement burns from frozen)
@@ -724,6 +712,7 @@ contract PolicyGatedUnit_SetPolicyHook is PolicyGatedUnitTest {
     address _next = _mockContract('next');
     _attested(_next, IPolicyRegistry.AttestKind.HOOK, true);
     _hookNamesRegistry(_next, _registry);
+    _mockPolicy(_next);
     vm.expectEmit(address(_token));
     emit IERC8473.PolicyChanged(_hook, _next);
     vm.prank(_admin);
@@ -745,15 +734,6 @@ contract PolicyGatedUnit_CanTransfer is PolicyGatedUnitTest {
     (bool _ok, bytes32 _reason) = _token.canTransferWithReason(_alice, _bob, 1);
     assertTrue(_ok);
     assertEq(_reason, Reasons.TRANSFER_OK);
-  }
-
-  function test_WhenSimulatingAMint_ItUsesTheCallerAsOperator() external {
-    vm.expectCall(
-      _hook,
-      abi.encodeCall(IERC8473Policy.checkTransfer, (_ctx(address(0), _bob, 1, _minter, IERC8473Policy.TransferKind.MINT)))
-    );
-    vm.prank(_minter);
-    _token.canTransferWithReason(address(0), _bob, 1);
   }
 
   function test_WhenPaused_ItReturnsPaused() external {
@@ -786,33 +766,21 @@ contract PolicyGatedUnit_CanTransfer is PolicyGatedUnitTest {
     assertFalse(_token.canTransfer(_alice, _bob, _INITIAL - _frozen + 1));
   }
 
-  /// @dev An enforcement burn (the operator holds BURNER_ROLE) may take frozen tokens, but never more than the balance:
-  ///      the reasoned pre-flight must say so, as the write does. The plain answer leaves a balance shortfall to the base
-  ///      standard like any other, because no frozen amount stands in the way of an enforcement burn
-  function test_WhenABurnerAsksAboutBurningMoreThanItHolds_TheReasonedAnswerRefusesAndThePlainOneDoesNot() external {
-    bytes32 _burnerRole = _token.BURNER_ROLE(); // read first: an external call in the arguments would consume the prank
-    vm.prank(_admin);
-    _token.grantRole(_burnerRole, _alice);
-    (bool _ok, bytes32 _reason) = _token.canTransferWithReason(_alice, address(0), _INITIAL + 1);
-    assertFalse(_ok);
-    assertEq(_reason, Reasons.INSUFFICIENT_UNFROZEN);
-    assertTrue(_token.canTransfer(_alice, address(0), _INITIAL + 1));
-  }
-
-  function test_WhenABurnerAsksAboutBurningFrozenTokens_TheReasonedAnswerAllowsUpToTheBalanceOnly() external {
+  /// @dev A pre-flight simulates the holder's own burn, whoever the holder is: holding BURNER_ROLE changes nothing, and
+  ///      the burner's enforcement burn is FORCED, which no pre-flight simulates
+  function test_WhenAHolderWithTheBurnerRoleAsksAboutBurningFrozenTokens_ItIsRefusedToo() external {
     bytes32 _burnerRole = _token.BURNER_ROLE(); // read first: an external call in the arguments would consume the prank
     vm.prank(_admin);
     _token.grantRole(_burnerRole, _alice);
     vm.prank(_agent);
     _token.setFrozenTokens(_alice, _INITIAL);
-    assertTrue(_token.canTransfer(_alice, address(0), _INITIAL));
-    (bool _ok, bytes32 _reason) = _token.canTransferWithReason(_alice, address(0), _INITIAL + 1);
+    assertFalse(_token.canTransfer(_alice, address(0), 1));
+    (bool _ok, bytes32 _reason) = _token.canTransferWithReason(_alice, address(0), 1);
     assertFalse(_ok);
     assertEq(_reason, Reasons.INSUFFICIENT_UNFROZEN);
-    assertTrue(_token.canTransfer(_alice, address(0), _INITIAL + 1)); // frozen tokens do not stand in a burner's way
   }
 
-  /// @dev A holder without the role is not exempt: frozen tokens count against its burn
+  /// @dev Frozen tokens count against a holder's own burn
   function test_WhenAHolderAsksAboutBurningFrozenTokens_ItIsRefused() external {
     vm.prank(_agent);
     _token.setFrozenTokens(_alice, _INITIAL);
@@ -1440,8 +1408,11 @@ contract PolicyGatedUnit_Context is PolicyGatedUnitTest {
     _token.mint(_alice, 5 ether);
   }
 
-  function test_WhenBurning_TheReceiverBalanceIsZero() external {
-    _expectBefore(_alice, address(0), 5 ether, _burner, IERC8473Policy.TransferKind.BURN, abi.encode(_INITIAL, uint256(0)));
+  /// @dev The burner's burn is enforcement, so the kind is FORCED and the receiver is the zero address
+  function test_WhenTheBurnerBurns_TheReceiverBalanceIsZero() external {
+    _expectBefore(
+      _alice, address(0), 5 ether, _burner, IERC8473Policy.TransferKind.FORCED, abi.encode(_INITIAL, uint256(0))
+    );
     vm.prank(_burner);
     _token.burn(_alice, 5 ether);
   }
@@ -1524,21 +1495,16 @@ contract PolicyGatedUnit_SharedHook is PolicyGatedUnitTest {
     );
   }
 
-  function test_WhenInitialRulesAreGiven_TheTokenInstallsThemOnTheHookItself() external {
-    IComplianceRule[] memory _ruleSet = new IComplianceRule[](1);
-    _ruleSet[0] = IComplianceRule(_mockContract('rule'));
-    vm.mockCall(_hook, abi.encodeWithSelector(IComplianceHook.setRules.selector), '');
-    vm.expectCall(_hook, abi.encodeWithSelector(IComplianceHook.setRules.selector), 1);
+  /// @dev With no rules to install the data is empty, and the hook keeps what it holds for the token: nothing
+  function test_WhenNoInitialRulesAreGiven_TheInstallationCarriesNoData() external {
     PolicyGatedHarness _impl = new PolicyGatedHarness();
+    address _proxy = vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
+    vm.expectCall(_hook, abi.encodeCall(IERC8473Policy.onInstall, (_proxy, address(0), '')));
+    vm.expectCall(_hook, abi.encodeWithSelector(IComplianceHook.setRules.selector), 0);
     new ERC1967Proxy(
       address(_impl),
-      abi.encodeCall(PolicyGatedHarness.initialize, ('G', 'G', _admin, _guardian, _registry, _hook, _ruleSet))
+      abi.encodeCall(PolicyGatedHarness.initialize, ('G', 'G', _admin, _guardian, _registry, _hook, _noRules()))
     );
-  }
-
-  function test_WhenNoInitialRulesAreGiven_TheTokenLeavesTheHookAlone() external {
-    vm.expectCall(_hook, abi.encodeWithSelector(IComplianceHook.setRules.selector), 0);
-    _deploy(_hook);
   }
 }
 
@@ -1642,5 +1608,196 @@ contract PolicyGatedUnit_ZeroToZero is PolicyGatedUnitTest {
     vm.prank(_minter);
     vm.expectRevert(abi.encodeWithSelector(IERC20Errors.ERC20InvalidReceiver.selector, address(0)));
     _token.mint(address(0), 1);
+  }
+}
+
+/// @dev ERC-8473 (uRWA Policy): what the draft asks of a token beyond the names
+contract PolicyGatedUnit_Erc8473 is PolicyGatedUnitTest {
+  bytes4 internal constant _TOKEN_ID = 0x0505c8c9;
+
+  function _next() internal returns (address _policyAddress) {
+    _policyAddress = _mockContract('next');
+    _attested(_policyAddress, IPolicyRegistry.AttestKind.HOOK, true);
+    _hookNamesRegistry(_policyAddress, _registry);
+    _mockPolicy(_policyAddress);
+  }
+
+  function _checksRevert() internal {
+    vm.mockCallRevert(_hook, abi.encodeWithSelector(IERC8473Policy.checkSend.selector), 'broken');
+    vm.mockCallRevert(_hook, abi.encodeWithSelector(IERC8473Policy.checkReceive.selector), 'broken');
+    vm.mockCallRevert(_hook, abi.encodeWithSelector(IERC8473Policy.checkTransfer.selector), 'broken');
+  }
+
+  function _checksAnswerShort() internal {
+    vm.mockCall(_hook, abi.encodeWithSelector(IERC8473Policy.checkSend.selector), hex'01');
+    vm.mockCall(_hook, abi.encodeWithSelector(IERC8473Policy.checkReceive.selector), hex'01');
+    vm.mockCall(_hook, abi.encodeWithSelector(IERC8473Policy.checkTransfer.selector), hex'01');
+  }
+
+  function _assertPreflightsReadFalse() internal view {
+    assertFalse(_token.canSend(_alice), 'canSend');
+    assertFalse(_token.canReceive(_bob), 'canReceive');
+    assertFalse(_token.canTransfer(_alice, _bob, 1), 'canTransfer');
+    (bool _ok, bytes32 _reason) = _token.canTransferWithReason(_alice, _bob, 1);
+    assertFalse(_ok, 'canTransferWithReason');
+    assertEq(_reason, Reasons.CHECK_UNAVAILABLE);
+  }
+
+  /// @dev Installing a policy, rule 4: the token answers the ERC-8473 token id
+  function test_ItAnswersTheTokenInterfaceId() external view {
+    assertTrue(_token.supportsInterface(_TOKEN_ID));
+    assertTrue(_token.supportsInterface(type(IERC8473).interfaceId));
+  }
+
+  /// @dev Installing a policy, rule 3: a contract that does not answer the policy id is not installed
+  function test_WhenThePolicyDoesNotAnswerItsInterfaceId_TheInstallationReverts() external {
+    address _notAPolicy = _next();
+    vm.mockCall(
+      _notAPolicy, abi.encodeCall(IERC165.supportsInterface, (type(IERC8473Policy).interfaceId)), abi.encode(false)
+    );
+    vm.expectRevert(abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_NotAPolicy.selector, _notAPolicy));
+    vm.prank(_admin);
+    _token.installPolicy(_notAPolicy, '');
+    assertEq(_token.policy(), _hook);
+  }
+
+  /// @dev Installing a policy, rule 5: `onInstall` gets the token, the policy consulted until now and the data, unchanged
+  function test_WhenInstalling_ItCallsOnInstallWithThePreviousPolicyAndTheData(
+    bytes calldata _data
+  ) external {
+    address _newPolicy = _next();
+    vm.expectCall(_newPolicy, abi.encodeCall(IERC8473Policy.onInstall, (address(_token), _hook, _data)));
+    vm.prank(_admin);
+    _token.installPolicy(_newPolicy, _data);
+    assertEq(_token.policy(), _newPolicy);
+  }
+
+  /// @dev Installing the policy the token already consults is an installation too
+  function test_WhenInstallingTheSamePolicyAgain_ItCallsOnInstallAndEmits() external {
+    vm.expectCall(_hook, abi.encodeCall(IERC8473Policy.onInstall, (address(_token), _hook, '')));
+    vm.expectEmit(address(_token));
+    emit IERC8473.PolicyChanged(_hook, _hook);
+    vm.prank(_admin);
+    _token.installPolicy(_hook, '');
+  }
+
+  /// @dev Installing a policy, rule 5: a reverting `onInstall` undoes the installation
+  function test_WhenOnInstallReverts_TheInstallationRevertsAndThePolicyStays() external {
+    address _newPolicy = _next();
+    vm.mockCallRevert(_newPolicy, abi.encodeWithSelector(IERC8473Policy.onInstall.selector), 'not ready');
+    vm.expectRevert('not ready');
+    vm.prank(_admin);
+    _token.installPolicy(_newPolicy, '');
+    assertEq(_token.policy(), _hook);
+  }
+
+  /// @dev The first installation: no previous policy, and the initial rule list as the data
+  function test_WhenInitialised_ItCallsOnInstallWithNoPreviousPolicyAndTheRuleList() external {
+    IComplianceRule[] memory _ruleList = new IComplianceRule[](1);
+    _ruleList[0] = IComplianceRule(_mockContract('rule'));
+    PolicyGatedHarness _impl = new PolicyGatedHarness();
+    address _proxy = vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
+    vm.expectCall(_hook, abi.encodeCall(IERC8473Policy.onInstall, (_proxy, address(0), abi.encode(_ruleList))));
+    vm.expectCall(_hook, abi.encodeWithSelector(IComplianceHook.setRules.selector), 0);
+    new ERC1967Proxy(
+      address(_impl),
+      abi.encodeCall(PolicyGatedHarness.initialize, ('Gated', 'GTD', _admin, _guardian, _registry, _hook, _ruleList))
+    );
+  }
+
+  /// @dev Installing a policy, rule 7: no movement may begin while `onInstall` runs
+  function test_WhenThePolicyMovesTokensFromOnInstall_TheGuardRefuses() external {
+    MockInstallReentrantPolicy _reentrant = new MockInstallReentrantPolicy(_registry);
+    _attested(address(_reentrant), IPolicyRegistry.AttestKind.HOOK, true);
+    vm.expectRevert(ReentrancyGuard.ReentrancyGuardReentrantCall.selector);
+    vm.prank(_admin);
+    _token.installPolicy(address(_reentrant), '');
+  }
+
+  /// @dev Check rule 5: a policy that reverts makes the pre-flights read false, and they do not revert
+  function test_WhenThePolicyRevertsItsChecks_ThePreflightsReadFalse() external {
+    _checksRevert();
+    _assertPreflightsReadFalse();
+  }
+
+  /// @dev Check rule 5: fewer than 32 bytes is no answer
+  function test_WhenThePolicyAnswersFewerThan32Bytes_ThePreflightsReadFalse() external {
+    _checksAnswerShort();
+    _assertPreflightsReadFalse();
+  }
+
+  /// @dev Check rule 5: a policy with no code is no answer
+  function test_WhenThePolicyHasNoCode_ThePreflightsReadFalse() external {
+    vm.etch(_hook, '');
+    vm.clearMockedCalls();
+    _assertPreflightsReadFalse();
+  }
+
+  /// @dev Token rule 4: the movement reverts in each of those cases
+  function test_WhenThePolicyCannotBeAsked_TheMovementReverts() external {
+    _checksRevert();
+    vm.expectRevert(_rejected(Reasons.CHECK_UNAVAILABLE));
+    vm.prank(_alice);
+    _token.transfer(_bob, 1);
+
+    _checksAnswerShort();
+    vm.expectRevert(_rejected(Reasons.CHECK_UNAVAILABLE));
+    vm.prank(_alice);
+    _token.transfer(_bob, 1);
+  }
+
+  /// @dev Check rules 1 and 2: the zero address may send and receive, and the policy is not asked, paused or not
+  function test_TheZeroAddressMaySendAndReceive_AndThePolicyIsNotAsked() external {
+    vm.expectCall(_hook, abi.encodeWithSelector(IERC8473Policy.checkSend.selector), 0);
+    vm.expectCall(_hook, abi.encodeWithSelector(IERC8473Policy.checkReceive.selector), 0);
+    assertTrue(_token.canSend(address(0)));
+    assertTrue(_token.canReceive(address(0)));
+    vm.prank(_guardian);
+    _token.pause();
+    assertTrue(_token.canSend(address(0)));
+    assertTrue(_token.canReceive(address(0)));
+  }
+
+  /// @dev Check rule 3: the operator of a mint pre-flight is zero, whoever asks
+  function test_WhenPreflightingAMint_TheOperatorIsZeroWhoeverAsks(
+    address _caller,
+    uint256 _amount
+  ) external {
+    vm.expectCall(
+      _hook,
+      abi.encodeCall(
+        IERC8473Policy.checkTransfer,
+        (_ctx(address(0), _bob, _amount, address(0), IERC8473Policy.TransferKind.MINT))
+      )
+    );
+    vm.prank(_caller);
+    assertTrue(_token.canTransfer(address(0), _bob, _amount));
+  }
+
+  /// @dev Transfer kinds, rule 1: a burn by the burner takes tokens without the holder directing it, so it is FORCED
+  function test_WhenTheBurnerBurns_ThePolicySeesAForcedMovementToZero(
+    uint256 _amount
+  ) external {
+    _amount = bound(_amount, 0, _INITIAL);
+    vm.expectCall(
+      _hook,
+      abi.encodeCall(
+        IERC8473Policy.checkTransfer,
+        (_ctx(_alice, address(0), _amount, _burner, IERC8473Policy.TransferKind.FORCED))
+      )
+    );
+    vm.prank(_burner);
+    _token.burn(_alice, _amount);
+    assertEq(_token.balanceOf(_alice), _INITIAL - _amount);
+    assertEq(_token.totalSupply(), _INITIAL - _amount);
+  }
+
+  /// @dev An enforcement burn is not stopped by the pause, like a forced transfer
+  function test_WhenTheBurnerBurnsWhilePaused_ItPasses() external {
+    vm.prank(_guardian);
+    _token.pause();
+    vm.prank(_burner);
+    _token.burn(_alice, 1);
+    assertEq(_token.balanceOf(_alice), _INITIAL - 1);
   }
 }

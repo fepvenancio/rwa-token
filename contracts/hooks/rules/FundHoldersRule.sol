@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
+
 import {Reasons} from 'interfaces/Errors.sol';
 
+import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IFund} from 'interfaces/IFund.sol';
 import {IFundHoldersRule} from 'interfaces/IFundHoldersRule.sol';
@@ -51,6 +54,30 @@ contract FundHoldersRule is BaseRule, IFundHoldersRule {
     if (_ctx.from != address(0) && _fromBalance == _ctx.amount) FUND.leave(_ctx.token, _ctx.from);
     if (_ctx.to != address(0) && _toBalance == 0) FUND.join(_ctx.token, _ctx.to);
     // slither-disable-end incorrect-equality
+  }
+
+  /**
+   * @inheritdoc IComplianceRule
+   * @dev The fund's count is derived from the class's movements, and it is kept across installations on purpose, so
+   *      here the rule confirms it is current: the class has no supply, so there is nothing to count, or the policy the
+   *      token consulted until now listed this rule for it, so no movement went unseen. Otherwise it refuses to go
+   *      live. It writes nothing, so anyone may call it
+   */
+  function onInstall(
+    address _token,
+    address _previousPolicy
+  ) external view override(BaseRule, IComplianceRule) {
+    // Compares a supply with zero: an empty class has no investor to count.
+    // slither-disable-next-line incorrect-equality
+    if (IERC20(_token).totalSupply() == 0) return;
+    if (_previousPolicy != address(0)) {
+      IComplianceRule[] memory _listed = IComplianceHook(_previousPolicy).rules(_token);
+      uint256 _length = _listed.length;
+      for (uint256 _i; _i < _length; ++_i) {
+        if (address(_listed[_i]) == address(this)) return;
+      }
+    }
+    revert FundHoldersRule_CountNotCurrent(_token);
   }
 
   /**
