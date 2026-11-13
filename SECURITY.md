@@ -370,7 +370,7 @@ Slither 0.11.5 runs as a CI gate with 0 findings, on the contracts that ship: `n
 | Detector | Reason |
 |---|---|
 | `naming-convention` | Wonderland style uses `_camelCase` for parameters and internals |
-| `assembly` | ERC-7201 storage accessors only |
+| `assembly` | ERC-7201 storage accessors, and two bounded static calls that copy a fixed number of words and decode nothing: `ERC4626Adapter` `_ask` (one word) and `Gated4626Vault` `_hasAdapters` (two) |
 | `timestamp` | Intent deadlines and `validAfter`, lockups and settlement windows are time-based by specification |
 | `calls-loop` | The hook calls at most 16 attested rules, the fund at most 32 classes and the portfolio its attested adapters; a batch (`IntentExecutor.executeBatch`, `GuardedAccount.execute`) is the caller's own and atomic |
 
@@ -401,7 +401,7 @@ Inline suppressions (each carries its reason on the line above, in the source):
 | `ComplianceHook` `_setRules` | `uninitialized-local` | The after-mask starts at zero by design |
 | `Portfolio` `_allocate`, `_deallocate` | `reentrancy-benign`, `reentrancy-events`, `reentrancy-balance` | The guard is held, the adapter is attested, and what the move changed can only be measured after the call: the balance read before it is the point of the comparison. A reentrant target is refused (`test_AReentrantTargetCannotAllocateAgainMidCall`) |
 | `Portfolio` `allocate`, `_deallocate`, `removeAdapter` | `incorrect-equality` | A zero test on a caller's argument, and the definition of an empty adapter. A donation only delays a removal until the allocator brings it back |
-| `Portfolio` `_takeOff`, `ERC4626Adapter` `allocate`, `deallocate`, `_ask` | `unused-return` | The list removal is false only if the adapter was not there, which the caller has checked; the portfolio measures what a target move changed; a read needs only the first word of the answer |
+| `Portfolio` `_takeOff`, `ERC4626Adapter` `allocate`, `deallocate` | `unused-return` | The list removal is false only if the adapter was not there, which the caller has checked; the portfolio measures what a target move changed |
 | `Gated7540Vault` | `missing-inheritance` | `IERC7575` re-declares inherited ERC-4626 functions; conformance pinned by ERC-165 id `0x2f0a18c5` |
 | `Gated7540Vault` `requestDeposit` | `arbitrary-send-erc20` | `owner` is the caller or an approved operator. Fuzzed: a non-operator with a victim owner reverts and moves nothing. Removing the guard fails 2 tests |
 | `ProxyDeployer` `deploy` | `unused-return` | `initialize` returns nothing; success is checked by the post-init assertions |

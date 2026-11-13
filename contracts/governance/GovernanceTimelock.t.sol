@@ -175,6 +175,14 @@ contract GovernanceTimelockUnitTest is Test {
     assertEq(_timelock.getMinDelay(), 8 days);
   }
 
+  /// @dev The contract emits OpenZeppelin's event itself: the delay before the change, then the delay after it
+  function test_WhenGovernanceChangesTheDelay_ItEmitsTheOldAndTheNewDelay() external {
+    _scheduleUpdateDelay(8 days);
+    vm.expectEmit(address(_timelock));
+    emit TimelockController.MinDelayChange(_DELAY, 8 days);
+    _executeUpdateDelay(8 days);
+  }
+
   /// @dev The floor does not mask OpenZeppelin's own check: only the timelock itself may call updateDelay
   function test_WhenAStrangerCallsUpdateDelay_ItRevertsAsUnauthorized() external {
     vm.expectRevert(abi.encodeWithSelector(TimelockController.TimelockUnauthorizedCaller.selector, _stranger));

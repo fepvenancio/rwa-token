@@ -555,7 +555,9 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
    * @notice Whether a portfolio still lists an adapter
    * @dev `adapters()` answers with an array, encoded as its offset and then its length. Only those two words are
    *      copied and the list itself is never decoded, which a call through the interface would do. A failed call or an
-   *      answer too short to hold a length reverts
+   *      answer too short to hold a length reverts. The second word is taken as the length, which is the standard
+   *      encoding of a lone array and what any Solidity portfolio answers; the portfolio asked is one this vault had
+   *      plugged, so its code was attested
    * @param _portfolio The portfolio
    * @return _has True when its list is not empty
    */
