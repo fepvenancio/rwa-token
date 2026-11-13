@@ -101,7 +101,7 @@ describe("ERC-7943 face and multicall on the deployed stack", async function () 
     assert.equal(await s.token.read.canReceive([bob]), false);
     assert.deepEqual(await s.token.read.canTransferWithReason([alice, bob, 1n]), [false, REASONS.RECEIVER_FROZEN]);
     const failure = await revertOf(s.token.simulate.transfer([bob, 1n], { account: alice }), s.token.abi);
-    assert.deepEqual(failure, { errorName: "PolicyGated_TransferRejected", args: [REASONS.RECEIVER_FROZEN] });
+    assert.deepEqual(failure, { errorName: "ERC8473PolicyRejected", args: [REASONS.RECEIVER_FROZEN] });
 
     await s.rules.holderRestrictionRule.write.setFrozen([s.token.address, bob, false], { account: agent });
     assert.equal(await s.token.read.canReceive([bob]), true);

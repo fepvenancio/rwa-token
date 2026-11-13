@@ -61,11 +61,11 @@ const REASON_NAMES = [
   "TRANSFER_OK",
   "PAUSED",
   "INSUFFICIENT_UNFROZEN",
-  "SENDER_NOT_VERIFIED",
+  "SENDER_NOT_ELIGIBLE",
   "RECEIVER_NOT_VERIFIED",
-  "OUTSIDE_SETTLEMENT_WINDOW",
+  "WINDOW_CLOSED",
   "MAX_HOLDERS",
-  "LOCKED",
+  "LOCKED_UP",
   "INTENT_EXPIRED",
   "NONCE_USED",
   "BAD_SIGNATURE",
@@ -84,8 +84,9 @@ const REASON_NAMES = [
   "NOT_EXECUTOR",
   "ZERO_RECEIVER",
   "ABOVE_SUPPLY_CAP",
-  "TRANSFER_NOT_EXECUTED",
+  "KIND_NOT_ALLOWED",
   "NOT_TOKEN_OWNER",
+  "CHECK_UNAVAILABLE",
 ] as const;
 
 /** `Errors.sol` reason codes, keyed by name; `reasonName` maps a code back for readable assertions. */
@@ -708,7 +709,7 @@ export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
   // check each product runs that exact instance and that its rule list on it is the intended one.
   assert.ok(isAddressEqual(await s.hook.read.REGISTRY(), s.registry.address), `hook ${s.hook.address} names another registry`);
   for (const { product, contract } of s.deployed) {
-    assert.ok(isAddressEqual(await contract.read.policyHook(), s.hook.address), `token ${contract.address} runs another hook`);
+    assert.ok(isAddressEqual(await contract.read.policy(), s.hook.address), `token ${contract.address} runs another hook`);
     const expected = product.rules.map((name) => (name === "fundHoldersRule" ? s.funds[product.fund!].rule.address : s.rules[name]!.address));
     const actual = await s.hook.read.rules([contract.address]);
     assert.equal(actual.length, expected.length, `token ${contract.address} rule count`);

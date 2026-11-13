@@ -90,7 +90,7 @@ describe("governance through the timelock", async function () {
       "AccessControlUnauthorizedAccount",
     );
     await viem.assertions.revertWithCustomError(
-      s.token.write.setPolicyHook([s.hook.address], { account: governance }),
+      s.token.write.installPolicy([s.hook.address, "0x"], { account: governance }),
       s.token,
       "AccessControlUnauthorizedAccount",
     );
@@ -170,7 +170,7 @@ describe("governance through the timelock", async function () {
     const swap = await schedule(
       s,
       s.token.address,
-      encodeFunctionData({ abi: s.token.abi, functionName: "setPolicyHook", args: [replacement.address] }),
+      encodeFunctionData({ abi: s.token.abi, functionName: "installPolicy", args: [replacement.address, "0x"] }),
     );
     const rules = await schedule(
       s,
@@ -179,11 +179,11 @@ describe("governance through the timelock", async function () {
     );
 
     await networkHelpers.time.increase(swap.delay - 1n);
-    assert.equal(getAddress(await s.token.read.policyHook()), getAddress(s.hook.address));
+    assert.equal(getAddress(await s.token.read.policy()), getAddress(s.hook.address));
     assert.equal((await s.hook.read.rules([s.vault4626.address])).length, RULE_ORDER.fund.length);
     await networkHelpers.time.increase(1n);
     await replacementRules.execute();
-    await viem.assertions.emitWithArgs(swap.execute(), s.token, "PolicyHookChanged", [
+    await viem.assertions.emitWithArgs(swap.execute(), s.token, "PolicyChanged", [
       getAddress(s.hook.address),
       getAddress(replacement.address),
     ]);
@@ -210,7 +210,7 @@ describe("governance through the timelock", async function () {
     );
     await s.proxyDeployer.write.deploy(["NEW", implementation, initData, s.hook.address, rules], { account: s.wallets.operations.account });
     const token = await viem.getContractAt("IntentToken", predicted);
-    assert.ok(isAddressEqual(await token.read.policyHook(), s.hook.address));
+    assert.ok(isAddressEqual(await token.read.policy(), s.hook.address));
     assert.deepEqual(await s.hook.read.rules([predicted]), rules.map((rule) => getAddress(rule)));
     assert.equal(await token.read.hasRole([ROLES.DEFAULT_ADMIN, s.timelock.address]), true);
   });
@@ -345,7 +345,7 @@ describe("governance through the timelock", async function () {
     const forbidden = [
       call(s.token, "grantRole", [ROLES.MINTER, recovery]),
       call(s.token, "revokeRole", [ROLES.AGENT, s.wallets.agent.account.address]),
-      call(s.token, "setPolicyHook", [s.hook.address]),
+      call(s.token, "installPolicy", [s.hook.address, "0x"]),
       call(s.token, "upgradeToAndCall", [s.implementations.token.address, "0x"]),
       call(s.executor, "grantRole", [ROLES.OPERATOR, recovery]),
       call(s.dvpExecutor, "grantRole", [ROLES.OPERATOR, recovery]),

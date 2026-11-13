@@ -129,7 +129,7 @@ describe("vault flows", async function () {
       await viem.assertions.revertWithCustomError(
         s.vault7540.write.rejectRedeemRequest([alice.address], { account: agent }),
         s.vault7540,
-        "PolicyGated_TransferRejected",
+        "ERC8473PolicyRejected",
       );
       await viem.assertions.emitWithArgs(
         s.vault7540.write.recoverRedeemRequest([alice.address, recovery], { account: agent }),
