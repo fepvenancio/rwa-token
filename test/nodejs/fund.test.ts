@@ -139,7 +139,7 @@ describe("fund: investors counted across classes", async function () {
 
     // Token: pre-flight says MAX_HOLDERS and the mint reverts with that reason.
     assert.deepEqual(await s.token.read.canTransferWithReason([zeroAddress, d, 1n]), [false, REASONS.MAX_HOLDERS]);
-    await viem.assertions.revertWithCustomErrorWithArgs(mintToken(s, dave), s.token, "PolicyGated_TransferRejected", [REASONS.MAX_HOLDERS]);
+    await viem.assertions.revertWithCustomErrorWithArgs(mintToken(s, dave), s.token, "ERC8473PolicyRejected", [REASONS.MAX_HOLDERS]);
     // The cap decides a movement, not an account: ERC-7943 keeps quantitative rules out of `canReceive`.
     assert.equal(await s.token.read.canReceive([d]), true);
     // 4626: the gating-aware max is zero, and a deposit above it reverts.
@@ -175,7 +175,7 @@ describe("fund: investors counted across classes", async function () {
       s.executor.write.execute([s.token.address, intent, sig], { account: s.wallets.operator.account }),
       [...s.executor.abi, ...s.token.abi] as Abi,
     );
-    assert.equal(failure?.errorName, "PolicyGated_TransferRejected");
+    assert.equal(failure?.errorName, "ERC8473PolicyRejected");
     assert.deepEqual(failure?.args, [REASONS.MAX_HOLDERS]);
 
     // A whole-balance intent is net zero, so it passes: alice leaves the fund as dave joins it.
@@ -327,11 +327,11 @@ describe("fund: investors counted across classes", async function () {
       // The monitor says the same: every class lists a rule that is no longer the fund's, the first is named.
       assert.equal(await s.fund.read.isClassIntact([s.token.address]), false);
       assert.ok(isAddressEqual(await s.fund.read.firstBrokenClass(), s.token.address));
-      await viem.assertions.revertWithCustomErrorWithArgs(mintToken(s, s.holders.carol), s.token, "PolicyGated_TransferRejected", [REASONS.NOT_FUND_CLASS]);
+      await viem.assertions.revertWithCustomErrorWithArgs(mintToken(s, s.holders.carol), s.token, "ERC8473PolicyRejected", [REASONS.NOT_FUND_CLASS]);
       await viem.assertions.revertWithCustomErrorWithArgs(
         s.token.write.transfer([bob, 1n], { account: s.holders.alice.account }),
         s.token,
-        "PolicyGated_TransferRejected",
+        "ERC8473PolicyRejected",
         [REASONS.NOT_FUND_CLASS],
       );
       assert.equal(await s.fund.read.holderCount(), 2n);

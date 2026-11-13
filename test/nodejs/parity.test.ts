@@ -46,11 +46,11 @@ const CONDITIONS: Condition[] = [
   {
     name: "sender de-verified",
     setup: async (s) => deverify(s, s.holders.alice),
-    transfer: "SENDER_NOT_VERIFIED",
-    intent: "SENDER_NOT_VERIFIED",
+    transfer: "SENDER_NOT_ELIGIBLE",
+    intent: "SENDER_NOT_ELIGIBLE",
     deposit: "TRANSFER_OK", // bob may receive the shares
     payer: "RECEIVER_NOT_VERIFIED",
-    redeem: "SENDER_NOT_VERIFIED",
+    redeem: "SENDER_NOT_ELIGIBLE",
   },
   {
     // The new standings of the credential layer. An exit-only or lapsed holder can leave but not receive.
@@ -93,11 +93,11 @@ const CONDITIONS: Condition[] = [
   {
     name: "sender blocked by the guardian",
     setup: async (s) => void (await s.credentials.write.blockSubject([s.holders.alice.account.address], { account: s.wallets.guardian.account })),
-    transfer: "SENDER_NOT_VERIFIED",
-    intent: "SENDER_NOT_VERIFIED",
+    transfer: "SENDER_NOT_ELIGIBLE",
+    intent: "SENDER_NOT_ELIGIBLE",
     deposit: "TRANSFER_OK",
     payer: "RECEIVER_NOT_VERIFIED",
-    redeem: "SENDER_NOT_VERIFIED",
+    redeem: "SENDER_NOT_ELIGIBLE",
   },
   {
     name: "sender locked up",
@@ -109,16 +109,16 @@ const CONDITIONS: Condition[] = [
         });
       }
     },
-    transfer: "LOCKED",
-    intent: "LOCKED",
+    transfer: "LOCKED_UP",
+    intent: "LOCKED_UP",
     deposit: "TRANSFER_OK",
-    redeem: "LOCKED",
+    redeem: "LOCKED_UP",
   },
   {
     name: "outside the settlement window (Saturday)",
     setup: async () => {}, // `prepared` moves the clock to Saturday 10:00 UTC
     transfer: "TRANSFER_OK",
-    intent: "OUTSIDE_SETTLEMENT_WINDOW",
+    intent: "WINDOW_CLOSED",
     deposit: "TRANSFER_OK",
     redeem: "TRANSFER_OK",
   },
@@ -202,7 +202,7 @@ describe("pre-flight parity matrix", async function () {
   const rejected = (reason: Hex, sender: Address, amount: bigint, unfrozen: bigint) =>
     reason === REASONS.INSUFFICIENT_UNFROZEN
       ? { errorName: "ERC7943InsufficientUnfrozenBalance", args: [getAddress(sender), amount, unfrozen] }
-      : { errorName: "PolicyGated_TransferRejected", args: [reason] };
+      : { errorName: "ERC8473PolicyRejected", args: [reason] };
 
   for (const c of CONDITIONS) {
     describe(c.name, function () {
@@ -210,7 +210,7 @@ describe("pre-flight parity matrix", async function () {
         const s = await networkHelpers.loadFixture(funded);
         await c.setup(s);
         if (c.advance) await networkHelpers.time.increase(c.advance);
-        if (c.intent === "OUTSIDE_SETTLEMENT_WINDOW") await networkHelpers.time.increaseTo(MONDAY + 5n * 86_400n + 10n * 3_600n);
+        if (c.intent === "WINDOW_CLOSED") await networkHelpers.time.increaseTo(MONDAY + 5n * 86_400n + 10n * 3_600n);
         return s;
       }
 

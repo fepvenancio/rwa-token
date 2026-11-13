@@ -62,7 +62,7 @@ describe("intents: EIP-712 signing and executor settlement", async function () {
       await verifyTypedData({ address: s.holders.alice.account.address, domain: onChainDomain, types: INTENT_TYPES, primaryType: "TransferIntent", message: intent, signature: sig }),
       false,
     );
-    await viem.assertions.revertWithCustomErrorWithArgs(execute(s, intent, sig), s.token, "PolicyGated_TransferRejected", [REASONS.BAD_SIGNATURE]);
+    await viem.assertions.revertWithCustomErrorWithArgs(execute(s, intent, sig), s.token, "ERC8473PolicyRejected", [REASONS.BAD_SIGNATURE]);
   });
 
   it("an intent with all ten fields set hashes alike in the wallet and on chain, and the intent executor refuses the payment it states", async function () {
@@ -131,7 +131,7 @@ describe("intents: EIP-712 signing and executor settlement", async function () {
     assert.deepEqual(await s.token.read.canExecute([intent, sig, s.executor.address]), [false, REASONS.WRONG_EXECUTOR]);
     // The named account holds no role here, so the call from it would revert too.
     assert.deepEqual(await s.token.read.canExecute([intent, sig, named]), [false, REASONS.NOT_EXECUTOR]);
-    await viem.assertions.revertWithCustomErrorWithArgs(execute(s, intent, sig), s.token, "PolicyGated_TransferRejected", [REASONS.WRONG_EXECUTOR]);
+    await viem.assertions.revertWithCustomErrorWithArgs(execute(s, intent, sig), s.token, "ERC8473PolicyRejected", [REASONS.WRONG_EXECUTOR]);
     assert.equal(await s.token.read.nonceUsed([alice.account.address, intent.nonce]), false);
     assert.equal(await s.token.read.balanceOf([bob.account.address]), 0n);
   });
@@ -158,7 +158,7 @@ describe("intents: EIP-712 signing and executor settlement", async function () {
     const first = await signIntent(s, alice, { to: bob.account.address, amount: 1n });
     await execute(s, first.intent, first.sig);
     assert.deepEqual(await s.token.read.canExecute([first.intent, first.sig, s.executor.address]), [false, REASONS.NONCE_USED]);
-    await viem.assertions.revertWithCustomErrorWithArgs(execute(s, first.intent, first.sig), s.token, "PolicyGated_TransferRejected", [REASONS.NONCE_USED]);
+    await viem.assertions.revertWithCustomErrorWithArgs(execute(s, first.intent, first.sig), s.token, "ERC8473PolicyRejected", [REASONS.NONCE_USED]);
 
     const cancelled = await signIntent(s, alice, { to: bob.account.address, amount: 1n });
     await viem.assertions.emitWithArgs(
@@ -168,7 +168,7 @@ describe("intents: EIP-712 signing and executor settlement", async function () {
       [alice.account.address, cancelled.intent.nonce],
     );
     assert.deepEqual(await s.token.read.canExecute([cancelled.intent, cancelled.sig, s.executor.address]), [false, REASONS.NONCE_USED]);
-    await viem.assertions.revertWithCustomErrorWithArgs(execute(s, cancelled.intent, cancelled.sig), s.token, "PolicyGated_TransferRejected", [REASONS.NONCE_USED]);
+    await viem.assertions.revertWithCustomErrorWithArgs(execute(s, cancelled.intent, cancelled.sig), s.token, "ERC8473PolicyRejected", [REASONS.NONCE_USED]);
   });
 
   it("a failed batch names the failing index and its nested reason; dropping it lets the rest settle", async function () {
@@ -198,7 +198,7 @@ describe("intents: EIP-712 signing and executor settlement", async function () {
     const [index, nested] = failure.args as [bigint, `0x${string}`];
     assert.equal(index, 1n);
     const inner = decodeErrorResult({ abi: s.token.abi, data: nested });
-    assert.equal(inner.errorName, "PolicyGated_TransferRejected");
+    assert.equal(inner.errorName, "ERC8473PolicyRejected");
     assert.deepEqual(inner.args, [REASONS.RECEIVER_NOT_VERIFIED]);
     await viem.assertions.revertWithCustomError(batch(items), s.executor, "IntentExecutor_BatchItemFailed");
     // Atomic: nothing moved, no nonce consumed.

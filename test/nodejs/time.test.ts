@@ -25,7 +25,7 @@ describe("time-based flows", async function () {
   const execute = (s: Stack, intent: Intent, sig: `0x${string}`) =>
     s.executor.write.execute([s.token.address, intent, sig], { account: s.wallets.operator.account });
   const rejected = (s: Stack, call: Promise<unknown>, reason: `0x${string}`) =>
-    viem.assertions.revertWithCustomErrorWithArgs(call, s.token, "PolicyGated_TransferRejected", [reason]);
+    viem.assertions.revertWithCustomErrorWithArgs(call, s.token, "ERC8473PolicyRejected", [reason]);
 
   it("a lockup holds until its unlock second, then releases", async function () {
     const s = await networkHelpers.loadFixture(funded);
@@ -36,12 +36,12 @@ describe("time-based flows", async function () {
     });
 
     await time.increaseTo(unlock - 2);
-    assert.deepEqual(await s.token.read.canTransferWithReason([alice.account.address, bob.account.address, 1n]), [false, REASONS.LOCKED]);
+    assert.deepEqual(await s.token.read.canTransferWithReason([alice.account.address, bob.account.address, 1n]), [false, REASONS.LOCKED_UP]);
     // The standard's account question says the same: she cannot send, and can still be paid.
     assert.equal(await s.token.read.canSend([alice.account.address]), false);
     assert.equal(await s.token.read.canReceive([alice.account.address]), true);
     await time.setNextBlockTimestamp(unlock - 1);
-    await rejected(s, s.token.write.transfer([bob.account.address, 1n], { account: alice.account }), REASONS.LOCKED);
+    await rejected(s, s.token.write.transfer([bob.account.address, 1n], { account: alice.account }), REASONS.LOCKED_UP);
 
     await time.setNextBlockTimestamp(unlock);
     await s.token.write.transfer([bob.account.address, 1n], { account: alice.account });
@@ -63,12 +63,12 @@ describe("time-based flows", async function () {
 
     const atClose = await sign();
     await time.setNextBlockTimestamp(friday + BigInt(WINDOW_CLOSE));
-    await rejected(s, execute(s, atClose.intent, atClose.sig), REASONS.OUTSIDE_SETTLEMENT_WINDOW);
+    await rejected(s, execute(s, atClose.intent, atClose.sig), REASONS.WINDOW_CLOSED);
     assert.equal(await s.rules.windowRule.read.isOpen([s.token.address, friday + DAY + 12n * 3_600n]), false, "Saturday noon");
 
     // The same intent waits out the weekend and settles at Monday's open.
     await time.increaseTo(nextMonday + BigInt(WINDOW_OPEN) - 2n);
-    assert.deepEqual(await s.token.read.canExecute([atClose.intent, atClose.sig, s.executor.address]), [false, REASONS.OUTSIDE_SETTLEMENT_WINDOW]);
+    assert.deepEqual(await s.token.read.canExecute([atClose.intent, atClose.sig, s.executor.address]), [false, REASONS.WINDOW_CLOSED]);
     await time.setNextBlockTimestamp(nextMonday + BigInt(WINDOW_OPEN));
     await execute(s, atClose.intent, atClose.sig);
     assert.equal(await s.token.read.balanceOf([bob.account.address]), 2n);
