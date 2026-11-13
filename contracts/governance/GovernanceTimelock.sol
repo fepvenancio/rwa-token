@@ -85,7 +85,7 @@ contract GovernanceTimelock is TimelockController, IGovernanceTimelock {
   }
 
   /// @inheritdoc TimelockController
-  function getMinDelay() public view override returns (uint256 _minDelay) {
-    _minDelay = _delay;
+  function getMinDelay() public view override returns (uint256 _currentDelay) {
+    _currentDelay = _delay;
   }
 }

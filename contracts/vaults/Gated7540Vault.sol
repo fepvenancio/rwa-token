@@ -141,11 +141,15 @@ contract Gated7540Vault is
   }
 
   /// @inheritdoc IGated7540Vault
+  // The target is SETTLEMENT_LOGIC, an immutable this implementation's constructor creates: no caller chooses it.
+  // aderyn-ignore-next-line(delegate-call-unchecked-address)
   function closePeriod() external {
     _toSettlement();
   }
 
   /// @inheritdoc IGated7540Vault
+  // The target is SETTLEMENT_LOGIC, an immutable this implementation's constructor creates: no caller chooses it.
+  // aderyn-ignore-next-line(delegate-call-unchecked-address)
   function settlePeriod(
     uint256,
     uint256,
@@ -157,6 +161,8 @@ contract Gated7540Vault is
   }
 
   /// @inheritdoc IGated7540Vault
+  // The target is SETTLEMENT_LOGIC, an immutable this implementation's constructor creates: no caller chooses it.
+  // aderyn-ignore-next-line(delegate-call-unchecked-address)
   function rejectDepositRequest(
     address
   ) external {
@@ -164,6 +170,8 @@ contract Gated7540Vault is
   }
 
   /// @inheritdoc IGated7540Vault
+  // The target is SETTLEMENT_LOGIC, an immutable this implementation's constructor creates: no caller chooses it.
+  // aderyn-ignore-next-line(delegate-call-unchecked-address)
   function rejectRedeemRequest(
     address
   ) external {
@@ -171,6 +179,8 @@ contract Gated7540Vault is
   }
 
   /// @inheritdoc IGated7540Vault
+  // The target is SETTLEMENT_LOGIC, an immutable this implementation's constructor creates: no caller chooses it.
+  // aderyn-ignore-next-line(delegate-call-unchecked-address)
   function recoverClaimable(
     address,
     address
@@ -179,6 +189,8 @@ contract Gated7540Vault is
   }
 
   /// @inheritdoc IGated7540Vault
+  // The target is SETTLEMENT_LOGIC, an immutable this implementation's constructor creates: no caller chooses it.
+  // aderyn-ignore-next-line(delegate-call-unchecked-address)
   function recoverRedeemRequest(
     address,
     address
