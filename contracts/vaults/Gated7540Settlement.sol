@@ -8,8 +8,8 @@ import {SafeCast} from '@openzeppelin/contracts/utils/math/SafeCast.sol';
 
 import {Reasons} from 'interfaces/Errors.sol';
 
-import {IGated7540Vault} from 'interfaces/IGated7540Vault.sol';
 import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
+import {IGated7540Vault} from 'interfaces/IGated7540Vault.sol';
 // Needed by the compiler to resolve `@inheritdoc ITemplated`; solhint does not see NatSpec usage.
 // solhint-disable-next-line no-unused-vars
 import {ITemplated} from 'interfaces/ITemplated.sol';

@@ -7,8 +7,8 @@ import {IERC165} from '@openzeppelin/contracts/utils/introspection/IERC165.sol';
 import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
-import {IMinPositionRule} from 'interfaces/IMinPositionRule.sol';
 import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
+import {IMinPositionRule} from 'interfaces/IMinPositionRule.sol';
 
 import {MinPositionRule} from 'contracts/hooks/rules/MinPositionRule.sol';
 import {Helpers} from 'contracts/test/Helpers.sol';
@@ -225,7 +225,8 @@ contract MinPositionRuleUnit_Check is MinPositionRuleUnitTest {
 
   /// @dev EXECUTED is a holder-driven transfer, and its context carries the reference and deadline after the balances
   function test_WhenTheKindIsExecuted_ItDecidesTheSameAndReadsTheLongerExtra() external view {
-    IERC8473Policy.TransferContext memory _context = _ctx(IERC8473Policy.TransferKind.EXECUTED, _from, _to, 1, 500 ether, 0);
+    IERC8473Policy.TransferContext memory _context =
+      _ctx(IERC8473Policy.TransferKind.EXECUTED, _from, _to, 1, 500 ether, 0);
     _context.data = abi.encode(uint256(500 ether), uint256(0), keccak256('ref'), block.timestamp + 1 days);
     assertEq(_rule.check(_context), Reasons.BELOW_MIN_POSITION);
     _context.amount = _MIN;
@@ -242,10 +243,12 @@ contract MinPositionRuleUnit_Check is MinPositionRuleUnitTest {
 
   function test_WhenAHolderBurns_OnlyTheRemainderIsJudged() external view {
     assertEq(
-      _rule.check(_ctx(IERC8473Policy.TransferKind.BURN, _from, address(0), 500 ether, 500 ether, 0)), Reasons.TRANSFER_OK
+      _rule.check(_ctx(IERC8473Policy.TransferKind.BURN, _from, address(0), 500 ether, 500 ether, 0)),
+      Reasons.TRANSFER_OK
     );
     assertEq(
-      _rule.check(_ctx(IERC8473Policy.TransferKind.BURN, _from, address(0), 400 ether, 500 ether, 0)), Reasons.TRANSFER_OK
+      _rule.check(_ctx(IERC8473Policy.TransferKind.BURN, _from, address(0), 400 ether, 500 ether, 0)),
+      Reasons.TRANSFER_OK
     );
     assertEq(
       _rule.check(_ctx(IERC8473Policy.TransferKind.BURN, _from, address(0), 500 ether - 1, 500 ether, 0)),
@@ -299,7 +302,8 @@ contract MinPositionRuleUnit_Exemptions is MinPositionRuleUnitTest {
   function test_WhenForced_BothSidesAreExempt() external view {
     assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.FORCED, _from, _to, 1, 5, 0)), Reasons.TRANSFER_OK);
     assertEq(
-      _rule.check(_ctx(IERC8473Policy.TransferKind.FORCED, _from, _to, 500 ether - 1, 500 ether, 0)), Reasons.TRANSFER_OK
+      _rule.check(_ctx(IERC8473Policy.TransferKind.FORCED, _from, _to, 500 ether - 1, 500 ether, 0)),
+      Reasons.TRANSFER_OK
     );
   }
 
@@ -354,8 +358,12 @@ contract MinPositionRuleUnit_Exemptions is MinPositionRuleUnitTest {
 
   /// @dev The 7540 escrow: a redeem request moves shares to the token below the minimum, and the fulfilment burns them
   function test_WhenTheTokenItselfReceivesOrSends_ItIsExempt() external view {
-    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.TRANSFER, _from, _token, 1, 500 ether, 0)), Reasons.TRANSFER_OK);
-    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.TRANSFER, _token, _to, _MIN, _MIN + 5, 0)), Reasons.TRANSFER_OK);
+    assertEq(
+      _rule.check(_ctx(IERC8473Policy.TransferKind.TRANSFER, _from, _token, 1, 500 ether, 0)), Reasons.TRANSFER_OK
+    );
+    assertEq(
+      _rule.check(_ctx(IERC8473Policy.TransferKind.TRANSFER, _token, _to, _MIN, _MIN + 5, 0)), Reasons.TRANSFER_OK
+    );
     assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.BURN, _token, address(0), 7, 10, 0)), Reasons.TRANSFER_OK);
   }
 

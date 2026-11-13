@@ -6,8 +6,8 @@ import {ERC165} from '@openzeppelin/contracts/utils/introspection/ERC165.sol';
 import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
-import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
+import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 
 /**
  * @title BaseRule
@@ -41,8 +41,8 @@ abstract contract BaseRule is ERC165, IComplianceRule {
   // Default for rules that keep no state derived from a token's movements: nothing to confirm.
   // aderyn-ignore-next-line(empty-block)
   function onInstall(
-    address _token,
-    address _previousPolicy
+    address,
+    address
   ) external virtual {}
 
   /// @inheritdoc IComplianceRule

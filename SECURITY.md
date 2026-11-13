@@ -192,29 +192,45 @@ Further limits recorded during review:
   exit-only at once) and `blockSubject`. A holder whose credential lapsed, or whose attester was killed, can still send,
   burn and redeem and cannot receive; only a blocked or unknown holder cannot send. That is deliberate (a holder must be
   able to leave), so a lapse does not stop funds already held: the address freeze, the lockup and `forcedTransfer` do.
-  An enforcement burn (operator holds `BURNER_ROLE`) passes the sender check, so the issuer can burn from a blocked
-  holder. The council attests `CredentialRule`, whose codehash covers the registry's address and not its code, so it
+  An enforcement burn (`burn`, which the policy sees as FORCED) is not judged on the sender, so the issuer can burn
+  from a blocked holder. The council attests `CredentialRule`, whose codehash covers the registry's address and not its code, so it
   reads the registry (code, admin, attester list) first. A core may read another core's registry
   (`credentials: "external"` in its profile): that registry's admin then decides who does KYC for the issuer's tokens, and
   its guardian can block their investors with no delay. The deployment names both, and the post-deploy check refuses the
   stack unless they hold those roles and neither the core's named accounts nor its timelocks hold another role there; it
   does not stop the admin granting a role later. Entities are not modelled: one wallet is one holder. Pinned by `CredentialRegistry.t.sol`,
   `CredentialRule.t.sol`, `test/nodejs/credentials.test.ts` and, for an external registry, `test/nodejs/products.test.ts`.
-- **A pause blocks mint and burn as well.** Only FORCED movements pass: `forcedTransfer`, and the 7540 vault's `recoverRedeemRequest` and `recoverClaimable`. Enforcement during a pause is `forcedTransfer`
-  to a quarantine account (holding an active credential the token's policy accepts, never address-frozen: the freeze on a receiver applies to FORCED), and the
-  burn waits for the unpause. The ERC-3643 reference token differs: its agents can mint, burn and force while paused
+- **A pause blocks mint as well.** Only FORCED movements pass: `forcedTransfer`, the issuer's `burn`, and the 7540 vault's `recoverRedeemRequest` and `recoverClaimable`. Enforcement during a pause is `forcedTransfer`
+  to a quarantine account (holding an active credential the token's policy accepts, never address-frozen: the freeze on a receiver applies to FORCED), or
+  `burn`. So a stolen `BURNER_ROLE` key can destroy holdings while the token is paused, and the pause is no defence against it: revoke the role. The ERC-3643 reference token's agents can also mint while paused
   (checked 2026-10-23; the ERC-3643 text itself was not checked).
 - **`canTransfer` can say yes where the write reverts.** ERC-7943 forbids `canTransfer` to fail on a balance check, so an
-  amount above the balance reads true when the hook accepts it and no frozen amount is in the way (nothing frozen, or a
-  burn by a sender that holds `BURNER_ROLE`), and the write reverts with the base's `ERC20InsufficientBalance`. While
+  amount above the balance reads true when the hook accepts it and nothing is frozen on the sender, and the write reverts with the base's `ERC20InsufficientBalance`. While
   part of the balance is frozen, an amount above the unfrozen balance reads false: the standard asks `canTransfer` to
   validate the unfrozen amount, but does not say which rule wins above the balance, and this follows the draft ERC's
   reference, so a one-unit freeze flips the answer. `canTransferWithReason` and `canExecute` make no exception and say
   no with `INSUFFICIENT_UNFROZEN`. An integrator that wants to know whether a movement will succeed should call those.
-- **A `BURNER_ROLE` holder's own burns are enforcement burns.** The rules ask the operator, not the intent: a burner who
-  redeems its own shares through a vault passes its own lockup and minimum (a probe showed a locked holder redeeming in
-  full). It does not pass its own frozen tokens (the vault's `maxRedeem` stops at the unfrozen balance) or its own address
-  freeze. Burner accounts are issuer service accounts; do not also use one as an investor.
+- **An enforcement burn is the `burn` function, not the burner's account.** `burn` reaches the policy as FORCED, and a
+  holder's own burn (a vault redemption) as BURN, whoever the holder is: no check reads the operator's role. A burner
+  that also invests redeems under its own lockup, minimum and freeze like anyone else (until 2026-11-13 it passed its
+  own lockup and minimum). `burn` takes tokens from an address-frozen or locked account and during a pause, as
+  `forcedTransfer` does (owner decision of 2026-11-13, replacing RD4).
+- **A policy that cannot be asked rejects, and its revert data is lost.** The token asks its policy through one bounded
+  static call that copies one word. A policy that reverts, runs out of gas, answers fewer than 32 bytes or has no code
+  reads `CHECK_UNAVAILABLE`: `canSend`, `canReceive` and `canTransfer` return false and never revert, and a movement
+  reverts with `ERC8473PolicyRejected(CHECK_UNAVAILABLE)`, not with whatever the policy reverted with. A rule that
+  reverts inside the hook therefore shows up as that one code; the trace has the cause.
+- **ERC-8473 (uRWA Policy) is a draft, and two readings of it are ours.** The tokens and the hook take its names, ids
+  and requirements as its pull request stood on 2026-11-13; a change to the draft can move them. `wantsAfterTransfer()`
+  takes no token and may not read the caller, so the shared hook answers true for every caller and every movement pays
+  the `afterTransfer` call, which returns at once for a token none of whose rules wants it. The draft says a policy keeps
+  no movement-derived state from an earlier installation; the fund's investor count is kept on purpose, and
+  `FundHoldersRule.onInstall` refuses to go live unless the class has no supply or the previous policy listed the rule.
+  A hook replacement that lists the rule on both sides therefore keeps the count; one that dropped it in between cannot
+  bring it back without emptying the class.
+- **`installPolicy` runs the new policy's code.** The token calls the policy's `onInstall` while holding its reentrancy
+  guard, so the policy cannot move tokens or install another policy from there, and a revert undoes the installation.
+  The policy is attested and the call is the timelock's.
 - **A frozen remainder below the minimum makes `maxRedeem` overstate.** `maxRedeem` is the unfrozen balance, and the minimum
   judges the whole balance. A holder whose frozen amount is above zero and below the minimum cannot redeem all of
   `maxRedeem`: the frozen remainder would be left behind and the redemption reverts with `BELOW_MIN_POSITION`. The holder
@@ -370,7 +386,7 @@ Slither 0.11.5 runs as a CI gate with 0 findings, on the contracts that ship: `n
 | Detector | Reason |
 |---|---|
 | `naming-convention` | Wonderland style uses `_camelCase` for parameters and internals |
-| `assembly` | ERC-7201 storage accessors, and two bounded static calls that copy a fixed number of words and decode nothing: `ERC4626Adapter` `_ask` (one word) and `Gated4626Vault` `_hasAdapters` (two) |
+| `assembly` | ERC-7201 storage accessors, and three bounded static calls that copy a fixed number of words and decode nothing: `PolicyGatedCoreUpgradeable` `_ask` (one word, every policy check), `ERC4626Adapter` `_ask` (one word) and `Gated4626Vault` `_hasAdapters` (two) |
 | `timestamp` | Intent deadlines and `validAfter`, lockups and settlement windows are time-based by specification |
 | `calls-loop` | The hook calls at most 16 attested rules, the fund at most 32 classes and the portfolio its attested adapters; a batch (`IntentExecutor.executeBatch`, `GuardedAccount.execute`) is the caller's own and atomic |
 
@@ -447,7 +463,7 @@ Inline acknowledgements (reason on the line above each `aderyn-ignore`):
 | `literal-instead-of-constant` | `SettlementWindowRule` calendar arithmetic | Calendar constants | Window tests |
 | `empty-block`, `modifier-used-only-once` | `BaseRule.after_`, `__IntentSettled_init`, `Fund.onlyRule`, the two empty `catch` blocks of `Fund._listsInstalledRule` | By design; in the fund views a token or a hook that fails is a broken class, and the answer is `false` | `FundUnit_ClassIntegrity` |
 | `unsafe-casting` | `ComplianceHook._setRules`, `HolderRestrictionRule.setLockup`, `Portfolio._addAllocation`, `_subtractAllocation` | Each narrowing follows an explicit bound: at most 16 rules and a 16-bit mask; a range check against 64 bits; an allocation at most the 120-bit cap | Hook tests; `HolderRestrictionRuleUnit_SetLockup`; `testFuzz_ARiskAlwaysEqualsTheSumOfItsAdapters` |
-| `unused-error` | `IERC7943Fungible`, `IERC7943NonFungible` | The standard's `ERC7943CannotSend`, `ERC7943CannotReceive` and `ERC7943CannotTransfer` are part of the interface the token inherits; the token reverts with `PolicyGated_TransferRejected` and `ERC7943InsufficientUnfrozenBalance` instead | n/a |
+| `unused-error` | `IERC7943Fungible`, `IERC7943NonFungible` | The standard's `ERC7943CannotSend`, `ERC7943CannotReceive` and `ERC7943CannotTransfer` are part of the interface the token inherits; the token reverts with `ERC8473PolicyRejected` and `ERC7943InsufficientUnfrozenBalance` instead | n/a |
 
 solhint (Wonderland config, `--max-warnings 0`):
 - `style-guide-casing` is disabled on getters of `UPPER_SNAKE` constants and immutables and on OZ-style `__X_init`

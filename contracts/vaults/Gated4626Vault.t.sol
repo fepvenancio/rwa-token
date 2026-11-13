@@ -15,12 +15,12 @@ import {Reasons} from 'interfaces/Errors.sol';
 import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IERC8473} from 'interfaces/IERC8473.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IGated4626Vault} from 'interfaces/IGated4626Vault.sol';
 import {IGatedVaultBase} from 'interfaces/IGatedVaultBase.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
-import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {ITemplated} from 'interfaces/ITemplated.sol';
 
@@ -128,9 +128,7 @@ contract Gated4626VaultUnitTest is Helpers {
       amount: _amount,
       operator: _operator,
       kind: _kind,
-      data: abi.encode(
-        _from == address(0) ? 0 : _vault.balanceOf(_from), _to == address(0) ? 0 : _vault.balanceOf(_to)
-      )
+      data: abi.encode(_from == address(0) ? 0 : _vault.balanceOf(_from), _to == address(0) ? 0 : _vault.balanceOf(_to))
     });
   }
 }
@@ -511,9 +509,7 @@ contract Gated4626VaultIntegration_MinPosition is Gated4626VaultIntegrationTest 
 
   function test_WhenADepositWouldLeaveDust_ItRevertsWithTheReasonAndTheMinimumDepositWorks() external {
     _enableMinPosition();
-    vm.expectRevert(
-      abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, Reasons.BELOW_MIN_POSITION)
-    );
+    vm.expectRevert(abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, Reasons.BELOW_MIN_POSITION));
     vm.prank(_alice);
     _vault.deposit(_MIN_ASSETS - 1, _alice);
 
@@ -537,9 +533,7 @@ contract Gated4626VaultIntegration_MinPosition is Gated4626VaultIntegrationTest 
   function test_WhenARedemptionWouldLeaveDust_ItRevertsWithTheReason() external {
     _enableMinPosition();
     _deposit(_alice, 2 * _MIN_ASSETS);
-    vm.expectRevert(
-      abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, Reasons.BELOW_MIN_POSITION)
-    );
+    vm.expectRevert(abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, Reasons.BELOW_MIN_POSITION));
     vm.prank(_alice);
     _vault.redeem(_MIN_SHARES + 1, _alice, _alice);
 
@@ -558,9 +552,7 @@ contract Gated4626VaultIntegration_MinPosition is Gated4626VaultIntegrationTest 
 
     uint256 _max = _vault.maxRedeem(_alice);
     assertEq(_max, _shares - 5);
-    vm.expectRevert(
-      abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, Reasons.BELOW_MIN_POSITION)
-    );
+    vm.expectRevert(abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, Reasons.BELOW_MIN_POSITION));
     vm.prank(_alice);
     _vault.redeem(_max, _alice, _alice);
 

@@ -7,8 +7,8 @@ import {IERC165} from '@openzeppelin/contracts/utils/introspection/IERC165.sol';
 import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
-import {IHolderRestrictionRule} from 'interfaces/IHolderRestrictionRule.sol';
 import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
+import {IHolderRestrictionRule} from 'interfaces/IHolderRestrictionRule.sol';
 
 import {HolderRestrictionRule} from 'contracts/hooks/rules/HolderRestrictionRule.sol';
 import {Helpers} from 'contracts/test/Helpers.sol';

@@ -4,8 +4,8 @@ pragma solidity ^0.8.28;
 import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
-import {IExecutedOnlyRule} from 'interfaces/IExecutedOnlyRule.sol';
 import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
+import {IExecutedOnlyRule} from 'interfaces/IExecutedOnlyRule.sol';
 
 import {BaseRule} from 'contracts/hooks/BaseRule.sol';
 

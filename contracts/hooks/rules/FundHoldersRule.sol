@@ -7,9 +7,9 @@ import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IFund} from 'interfaces/IFund.sol';
 import {IFundHoldersRule} from 'interfaces/IFundHoldersRule.sol';
-import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 
 import {BaseRule} from 'contracts/hooks/BaseRule.sol';
 
@@ -96,8 +96,8 @@ contract FundHoldersRule is BaseRule, IFundHoldersRule {
     // Not a new investor: nothing to count, or the receiver is already counted or never counted. FORCED is exempt from
     // the cap and still counted in `after_`. The class itself is the 7540 escrow.
     if (
-      _ctx.amount == 0 || _ctx.from == _ctx.to || _ctx.to == address(0) || _ctx.kind == IERC8473Policy.TransferKind.FORCED
-        || _ctx.to == _ctx.token || _exempt || _held != 0
+      _ctx.amount == 0 || _ctx.from == _ctx.to || _ctx.to == address(0)
+        || _ctx.kind == IERC8473Policy.TransferKind.FORCED || _ctx.to == _ctx.token || _exempt || _held != 0
     ) return Reasons.TRANSFER_OK;
 
     if (_cap == 0) return Reasons.MAX_HOLDERS;

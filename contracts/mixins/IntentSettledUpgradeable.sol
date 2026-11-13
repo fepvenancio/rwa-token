@@ -55,7 +55,9 @@ abstract contract IntentSettledUpgradeable is PolicyGatedERC20Upgradeable, ITran
     }
 
     _getIntentSettledStorage().nonces[_intent.from][_intent.nonce] = true;
-    _moveAs(_intent.from, _intent.to, _intent.amount, IERC8473Policy.TransferKind.EXECUTED, _intent.ref, _intent.deadline);
+    _moveAs(
+      _intent.from, _intent.to, _intent.amount, IERC8473Policy.TransferKind.EXECUTED, _intent.ref, _intent.deadline
+    );
 
     // Emitted after the hook's afterTransfer: re-entry is blocked by `_move`'s guard and the hook is attested.
     // slither-disable-next-line reentrancy-events

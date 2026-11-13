@@ -84,7 +84,8 @@ contract MinPositionRuleHalmos is Test {
   ) public {
     _rule.setMinPosition(_token, _min);
     assert(
-      _rule.check(_context(IERC8473Policy.TransferKind.FORCED, _fromBalance, _toBalance, _amount)) == Reasons.TRANSFER_OK
+      _rule.check(_context(IERC8473Policy.TransferKind.FORCED, _fromBalance, _toBalance, _amount))
+        == Reasons.TRANSFER_OK
     );
   }
 

@@ -3,11 +3,11 @@ pragma solidity ^0.8.28;
 
 import {Reasons} from 'interfaces/Errors.sol';
 
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IGatedVaultBase} from 'interfaces/IGatedVaultBase.sol';
 // Needed by the compiler to resolve `@inheritdoc IPolicyGated`; solhint does not see NatSpec usage.
 // solhint-disable-next-line no-unused-vars
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
-import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 
 import {PolicyGatedERC20Upgradeable} from 'contracts/base/PolicyGatedERC20Upgradeable.sol';
 
