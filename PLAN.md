@@ -4077,6 +4077,81 @@ Each step ends with its check; the next does not start until it passes.
 - Anything new: this is a port, and a difference in behaviour between the lines found on the way is reported, not
   settled here.
 
+## ERC-8473 conformance (plan, 2026-11-13; nothing built)
+
+Branch `erc8473-conformance`, cut from `paris` (`3010880`). This section is the plan the brief's rule 3 asks for before a change across files. No contract, test or page changes until the owner has answered the decisions below.
+
+### Goal
+
+Every token template is an ERC-8473 token and `ComplianceHook` is an ERC-8473 policy, as the draft stands in its pull request (head `cf6e212`, read on 2026-11-13). Done means: the selectors and ERC-165 ids in the draft's table are the ones `InterfaceFreeze.t.sol` pins, the draft's token, check, installation and policy requirements each have a test that fails without the change, and every gate passes.
+
+### What already conforms
+
+`TRANSFER_OK` is `keccak256('TRANSFER_OK')`; the five kinds and their encoding; the context's field types and order; checks made by `STATICCALL`; the policy address read once per movement; check, then balances, then the transfer event, then the callback; the reentrancy guard on the movement path; every movement refused with no policy; `Frozen` before `Transfer` on a forced move; `afterTransfer` accepted only from the token the context names; `canExecute` building the context as the execution does; no installation from a constructor; `canTransfer` false when both accounts are zero; escrowed shares returned as a `TRANSFER`.
+
+### Gaps and the change for each
+
+| # | Draft requirement | Today | Change |
+|---|---|---|---|
+| G1 | `checkTransfer`, `wantsAfterTransfer` on the policy; `policy()` and `PolicyChanged` on the token | `beforeTransfer`, `wantsAfter`, `policyHook()`, `PolicyHookChanged` | `IPolicyHook` gives way to `IERC8473Policy`, written here with the draft's ABI. `IPolicyGatedCore` inherits `IERC8473`: `policy()`, `setPolicy(newPolicy, data)`, `PolicyChanged`. The context's `id` and `extra` become `tokenId` and `data`, which moves no selector. `IComplianceRule` keeps `check`, `after_` and `wantsAfter`: it is the hook's own boundary, outside the ERC |
+| G2 | Ids `0x9cb56a99` (policy) and `0x0505c8c9` (token); a token refuses a policy that does not answer its id | Other ids; attestation only | Both answer the draft's ids. `_setPolicy` asks `supportsInterface(0x9cb56a99)` beside the attestation and the registry match |
+| G3 | The token SHOULD revert with `ERC8473PolicyRejected(reason)` | `PolicyGated_TransferRejected(reason)` | Adopt the draft's error (decision D5). The brief's rule 7 is amended to name it |
+| G4 | A movement that takes tokens without the holder directing it is `FORCED`; for `BURN` neither the token's own checks nor the policy may read `operator` | `burn(from, amount)` by `BURNER_ROLE` is labelled `BURN`; the base and three rules exempt it by asking whether `operator` holds the role | `burn` announces `FORCED` with `to` zero, the case section 5 of the brief reserved. `_takesFrozenTokens` becomes `kind == FORCED`. `CredentialRule`, `MinPositionRule` and `HolderRestrictionRule` drop their `hasRole(BURNER_ROLE, operator)` reads: their `FORCED` exemptions already cover it. `canTransfer`'s burner exception goes. Two behaviours change, see D2 |
+| G5 | The token calls `onInstall(token, previous, data)` on every installation, after `policy()` returns the new policy; a revert undoes the installation; no movement or installation may begin while it runs | No such call; the initialiser calls `hook.setRules` | `_setPolicy` sets the pointer, emits, then calls `onInstall`, under the reentrancy guard. `ComplianceHook.onInstall` accepts only the token itself. Non-empty `data` is the ordered rule list, installed as `setRules` does today, so the initialiser's separate `setRules` call goes. Empty `data` keeps the list the hook already holds for the token |
+| G6 | On every installation a policy sets all state it derives from the token's movements, or reverts; it keeps none from an earlier installation | The fund's investor count is kept across hook replacements on purpose | See D3. The hook's `onInstall` calls a new `onInstall(token, previousPolicy)` on each rule in the list; `BaseRule`'s does nothing. `FundHoldersRule`'s accepts when the class's supply is zero, or when the previous policy listed this same rule for the token, so no movement went unseen; otherwise it reverts |
+| G7 | `canSend`, `canReceive` and `canTransfer` never revert: a policy that reverts, runs out of gas, answers fewer than 32 bytes or has no code reads false. At most 32 bytes copied | High-level calls, which revert in each of those cases | One private helper in the core makes the bounded static call and returns the reason, or a rejecting `CHECK_UNAVAILABLE` (appended reason code). The views and the movement path both use it; the movement path reverts on anything but `TRANSFER_OK`, as today |
+| G8 | `canSend(address(0))` and `canReceive(address(0))` are true without calling the policy | The hook is asked | `_accountAllowed` returns true for the zero address first, before the pause |
+| G9 | In `canTransfer` the operator is `from`, zero for a mint | The caller, for a mint | `_canTransfer` passes `_from` always. After G4 no shipped rule reads the operator of a mint |
+| G10 | `wantsAfterTransfer` does not depend on the caller | The shared hook reads the calling token's rule list | See D4 |
+| G11 | For every kind but `FORCED`, `checkTransfer` rejects when `checkSend(from)` or `checkReceive(to)` rejects | Fuzzed for a plain transfer only, one way | Not known to be a gap. `RuleSetIntegration.t.sol` gains the same fuzz for `MINT`, `BURN` and `EXECUTED`, over every shipped rule list. Whatever it finds is fixed in the rule, and reported before it is fixed |
+| G12 | Recommended reason names: `SENDER_NOT_ELIGIBLE`, `LOCKED_UP`, `WINDOW_CLOSED`, `KIND_NOT_ALLOWED`, `CHECK_UNAVAILABLE` | `SENDER_NOT_VERIFIED`, `LOCKED`, `OUTSIDE_SETTLEMENT_WINDOW`, `TRANSFER_NOT_EXECUTED` | See D6. Optional in the draft |
+
+### Decisions for the owner
+
+- **D1. Reopen the frozen interfaces.** G1, G2, G3 and G5 change `contracts/interfaces/`: `IPolicyHook` (replaced), `IPolicyGatedCore`, `IComplianceHook`, `IComplianceRule` (one function added), `Errors.sol` (one code appended). Every id that includes a changed member moves and `InterfaceFreeze.t.sol` is re-pinned. Rule 4 needs the instruction.
+- **D2. Two behaviours change when an enforcement burn becomes `FORCED`.** Today a burner's burn is refused while the token is paused and refused from an address `HolderRestrictionRule` has frozen, where the documented route is `forcedTransfer` to a quarantine account. As `FORCED` it passes both, like `forcedTransfer` does. Option A: accept both, so every enforcement action behaves alike. Option B: keep the frozen-sender refusal by having `HolderRestrictionRule` refuse a `FORCED` movement to zero from a frozen address. I recommend A: one rule for all enforcement, and no reason a regulator's burn should fail where its transfer succeeds.
+- **D3. The fund's count across installations.** The draft's policy requirement 16 says a policy must not keep movement-derived state from an earlier installation, and its rationale says a policy may "rebuild or verify" that state. A count of investors cannot be rebuilt on-chain, so G6 verifies continuity and refuses otherwise. That follows the rationale and not the letter of requirement 16. As the draft's author you can make the two agree; I recommend wording requirement 16 to allow state that the policy verifies was observed without a gap.
+- **D4. `wantsAfterTransfer()` on a shared policy.** It takes no argument and may not read the caller, so a policy serving many tokens cannot answer for one of them. Option A: amend the draft to `wantsAfterTransfer(address token)`, which moves the policy's id. Option B: `ComplianceHook` answers true always and its `afterTransfer` returns early for a token with no after-rules, at one extra call a movement. I recommend A in the draft, and B here until the draft settles, since B conforms to both texts.
+- **D5. The rejection error.** Adopt `ERC8473PolicyRejected` and drop `PolicyGated_TransferRejected`, or keep ours, which the draft allows. I recommend adopting it: 13 test files, 11 TypeScript files and 43 pages name the old one, and they are touched by G1 anyway.
+- **D6. Reason names.** Renaming changes the `bytes32` values, which the brief says are never renamed. Nothing is deployed, so this is the cheapest moment. I recommend adopting the draft's five names and keeping every other code as it is.
+- **D7. Where this lands.** The branch is cut from `paris`, the build being deployed. If `main` stays the Cancun build, the same commits apply there, apart from the size step below.
+
+### Size comes first
+
+G5 and G7 add code to the shared core, which every template inherits. `Gated4626Vault` has 271 bytes left on the Paris build. Step 1 therefore measures what the core change adds, on a throwaway commit. If the 4626 does not fit, its fee and rate-limit accounting move to a second contract reached by delegatecall, as `Gated7540Settlement` already is, in its own change and before anything else here. The design is not cut to fit.
+
+### Steps
+
+Each step ends with its check; the next does not start until it passes.
+
+1. Measure the core change's bytes on every template. Check: a table of sizes before and after; the 4626 decision above is made on it.
+2. Interfaces (after D1): `IERC8473Policy.sol`, `IERC8473.sol`, `IPolicyGatedCore`, `IComplianceHook`, `IComplianceRule`, `Errors.sol`. Check: `InterfaceFreeze.t.sol` fails on the old pins and passes on the draft's selectors and ids, written into the test from the draft's table by hand.
+3. Tests, written first and shown failing: one per requirement in the gap table, in `PolicyGatedERC20Upgradeable.t.sol`, `Gated721.t.sol`, `ComplianceHook.t.sol` and `RuleSetIntegration.t.sol`, with `contracts/test/` mocks for a policy that reverts, answers short, has no code and re-enters during `onInstall`. The G11 fuzz is part of this step and its result is reported before step 5.
+4. Core, fungible base and `Gated721`: G1 to G5 and G7 to G9. Check: the step 3 token tests pass; the whole Solidity suite passes.
+5. `ComplianceHook`, `BaseRule` and the rules: G4's rule side, G5, G6, G10, and what G11 found. Check: the step 3 policy tests pass.
+6. `ProxyDeployer` (the init data now carries the rule list through `onInstall`), the Ignition modules, the post-deploy check and `test/nodejs`. Check: `npx hardhat test`, both runners.
+7. The brief (sections 4, 5 and 6, rules 7 and 14), `README.md`, `SECURITY.md`, the pages and their Markdown copies. Check: no page names a member that no longer exists (`grep` for the old names returns nothing outside history sections).
+8. Gates: format, lint, typecheck, Slither, Aderyn, Halmos, `validate:upgrades`, `verify:reproducible`, the size test.
+
+### Reach, measured on `3010880`
+
+| Name | Contracts | Solidity tests | TypeScript | Docs and brief |
+|---|---|---|---|---|
+| `IPolicyHook` | 21 | 17 | 0 | 10 |
+| `policyHook` | 10 | 11 | 3 | 14 |
+| `wantsAfter()` | 8 | 10 | 0 | 23 |
+| `beforeTransfer` | 4 | 7 | 0 | 18 |
+| `PolicyGated_TransferRejected` | 10 | 13 | 11 | 43 |
+| `extra` | 5 | 15 | 0 | 1 |
+
+The counts are files. The read of whether the operator holds the burner role is in 5 contract files.
+
+### Not covered by this plan
+
+- The draft's reference tests are not ported: they are written against its example token. Step 3 writes the stack's own.
+- An ERC-1155 template, and so the draft's batch rule.
+- An adapter that presents an ERC-3643 compliance contract as a policy.
+
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
 2. Credential layer: none left. On 2026-10-30 the owner confirmed decisions 11, 12, 13, 15, 16 and 17 as built (17 at the measured +8,179 gas on a transfer). Decision 14 is moot, since `IdentityRule` was removed in the cleanup. Decisions 8 and 9 are recorded in the credential section's table.
