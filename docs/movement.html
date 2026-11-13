@@ -30,7 +30,7 @@
     <span class="fact">one path: <b>_move</b> in the base</span>
     <span class="fact"><b>5</b> kinds of movement</span>
     <span class="fact">up to <b>16</b> rules per token, first no wins</span>
-    <span class="fact"><b>28</b> reason codes in Errors.sol</span>
+    <span class="fact"><b>29</b> reason codes in Errors.sol</span>
   </div>
 </header>
 
@@ -60,11 +60,11 @@
   <div class="prose wrap-any">
     <h2>The path of one movement</h2>
     <p>OpenZeppelin's ERC-20 code calls <code>_update(from, to, value)</code> for each balance change. The base overrides it to call <code>_move</code>, and <code>_move</code> is the one place that calls OpenZeppelin's own <code>_update</code>, the code that writes the balances. No fungible template overrides <code>_move</code>, so every route reaches these steps in this order.</p>
-    <p>The NFT template, <a href="contracts/Gated721.html"><code>Gated721</code></a>, has its own path in the same order: ERC-721's existence and approval checks, then in its own <code>_move</code> the pause, the freeze of that item, the same hook, the move and <code>afterTransfer</code>. On a transfer, ERC-721 checks that <code>from</code> is the owner after that. Its context has the token id in <code>id</code> and 1 as <code>amount</code>, and <code>extra</code> holds how many items each side held. The rest of this page follows the fungible path.</p>
+    <p>The NFT template, <a href="contracts/Gated721.html"><code>Gated721</code></a>, has its own path in the same order: ERC-721's existence and approval checks, then in its own <code>_move</code> the pause, the freeze of that item, the same hook, the move and <code>afterTransfer</code>. On a transfer, ERC-721 checks that <code>from</code> is the owner after that. Its context has the token id in <code>tokenId</code> and 1 as <code>amount</code>, and <code>data</code> holds how many items each side held. The rest of this page follows the fungible path.</p>
   </div>
   <figure>
     <div class="fig-scroll">
-      <svg class="d" viewBox="0 0 780 762" role="img" aria-label="Three routes lead into _move. _update infers the kind from the addresses and serves transfer, mint, burn and the vault calls. _moveAs announces FORCED or EXECUTED and serves forcedTransfer, executeTransfer and recoverRedeemRequest. _mintAs announces FORCED and serves recoverClaimable. Inside _move: 1, take the reentrancy guard. 2, build the context with the balances before the move. 3, read the hook address once. 4, if paused and the kind is not FORCED, revert with PolicyGated_TransferRejected(PAUSED). 5, if the amount is above what the sender can move, revert with ERC7943InsufficientUnfrozenBalance, or with ERC20InsufficientBalance above the whole balance. 6, if no hook is installed, revert with PolicyGated_TransferRejected(NO_HOOK). 7, the hook asks the token's rules in order; a reason other than TRANSFER_OK reverts with PolicyGated_TransferRejected(reason). 8, OpenZeppelin's _update moves the balances and emits Transfer. 9, if the hook wants it, afterTransfer runs after_ on the rules that asked. 10, release the guard.">
+      <svg class="d" viewBox="0 0 780 762" role="img" aria-label="Three functions lead into _move. _update infers the kind from the addresses and serves transfer, mint and the vault calls. _moveAs announces FORCED or EXECUTED and serves forcedTransfer, executeTransfer and recoverRedeemRequest. _mintAs announces FORCED and serves recoverClaimable. The burner's burn calls _move itself, as FORCED. Inside _move: 1, take the reentrancy guard. 2, build the context with the balances before the move. 3, read the hook address once. 4, if paused and the kind is not FORCED, revert with ERC8473PolicyRejected(PAUSED). 5, if the amount is above what the sender can move, revert with ERC7943InsufficientUnfrozenBalance, or with ERC20InsufficientBalance above the whole balance. 6, if no hook is installed, revert with ERC8473PolicyRejected(NO_HOOK). 7, the hook asks the token's rules in order; a reason other than TRANSFER_OK reverts with ERC8473PolicyRejected(reason). 8, OpenZeppelin's _update moves the balances and emits Transfer. 9, if the hook's wantsAfterTransfer() is true, afterTransfer runs after_ on the rules that asked. 10, release the guard.">
         <defs>
           <marker id="mv-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
           <marker id="mv-arrow-rej" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="rej"/></marker>
@@ -72,7 +72,7 @@
         <rect class="act" x="20" y="14" width="236" height="66" rx="8"/>
         <text x="32" y="34" class="mono sm bold">_update(from, to, value)</text>
         <text x="32" y="52" class="m sm">kind inferred from the addresses</text>
-        <text x="32" y="68" class="m sm">transfer, mint, burn, vault calls</text>
+        <text x="32" y="68" class="m sm">transfer, mint, vault calls</text>
         <rect class="act" x="272" y="14" width="236" height="66" rx="8"/>
         <text x="284" y="34" class="mono sm bold">_moveAs(…, kind, ref, deadline)</text>
         <text x="284" y="52" class="m sm">kind announced: FORCED, EXECUTED</text>
@@ -87,6 +87,7 @@
 
         <rect class="frame" x="12" y="108" width="756" height="642" rx="10"/>
         <text x="30" y="130" class="mono bold">_move(from, to, value, kind, ref, deadline)</text>
+        <text x="490" y="130" class="m sm">the burner's burn calls it, as FORCED</text>
 
         <rect class="b2" x="30" y="142" width="420" height="34" rx="8"/>
         <text x="46" y="164">1. Take the reentrancy guard</text>
@@ -105,12 +106,12 @@
         <line class="ln-rej" x1="450" y1="321" x2="486" y2="321" marker-end="url(#mv-arrow-rej)"/>
         <text x="458" y="314" class="sm m">yes</text>
         <rect class="rejbox" x="490" y="304" width="270" height="34" rx="6"/>
-        <text x="502" y="325" class="mono sm rej">PolicyGated_TransferRejected(PAUSED)</text>
+        <text x="502" y="325" class="mono sm rej">ERC8473PolicyRejected(PAUSED)</text>
         <line class="ln" x1="240" y1="338" x2="240" y2="362" marker-end="url(#mv-arrow)"/>
 
         <rect class="b" x="30" y="364" width="420" height="50" rx="8"/>
         <text x="46" y="385">5. Amount above what the sender can move?</text>
-        <text x="46" y="403" class="m sm">unfrozen balance; whole balance for FORCED and a burner's burn</text>
+        <text x="46" y="403" class="m sm">unfrozen balance; whole balance for a FORCED movement</text>
         <line class="ln-rej" x1="450" y1="389" x2="486" y2="389" marker-end="url(#mv-arrow-rej)"/>
         <text x="458" y="382" class="sm m">yes</text>
         <rect class="rejbox" x="490" y="356" width="270" height="66" rx="6"/>
@@ -124,16 +125,16 @@
         <line class="ln-rej" x1="450" y1="457" x2="486" y2="457" marker-end="url(#mv-arrow-rej)"/>
         <text x="458" y="450" class="sm m">yes</text>
         <rect class="rejbox" x="490" y="440" width="270" height="34" rx="6"/>
-        <text x="502" y="461" class="mono sm rej">PolicyGated_TransferRejected(NO_HOOK)</text>
+        <text x="502" y="461" class="mono sm rej">ERC8473PolicyRejected(NO_HOOK)</text>
         <line class="ln" x1="240" y1="474" x2="240" y2="492" marker-end="url(#mv-arrow)"/>
 
         <rect class="b" x="30" y="494" width="420" height="50" rx="8"/>
-        <text x="46" y="515">7. hook.beforeTransfer(ctx): the token's rules,</text>
+        <text x="46" y="515">7. hook.checkTransfer(ctx): the token's rules,</text>
         <text x="62" y="533">in order, until one says no</text>
         <line class="ln-rej" x1="450" y1="519" x2="486" y2="519" marker-end="url(#mv-arrow-rej)"/>
         <text x="458" y="512" class="sm m">no</text>
         <rect class="rejbox" x="490" y="494" width="270" height="50" rx="6"/>
-        <text x="502" y="515" class="mono sm rej">PolicyGated_TransferRejected(reason)</text>
+        <text x="502" y="515" class="mono sm rej">ERC8473PolicyRejected(reason)</text>
         <text x="502" y="533" class="m sm">the first rule's reason, or NO_RULES</text>
         <line class="ln" x1="240" y1="544" x2="240" y2="562" marker-end="url(#mv-arrow)"/>
 
@@ -143,7 +144,7 @@
         <line class="ln" x1="240" y1="614" x2="240" y2="632" marker-end="url(#mv-arrow)"/>
 
         <rect class="b2" x="30" y="634" width="420" height="50" rx="8"/>
-        <text x="46" y="655">9. If hook.wantsAfter(): hook.afterTransfer(ctx),</text>
+        <text x="46" y="655">9. If hook.wantsAfterTransfer(): afterTransfer(ctx),</text>
         <text x="62" y="673">which runs after_ on the rules that asked</text>
         <line class="ln" x1="240" y1="684" x2="240" y2="702" marker-end="url(#mv-arrow)"/>
 
@@ -159,7 +160,7 @@
     <li><b>Step 2, the context.</b> See <a href="#context">What the hook is told</a>. The kind is an argument: <a href="#kinds">The five kinds</a> says where it comes from.</li>
     <li><b>Step 3, the hook.</b> The address is read once into a local variable, so the hook that approved the movement is the hook that hears about it afterwards.</li>
     <li><b>Steps 4 and 5.</b> See <a href="#own-checks">The token's own checks</a>.</li>
-    <li><b>Steps 6 and 7.</b> The initialiser and <code>setPolicyHook</code> refuse the zero address (<code>PolicyGated_ZeroAddress</code>), so an initialised token has a hook. See <a href="#chain">The rule chain</a>.</li>
+    <li><b>Steps 6 and 7.</b> The initialiser and <code>installPolicy</code> refuse the zero address (<code>PolicyGated_ZeroAddress</code>), so an initialised token has a hook. A hook that cannot be asked gives the reason <code>CHECK_UNAVAILABLE</code>. See <a href="#chain">The rule chain</a>.</li>
     <li><b>Step 9.</b> See <a href="#after">After the balances move</a>.</li>
   </ul>
 </section>
@@ -167,7 +168,7 @@
 <section id="kinds">
   <div class="prose wrap-any">
     <h2>The five kinds</h2>
-    <p>The kind tells the rules whose authority moves the tokens. A rule can treat an enforcement move by the agent differently from a holder's transfer, even when the addresses are the same. Three kinds can be read from the addresses, which is what <code>_update</code> does with <code>_inferKind</code>. The other two cannot, so the function that starts them calls <code>_moveAs</code> (between two accounts) or <code>_mintAs</code> (a mint) and names the kind.</p>
+    <p>The kind tells the rules whose authority moves the tokens. A rule can treat an enforcement move by the agent differently from a holder's transfer, even when the addresses are the same. Three kinds can be read from the addresses, which is what <code>_update</code> does with <code>_inferKind</code>. The other two cannot, so the function that starts them calls <code>_moveAs</code> (between two accounts) or <code>_mintAs</code> (a mint) and names the kind. The burner's <code>burn</code> calls <code>_move</code> itself and names <span class="k k-forced">FORCED</span>.</p>
   </div>
   <div class="table-wrap">
     <table>
@@ -175,13 +176,13 @@
       <tbody>
         <tr><td><span class="k k-transfer">TRANSFER</span></td><td>A holder moves tokens, or a spender with an allowance does</td><td><code>transfer</code>, <code>transferFrom</code>; on <code>Gated721</code>, <code>transferFrom</code> and <code>safeTransferFrom</code>; on <code>Gated7540Vault</code>, <code>requestRedeem</code> (owner to the vault) and <code>rejectRedeemRequest</code> (vault back to the controller)</td><td>Inferred: both addresses are set</td></tr>
         <tr><td><span class="k k-executed">EXECUTED</span></td><td>A holder's signed intent, run by an executor</td><td><code>IntentToken.executeTransfer</code></td><td>Named through <code>_moveAs</code>, with the intent's <code>ref</code> and <code>deadline</code></td></tr>
-        <tr><td><span class="k k-forced">FORCED</span></td><td>An enforcement move by the agent or, once a period has closed, the settler</td><td><code>forcedTransfer</code>; on <code>Gated7540Vault</code>, <code>recoverRedeemRequest</code> (escrow to a recovery account) and <code>recoverClaimable</code> (claimable shares minted to a recovery account, so <code>from</code> is zero)</td><td>Named through <code>_moveAs</code>, or through <code>_mintAs</code> for the mint</td></tr>
+        <tr><td><span class="k k-forced">FORCED</span></td><td>An enforcement move by the agent, the burner or, once a period has closed, the settler</td><td><code>forcedTransfer</code>; <code>burn</code> on <code>GatedToken</code>, <code>IntentToken</code> and <code>Gated721</code> (so <code>to</code> is zero); on <code>Gated7540Vault</code>, <code>recoverRedeemRequest</code> (escrow to a recovery account) and <code>recoverClaimable</code> (claimable shares minted to a recovery account, so <code>from</code> is zero)</td><td>Named through <code>_moveAs</code>, through <code>_mintAs</code> for the mint, or by <code>burn</code> in its call to <code>_move</code></td></tr>
         <tr><td><span class="k k-mint">MINT</span></td><td>New tokens</td><td><code>mint</code> on <code>GatedToken</code>, <code>IntentToken</code> and <code>Gated721</code>; <code>Gated4626Vault.deposit</code> and <code>mint</code>; the <code>Gated7540Vault</code> deposit claims (<code>deposit</code>, <code>mint</code>)</td><td>Inferred: <code>from</code> is zero</td></tr>
-        <tr><td><span class="k k-burn">BURN</span></td><td>Tokens destroyed</td><td><code>burn</code> on <code>GatedToken</code>, <code>IntentToken</code> and <code>Gated721</code>; <code>Gated4626Vault.withdraw</code> and <code>redeem</code>; <code>Gated7540Vault.settlePeriod</code> (burns the escrowed shares it takes)</td><td>Inferred: <code>to</code> is zero</td></tr>
+        <tr><td><span class="k k-burn">BURN</span></td><td>A holder's own tokens destroyed</td><td><code>Gated4626Vault.withdraw</code> and <code>redeem</code>; <code>Gated7540Vault.settlePeriod</code> (burns the escrowed shares it takes)</td><td>Inferred: <code>to</code> is zero</td></tr>
       </tbody>
     </table>
   </div>
-  <p class="small wrap-any">No code path produces <span class="k k-forced">FORCED</span> with <code>to</code> zero: <code>_moveAs</code> and <code>_mintAs</code> refuse it with <code>ERC20InvalidReceiver</code>. Both vaults make the issuer's <code>mint(address, uint256)</code> and <code>burn(address, uint256)</code> revert with <code>GatedVault_Unsupported</code>. The 7540 vault's <code>redeem</code> and <code>withdraw</code> move no shares, because the shares were burned at settlement.</p>
+  <p class="small wrap-any">The burner's <code>burn</code> is the one code path that produces <span class="k k-forced">FORCED</span> with <code>to</code> zero: <code>_moveAs</code> and <code>_mintAs</code> refuse a zero receiver with <code>ERC20InvalidReceiver</code>. <code>GatedToken</code>, <code>IntentToken</code> and <code>Gated721</code> have no holder burn, so nothing on them produces <span class="k k-burn">BURN</span>. Both vaults make the issuer's <code>mint(address, uint256)</code> and <code>burn(address, uint256)</code> revert with <code>GatedVault_Unsupported</code>. The 7540 vault's <code>redeem</code> and <code>withdraw</code> move no shares, because the shares were burned at settlement.</p>
 </section>
 
 <section id="context">
@@ -196,27 +197,27 @@
         <tr><td><code>token</code></td><td>The token's own address. A shared hook and shared rules key their state by it.</td></tr>
         <tr><td><code>from</code></td><td>The sender; zero on a mint.</td></tr>
         <tr><td><code>to</code></td><td>The receiver; zero on a burn.</td></tr>
-        <tr><td><code>id</code></td><td>0 for these fungible tokens.</td></tr>
+        <tr><td><code>tokenId</code></td><td>0 for these fungible tokens.</td></tr>
         <tr><td><code>amount</code></td><td>The amount moved.</td></tr>
         <tr><td><code>operator</code></td><td>The account that called the token: the holder for <code>transfer</code>, the spender for <code>transferFrom</code>, the executor for <code>executeTransfer</code>, the minter, burner, agent or settler for their calls, the caller of a vault function.</td></tr>
         <tr><td><code>kind</code></td><td>One of the five kinds.</td></tr>
-        <tr><td><code>extra</code></td><td>The balances before the move, then, for <span class="k k-executed">EXECUTED</span> only, the intent's <code>ref</code> and <code>deadline</code>. The next table gives each kind.</td></tr>
+        <tr><td><code>data</code></td><td>The balances before the move, then, for <span class="k k-executed">EXECUTED</span> only, the intent's <code>ref</code> and <code>deadline</code>. The next table gives each kind.</td></tr>
       </tbody>
     </table>
   </div>
   <div class="table-wrap">
     <table class="tight">
-      <thead><tr><th>Kind</th><th><code>extra</code></th><th>Notes</th></tr></thead>
+      <thead><tr><th>Kind</th><th><code>data</code></th><th>Notes</th></tr></thead>
       <tbody>
         <tr><td><span class="k k-transfer">TRANSFER</span></td><td><code>abi.encode(fromBalance, toBalance)</code></td><td>Two words.</td></tr>
-        <tr><td><span class="k k-executed">EXECUTED</span></td><td><code>abi.encode(fromBalance, toBalance, ref, deadline)</code></td><td>Four words. Decoding the first two with <code>abi.decode(extra, (uint256, uint256))</code> ignores the rest. No shipped rule reads <code>ref</code> or <code>deadline</code>.</td></tr>
-        <tr><td><span class="k k-forced">FORCED</span></td><td><code>abi.encode(fromBalance, toBalance)</code></td><td><code>fromBalance</code> is 0 on the enforcement mint, where <code>from</code> is zero.</td></tr>
+        <tr><td><span class="k k-executed">EXECUTED</span></td><td><code>abi.encode(fromBalance, toBalance, ref, deadline)</code></td><td>Four words. Decoding the first two with <code>abi.decode(ctx.data, (uint256, uint256))</code> ignores the rest. No shipped rule reads <code>ref</code> or <code>deadline</code>.</td></tr>
+        <tr><td><span class="k k-forced">FORCED</span></td><td><code>abi.encode(fromBalance, toBalance)</code></td><td><code>fromBalance</code> is 0 on the enforcement mint, where <code>from</code> is zero. <code>toBalance</code> is 0 on the burner's burn, where <code>to</code> is zero.</td></tr>
         <tr><td><span class="k k-mint">MINT</span></td><td><code>abi.encode(fromBalance, toBalance)</code></td><td><code>fromBalance</code> is 0.</td></tr>
         <tr><td><span class="k k-burn">BURN</span></td><td><code>abi.encode(fromBalance, toBalance)</code></td><td><code>toBalance</code> is 0.</td></tr>
       </tbody>
     </table>
   </div>
-  <p class="small wrap-any">A rule reads the balances from <code>extra</code> and works out the balances after the move from <code>amount</code>, so on the movement path it makes no call back into the token for them. The calls the shipped rules do make to the token are views: <code>hasRole</code> (to recognise an enforcement burn), <code>totalSupply</code> (<code>SupplyCapRule</code>, on a mint), and <code>policyHook</code> in <code>after_</code>.</p>
+  <p class="small wrap-any">A rule reads the balances from <code>data</code> and works out the balances after the move from <code>amount</code>, so on the movement path it makes no call back into the token for them. The calls the shipped rules do make to the token are views: <code>totalSupply</code> (<code>SupplyCapRule</code>, on a mint) and <code>policy</code> in <code>after_</code>. No rule reads the operator's roles.</p>
 </section>
 
 <section id="own-checks">
@@ -227,11 +228,11 @@
   <div class="two">
     <div class="prose wrap-any">
       <h3>Pause</h3>
-      <p>While the token is paused, every kind except <span class="k k-forced">FORCED</span> gets the reason <code>PAUSED</code> from <code>_check</code>: transfers, intents, mints and burns. A vault call can stop before that with its own error, for example <code>ERC4626ExceededMaxDeposit</code> on a 4626 or <code>EnforcedPause</code> on a 7540 redemption claim; <a href="#rejections">What a rejection looks like</a> lists them. The guardian pauses with no delay (<code>GUARDIAN_ROLE</code>). <code>unpause</code> takes <code>DEFAULT_ADMIN_ROLE</code> (the main timelock) or <code>RECOVERY_ROLE</code> (the recovery timelock).</p>
+      <p>While the token is paused, every kind except <span class="k k-forced">FORCED</span> gets the reason <code>PAUSED</code> from <code>_check</code>: transfers, intents, mints and holders' burns (vault redemptions). The <span class="k k-forced">FORCED</span> movements pass: <code>forcedTransfer</code>, the burner's <code>burn</code>, and the 7540's <code>recoverRedeemRequest</code> and <code>recoverClaimable</code>. A vault call can stop before that with its own error, for example <code>ERC4626ExceededMaxDeposit</code> on a 4626 or <code>EnforcedPause</code> on a 7540 redemption claim; <a href="#rejections">What a rejection looks like</a> lists them. The guardian pauses with no delay (<code>GUARDIAN_ROLE</code>). <code>unpause</code> takes <code>DEFAULT_ADMIN_ROLE</code> (the main timelock) or <code>RECOVERY_ROLE</code> (the recovery timelock).</p>
     </div>
     <div class="prose wrap-any">
       <h3>What the sender can move</h3>
-      <p>The agent can hold back part of any balance with <code>setFrozenTokens(account, amount)</code>, except the 7540 vault's own address (<code>GatedVault_Unsupported</code>). The frozen amount may be larger than the balance. A holder can move only the unfrozen balance, <code>balance - frozen</code>, or nothing when the frozen amount is the larger. A <span class="k k-forced">FORCED</span> move, and a <span class="k k-burn">BURN</span> whose operator holds <code>BURNER_ROLE</code>, may take the whole balance, frozen tokens included, but no more than that.</p>
+      <p>The agent can hold back part of any balance with <code>setFrozenTokens(account, amount)</code>, except the 7540 vault's own address (<code>GatedVault_Unsupported</code>). The frozen amount may be larger than the balance. A holder can move only the unfrozen balance, <code>balance - frozen</code>, or nothing when the frozen amount is the larger. A <span class="k k-forced">FORCED</span> move, the burner's <code>burn</code> included, may take the whole balance, frozen tokens included, but no more than that.</p>
     </div>
   </div>
   <div class="table-wrap">
@@ -253,17 +254,17 @@
 <section id="chain">
   <div class="prose wrap-any">
     <h2>The rule chain</h2>
-    <p>The hook, <code>ComplianceHook</code>, is shared by every token of a deployment. For each token it keeps an ordered list of rules, at most 16 (<code>MAX_RULES</code>). <code>beforeTransfer</code> is a read-only call (<code>view</code>, made with <code>STATICCALL</code>), so neither the hook nor a rule can change anything while deciding. This figure shows the list of the intent token in the <code>full</code> deployment profile.</p>
+    <p>The hook, <code>ComplianceHook</code>, is shared by every token of a deployment. For each token it keeps an ordered list of rules, at most 16 (<code>MAX_RULES</code>). <code>checkTransfer</code> is a read-only call (<code>view</code>, made with <code>STATICCALL</code>), so neither the hook nor a rule can change anything while deciding. The token makes the call through <code>_ask</code>, which copies one word of the answer. A hook that reverts, runs out of gas, answers fewer than 32 bytes or has no code gives the reason <code>CHECK_UNAVAILABLE</code>, and the movement reverts with <code>ERC8473PolicyRejected(CHECK_UNAVAILABLE)</code>. The hook's own revert data is not passed on. This figure shows the list of the intent token in the <code>full</code> deployment profile.</p>
   </div>
   <figure>
     <div class="fig-scroll">
-      <svg class="d" viewBox="0 0 780 608" role="img" aria-label="The rule chain for the intent token in the full profile. The token calls beforeTransfer. The hook reads the list kept for the token; an empty list returns NO_RULES. Then CredentialRule, MinPositionRule, HolderRestrictionRule, SettlementWindowRule and FundHoldersRule run in that order. Each either returns TRANSFER_OK and the next rule runs, or returns its own reason code, which the hook returns at once. SupplyCapRule and ExecutedOnlyRule run only where a product lists them. If all return TRANSFER_OK the hook returns TRANSFER_OK and the balances move.">
+      <svg class="d" viewBox="0 0 780 608" role="img" aria-label="The rule chain for the intent token in the full profile. The token calls checkTransfer. The hook reads the list kept for the token; an empty list returns NO_RULES. Then CredentialRule, MinPositionRule, HolderRestrictionRule, SettlementWindowRule and FundHoldersRule run in that order. Each either returns TRANSFER_OK and the next rule runs, or returns its own reason code, which the hook returns at once. SupplyCapRule and ExecutedOnlyRule run only where a product lists them. If all return TRANSFER_OK the hook returns TRANSFER_OK and the balances move.">
         <defs>
           <marker id="mv-chain" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
           <marker id="mv-chain-rej" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="rej"/></marker>
         </defs>
         <rect class="act" x="20" y="14" width="380" height="36" rx="8"/>
-        <text x="36" y="37" class="bold">The token calls beforeTransfer(ctx)</text>
+        <text x="36" y="37" class="bold">The token calls checkTransfer(ctx)</text>
         <line class="ln" x1="210" y1="50" x2="210" y2="70" marker-end="url(#mv-chain)"/>
 
         <rect class="b" x="20" y="72" width="380" height="46" rx="8"/>
@@ -280,7 +281,7 @@
         <line class="ln-rej" x1="400" y1="162" x2="436" y2="162" marker-end="url(#mv-chain-rej)"/>
         <text x="408" y="155" class="sm m">no</text>
         <rect class="rejbox" x="440" y="140" width="325" height="44" rx="6"/>
-        <text x="452" y="158" class="mono sm rej">SENDER_NOT_VERIFIED, RECEIVER_NOT_VERIFIED,</text>
+        <text x="452" y="158" class="mono sm rej">SENDER_NOT_ELIGIBLE, RECEIVER_NOT_VERIFIED,</text>
         <text x="452" y="175" class="mono sm rej">CREDENTIAL_EXPIRED, RECEIVER_NOT_ELIGIBLE</text>
         <line class="ln" x1="210" y1="184" x2="210" y2="208" marker-end="url(#mv-chain)"/>
         <text x="220" y="201" class="mono sm m">TRANSFER_OK</text>
@@ -299,7 +300,7 @@
         <line class="ln-rej" x1="400" y1="302" x2="436" y2="302" marker-end="url(#mv-chain-rej)"/>
         <text x="408" y="295" class="sm m">no</text>
         <rect class="rejbox" x="440" y="284" width="325" height="36" rx="6"/>
-        <text x="452" y="307" class="mono sm rej">SENDER_FROZEN, LOCKED, RECEIVER_FROZEN</text>
+        <text x="452" y="307" class="mono sm rej">SENDER_FROZEN, LOCKED_UP, RECEIVER_FROZEN</text>
         <line class="ln" x1="210" y1="324" x2="210" y2="348" marker-end="url(#mv-chain)"/>
         <text x="220" y="341" class="mono sm m">TRANSFER_OK</text>
 
@@ -308,7 +309,7 @@
         <line class="ln-rej" x1="400" y1="372" x2="436" y2="372" marker-end="url(#mv-chain-rej)"/>
         <text x="408" y="365" class="sm m">no</text>
         <rect class="rejbox" x="440" y="354" width="325" height="36" rx="6"/>
-        <text x="452" y="377" class="mono sm rej">OUTSIDE_SETTLEMENT_WINDOW</text>
+        <text x="452" y="377" class="mono sm rej">WINDOW_CLOSED</text>
         <line class="ln" x1="210" y1="394" x2="210" y2="418" marker-end="url(#mv-chain)"/>
         <text x="220" y="411" class="mono sm m">TRANSFER_OK</text>
 
@@ -327,14 +328,14 @@
         <line class="ln-rej" x1="400" y1="512" x2="436" y2="512" marker-end="url(#mv-chain-rej)"/>
         <text x="408" y="505" class="sm m">no</text>
         <rect class="rejbox" x="440" y="494" width="325" height="36" rx="6"/>
-        <text x="452" y="517" class="mono sm rej">ABOVE_SUPPLY_CAP, TRANSFER_NOT_EXECUTED</text>
+        <text x="452" y="517" class="mono sm rej">ABOVE_SUPPLY_CAP, KIND_NOT_ALLOWED</text>
         <line class="ln" x1="210" y1="534" x2="210" y2="558" marker-end="url(#mv-chain)"/>
 
         <rect class="act" x="20" y="560" width="380" height="36" rx="8"/>
         <text x="36" y="583" class="bold">The hook returns TRANSFER_OK; the balances move</text>
       </svg>
     </div>
-    <figcaption class="wrap-any"><b>The first rule to say no wins, and its reason is what the caller sees.</b> Red boxes list the codes each rule can return; the hook returns the first one at once and asks no further rule. So a sender who is both unverified and locked sees <code>SENDER_NOT_VERIFIED</code>, because <code>CredentialRule</code> runs first in this list.</figcaption>
+    <figcaption class="wrap-any"><b>The first rule to say no wins, and its reason is what the caller sees.</b> Red boxes list the codes each rule can return; the hook returns the first one at once and asks no further rule. So a sender who is both unverified and locked sees <code>SENDER_NOT_ELIGIBLE</code>, because <code>CredentialRule</code> runs first in this list.</figcaption>
   </figure>
   <div class="table-wrap">
     <table class="tight">
@@ -347,7 +348,7 @@
       </tbody>
     </table>
   </div>
-  <p class="small wrap-any">Each token passes its list to its initialiser, which installs it on the hook, and <code>ProxyDeployer</code> refuses to finish unless the hook holds exactly that list. Later, the token's <code>DEFAULT_ADMIN_ROLE</code> holder (the main timelock) can replace a list with <code>setRules</code>, using rules attested as <code>RULE</code> and no two with the same <code>ruleId</code>. The token's own code calls <code>setRules</code> only in its initialiser. The hook accepts any attested list. What stops a poor combination is <code>assertUsable</code> in <code>ignition/profiles.ts</code>, off-chain when a module is built: it refuses <code>SupplyCapRule</code> on a vault, <code>SettlementWindowRule</code> or <code>ExecutedOnlyRule</code> on anything but an <code>IntentToken</code>, and <code>MinPositionRule</code>, <code>FundHoldersRule</code> or <code>SupplyCapRule</code> on a <code>Gated721</code>.</p>
+  <p class="small wrap-any">Each token passes its list to its initialiser, which installs the hook with the list as the installation's data. The hook's <code>onInstall</code> installs the list, and <code>ProxyDeployer</code> refuses to finish unless the hook holds exactly that list. Later, the token's <code>DEFAULT_ADMIN_ROLE</code> holder (the main timelock) can replace a list with <code>setRules</code>, or with a list as the data of <code>installPolicy(newPolicy, data)</code>, using rules attested as <code>RULE</code> and no two with the same <code>ruleId</code>. The token's own code does not call <code>setRules</code>. The hook accepts any attested list. What stops a poor combination is <code>assertUsable</code> in <code>ignition/profiles.ts</code>, off-chain when a module is built: it refuses <code>SupplyCapRule</code> on a vault, <code>SettlementWindowRule</code> or <code>ExecutedOnlyRule</code> on anything but an <code>IntentToken</code>, and <code>MinPositionRule</code>, <code>FundHoldersRule</code> or <code>SupplyCapRule</code> on a <code>Gated721</code>.</p>
 </section>
 
 <section id="matrix">
@@ -360,11 +361,11 @@
       <thead><tr><th>Check</th><th><span class="k k-transfer">TRANSFER</span></th><th><span class="k k-executed">EXECUTED</span></th><th><span class="k k-forced">FORCED</span></th><th><span class="k k-mint">MINT</span></th><th><span class="k k-burn">BURN</span></th></tr></thead>
       <tbody>
         <tr><td>Token: pause</td><td class="no">rejects</td><td class="no">rejects</td><td class="ok">passes</td><td class="no">rejects</td><td class="no">rejects</td></tr>
-        <tr><td>Token: amount the sender can move</td><td>unfrozen balance</td><td>unfrozen balance</td><td>whole balance</td><td>no sender</td><td>unfrozen balance; whole balance if the operator holds <code>BURNER_ROLE</code></td></tr>
-        <tr><td><code>CredentialRule</code>, sender</td><td>can leave</td><td>can leave</td><td>not checked</td><td>no sender</td><td>can leave, unless the operator holds <code>BURNER_ROLE</code></td></tr>
+        <tr><td>Token: amount the sender can move</td><td>unfrozen balance</td><td>unfrozen balance</td><td>whole balance</td><td>no sender</td><td>unfrozen balance</td></tr>
+        <tr><td><code>CredentialRule</code>, sender</td><td>can leave</td><td>can leave</td><td>not checked</td><td>no sender</td><td>can leave</td></tr>
         <tr><td><code>CredentialRule</code>, receiver</td><td>eligible</td><td>eligible</td><td>eligible</td><td>eligible</td><td>no receiver</td></tr>
-        <tr><td><code>MinPositionRule</code></td><td>both sides</td><td>both sides</td><td>not checked</td><td>receiver</td><td>sender, unless the operator holds <code>BURNER_ROLE</code></td></tr>
-        <tr><td><code>HolderRestrictionRule</code>, sender</td><td>not frozen, not locked</td><td>not frozen, not locked</td><td>not checked</td><td>no sender</td><td>not frozen; not locked unless the operator holds <code>BURNER_ROLE</code></td></tr>
+        <tr><td><code>MinPositionRule</code></td><td>both sides</td><td>both sides</td><td>not checked</td><td>receiver</td><td>sender</td></tr>
+        <tr><td><code>HolderRestrictionRule</code>, sender</td><td>not frozen, not locked</td><td>not frozen, not locked</td><td>not checked</td><td>no sender</td><td>not frozen, not locked</td></tr>
         <tr><td><code>HolderRestrictionRule</code>, receiver</td><td>not frozen</td><td>not frozen</td><td>not frozen</td><td>not frozen</td><td>no receiver</td></tr>
         <tr><td><code>SettlementWindowRule</code></td><td>not checked</td><td>window open</td><td>not checked</td><td>not checked</td><td>not checked</td></tr>
         <tr><td><code>FundHoldersRule</code>, class</td><td>registered</td><td>registered</td><td>registered</td><td>registered</td><td>registered</td></tr>
@@ -374,24 +375,24 @@
       </tbody>
     </table>
   </div>
-  <p class="small wrap-any">The <span class="k k-forced">FORCED</span> column also covers the enforcement mint of <code>recoverClaimable</code>, where there is no sender and <code>SupplyCapRule</code> does not apply, as the kind is not <span class="k k-mint">MINT</span>. "Registered" means the token is a registered class of the fund and the rule is the fund's installed one; otherwise every movement gets <code>NOT_FUND_CLASS</code>.</p>
+  <p class="small wrap-any">The <span class="k k-forced">FORCED</span> column also covers the enforcement mint of <code>recoverClaimable</code>, where there is no sender and <code>SupplyCapRule</code> does not apply, as the kind is not <span class="k k-mint">MINT</span>. It also covers the burner's <code>burn</code>, where there is no receiver, so the two receiver rows do not apply to it. The <span class="k k-burn">BURN</span> column is a holder's own burn, whoever the operator is. "Registered" means the token is a registered class of the fund and the rule is the fund's installed one; otherwise every movement gets <code>NOT_FUND_CLASS</code>.</p>
 
   <div class="rules wrap-any">
     <div class="rule">
       <h3><a href="contracts/CredentialRule.html">CredentialRule</a></h3>
-      <p>Asks <code>CredentialRegistry.profileOf</code> about each party. Sender first: an address that reads <code>NONE</code> or <code>BLOCKED</code> gets <code>SENDER_NOT_VERIFIED</code>, except in a burn whose operator holds <code>BURNER_ROLE</code>. Then the receiver: no policy for the token gives <code>RECEIVER_NOT_ELIGIBLE</code>, a lapsed credential <code>CREDENTIAL_EXPIRED</code>, any other standing but <code>ACTIVE</code> gives <code>RECEIVER_NOT_VERIFIED</code>, and an active credential the policy does not accept gives <code>RECEIVER_NOT_ELIGIBLE</code>. A holder whose credential lapsed can still send and redeem, and cannot receive. The token's own address is not judged on either side. The token's <code>DEFAULT_ADMIN_ROLE</code> sets the policy with <code>setPolicy</code>.</p>
+      <p>Asks <code>CredentialRegistry.profileOf</code> about each party. Sender first, on a transfer, an intent or a holder's burn: an address that reads <code>NONE</code> or <code>BLOCKED</code> gets <code>SENDER_NOT_ELIGIBLE</code>. A <span class="k k-forced">FORCED</span> move, the burner's <code>burn</code> included, does not judge the sender. Then the receiver, when there is one: no policy for the token gives <code>RECEIVER_NOT_ELIGIBLE</code>, a lapsed credential <code>CREDENTIAL_EXPIRED</code>, any other standing but <code>ACTIVE</code> gives <code>RECEIVER_NOT_VERIFIED</code>, and an active credential the policy does not accept gives <code>RECEIVER_NOT_ELIGIBLE</code>. A holder whose credential lapsed can still send and redeem, and cannot receive. The token's own address is not judged on either side. The token's <code>DEFAULT_ADMIN_ROLE</code> sets the policy with <code>setPolicy</code>.</p>
     </div>
     <div class="rule">
       <h3><a href="contracts/MinPositionRule.html">MinPositionRule</a></h3>
-      <p>Passes when the token's minimum is 0, the amount is 0, the sender is the receiver, or the kind is <span class="k k-forced">FORCED</span>. Otherwise <code>BELOW_MIN_POSITION</code> when the receiver would end below the minimum, or the sender would keep a remainder above zero and below it. Exempt: the token itself (the 7540 escrow), accounts the token's admin lists with <code>setExempt</code>, and a burner's burn on the sender side. The admin sets the minimum with <code>setMinPosition</code>.</p>
+      <p>Passes when the token's minimum is 0, the amount is 0, the sender is the receiver, or the kind is <span class="k k-forced">FORCED</span>, the burner's <code>burn</code> included. Otherwise <code>BELOW_MIN_POSITION</code> when the receiver would end below the minimum, or the sender would keep a remainder above zero and below it. Exempt: the token itself (the 7540 escrow) and accounts the token's admin lists with <code>setExempt</code>. The admin sets the minimum with <code>setMinPosition</code>.</p>
     </div>
     <div class="rule">
       <h3><a href="contracts/HolderRestrictionRule.html">HolderRestrictionRule</a></h3>
-      <p>For every kind but <span class="k k-forced">FORCED</span>, a frozen sender gets <code>SENDER_FROZEN</code> (a burner's burn included), then a locked one gets <code>LOCKED</code> on a transfer, an intent or a holder's burn. A frozen receiver gets <code>RECEIVER_FROZEN</code> in every kind with a receiver, forced moves and mints included. The way out of a frozen address is a forced transfer to an unfrozen quarantine account. The token's <code>AGENT_ROLE</code> sets both with <code>setLockup</code> and <code>setFrozen</code>.</p>
+      <p>For every kind but <span class="k k-forced">FORCED</span>, a frozen sender gets <code>SENDER_FROZEN</code>, then a locked one gets <code>LOCKED_UP</code>: on a transfer, an intent or a holder's burn. A frozen receiver gets <code>RECEIVER_FROZEN</code> in every kind with a receiver, forced moves and mints included. The ways out of a frozen address are the burner's <code>burn</code> and a forced transfer to an unfrozen quarantine account. The token's <code>AGENT_ROLE</code> sets both with <code>setLockup</code> and <code>setFrozen</code>.</p>
     </div>
     <div class="rule">
       <h3><a href="contracts/SettlementWindowRule.html">SettlementWindowRule</a></h3>
-      <p>Judges <span class="k k-executed">EXECUTED</span> only. Outside the token's daily UTC window, or on a weekday the window does not include, it returns <code>OUTSIDE_SETTLEMENT_WINDOW</code>. An overnight window belongs to the day it opened. The token's <code>DEFAULT_ADMIN_ROLE</code> sets it with <code>setWindow</code>.</p>
+      <p>Judges <span class="k k-executed">EXECUTED</span> only. Outside the token's daily UTC window, or on a weekday the window does not include, it returns <code>WINDOW_CLOSED</code>. An overnight window belongs to the day it opened. The token's <code>DEFAULT_ADMIN_ROLE</code> sets it with <code>setWindow</code>.</p>
     </div>
     <div class="rule">
       <h3><a href="contracts/FundHoldersRule.html">FundHoldersRule</a></h3>
@@ -403,7 +404,7 @@
     </div>
     <div class="rule">
       <h3><a href="contracts/ExecutedOnlyRule.html">ExecutedOnlyRule</a></h3>
-      <p>Refuses <span class="k k-transfer">TRANSFER</span> with <code>TRANSFER_NOT_EXECUTED</code>, so that every movement between holders is a signed intent with its <code>ref</code>, run by an executor. Mints, burns, forced moves and executed intents pass. It has no settings and no account-level answer.</p>
+      <p>Refuses <span class="k k-transfer">TRANSFER</span> with <code>KIND_NOT_ALLOWED</code>, so that every movement between holders is a signed intent with its <code>ref</code>, run by an executor. Mints, burns, forced moves and executed intents pass. It has no settings and no account-level answer.</p>
     </div>
   </div>
 
@@ -418,7 +419,7 @@
         <tr><td><code>CredentialRule</code>: the token has no policy</td><td>Every receiver but the token itself gets <code>RECEIVER_NOT_ELIGIBLE</code>, in forced moves too. Burns, which have no receiver, can still pass</td></tr>
         <tr><td><code>MinPositionRule</code>: minimum 0</td><td>The rule passes every movement</td></tr>
         <tr><td><code>HolderRestrictionRule</code>: nothing set</td><td>Nobody is frozen or locked</td></tr>
-        <tr><td><code>SettlementWindowRule</code>: no window</td><td>Every executed intent gets <code>OUTSIDE_SETTLEMENT_WINDOW</code>; other kinds are not affected</td></tr>
+        <tr><td><code>SettlementWindowRule</code>: no window</td><td>Every executed intent gets <code>WINDOW_CLOSED</code>; other kinds are not affected</td></tr>
         <tr><td><code>FundHoldersRule</code>: the token is not a registered class</td><td>Every movement, forced ones included, gets <code>NOT_FUND_CLASS</code></td></tr>
         <tr><td><code>FundHoldersRule</code>: cap 0</td><td>A new investor gets <code>MAX_HOLDERS</code>. Forced moves, exempt receivers and existing investors still pass</td></tr>
         <tr><td><code>SupplyCapRule</code>: no cap set</td><td>A mint of any amount above zero gets <code>ABOVE_SUPPLY_CAP</code>; other kinds are not affected</td></tr>
@@ -430,7 +431,7 @@
 <section id="after">
   <div class="prose wrap-any">
     <h2>After the balances move</h2>
-    <p>Once the balances have moved and <code>Transfer</code> is emitted, the token asks the hook <code>wantsAfter()</code>. <code>ComplianceHook</code> answers yes when at least one rule in the calling token's list asked for <code>after_</code> when the list was installed. Then the token calls <code>afterTransfer(ctx)</code>, which the hook accepts only from the token named in the context (<code>ComplianceHook_OnlyToken</code>), and the hook calls <code>after_</code> on those rules. Each rule accepts it only from the hook that token has installed at that moment (<code>ComplianceRule_OnlyHook</code>).</p>
+    <p>Once the balances have moved and <code>Transfer</code> is emitted, the token asks the hook <code>wantsAfterTransfer()</code>. <code>ComplianceHook</code> answers yes to every caller: the function takes no token, so a shared hook cannot answer for one of them. Then the token calls <code>afterTransfer(ctx)</code>, which the hook accepts only from the token named in the context (<code>ComplianceHook_OnlyToken</code>). The hook returns at once when no rule in that token's list asked for <code>after_</code> when the list was installed. Otherwise it calls <code>after_</code> on the rules that did. Each rule accepts it only from the hook that token has installed at that moment (<code>ComplianceRule_OnlyHook</code>).</p>
     <p><code>FundHoldersRule</code> is the one shipped rule with an <code>after_</code>. It runs for every kind. It does nothing for a zero amount or a move to oneself. Otherwise it calls <code>Fund.leave(token, from)</code> when the move takes the sender's whole balance, and then <code>Fund.join(token, to)</code> when the receiver held none of this class before the move. The fund keeps the investor count; it does not record the class token itself.</p>
     <p>This step can write state, so it runs while the token's reentrancy guard is still held: a rule that calls back into a function that moves balances reverts with <code>ReentrancyGuardReentrantCall</code>. If <code>after_</code> reverts, the whole movement reverts.</p>
     <p>On <code>forcedTransfer</code> and <code>executeTransfer</code> the entry point's events come after <code>_move</code> returns: <code>ForcedTransfer</code> and <code>ForcedTransferBy</code>, and <code>IntentExecuted</code>. <code>Gated7540Vault</code> emits its own first: <code>RedeemRequest</code>, <code>RedeemRequestRejected</code>, <code>RedeemRequestRecovered</code>, <code>ClaimableRecovered</code>, <code>PeriodSettled</code> and a claim's <code>Deposit</code> come before the <code>Transfer</code>.</p>
@@ -440,25 +441,25 @@
 <section id="preflight">
   <div class="prose wrap-any">
     <h2>Asking first: the pre-flights</h2>
-    <p><code>canTransferWithReason</code>, <code>canTransfer</code> and <code>canExecute</code> run the same <code>_check</code> as the write, without writing, so a wallet or an integrator can learn the answer before sending. <code>canSend</code> and <code>canReceive</code> ask the hook's account questions instead. They answer for the block they read; a transaction mined later sees a later time, which matters at a lockup end, a window edge or an intent deadline.</p>
+    <p><code>canTransferWithReason</code>, <code>canTransfer</code> and <code>canExecute</code> run the same <code>_check</code> as the write, without writing, so a wallet or an integrator can learn the answer before sending. <code>canSend</code> and <code>canReceive</code> ask the hook's account questions instead. None of them reverts when the hook cannot be asked: <code>canTransfer</code>, <code>canSend</code> and <code>canReceive</code> return false, and <code>canTransferWithReason</code> says <code>CHECK_UNAVAILABLE</code>. They answer for the block they read; a transaction mined later sees a later time, which matters at a lockup end, a window edge or an intent deadline.</p>
   </div>
   <div class="table-wrap">
     <table class="tight">
       <thead><tr><th>Function</th><th>What it asks</th><th>Operator it assumes</th></tr></thead>
       <tbody>
-        <tr><td><code>canTransferWithReason(from, to, amount)</code></td><td>Would a holder-driven movement pass, and if not, why. Returns <code>(ok, reason)</code>. The kind is <span class="k k-mint">MINT</span> when <code>from</code> is zero, <span class="k k-burn">BURN</span> when <code>to</code> is zero, otherwise <span class="k k-transfer">TRANSFER</span></td><td><code>from</code>, or the caller for a mint</td></tr>
+        <tr><td><code>canTransferWithReason(from, to, amount)</code></td><td>Would a holder-driven movement pass, and if not, why. Returns <code>(ok, reason)</code>. The kind is <span class="k k-mint">MINT</span> when <code>from</code> is zero, <span class="k k-burn">BURN</span> when <code>to</code> is zero, otherwise <span class="k k-transfer">TRANSFER</span></td><td><code>from</code>, which is the zero address for a mint, so the answer does not depend on who asks</td></tr>
         <tr><td><code>canTransfer(from, to, amount)</code></td><td>The ERC-7943 bool: the same question, with one difference below</td><td>the same</td></tr>
         <tr><td><code>canExecute(intent, sig, executor)</code></td><td>Would <code>executeTransfer</code> pass if <code>executor</code> called it: its role, the intent checks, the signature, then the <span class="k k-executed">EXECUTED</span> path. Returns <code>(ok, reason)</code></td><td><code>executor</code>, so the answer does not depend on who asks</td></tr>
-        <tr><td><code>canSend(account)</code></td><td>May the account send at all: the hook's <code>checkSend</code> over the token's rules. False while paused and with no hook</td><td>none: no amount, no counterparty</td></tr>
-        <tr><td><code>canReceive(account)</code></td><td>May the account receive at all: the hook's <code>checkReceive</code>. False while paused and with no hook</td><td>none</td></tr>
+        <tr><td><code>canSend(account)</code></td><td>May the account send at all: the hook's <code>checkSend</code> over the token's rules. True for the zero address, without asking the hook, even while paused. For any other account, false while paused and with no hook</td><td>none: no amount, no counterparty</td></tr>
+        <tr><td><code>canReceive(account)</code></td><td>May the account receive at all: the hook's <code>checkReceive</code>. True for the zero address, without asking the hook, even while paused. For any other account, false while paused and with no hook</td><td>none</td></tr>
       </tbody>
     </table>
   </div>
   <div class="prose wrap-any">
     <h3>Where they differ from the write</h3>
     <ul class="plain wrap-any">
-      <li><b><code>canTransfer</code> does not fail on a plain balance shortfall.</b> ERC-7943 forbids it. With nothing frozen on the sender, an amount above the balance reads true when the hook accepts it, while <code>canTransferWithReason</code> says <code>INSUFFICIENT_UNFROZEN</code> and the write reverts with <code>ERC20InsufficientBalance</code>. Once part of the balance is frozen, an amount above the unfrozen balance reads false in both, except a burn by a sender that holds <code>BURNER_ROLE</code>. To learn whether a movement will succeed, call <code>canTransferWithReason</code> or <code>canExecute</code>.</li>
-      <li><b>They model a holder-driven movement.</b> <code>canTransfer</code> and <code>canTransferWithReason</code> cannot ask about <span class="k k-forced">FORCED</span> or <span class="k k-executed">EXECUTED</span>. So on a token that lists <code>ExecutedOnlyRule</code> they say no with <code>TRANSFER_NOT_EXECUTED</code>, and only <code>canExecute</code> can say yes. A burn is asked as the sender's own burn, so frozen tokens and the lockup count, unless the sender itself holds <code>BURNER_ROLE</code>. On <code>Gated721</code>, which has no holder burn, a burn is asked as the caller's: from the burner's address it answers for <code>burn</code>.</li>
+      <li><b><code>canTransfer</code> does not fail on a plain balance shortfall.</b> ERC-7943 forbids it. With nothing frozen on the sender, an amount above the balance reads true when the hook accepts it, while <code>canTransferWithReason</code> says <code>INSUFFICIENT_UNFROZEN</code> and the write reverts with <code>ERC20InsufficientBalance</code>. Once part of the balance is frozen, an amount above the unfrozen balance reads false in both. To learn whether a movement will succeed, call <code>canTransferWithReason</code> or <code>canExecute</code>.</li>
+      <li><b>They model a holder-driven movement.</b> <code>canTransfer</code> and <code>canTransferWithReason</code> cannot ask about <span class="k k-forced">FORCED</span> or <span class="k k-executed">EXECUTED</span>. So on a token that lists <code>ExecutedOnlyRule</code> they say no with <code>KIND_NOT_ALLOWED</code>, and only <code>canExecute</code> can say yes. A burn is asked as the holder's own burn, so frozen tokens, the lockup and the address freeze count, whoever the holder is and whoever asks. No pre-flight predicts <code>burn</code> or <code>forcedTransfer</code>. On <code>Gated721</code>, which has no holder burn, a burn pre-flight gives the answer a holder's burn would get, while <code>burn</code> itself takes a frozen item.</li>
       <li><b><code>canExecute</code> says <code>NOT_EXECUTOR</code> first</b> when the named account lacks <code>EXECUTOR_ROLE</code>, where the write reverts with <code>AccessControlUnauthorizedAccount</code>. It does not see what an executor contract refuses for itself, such as <code>IntentExecutor_ConsiderationNotSupported</code>.</li>
       <li><b>The account questions leave out amounts and counts.</b> <code>canSend</code> and <code>canReceive</code> do not see the minimum position, the supply cap or the fund's investor cap: a new investor at a full fund reads true in <code>canReceive</code>, and the movement is refused with <code>MAX_HOLDERS</code>. They also cannot see the kinds a rule exempts: <code>canSend</code> is false for a locked holder although a forced transfer from it still passes.</li>
       <li><b>None of them runs <code>afterTransfer</code>.</b></li>
@@ -482,21 +483,23 @@
         <tr><td><code>INSUFFICIENT_UNFROZEN</code></td><td><code>_check</code>; <code>canExecuteDvP3009</code> for the buyer's cash balance</td><td>The sender cannot move that much. The token's write reverts with a balance error instead</td></tr>
         <tr><td><code>NO_HOOK</code></td><td><code>_check</code></td><td>No hook installed. An initialised token has one, so in practice a bare implementation answers this</td></tr>
 
-        <tr><td><code>NO_RULES</code></td><td><code>ComplianceHook</code>: <code>beforeTransfer</code>, <code>checkSend</code>, <code>checkReceive</code></td><td>The token's rule list is empty</td></tr>
+        <tr><td><code>CHECK_UNAVAILABLE</code></td><td><code>_ask</code> in the core, for <code>checkTransfer</code>, <code>checkSend</code> and <code>checkReceive</code></td><td>The hook could not be asked: it reverted, ran out of gas, answered fewer than 32 bytes or has no code</td></tr>
 
-        <tr><td><code>SENDER_NOT_VERIFIED</code></td><td><code>CredentialRule</code>: <code>check</code>, <code>checkSend</code></td><td>The sender has no credential, or is blocked</td></tr>
+        <tr><td><code>NO_RULES</code></td><td><code>ComplianceHook</code>: <code>checkTransfer</code>, <code>checkSend</code>, <code>checkReceive</code></td><td>The token's rule list is empty</td></tr>
+
+        <tr><td><code>SENDER_NOT_ELIGIBLE</code></td><td><code>CredentialRule</code>: <code>check</code>, <code>checkSend</code></td><td>The sender has no credential, or is blocked</td></tr>
         <tr><td><code>RECEIVER_NOT_VERIFIED</code></td><td><code>CredentialRule</code>: <code>check</code>, <code>checkReceive</code></td><td>The receiver's standing is neither <code>ACTIVE</code> nor <code>LAPSED</code></td></tr>
         <tr><td><code>CREDENTIAL_EXPIRED</code></td><td><code>CredentialRule</code>: <code>check</code>, <code>checkReceive</code></td><td>The receiver's credential has lapsed</td></tr>
         <tr><td><code>RECEIVER_NOT_ELIGIBLE</code></td><td><code>CredentialRule</code>: <code>check</code>, <code>checkReceive</code></td><td>The token's policy does not accept the receiver, or the token has no policy</td></tr>
         <tr><td><code>BELOW_MIN_POSITION</code></td><td><code>MinPositionRule</code>: <code>check</code></td><td>An account would end above zero and below the minimum</td></tr>
         <tr><td><code>SENDER_FROZEN</code></td><td><code>HolderRestrictionRule</code>: <code>check</code>, <code>checkSend</code></td><td>The sender's address is frozen on this token</td></tr>
-        <tr><td><code>LOCKED</code></td><td><code>HolderRestrictionRule</code>: <code>check</code>, <code>checkSend</code></td><td>The sender's lockup is still running</td></tr>
+        <tr><td><code>LOCKED_UP</code></td><td><code>HolderRestrictionRule</code>: <code>check</code>, <code>checkSend</code></td><td>The sender's lockup is still running</td></tr>
         <tr><td><code>RECEIVER_FROZEN</code></td><td><code>HolderRestrictionRule</code>: <code>check</code>, <code>checkReceive</code></td><td>The receiver's address is frozen on this token</td></tr>
-        <tr><td><code>OUTSIDE_SETTLEMENT_WINDOW</code></td><td><code>SettlementWindowRule</code>: <code>check</code></td><td>An executed intent outside the window</td></tr>
+        <tr><td><code>WINDOW_CLOSED</code></td><td><code>SettlementWindowRule</code>: <code>check</code></td><td>An executed intent outside the window</td></tr>
         <tr><td><code>NOT_FUND_CLASS</code></td><td><code>FundHoldersRule</code>: <code>check</code>, <code>checkSend</code>, <code>checkReceive</code></td><td>The token is not a registered class, or the rule is not the fund's installed one</td></tr>
         <tr><td><code>MAX_HOLDERS</code></td><td><code>FundHoldersRule</code>: <code>check</code></td><td>A new investor would pass the fund's cap</td></tr>
         <tr><td><code>ABOVE_SUPPLY_CAP</code></td><td><code>SupplyCapRule</code>: <code>check</code></td><td>A mint would take the supply above the token's cap</td></tr>
-        <tr><td><code>TRANSFER_NOT_EXECUTED</code></td><td><code>ExecutedOnlyRule</code>: <code>check</code></td><td>A plain transfer on a token whose movements must be signed intents</td></tr>
+        <tr><td><code>KIND_NOT_ALLOWED</code></td><td><code>ExecutedOnlyRule</code>: <code>check</code></td><td>A plain transfer on a token whose movements must be signed intents</td></tr>
 
         <tr><td><code>NOT_EXECUTOR</code></td><td><code>canExecute</code></td><td>The named account does not hold <code>EXECUTOR_ROLE</code>. Pre-flight only: the write has its role check</td></tr>
         <tr><td><code>INTENT_EXPIRED</code></td><td><code>executeTransfer</code>, <code>canExecute</code>; <code>canExecuteDvP3009</code> for the authorization</td><td>Past the deadline</td></tr>
@@ -512,7 +515,7 @@
       </tbody>
     </table>
   </div>
-  <p class="small wrap-any">The intent checks run in this order, in <code>executeTransfer</code> and <code>canExecute</code>: deadline, nonce, consideration, executor, <code>validAfter</code>, zero receiver, signature, then the movement path. ERC-7943 also declares <code>ERC7943CannotSend</code>, <code>ERC7943CannotReceive</code> and <code>ERC7943CannotTransfer</code>; the token does not revert with them, because a policy rejection carries its reason in <code>PolicyGated_TransferRejected</code>.</p>
+  <p class="small wrap-any">The intent checks run in this order, in <code>executeTransfer</code> and <code>canExecute</code>: deadline, nonce, consideration, executor, <code>validAfter</code>, zero receiver, signature, then the movement path. ERC-7943 also declares <code>ERC7943CannotSend</code>, <code>ERC7943CannotReceive</code> and <code>ERC7943CannotTransfer</code>; the token does not revert with them, because a policy rejection carries its reason in <code>ERC8473PolicyRejected</code>.</p>
 </section>
 
 <section id="rejections">
@@ -521,7 +524,7 @@
     <p>A rejected movement reverts; <code>transfer</code> does not return <code>false</code>. These are the errors a caller sees most, for a holder with 100 tokens, 30 of them frozen, sending to Bob, whose credential has lapsed, and to Carol, who is eligible:</p>
   </div>
   <div class="code-block">
-<pre>transfer(bob, 10)     <span class="cm">reverts</span> PolicyGated_TransferRejected(keccak256('CREDENTIAL_EXPIRED'))
+<pre>transfer(bob, 10)     <span class="cm">reverts</span> ERC8473PolicyRejected(keccak256('CREDENTIAL_EXPIRED'))
 transfer(carol, 80)   <span class="cm">reverts</span> ERC7943InsufficientUnfrozenBalance(holder, 80, 70)
 transfer(carol, 120)  <span class="cm">reverts</span> ERC20InsufficientBalance(holder, 100, 120)</pre>
   </div>
@@ -532,26 +535,26 @@ transfer(carol, 120)  <span class="cm">reverts</span> ERC20InsufficientBalance(h
     <table class="tight">
       <thead><tr><th>Entry point</th><th>Stops before the movement with</th><th>The movement path rejects with</th></tr></thead>
       <tbody>
-        <tr><td><code>transfer</code>, <code>transferFrom</code></td><td><code>transferFrom</code> spends the allowance first: <code>ERC20InsufficientAllowance</code>. A zero address: <code>ERC20InvalidSender</code>, <code>ERC20InvalidReceiver</code></td><td><code>PolicyGated_TransferRejected(reason)</code>, <code>ERC7943InsufficientUnfrozenBalance</code> or <code>ERC20InsufficientBalance</code></td></tr>
-        <tr><td><code>mint</code> on a token</td><td><code>AccessControlUnauthorizedAccount</code> without <code>MINTER_ROLE</code>. A zero receiver: <code>ERC20InvalidReceiver</code></td><td><code>PolicyGated_TransferRejected(reason)</code>, for example a receiver without an eligible credential, or <code>ABOVE_SUPPLY_CAP</code></td></tr>
-        <tr><td><code>burn</code> on a token</td><td>Without <code>BURNER_ROLE</code>: <code>AccessControlUnauthorizedAccount</code>. Above the balance: <code>ERC20InsufficientBalance</code></td><td><code>PolicyGated_TransferRejected(reason)</code>, for example <code>PAUSED</code>, <code>SENDER_FROZEN</code> or <code>NOT_FUND_CLASS</code></td></tr>
+        <tr><td><code>transfer</code>, <code>transferFrom</code></td><td><code>transferFrom</code> spends the allowance first: <code>ERC20InsufficientAllowance</code>. A zero address: <code>ERC20InvalidSender</code>, <code>ERC20InvalidReceiver</code></td><td><code>ERC8473PolicyRejected(reason)</code>, <code>ERC7943InsufficientUnfrozenBalance</code> or <code>ERC20InsufficientBalance</code></td></tr>
+        <tr><td><code>mint</code> on a token</td><td><code>AccessControlUnauthorizedAccount</code> without <code>MINTER_ROLE</code>. A zero receiver: <code>ERC20InvalidReceiver</code></td><td><code>ERC8473PolicyRejected(reason)</code>, for example a receiver without an eligible credential, or <code>ABOVE_SUPPLY_CAP</code></td></tr>
+        <tr><td><code>burn</code> on a token</td><td>Without <code>BURNER_ROLE</code>: <code>AccessControlUnauthorizedAccount</code>. Above the balance: <code>ERC20InsufficientBalance</code></td><td><code>ERC8473PolicyRejected(reason)</code>, for example <code>NOT_FUND_CLASS</code> or <code>NO_RULES</code>. It does not see <code>PAUSED</code>, <code>SENDER_FROZEN</code> or <code>LOCKED_UP</code></td></tr>
         <tr><td><code>mint</code>, <code>burn</code> of an address and an amount, on a vault</td><td><code>GatedVault_Unsupported</code></td><td>Moves nothing</td></tr>
-        <tr><td><code>forcedTransfer</code></td><td>Without <code>AGENT_ROLE</code>: <code>AccessControlUnauthorizedAccount</code>. On the 7540 vault, out of its own address beyond the shares not booked to a pending redemption: <code>Gated7540Vault_ExceedsSurplus</code>. Above the balance: <code>ERC20InsufficientBalance</code>. A zero address: <code>ERC20InvalidSender</code>, <code>ERC20InvalidReceiver</code></td><td><code>PolicyGated_TransferRejected(reason)</code>, for example the receiver's credential, <code>RECEIVER_FROZEN</code> or <code>NOT_FUND_CLASS</code>. It does not see <code>PAUSED</code></td></tr>
-        <tr><td><code>executeTransfer</code></td><td>Without <code>EXECUTOR_ROLE</code>: <code>AccessControlUnauthorizedAccount</code>. The intent checks and the signature: <code>PolicyGated_TransferRejected</code> with <code>INTENT_EXPIRED</code>, <code>NONCE_USED</code>, <code>CONSIDERATION_NEEDS_EXECUTOR</code>, <code>WRONG_EXECUTOR</code>, <code>INTENT_NOT_YET_VALID</code>, <code>ZERO_RECEIVER</code> or <code>BAD_SIGNATURE</code></td><td>As <code>transfer</code></td></tr>
-        <tr><td><code>cancelIntent</code></td><td>A nonce already used or cancelled: <code>PolicyGated_TransferRejected(NONCE_USED)</code></td><td>Moves nothing</td></tr>
+        <tr><td><code>forcedTransfer</code></td><td>Without <code>AGENT_ROLE</code>: <code>AccessControlUnauthorizedAccount</code>. On the 7540 vault, out of its own address beyond the shares not booked to a pending redemption: <code>Gated7540Vault_ExceedsSurplus</code>. Above the balance: <code>ERC20InsufficientBalance</code>. A zero address: <code>ERC20InvalidSender</code>, <code>ERC20InvalidReceiver</code></td><td><code>ERC8473PolicyRejected(reason)</code>, for example the receiver's credential, <code>RECEIVER_FROZEN</code> or <code>NOT_FUND_CLASS</code>. It does not see <code>PAUSED</code></td></tr>
+        <tr><td><code>executeTransfer</code></td><td>Without <code>EXECUTOR_ROLE</code>: <code>AccessControlUnauthorizedAccount</code>. The intent checks and the signature: <code>ERC8473PolicyRejected</code> with <code>INTENT_EXPIRED</code>, <code>NONCE_USED</code>, <code>CONSIDERATION_NEEDS_EXECUTOR</code>, <code>WRONG_EXECUTOR</code>, <code>INTENT_NOT_YET_VALID</code>, <code>ZERO_RECEIVER</code> or <code>BAD_SIGNATURE</code></td><td>As <code>transfer</code></td></tr>
+        <tr><td><code>cancelIntent</code></td><td>A nonce already used or cancelled: <code>ERC8473PolicyRejected(NONCE_USED)</code></td><td>Moves nothing</td></tr>
         <tr><td><code>IntentExecutor.execute</code></td><td>Without <code>OPERATOR_ROLE</code>: <code>AccessControlUnauthorizedAccount</code>. While paused: <code>EnforcedPause</code>. An intent that states a payment: <code>IntentExecutor_ConsiderationNotSupported(0)</code></td><td>The token's revert, unchanged</td></tr>
         <tr><td><code>IntentExecutor.executeBatch</code></td><td>As <code>execute</code>, plus <code>IntentExecutor_LengthMismatch</code> and <code>IntentExecutor_ConsiderationNotSupported(index)</code></td><td><code>IntentExecutor_BatchItemFailed(index, reason)</code>, with the token's revert data. The whole batch is undone</td></tr>
         <tr><td><code>DvPExecutor.executeDvPGated</code>, <code>executeDvP3009</code></td><td>Without <code>OPERATOR_ROLE</code>, or while paused. Legs that do not mirror: <code>DvPExecutor_LegsDoNotMatch</code></td><td><code>DvPExecutor_LegFailed(leg, reason)</code>, <code>leg</code> being <code>CASH</code> or <code>SECURITIES</code>. In the ERC-3009 form a cash balance that does not add up gives <code>DvPExecutor_CashNotConserved</code>, and a failing payout to the seller is not wrapped</td></tr>
-        <tr><td><code>Gated4626Vault.deposit</code>, <code>mint</code></td><td><code>ERC4626ExceededMaxDeposit</code> or <code>ERC4626ExceededMaxMint</code> when the max is 0: paused, credential, freeze, a full fund, no price from the portfolio, or exit-only. A payer the policy refuses: <code>GatedVault_ThirdPartyNotEligible(account, reason)</code></td><td><code>PolicyGated_TransferRejected(reason)</code>, for example <code>BELOW_MIN_POSITION</code>, or any reason for a zero amount, which passes the max check</td></tr>
-        <tr><td><code>Gated4626Vault.withdraw</code>, <code>redeem</code></td><td><code>ERC4626ExceededMaxWithdraw</code> or <code>ERC4626ExceededMaxRedeem</code>: the max is the unfrozen balance, limited by what a portfolio can raise, and 0 when the burn probe fails (paused, credential, freeze, lockup) or there is no price. A receiver the policy refuses: <code>GatedVault_ThirdPartyNotEligible</code>. Without an allowance: <code>ERC20InsufficientAllowance</code></td><td><code>PolicyGated_TransferRejected(reason)</code>, for example <code>BELOW_MIN_POSITION</code> for a remainder</td></tr>
+        <tr><td><code>Gated4626Vault.deposit</code>, <code>mint</code></td><td><code>ERC4626ExceededMaxDeposit</code> or <code>ERC4626ExceededMaxMint</code> when the max is 0: paused, credential, freeze, a full fund, no price from the portfolio, or exit-only. A payer the policy refuses: <code>GatedVault_ThirdPartyNotEligible(account, reason)</code></td><td><code>ERC8473PolicyRejected(reason)</code>, for example <code>BELOW_MIN_POSITION</code>, or any reason for a zero amount, which passes the max check</td></tr>
+        <tr><td><code>Gated4626Vault.withdraw</code>, <code>redeem</code></td><td><code>ERC4626ExceededMaxWithdraw</code> or <code>ERC4626ExceededMaxRedeem</code>: the max is the unfrozen balance, limited by what a portfolio can raise, and 0 when the burn probe fails (paused, credential, freeze, lockup) or there is no price. A receiver the policy refuses: <code>GatedVault_ThirdPartyNotEligible</code>. Without an allowance: <code>ERC20InsufficientAllowance</code></td><td><code>ERC8473PolicyRejected(reason)</code>, for example <code>BELOW_MIN_POSITION</code> for a remainder</td></tr>
         <tr><td><code>Gated7540Vault.requestDeposit</code></td><td><code>Gated7540Vault_ZeroAmount</code>, <code>Gated7540Vault_ZeroAddress</code>, <code>Gated7540Vault_Unauthorized</code>, then <code>Gated7540Vault_ControllerNotEligible(reason)</code> from the mint probe on the controller, <code>PAUSED</code> included, <code>GatedVault_ThirdPartyNotEligible</code>, <code>Gated7540Vault_EarlierRequestUnsettled</code></td><td>Moves no shares</td></tr>
-        <tr><td><code>Gated7540Vault.requestRedeem</code></td><td><code>Gated7540Vault_ZeroAmount</code>, <code>Gated7540Vault_ZeroAddress</code>; a caller that is not the owner or its operator spends an allowance; <code>GatedVault_ThirdPartyNotEligible</code>, <code>Gated7540Vault_EarlierRequestUnsettled</code></td><td>The move into escrow is a <span class="k k-transfer">TRANSFER</span>: <code>PolicyGated_TransferRejected(reason)</code> or a balance error</td></tr>
-        <tr><td><code>Gated7540Vault.settlePeriod</code></td><td>Without <code>SETTLER_ROLE</code>: <code>AccessControlUnauthorizedAccount</code>. While paused: <code>EnforcedPause</code>. No closed period: <code>Gated7540Vault_NoClosedPeriod</code></td><td>The burn of the shares it takes: <code>PolicyGated_TransferRejected(reason)</code>. After it, <code>Gated7540Vault_BalanceAudit(held, owed)</code></td></tr>
-        <tr><td><code>Gated7540Vault.deposit</code>, <code>mint</code> (claims)</td><td><code>Gated7540Vault_Unauthorized</code>, <code>Gated7540Vault_ControllerNotEligible(reason)</code> (<code>PAUSED</code> included), <code>Gated7540Vault_ZeroAmount</code>, <code>Gated7540Vault_ExceedsClaimable</code></td><td>The mint to the receiver: <code>PolicyGated_TransferRejected(reason)</code>, for example <code>BELOW_MIN_POSITION</code>; the claimable amount stays</td></tr>
+        <tr><td><code>Gated7540Vault.requestRedeem</code></td><td><code>Gated7540Vault_ZeroAmount</code>, <code>Gated7540Vault_ZeroAddress</code>; a caller that is not the owner or its operator spends an allowance; <code>GatedVault_ThirdPartyNotEligible</code>, <code>Gated7540Vault_EarlierRequestUnsettled</code></td><td>The move into escrow is a <span class="k k-transfer">TRANSFER</span>: <code>ERC8473PolicyRejected(reason)</code> or a balance error</td></tr>
+        <tr><td><code>Gated7540Vault.settlePeriod</code></td><td>Without <code>SETTLER_ROLE</code>: <code>AccessControlUnauthorizedAccount</code>. While paused: <code>EnforcedPause</code>. No closed period: <code>Gated7540Vault_NoClosedPeriod</code></td><td>The burn of the shares it takes: <code>ERC8473PolicyRejected(reason)</code>. After it, <code>Gated7540Vault_BalanceAudit(held, owed)</code></td></tr>
+        <tr><td><code>Gated7540Vault.deposit</code>, <code>mint</code> (claims)</td><td><code>Gated7540Vault_Unauthorized</code>, <code>Gated7540Vault_ControllerNotEligible(reason)</code> (<code>PAUSED</code> included), <code>Gated7540Vault_ZeroAmount</code>, <code>Gated7540Vault_ExceedsClaimable</code></td><td>The mint to the receiver: <code>ERC8473PolicyRejected(reason)</code>, for example <code>BELOW_MIN_POSITION</code>; the claimable amount stays</td></tr>
         <tr><td><code>Gated7540Vault.redeem</code>, <code>withdraw</code> (claims)</td><td><code>EnforcedPause</code> first, then <code>Gated7540Vault_Unauthorized</code>, <code>Gated7540Vault_ControllerNotEligible(reason)</code> from the burn probe, <code>GatedVault_ThirdPartyNotEligible</code>, <code>Gated7540Vault_ZeroAmount</code>, <code>Gated7540Vault_ExceedsClaimable</code></td><td>Moves no shares: they were burned at settlement</td></tr>
-        <tr><td><code>Gated7540Vault.rejectDepositRequest</code>, <code>rejectRedeemRequest</code></td><td><code>Gated7540Vault_NothingPending</code>, then <code>AccessControlUnauthorizedAccount</code> without <code>AGENT_ROLE</code> while the period is open, or without <code>SETTLER_ROLE</code> once it has closed</td><td><code>rejectDepositRequest</code> moves no shares. <code>rejectRedeemRequest</code> is a <span class="k k-transfer">TRANSFER</span> back to the controller: <code>PolicyGated_TransferRejected(reason)</code></td></tr>
-        <tr><td><code>Gated7540Vault.recoverRedeemRequest</code></td><td><code>Gated7540Vault_ZeroAddress</code>, then as <code>rejectRedeemRequest</code></td><td>A <span class="k k-forced">FORCED</span> move: <code>PolicyGated_TransferRejected(reason)</code> for the receiver</td></tr>
-        <tr><td><code>Gated7540Vault.recoverClaimable</code></td><td>Without <code>AGENT_ROLE</code>; <code>Gated7540Vault_ZeroAddress</code>; a recipient the policy refuses: <code>Gated7540Vault_RecipientNotEligible(reason)</code>; <code>Gated7540Vault_NothingClaimable</code></td><td>A <span class="k k-forced">FORCED</span> mint: <code>PolicyGated_TransferRejected(reason)</code> for the receiver</td></tr>
+        <tr><td><code>Gated7540Vault.rejectDepositRequest</code>, <code>rejectRedeemRequest</code></td><td><code>Gated7540Vault_NothingPending</code>, then <code>AccessControlUnauthorizedAccount</code> without <code>AGENT_ROLE</code> while the period is open, or without <code>SETTLER_ROLE</code> once it has closed</td><td><code>rejectDepositRequest</code> moves no shares. <code>rejectRedeemRequest</code> is a <span class="k k-transfer">TRANSFER</span> back to the controller: <code>ERC8473PolicyRejected(reason)</code></td></tr>
+        <tr><td><code>Gated7540Vault.recoverRedeemRequest</code></td><td><code>Gated7540Vault_ZeroAddress</code>, then as <code>rejectRedeemRequest</code></td><td>A <span class="k k-forced">FORCED</span> move: <code>ERC8473PolicyRejected(reason)</code> for the receiver</td></tr>
+        <tr><td><code>Gated7540Vault.recoverClaimable</code></td><td>Without <code>AGENT_ROLE</code>; <code>Gated7540Vault_ZeroAddress</code>; a recipient the policy refuses: <code>Gated7540Vault_RecipientNotEligible(reason)</code>; <code>Gated7540Vault_NothingClaimable</code></td><td>A <span class="k k-forced">FORCED</span> mint: <code>ERC8473PolicyRejected(reason)</code> for the receiver</td></tr>
       </tbody>
     </table>
   </div>
@@ -578,8 +581,8 @@ transfer(carol, 120)  <span class="cm">reverts</span> ERC20InsufficientBalance(h
       <li><b>It does not see a vault's asset.</b> The hook judges the token whose balance moves. A vault's asset is an ordinary ERC-20 transfer, outside this path unless the asset is itself a gated token, which then runs its own. See <a href="money.html">Where the money sits</a>.</li>
       <li><b>It does not hold a rule in place.</b> The hook accepts any attested list, so a timelock change that drops <code>FundHoldersRule</code> from a class's list stops that class counting investors and enforcing the cap. <code>Fund.isClassIntact</code> and <code>Fund.firstBrokenClass</code> report it; they do not prevent it.</li>
       <li><b>It does not re-check attestations.</b> Attestation is checked at install and upgrade. Revoking one leaves a running rule running until the timelock removes it, and the guardian can pause meanwhile.</li>
-      <li><b>It judges the operator, not the intent.</b> A burn whose operator holds <code>BURNER_ROLE</code> counts as an enforcement burn, including when that account redeems its own shares through a vault. Burner accounts are issuer service accounts, not investors.</li>
-      <li><b>A minimum does not stop every small move.</b> <code>MinPositionRule</code> does not stop 1 wei being sent to a holder already at or above the minimum, and <span class="k k-forced">FORCED</span> moves and enforcement burns can leave a remainder below it.</li>
+      <li><b>It does not read the operator's roles.</b> Only <code>burn</code> itself is an enforcement burn. A <code>BURNER_ROLE</code> holder that redeems its own shares through a vault is judged like any holder: its lockup, minimum, freeze and frozen tokens apply.</li>
+      <li><b>A minimum does not stop every small move.</b> <code>MinPositionRule</code> does not stop 1 wei being sent to a holder already at or above the minimum, and <span class="k k-forced">FORCED</span> moves, the burner's <code>burn</code> among them, can leave a remainder below it.</li>
       <li><b>A pre-flight is not a promise.</b> It reads one block. A later block can have another time, another balance or another rule list.</li>
     </ul>
   </div>
@@ -602,13 +605,13 @@ transfer(carol, 120)  <span class="cm">reverts</span> ERC20InsufficientBalance(h
     <h2>Source and tests</h2>
     <ul class="plain wrap-any">
       <li>The path: <code>PolicyGatedERC20Upgradeable.sol</code> (<code>_move</code>, <code>_check</code>, <code>_context</code>, <code>_releaseFrozen</code>), <code>ComplianceHook.sol</code>, the rules in <code>contracts/hooks/rules/</code>, the intent checks in <code>IntentSettledUpgradeable.sol</code></li>
-      <li>Reason codes: <code>contracts/interfaces/Errors.sol</code>; the context: <code>IPolicyHook.sol</code>; the rule lists: <code>ignition/modules/roles.ts</code> and <code>ignition/profiles.ts</code></li>
+      <li>Reason codes: <code>contracts/interfaces/Errors.sol</code>; the context: <code>IERC8473Policy.sol</code>; the rule lists: <code>ignition/modules/roles.ts</code> and <code>ignition/profiles.ts</code></li>
       <li>Tests: <code>PolicyGatedERC20Upgradeable.t.sol</code> (pause, frozen amounts, kinds), <code>ComplianceHook.t.sol</code> (order, first rejection, empty list), <code>RuleSetIntegration.t.sol</code> (pre-flight against write through a rule set), one <code>.t.sol</code> next to each rule, <code>IntentToken.t.sol</code> (a rule that re-enters, for example <code>test_WhenARuleReentersTheToken_TheTransferReverts</code>), <code>test/nodejs/parity.test.ts</code> and <code>time.test.ts</code> (pre-flights from TypeScript, time boundaries)</li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>4a906cc</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>6ef0d4e</code> on <code>erc8473-conformance</code>.</footer>
 </main>
 </body>
 </html>

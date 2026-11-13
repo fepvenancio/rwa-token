@@ -4187,7 +4187,7 @@ The 4626 fits, by 20 bytes, so the second contract was not built here. It has no
 
 **Not done.**
 
-- **The pages.** `docs/` and `docs/md` are untouched and still describe the code at their pin. About 130 lines of prose and several flowcharts in some 20 pages describe behaviour this change moves (the burner's burn, the pause, the frozen-sender route, the callback flag, the initial rule list, the pre-flight operator). Pages have followed the code in their own change, pinned to the code's commit, and that is what this needs.
+- **The pages**: done later the same day, see "The pages" below.
 - **The 4626's second contract**, above.
 - **The draft itself.** D3 and D4 ask for two changes to the draft's text, in its own repository.
 - **An upgrade from a deployed token.** A token deployed before this change has its hook installed without `onInstall` having run; nothing is deployed, so no migration is written.
@@ -4223,9 +4223,30 @@ On branch `erc8473-conformance`, after the conformance change left `Gated4626Vau
 - `_MAX_RATE_BPS` lives in the second contract, its only user (Slither's one finding on the first cut).
 - Tests first: `Gated4626Management.t.sol` did not compile before the contract existed, since the vault had no `MANAGEMENT_LOGIC`. It has 18 tests: wiring, direct calls on the second contract, the hand-off through the vault, and upgrades. The 141 tests in the two existing vault test files pass untouched.
 - `IGated4626Vault` id `0x7c5d7975` became `0xecc03c50`. `ContractSizes.t.sol`, `scripts/verify-reproducible.ts` and the post-deploy check in `test/nodejs/fixtures.ts` now cover the second contract as they cover the 7540's.
-- Not done: the pages, as for the conformance change above.
+- The pages: done later the same day, see "The pages" below.
 
 **Verified.** `npx hardhat test`: 2040 passing (1842 solidity, 198 nodejs). Format, lint and typecheck clean. Slither 0 results, Aderyn 0 findings, Halmos 22 of 22 checks, `validate:upgrades` 7 of 7, `verify:reproducible` 32 contracts identical, with `Gated4626Management` matching the creation code `Gated4626Vault` embeds.
+
+## The pages, for ERC-8473 and the 4626's second contract (2026-11-13)
+
+Asked for by the owner on 2026-11-13, on branch `erc8473-conformance`.
+
+**What was done.** 44 pages, two of them new (`Gated4626Management`, `Gated4626Common`), each with its Markdown copy in `docs/md`. A script applied the renames to 26 pages. Five writers then rewrote the behaviour, each on its own pages and from one brief of facts taken from the code: the movement page; the overview and the three other topic pages; the base, token, deploy and governance pages; the hook and rule pages; the vault pages and the two new ones. Four separate checkers, who had not written the pages, checked every changed passage against the code and read each page through: 15 corrections, 30 pages clean. Seven diagrams had text changed and one arrow moved; none lost a box, and the edited ones were looked at in a browser. The footers pin `6ef0d4e` on `erc8473-conformance`, the last commit that changed the contracts. `md_check`: 44 pages, 0 problems.
+
+**What the pages found in the code.**
+
+- The install order in `ComplianceHook.onInstall`, fixed (see "Install order" above).
+- Comments that still described the burner-role reads, the context's old field names and the initialiser calling `setRules`, in six contracts and interfaces, and a test whose name said the opposite of what it checks. Corrected.
+- My own comment on `Gated4626Management.setFeeModel` said the model could be removed. It cannot: the vault requires an attested model. Corrected.
+
+**An outside review, pasted by the owner while the pages were being written.** Its page findings were all of pages not yet rewritten at the moment it looked; each cited statement was searched for afterwards and none remains. Its other points:
+
+- Same-hook reinstall passing the fund rule's check: fixed, above.
+- `SECURITY.md` section 4 behind the code: true. The Slither table lacked `reentrancy-events` on `ProxyDeployer.deploy` and `GuardedAccount.execute`, and the Aderyn table lacked the delegatecall-target finding on both vaults and the 4626's hand-off. Every inline suppression in the contracts that ship was compared with the tables by script; they agree now.
+- Stale `id` and `extra` in `Gated721.sol` and its test: corrected.
+- **`setRules` calls no rule's `onInstall`: open, for the owner.** A list set through `setRules` can drop the fund rule and take it back, or add it to a class that already has holders, and the count then lacks the movements in between. Telling the rules from `setRules` too would refuse that, by the same reasoning as an installation. It was not done, because it changes behaviour the tests pin and it closes a door: today a class whose list dropped the rule by mistake gets it back with one `setRules`, and with the check it could not, until the class is empty. It would also need the rule to accept a successor of the same fund, since replacing a fund's rule goes through `setRules` on classes that have holders (`FundIntegration.t.sol`). The pages and `SECURITY.md` state the gap as a limit, and `Fund.isClassIntact` and `firstBrokenClass` show a class whose list lacks the rule.
+
+**Not covered.** The worked numbers on `money.html` and `FeeModel.html` were not recomputed, and statements about the Ignition modules and the TypeScript checks were spot-checked, not re-derived. The footers name a commit of this branch: when the branch lands on `main` by squash, the commit changes and the footers need the new one.
 
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.

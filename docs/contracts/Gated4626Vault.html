@@ -32,6 +32,7 @@
     <span class="fact">admin: <b>the main timelock</b></span>
     <span class="fact">implementation attested as <b>IMPLEMENTATION</b></span>
     <span class="fact">share decimals: <b>the asset's plus 6</b></span>
+    <span class="fact">management code: <b>Gated4626Management</b></span>
   </div>
 </header>
 
@@ -40,6 +41,7 @@
     <h3>In one minute</h3>
     <p>A vault is a shared pot. You put an asset in and receive shares that stand for your part of the pot. You hand the shares back and take your part out. ERC-4626 is the common standard for such vaults, so wallets and other contracts already know how to use this one. The shares are a gated token: creating, moving and destroying them goes through the same compliance checks as every other token in the system, and the vault reports refusals up front through <code>maxDeposit</code> and <code>maxRedeem</code>.</p>
     <p>On its own the vault holds the money and its price is its balance. With a <a href="Portfolio.html"><code>Portfolio</code></a> plugged, the money goes on to the portfolio, which can put it in other on-chain vaults. The price then follows the portfolio's value, with one difference that protects holders: a loss counts at once, a gain counts no faster than a yearly rate limit. A sudden rise, or someone sending money in, cannot be bought ahead of and cashed out in the same moment.</p>
+    <p>Plugging a portfolio, the rate limit, the fee model and paying fees run in a second contract, <a href="Gated4626Management.html"><code>Gated4626Management</code></a>, which the implementation creates and nobody can swap alone. Those four functions are called on this vault, and everything an investor calls runs on the vault itself.</p>
   </div>
 </section>
 
@@ -50,7 +52,7 @@
   </div>
   <figure>
     <div class="fig-scroll">
-      <svg class="d" viewBox="0 0 780 584" role="img" aria-label="The steps of a deposit and of a redemption, in order. Deposit: count the value and charge any fee, with a portfolio only. Check assets against maxDeposit of the receiver, else ERC4626ExceededMaxDeposit. Compute shares with previewDeposit. If the payer is not the receiver, run the enforcement probe on the payer, else GatedVault_ThirdPartyNotEligible. Add assets to last, with a portfolio only. Pull the asset from the payer to the vault. Mint shares to the receiver through the hook, else PolicyGated_TransferRejected, and emit Deposit. Send the asset on to the portfolio, with a portfolio only. Redemption: count the value and charge any fee, with a portfolio only. Check shares against maxRedeem of the owner, else ERC4626ExceededMaxRedeem. Compute assets with previewRedeem. If the receiver is not the owner, run the enforcement probe on the receiver, else GatedVault_ThirdPartyNotEligible. With a portfolio only, take assets off last, call raise on the portfolio, and pull the asset from the portfolio to the vault. If the caller is not the owner, spend its share allowance, else ERC20InsufficientAllowance. Burn the shares from the owner through the hook, else PolicyGated_TransferRejected. Pay the asset from the vault to the receiver and emit Withdraw.">
+      <svg class="d" viewBox="0 0 780 584" role="img" aria-label="The steps of a deposit and of a redemption, in order. Deposit: count the value and charge any fee, with a portfolio only. Check assets against maxDeposit of the receiver, else ERC4626ExceededMaxDeposit. Compute shares with previewDeposit. If the payer is not the receiver, run the enforcement probe on the payer, else GatedVault_ThirdPartyNotEligible. Add assets to last, with a portfolio only. Pull the asset from the payer to the vault. Mint shares to the receiver through the hook, else ERC8473PolicyRejected, and emit Deposit. Send the asset on to the portfolio, with a portfolio only. Redemption: count the value and charge any fee, with a portfolio only. Check shares against maxRedeem of the owner, else ERC4626ExceededMaxRedeem. Compute assets with previewRedeem. If the receiver is not the owner, run the enforcement probe on the receiver, else GatedVault_ThirdPartyNotEligible. With a portfolio only, take assets off last, call raise on the portfolio, and pull the asset from the portfolio to the vault. If the caller is not the owner, spend its share allowance, else ERC20InsufficientAllowance. Burn the shares from the owner through the hook, else ERC8473PolicyRejected. Pay the asset from the vault to the receiver and emit Withdraw.">
         <defs>
           <marker id="v46a-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
         </defs>
@@ -89,7 +91,7 @@
 
         <rect class="b" x="10" y="408" width="370" height="42" rx="6"/>
         <text x="24" y="426">7. <tspan class="t-mint bold">MINT</tspan> to the receiver, through the hook; event Deposit</text>
-        <text x="24" y="442" class="mono sm rej">no: PolicyGated_TransferRejected</text>
+        <text x="24" y="442" class="mono sm rej">no: ERC8473PolicyRejected</text>
         <line class="ln" x1="195" y1="450" x2="195" y2="462" marker-end="url(#v46a-arrow)"/>
 
         <rect class="act" x="10" y="464" width="370" height="42" rx="6"/>
@@ -131,7 +133,7 @@
 
         <rect class="b" x="400" y="408" width="370" height="42" rx="6"/>
         <text x="414" y="426">7. <tspan class="t-burn bold">BURN</tspan> from the owner, through the hook</text>
-        <text x="414" y="442" class="mono sm rej">no: PolicyGated_TransferRejected</text>
+        <text x="414" y="442" class="mono sm rej">no: ERC8473PolicyRejected</text>
         <line class="ln" x1="585" y1="450" x2="585" y2="462" marker-end="url(#v46a-arrow)"/>
 
         <rect class="b2" x="400" y="464" width="370" height="42" rx="6"/>
@@ -319,8 +321,8 @@ Else, under 1e6 share units: totalAssets() = 0</pre>
     <ul class="plain wrap-any">
       <li><b>Redeeming the maximum works.</b> <code>redeem(maxRedeem(owner))</code> succeeds and one more share reverts, with and without a portfolio, apart from the minimum-position case below (<code>test_WhenRedeemingMaxRedeem_ItSucceedsAndOneMoreReverts</code>, <code>test_RedeemingMaxRedeemSucceedsAndOneMoreReverts</code>). A position that is wholly liquid is not cut down by rounding (<code>testFuzz_WhenAHoldersWholePositionIsLiquid_MaxRedeemIsAllOfIt</code>).</li>
       <li><b>Rounding down for <code>maxWithdraw</code>.</b> <code>withdraw</code> rounds the shares it burns up. Deriving <code>maxWithdraw</code> from <code>maxRedeem</code> with floor rounding means it does not promise assets that <code>withdraw</code> could not deliver (<code>test_WhenThePriceMoves_WithdrawingMaxWithdrawAlwaysSucceeds</code>).</li>
-      <li><b>Where <code>maxRedeem</code> can overstate.</b> With a minimum position set, if a remainder below the minimum would stay behind, whether a frozen amount or, with a portfolio, the part <code>liquidAssets()</code> cannot pay, <code>redeem(maxRedeem(owner))</code> reverts with <code>PolicyGated_TransferRejected(BELOW_MIN_POSITION)</code>: the minimum judges the whole balance, <code>maxRedeem</code> only the part it can pay. A test shows the frozen case (<code>test_WhenAFrozenRemainderBelowTheMinimumWouldStay_RedeemingAllOfMaxRedeemReverts</code>).</li>
-      <li><b>Whose call it is.</b> The burn probe treats the owner as the operator, while a real redemption's operator is its caller. A <code>BURNER_ROLE</code> holder is the one case where that differs, and the deployment grants that role on no vault.</li>
+      <li><b>Where <code>maxRedeem</code> can overstate.</b> With a minimum position set, if a remainder below the minimum would stay behind, whether a frozen amount or, with a portfolio, the part <code>liquidAssets()</code> cannot pay, <code>redeem(maxRedeem(owner))</code> reverts with <code>ERC8473PolicyRejected(BELOW_MIN_POSITION)</code>: the minimum judges the whole balance, <code>maxRedeem</code> only the part it can pay. A test shows the frozen case (<code>test_WhenAFrozenRemainderBelowTheMinimumWouldStay_RedeemingAllOfMaxRedeemReverts</code>).</li>
+      <li><b>Whose call it is.</b> The burn probe names the owner as the operator, while a real redemption's operator is its caller. No check on the token and no shipped rule reads the operator, so the probe and the redemption get the same answer whoever calls.</li>
     </ul>
   </div>
 </section>
@@ -354,10 +356,10 @@ Else, under 1e6 share units: totalAssets() = 0</pre>
     <table class="tight">
       <thead><tr><th>Situation</th><th>Deposit, mint</th><th>Withdraw, redeem</th><th>Share transfer</th></tr></thead>
       <tbody>
-        <tr><td>Paused (<code>pause()</code> by <code>GUARDIAN_ROLE</code>)</td><td>The max is 0: <code>ERC4626ExceededMaxDeposit</code> or <code>ERC4626ExceededMaxMint</code></td><td>The max is 0: <code>ERC4626ExceededMaxRedeem</code> or <code>ERC4626ExceededMaxWithdraw</code></td><td><code>PolicyGated_TransferRejected</code> with <code>PAUSED</code></td></tr>
+        <tr><td>Paused (<code>pause()</code> by <code>GUARDIAN_ROLE</code>)</td><td>The max is 0: <code>ERC4626ExceededMaxDeposit</code> or <code>ERC4626ExceededMaxMint</code></td><td>The max is 0: <code>ERC4626ExceededMaxRedeem</code> or <code>ERC4626ExceededMaxWithdraw</code></td><td><code>ERC8473PolicyRejected</code> with <code>PAUSED</code></td></tr>
         <tr><td>An amount frozen on the owner (<code>setFrozenTokens</code>)</td><td>Not affected</td><td>Only the unfrozen part. Above it, the same two errors with the unfrozen figure as the max.</td><td>Above the unfrozen balance: <code>ERC7943InsufficientUnfrozenBalance</code>. Above the whole balance: <code>ERC20InsufficientBalance</code>.</td></tr>
-        <tr><td>Address frozen (<code>setFrozen</code> in the rule)</td><td>As receiver, the max is 0 (<code>RECEIVER_FROZEN</code>)</td><td>As owner, the max is 0 (<code>SENDER_FROZEN</code>)</td><td><code>PolicyGated_TransferRejected</code> with <code>SENDER_FROZEN</code> or <code>RECEIVER_FROZEN</code></td></tr>
-        <tr><td>Locked up (<code>setLockup</code> in the rule)</td><td>Not affected</td><td>The max is 0 (<code>LOCKED</code>)</td><td><code>PolicyGated_TransferRejected</code> with <code>LOCKED</code></td></tr>
+        <tr><td>Address frozen (<code>setFrozen</code> in the rule)</td><td>As receiver, the max is 0 (<code>RECEIVER_FROZEN</code>)</td><td>As owner, the max is 0 (<code>SENDER_FROZEN</code>)</td><td><code>ERC8473PolicyRejected</code> with <code>SENDER_FROZEN</code> or <code>RECEIVER_FROZEN</code></td></tr>
+        <tr><td>Locked up (<code>setLockup</code> in the rule)</td><td>Not affected</td><td>The max is 0 (<code>LOCKED_UP</code>)</td><td><code>ERC8473PolicyRejected</code> with <code>LOCKED_UP</code></td></tr>
       </tbody>
     </table>
   </div>
@@ -407,6 +409,7 @@ assets = shares × (totalAssets + 1) / (totalSupply + 10^6)</pre>
         <tr><td><code>setFeeModel(feeModel)</code></td><td><code>DEFAULT_ADMIN_ROLE</code></td><td>Plugs a fee model (<a href="#fees">above</a>). Errors: <code>Gated4626Vault_NoPortfolio</code>, <code>Gated4626Vault_NotAttested(target)</code>. Emits <code>FeeModelSet</code>.</td></tr>
         <tr><td><code>accrue()</code></td><td>Anyone</td><td>Counts the value and charges any fee; does nothing while no price can be used. Emits <code>Accrued(counted, fee)</code> when it counts, after <code>DepositsClosed(counted, last)</code> if that count closes deposits. Reverts <code>Gated4626Vault_NoPortfolio</code> with none plugged.</td></tr>
         <tr><td><code>collectFees()</code></td><td>Anyone</td><td>Pays fees owed from the portfolio's idle money. Emits <code>FeesCollected</code>. Reverts <code>Gated4626Vault_NoFeeModel</code> with no model, and <code>EnforcedPause</code> while paused.</td></tr>
+        <tr><td><code>MANAGEMENT_LOGIC()</code></td><td>Anyone (read-only)</td><td>The second contract, <a href="Gated4626Management.html"><code>Gated4626Management</code></a>, which four functions are handed to. An immutable of the implementation.</td></tr>
         <tr><td><code>portfolio()</code>, <code>feeModel()</code>, <code>maxRate()</code>, <code>lastCounted()</code>, <code>feesOwed()</code>, <code>mark()</code>, <code>paidSinceMark()</code>, <code>exitOnly()</code></td><td>Anyone (read-only)</td><td>The state described above. <code>portfolio()</code> and <code>feeModel()</code> read zero when none is plugged.</td></tr>
         <tr><td><code>mint(address, uint256)</code>, <code>burn(address, uint256)</code></td><td>Anyone, to no effect</td><td>The base token's issuer functions. They revert with <code>GatedVault_Unsupported</code>, even for a holder of <code>MINTER_ROLE</code> or <code>BURNER_ROLE</code> (<a href="GatedVaultBase.html"><code>GatedVaultBase</code></a>).</td></tr>
         <tr><td><code>transfer</code>, <code>transferFrom</code>, <code>approve</code>, <code>permit</code></td><td><code>transfer</code>: a holder. <code>transferFrom</code>: a spender with the holder's allowance. <code>approve</code>: any account. <code>permit</code>: anyone with the owner's signature.</td><td>Ordinary share transfers and allowances. <code>transfer</code> and <code>transferFrom</code> are each a <span class="k k-transfer">TRANSFER</span> through the hook; <code>approve</code> and <code>permit</code> only set allowances.</td></tr>
@@ -417,7 +420,7 @@ assets = shares × (totalAssets + 1) / (totalSupply + 10^6)</pre>
       </tbody>
     </table>
   </div>
-  <p class="small wrap-any">The rest is the base token's: roles, <code>setPolicyHook</code>, upgrades, <code>canTransfer</code>, <code>canTransferWithReason</code>, <code>canSend</code>, <code>canReceive</code> and <code>multicall</code>. See <a href="PolicyGatedERC20Upgradeable.html"><code>PolicyGatedERC20Upgradeable</code></a>. The portfolio asks this vault's role table for <code>ALLOCATOR_ROLE</code> and for its other gates.</p>
+  <p class="small wrap-any"><code>setPortfolio</code>, <code>setMaxRate</code>, <code>setFeeModel</code> and <code>collectFees</code> are named here and run in <a href="Gated4626Management.html"><code>Gated4626Management</code></a>, on this vault's storage, with its caller. The storage and the counting are in <a href="Gated4626Common.html"><code>Gated4626Common</code></a>, which both contracts inherit. The rest is the base token's: roles, <code>installPolicy</code>, upgrades, <code>canTransfer</code>, <code>canTransferWithReason</code>, <code>canSend</code>, <code>canReceive</code> and <code>multicall</code>. See <a href="PolicyGatedERC20Upgradeable.html"><code>PolicyGatedERC20Upgradeable</code></a>. The portfolio asks this vault's role table for <code>ALLOCATOR_ROLE</code> and for its other gates.</p>
 </section>
 
 <section id="why">
@@ -431,6 +434,7 @@ assets = shares × (totalAssets + 1) / (totalSupply + 10^6)</pre>
       <li><b>The policy shows through <code>max*</code>.</b> ERC-4626 expresses limits through these functions, and integrators read them before calling. A blocked account sees 0 instead of an unexplained revert, and the vault's own functions enforce the same answer.</li>
       <li><b>Shares only through deposits and redemptions.</b> The issuer <code>mint</code> and <code>burn</code> revert, so the share supply does not grow without assets coming in. An invariant on a vault with no portfolio checks that the whole share supply converts to no more assets than the vault holds (<code>invariant_SharesAreAlwaysBacked</code>).</li>
       <li><b>Attested code only.</b> The vault is a proxy: a small contract that keeps the address and the balances and runs shared code, its implementation. An upgrade (<code>UPGRADER_ROLE</code>, which the deployment gives to the main timelock) must target an implementation that the <a href="PolicyRegistry.html"><code>PolicyRegistry</code></a> attests, meaning an account with <code>ATTESTER_ROLE</code>, in a deployment the security council, has recorded its code hash, and that reports the same template id. Tests show the vault refusing attested <code>IntentToken</code> and <code>Gated7540Vault</code> implementations with <code>Templated_WrongTemplate</code>. An implementation that is not attested is refused before that, with <code>PolicyGated_NotAttested</code>.</li>
+      <li><b>Two contracts.</b> One contract's code is limited to 24,576 bytes. The four management functions, which no investor calls, are in a second contract, and that leaves this vault room under the limit. <a href="Gated4626Management.html">The second contract's page</a> says what fixes it in place and what it costs.</li>
       <li><b>No ETH.</b> There is no <code>receive</code> function. The one payable function is the inherited <code>upgradeToAndCall</code>, which only <code>UPGRADER_ROLE</code> can call and which refuses ETH when the upgrade carries no call. A test shows a plain ETH send reverting.</li>
     </ul>
   </div>
@@ -458,6 +462,8 @@ assets = shares × (totalAssets + 1) / (totalSupply + 10^6)</pre>
   <div class="prose wrap-any"><h2>Connected to</h2></div>
   <div class="cards">
     <a class="card" href="GatedVaultBase.html"><span class="name">GatedVaultBase</span><p>The third-party check, the probes behind <code>max*</code>, and the reverting issuer functions.</p></a>
+    <a class="card" href="Gated4626Management.html"><span class="name">Gated4626Management</span><p>The second contract: plugging a portfolio, the rate limit, the fee model and paying fees run there, on this vault's storage.</p></a>
+    <a class="card" href="Gated4626Common.html"><span class="name">Gated4626Common</span><p>The storage and the counting the two contracts share.</p></a>
     <a class="card" href="PolicyGatedERC20Upgradeable.html"><span class="name">PolicyGatedERC20Upgradeable</span><p>The base token the shares are: roles, freezes, pause and the hook path.</p></a>
     <a class="card" href="Portfolio.html"><span class="name">Portfolio</span><p>Where the money goes when one is plugged, and who may move it.</p></a>
     <a class="card" href="ERC4626Adapter.html"><span class="name">ERC4626Adapter</span><p>How a portfolio holds a position in another on-chain vault.</p></a>
@@ -473,13 +479,13 @@ assets = shares × (totalAssets + 1) / (totalSupply + 10^6)</pre>
   <div class="prose wrap-any">
     <h2>Source and tests</h2>
     <ul class="plain wrap-any">
-      <li>Contract: <code>contracts/vaults/Gated4626Vault.sol</code>, interface <code>IGated4626Vault.sol</code>. The vault logic it inherits is OpenZeppelin's <code>ERC4626Upgradeable</code> from <code>@openzeppelin/contracts-upgradeable</code> 5.6.1.</li>
-      <li>Tests: <code>Gated4626Vault.t.sol</code> (a vault with no portfolio: unit tests with a mocked hook, integration tests with the real hook, lockups and a minimum position, the donation attack, and invariants), <code>Gated4626VaultPortfolio.t.sol</code> (a real portfolio, adapter and outside vault: plugging, counting, write-offs and fees), <code>GatedVaultBase.t.sol</code> (third parties behind the real rules), <code>CredentialRuleVaults.t.sol</code> (a lapsed holder redeems but cannot deposit), <code>FundIntegration.t.sol</code> (the vault as a fund class at a full cap), and <code>test/nodejs/vaults.test.ts</code> (a deposit and <code>withdraw(maxWithdraw)</code> from TypeScript)</li>
+      <li>Contract: <code>contracts/vaults/Gated4626Vault.sol</code>, with <code>Gated4626Management.sol</code> and <code>Gated4626Common.sol</code>, interface <code>IGated4626Vault.sol</code>. The vault logic it inherits is OpenZeppelin's <code>ERC4626Upgradeable</code> from <code>@openzeppelin/contracts-upgradeable</code> 5.6.1.</li>
+      <li>Tests: <code>Gated4626Vault.t.sol</code> (a vault with no portfolio: unit tests with a mocked hook, integration tests with the real hook, lockups and a minimum position, the donation attack, and invariants), <code>Gated4626VaultPortfolio.t.sol</code> (a real portfolio, adapter and outside vault: plugging, counting, write-offs and fees), <code>Gated4626Management.t.sol</code> (the wiring, direct calls, the hand-off and upgrades), <code>GatedVaultBase.t.sol</code> (third parties behind the real rules), <code>CredentialRuleVaults.t.sol</code> (a lapsed holder redeems but cannot deposit), <code>FundIntegration.t.sol</code> (the vault as a fund class at a full cap), and <code>test/nodejs/vaults.test.ts</code> (a deposit and <code>withdraw(maxWithdraw)</code> from TypeScript)</li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>4a906cc</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>6ef0d4e</code> on <code>erc8473-conformance</code>.</footer>
 </main>
 </body>
 </html>

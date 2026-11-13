@@ -45,7 +45,7 @@
 <section id="how">
   <div class="prose">
     <h2>How a position is judged</h2>
-    <p>The rule looks at the balance each side will have after the move. It reads both balances before the move from the context the token built (<code>extra</code>) and works from the amount, so it makes no call back into the token for a balance.</p>
+    <p>The rule looks at the balance each side will have after the move. It reads both balances before the move from the context the token built (<code>data</code>) and works from the amount, so it makes no call back into the token for a balance.</p>
   </div>
   <figure>
     <div class="fig-scroll">
@@ -79,7 +79,7 @@
   </figure>
   <figure>
     <div class="fig-scroll">
-      <svg class="d" viewBox="0 0 780 382" role="img" aria-label="The check, in order. First, if the minimum is 0, the amount is 0, the sender is the receiver, or the kind is FORCED, it returns TRANSFER_OK without judging. Second, if there is a receiver that would end below the minimum and is not exempt, it returns BELOW_MIN_POSITION. Third, if there is a sender that would keep more than zero and less than the minimum, is not exempt, and the movement is not a burn by a holder of the token's BURNER_ROLE, it returns BELOW_MIN_POSITION. Otherwise TRANSFER_OK.">
+      <svg class="d" viewBox="0 0 780 382" role="img" aria-label="The check, in order. First, if the minimum is 0, the amount is 0, the sender is the receiver, or the kind is FORCED, it returns TRANSFER_OK without judging. Second, if there is a receiver that would end below the minimum and is not exempt, it returns BELOW_MIN_POSITION. Third, if there is a sender that would keep more than zero and less than the minimum and is not exempt, it returns BELOW_MIN_POSITION. Otherwise TRANSFER_OK.">
         <defs>
           <marker id="mp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
           <marker id="mp-arrow-rej" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="rej"/></marker>
@@ -110,9 +110,8 @@
         <text x="280" y="221" class="sm m">no</text>
 
         <rect class="b" x="40" y="230" width="460" height="68" rx="8"/>
-        <text x="60" y="251">3. Is there a sender that would keep more than 0</text>
-        <text x="60" y="269">   and less than the minimum, is it not exempt, and</text>
-        <text x="60" y="287">   is this not a burn by a BURNER_ROLE holder?</text>
+        <text x="60" y="260">3. Is there a sender that would keep more than 0</text>
+        <text x="60" y="278">   and less than the minimum, and is it not exempt?</text>
         <line class="ln-rej" x1="500" y1="264" x2="530" y2="264" marker-end="url(#mp-arrow-rej)"/>
         <text x="506" y="256" class="sm m">yes</text>
         <rect class="rejbox" x="534" y="246" width="226" height="36" rx="6"/>
@@ -124,7 +123,7 @@
         <text x="60" y="349" class="bold">TRANSFER_OK</text>
       </svg>
     </div>
-    <figcaption><b>Three steps, receiver before sender.</b> The exemption list and the token's roles are read only once a position would breach the minimum, so an ordinary movement pays for neither.</figcaption>
+    <figcaption><b>Three steps, receiver before sender.</b> The exemption list is read only once a position would breach the minimum, so an ordinary movement does not pay for it.</figcaption>
   </figure>
 </section>
 
@@ -141,12 +140,12 @@
         <tr><td><span class="k k-executed">EXECUTED</span></td><td>the same as a transfer</td><td>the same as a transfer</td></tr>
         <tr><td><span class="k k-forced">FORCED</span></td><td class="ok">not judged</td><td class="ok">not judged (an enforcement mint has no sender)</td></tr>
         <tr><td><span class="k k-mint">MINT</span></td><td>ends at the minimum or more, unless exempt</td><td>none: a mint has no sender</td></tr>
-        <tr><td><span class="k k-burn">BURN</span></td><td>none: a burn has no receiver</td><td>keeps 0, or the minimum or more, unless exempt or the operator holds the token's <code>BURNER_ROLE</code></td></tr>
+        <tr><td><span class="k k-burn">BURN</span></td><td>none: a burn has no receiver</td><td>keeps 0, or the minimum or more, unless exempt</td></tr>
       </tbody>
     </table>
   </div>
   <div class="prose">
-    <p>The one reason code is <code>BELOW_MIN_POSITION</code>, and the token reverts with <code>PolicyGated_TransferRejected(BELOW_MIN_POSITION)</code>. A holder's own burn, such as a vault redemption, is judged on what it leaves behind. A burn by an account holding the token's <code>BURNER_ROLE</code> counts as enforcement and may leave any remainder. A plain transfer by that same account is judged like any other.</p>
+    <p>The one reason code is <code>BELOW_MIN_POSITION</code>, and the token reverts with <code>ERC8473PolicyRejected(BELOW_MIN_POSITION)</code>. A holder's own burn, such as a vault redemption, is judged on what it leaves behind. The burner's <code>burn</code> reaches the rule as <code>FORCED</code> and may leave any remainder. A plain transfer or a vault redemption by an account holding the token's <code>BURNER_ROLE</code> is judged like any other.</p>
   </div>
 </section>
 
@@ -155,7 +154,7 @@
     <h2>What is not judged</h2>
     <ul class="plain">
       <li><b>Nothing to judge.</b> A minimum of 0 (the rule is off for the token), an amount of 0, and a move from an account to itself all pass. Nothing changes hands, so no dust appears.</li>
-      <li><b>Enforcement.</b> <code>FORCED</code> passes on both sides, the enforcement mint included, and so does a burn whose operator holds the token's <code>BURNER_ROLE</code> on the sender side. The rule asks the token for that role only when a burn would leave a remainder below the minimum.</li>
+      <li><b>Enforcement.</b> <code>FORCED</code> passes on both sides: the agent's forced transfer, the enforcement mint and the burner's <code>burn</code>. The rule does not look at the operator and asks the token for no role.</li>
       <li><b>The token itself.</b> The token's own address is exempt. On <a href="Gated7540Vault.html"><code>Gated7540Vault</code></a> that address is the escrow that holds the shares of pending redemptions.</li>
       <li><b>Listed accounts.</b> The token's admin can exempt an account with <code>setExempt(token, account, true)</code>. An exempt account is not judged on its own side; the other side of the same movement still is. A listing on one token does not carry over to another.</li>
     </ul>
@@ -197,6 +196,7 @@
         <tr><td><code>isExempt(token, account)</code></td><td>Anyone (read-only)</td><td>True for the token itself and for listed accounts.</td></tr>
         <tr><td><code>checkSend</code>, <code>checkReceive</code></td><td>Anyone (read-only)</td><td><code>TRANSFER_OK</code> for every account.</td></tr>
         <tr><td><code>after_(ctx)</code></td><td>The hook of <code>ctx.token</code></td><td>The empty default. The hook does not call it, because <code>wantsAfter()</code> is false.</td></tr>
+        <tr><td><code>onInstall(token, previousPolicy)</code></td><td>Anyone; the hook when a token installs it</td><td>The empty default: the rule keeps no state derived from movements.</td></tr>
         <tr><td><code>ruleId()</code>, <code>wantsAfter()</code>, <code>supportsInterface(id)</code></td><td>Anyone (read-only)</td><td><code>keccak256('MinPositionRule.v1')</code>; false; ERC-165 for <code>IMinPositionRule</code>, <code>IComplianceRule</code> and <code>IERC165</code>.</td></tr>
       </tbody>
     </table>
@@ -220,7 +220,7 @@
     <h2>Why it is built this way</h2>
     <ul class="plain">
       <li><b>No dust, no cheap investor slots.</b> A fund caps its number of investors (<a href="FundHoldersRule.html"><code>FundHoldersRule</code></a>), and a one-unit balance counts as an investor. With a minimum set, a movement this rule judges cannot create such a position.</li>
-      <li><b>No call back into the token for balances.</b> The token puts the balances before the move in the context, the same way for the write and for every pre-flight, so the usual path makes no call to the token at all. The token is asked for a role, and only when a burn would leave dust.</li>
+      <li><b>No call back into the token for balances.</b> The token puts the balances before the move in the context, the same way for the write and for every pre-flight, so <code>check</code> makes no call to the token at all.</li>
       <li><b>One instance for every token.</b> The minimum and the exemptions are stored per token and authorised by that token's own admin, so the same attested contract serves every token in the deployment.</li>
     </ul>
   </div>
@@ -231,8 +231,7 @@
     <h2>What it does not do</h2>
     <ul class="plain">
       <li><b>It does nothing until a minimum is set.</b> Listing the rule is not enough, and the deployment sets none unless given one. Where no minimum is set, a payer the token's policy accepts can deposit 1 unit into a 4626 for an eligible empty receiver and take a fund investor slot. No rule answers that there: the agent can take the dust back with <code>forcedTransfer</code> to an exempt or already counted account, and someone can watch <code>Fund.holderCount()</code>.</li>
-      <li><b>Enforcement and exempt accounts can still leave dust.</b> Forced transfers, burns by a <code>BURNER_ROLE</code> holder and listed accounts are not held to the minimum.</li>
-      <li><b>It asks the operator, not the intent.</b> A <code>BURNER_ROLE</code> holder that redeems its own vault shares passes its own minimum, because the rule sees a burn by that role. Burner accounts are issuer service accounts and should not also be investors.</li>
+      <li><b>Enforcement and exempt accounts can still leave dust.</b> Forced movements, the burner's burn included, and listed accounts are not held to the minimum.</li>
       <li><b>1 unit can still reach an existing holder.</b> A receiver already at or above the minimum can receive any amount. A holder trying to exit an exact balance it read earlier then reverts with <code>BELOW_MIN_POSITION</code>, because the extra unit would stay behind. It exits the current balance instead.</li>
       <li><b>A frozen remainder makes <code>maxRedeem</code> overstate.</b> <code>maxRedeem</code> is the unfrozen balance, and the minimum judges the whole balance. A holder whose frozen amount is above zero and below the minimum cannot redeem all of <code>maxRedeem</code>: the frozen remainder would stay behind, and the redemption reverts with <code>BELOW_MIN_POSITION</code>.</li>
       <li><b>A minimum above <code>type(uint128).max</code> would refuse the vaults' mint probe</b> and read as a block in <code>maxDeposit</code>.</li>
@@ -262,7 +261,7 @@
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>4a906cc</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>6ef0d4e</code> on <code>erc8473-conformance</code>.</footer>
 </main>
 </body>
 </html>

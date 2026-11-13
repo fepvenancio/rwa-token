@@ -34,9 +34,9 @@ For each way money moves, this page shows where the asset and the shares are at 
 
 [`IntentToken`](contracts/IntentToken.md) holds no asset and moves no payment. Its balances are the record of who owns what. An **intent** is a transfer the holder signs off-chain and an executor submits; its `ref` field ties the move to an off-chain payment message. [`GatedToken`](contracts/GatedToken.md) is the same without intents.
 
-> **Diagram.** Intent token flows. The minter mints tokens to holder A, raising the supply. Holder A moves tokens to holder B by a transfer or by a signed intent that an executor contract runs. The agent can force-transfer holder A's tokens to a quarantine account that holds a credential. The burner burns from holder B, lowering the supply.
+> **Diagram.** Intent token flows. The minter mints tokens to holder A, raising the supply. Holder A moves tokens to holder B by a transfer or by a signed intent that an executor contract runs. The agent can force-transfer holder A's tokens to a quarantine account that holds a credential. The burner burns from holder B, a forced movement that lowers the supply.
 >
-> **No asset, no payment: only balances move.** Colours follow the movement kinds the rules see: MINT, TRANSFER or EXECUTED, FORCED, BURN. The executor contracts hold no tokens; they submit the holder's signed intent. [One movement](movement.md) follows each kind through the rules.
+> **No asset, no payment: only balances move.** Colours follow the movement kinds the rules see: MINT, TRANSFER or EXECUTED, FORCED. The burner's `burn` is FORCED too: these tokens have no holder's burn. The executor contracts hold no tokens; they submit the holder's signed intent. [One movement](movement.md) follows each kind through the rules.
 
 | Who | Can move a holder's tokens by | Limits |
 |---|---|---|
@@ -44,7 +44,7 @@ For each way money moves, this page shows where the asset and the shares are at 
 | A spender | `transferFrom`, with an allowance set by `approve` or by a signed `permit` | As for the holder, plus the allowance. |
 | An executor contract (`EXECUTOR_ROLE`) | `executeTransfer(intent, sig)` | With the holder's signature, once per nonce, inside its validity window, and only if the intent names this executor or none. |
 | The agent (`AGENT_ROLE`) | `forcedTransfer(from, to, amount)` | Up to the whole balance, frozen part included, also while paused. The receiver must hold a credential the policy accepts and must not be address-frozen. |
-| The burner (`BURNER_ROLE`) | `burn(from, amount)` | No allowance needed and may take frozen tokens. Refused for an address-frozen holder and while paused. |
+| The burner (`BURNER_ROLE`) | `burn(from, amount)` | No allowance needed. Up to the whole balance, frozen part included, also while paused. An address-frozen or locked-up holder can be burned from. |
 
 An intent can state what its signer is to receive (`considerationToken`, `considerationAmount`). The token does not move it and does not check that it was paid. It refuses a stated consideration that names no executor (`CONSIDERATION_NEEDS_EXECUTOR`), so that the named executor is the one that can run it. `IntentExecutor` refuses every intent that states one (`IntentExecutor_ConsiderationNotSupported`), because it cannot enforce a payment. `DvPExecutor` is the one that does, below. Gas is paid by whoever sends the transaction, which for an intent is the operator, not the holder.
 
@@ -100,7 +100,7 @@ With a [`Portfolio`](contracts/Portfolio.md) plugged (`setPortfolio(portfolio, m
 
 The formula is the same, but `totalAssets()` is a counted value, not a balance. Losses count at once. Gains count only up to a yearly rate, so a donation to the portfolio cannot jump the price, and in one block a second count adds nothing. Each deposit and withdrawal counts first (`accrue` does the same for anyone), then moves `last` by exactly its amount, so a price quoted is the price paid.
 
-*Gated4626Vault: \_counting and \_accrue*
+*Gated4626Common: \_counting and \_accrue*
 
 ```
 net     = pricedValue() − feesOwed, stopping at zero
@@ -142,7 +142,7 @@ Example with a 6-decimal asset and a limit of 1,000 basis points (10% a year). A
 - **The escrow is one balance** at the vault's address for every controller, while the bookkeeping is per controller. The agent's `forcedTransfer` out of that address may take only shares above `pendingRedeemShares` (`Gated7540Vault_ExceedsSurplus` otherwise), and `setFrozenTokens` refuses that address (`GatedVault_Unsupported`). For escrowed shares the agent's tool is `recoverRedeemRequest`.
 - **Operators are full delegates.** An account approved with `setOperator` can open requests that pull the owner's assets or shares under any controller, and choose the receiver of a claim, as ERC-7540 specifies.
 - **The balance audit** is the last thing `settlePeriod` does. It reverts with `Gated7540Vault_BalanceAudit(held, owed)` unless the vault's asset balance is at least `pendingDeposits + claimableCash`, so a period cannot settle while the vault is short of what it owes. A cash account that is short, or has not approved the vault, makes the pull revert first. A `Portfolio` approved its vault at construction.
-- **During a pause.** `settlePeriod` and the redemption claims revert with `EnforcedPause`. `requestDeposit` and the deposit claims revert with `Gated7540Vault_ControllerNotEligible(PAUSED)`, and `requestRedeem` and `rejectRedeemRequest` with `PolicyGated_TransferRejected(PAUSED)`. `closePeriod`, `rejectDepositRequest`, `recoverRedeemRequest` and `recoverClaimable` still work.
+- **During a pause.** `settlePeriod` and the redemption claims revert with `EnforcedPause`. `requestDeposit` and the deposit claims revert with `Gated7540Vault_ControllerNotEligible(PAUSED)`, and `requestRedeem` and `rejectRedeemRequest` with `ERC8473PolicyRejected(PAUSED)`. `closePeriod`, `rejectDepositRequest`, `recoverRedeemRequest` and `recoverClaimable` still work.
 
 <a id="prices7540"></a>
 ## 7540 prices, rounding and a worked example
@@ -402,11 +402,11 @@ The list is a claim, like a NAV report: the root proves which list two people ap
 <a id="source"></a>
 ## Source and tests
 
-- Vaults: `GatedVaultBase.sol`, `Gated4626Vault.sol`, `Gated7540Vault.sol`, `Gated7540Settlement.sol`, `Gated7540Common.sol`
+- Vaults: `GatedVaultBase.sol`, `Gated4626Vault.sol`, `Gated4626Management.sol`, `Gated4626Common.sol`, `Gated7540Vault.sol`, `Gated7540Settlement.sol`, `Gated7540Common.sol`
 - Pricing and money's destinations: `NavDesk.sol`, `FeeModel.sol`, `Portfolio.sol`, `ERC4626Adapter.sol`, `GuardedAccount.sol`, `ERC20CallValidator.sol`, `ERC4626CallValidator.sol`
 - Settlement and distribution: `DvPExecutor.sol`, `IntentExecutor.sol`, `SignedEntry.sol`, `Distributor.sol`, `IntentSettledUpgradeable.sol`
-- Tests: `Gated4626Vault.t.sol`, `Gated4626VaultPortfolio.t.sol`, `Gated7540Vault.t.sol`, `Gated7540Settlement.t.sol`, `NavDesk.t.sol`, `FeeModel.t.sol`, `Portfolio.t.sol`, `GuardedAccount.t.sol`, `DvPExecutor.t.sol`, `SignedEntry.t.sol`, `Distributor.t.sol`, `test/nodejs/vaults.test.ts`, `test/nodejs/dvp.test.ts`, `test/nodejs/legos.test.ts`
+- Tests: `Gated4626Vault.t.sol`, `Gated4626VaultPortfolio.t.sol`, `Gated4626Management.t.sol`, `Gated7540Vault.t.sol`, `Gated7540Settlement.t.sol`, `NavDesk.t.sol`, `FeeModel.t.sol`, `Portfolio.t.sol`, `GuardedAccount.t.sol`, `DvPExecutor.t.sol`, `SignedEntry.t.sol`, `Distributor.t.sol`, `test/nodejs/vaults.test.ts`, `test/nodejs/dvp.test.ts`, `test/nodejs/legos.test.ts`
 
 ---
 
-Describes the contracts at commit `4a906cc` on `main`.
+Describes the contracts at commit `6ef0d4e` on `erc8473-conformance`.

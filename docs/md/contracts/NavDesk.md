@@ -245,4 +245,4 @@ In a deployment, `Legos` builds the desk against the vault's predicted address. 
 
 ---
 
-Describes the contracts at commit `4a906cc` on `main`.
+Describes the contracts at commit `6ef0d4e` on `erc8473-conformance`.

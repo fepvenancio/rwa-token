@@ -44,11 +44,11 @@
 <section id="how">
   <div class="prose">
     <h2>How it works</h2>
-    <p>The registry stores one kind per code hash. The kinds are the values of <code>AttestKind</code>: <code>HOOK</code>, <code>RULE</code>, <code>IMPLEMENTATION</code>, <code>PORTFOLIO</code>, <code>ADAPTER</code>, <code>VALIDATOR</code> and <code>FEE_MODEL</code>, with <code>NONE</code> meaning nothing is stored. <code>isAttested(target, kind)</code> reads the code hash of the address it is given and compares the stored kind with the kind asked for. Thirteen calls in the system ask it, and no token movement does.</p>
+    <p>The registry stores one kind per code hash. The kinds are the values of <code>AttestKind</code>: <code>HOOK</code>, <code>RULE</code>, <code>IMPLEMENTATION</code>, <code>PORTFOLIO</code>, <code>ADAPTER</code>, <code>VALIDATOR</code> and <code>FEE_MODEL</code>, with <code>NONE</code> meaning nothing is stored. <code>isAttested(target, kind)</code> reads the code hash of the address it is given and compares the stored kind with the kind asked for. Fourteen calls in the system ask it, and no token movement does.</p>
   </div>
   <figure>
     <div class="fig-scroll">
-      <svg class="d" viewBox="0 0 780 552" role="img" aria-label="Thirteen install calls ask the registry. For HOOK: the token initialiser through _setHook, and setPolicyHook. For RULE: ComplianceHook.setRules and Fund.setRule. For IMPLEMENTATION: ProxyDeployer.deploy and the upgrade check. For PORTFOLIO: Gated4626Vault.setPortfolio, NavDesk.setSettings and Portfolio.migrateTo. For ADAPTER: Portfolio.addAdapter. For VALIDATOR: GuardedAccount.setPermission. For FEE_MODEL: Gated4626Vault.setFeeModel and NavDesk.setFeeModel. Each asks isAttested with the target and the kind. The registry maps code hashes to kinds. The security council attests and revokes; the main timelock manages who holds ATTESTER_ROLE.">
+      <svg class="d" viewBox="0 0 780 552" role="img" aria-label="Fourteen install calls ask the registry. For HOOK: the token initialiser through _installPolicy, and installPolicy. For RULE: ComplianceHook.setRules, ComplianceHook.onInstall when it is given a rule list, and Fund.setRule. For IMPLEMENTATION: ProxyDeployer.deploy and the upgrade check. For PORTFOLIO: Gated4626Vault.setPortfolio, NavDesk.setSettings and Portfolio.migrateTo. For ADAPTER: Portfolio.addAdapter. For VALIDATOR: GuardedAccount.setPermission. For FEE_MODEL: Gated4626Vault.setFeeModel and NavDesk.setFeeModel. Each asks isAttested with the target and the kind. The registry maps code hashes to kinds. The security council attests and revokes; the main timelock manages who holds ATTESTER_ROLE.">
         <defs>
           <marker id="pr-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
         </defs>
@@ -56,13 +56,13 @@
         <text x="372" y="30" class="mono sm m">isAttested(target, kind)</text>
 
         <rect class="band" x="12" y="44" width="350" height="56" rx="8"/>
-        <text x="26" y="66" class="mono">initialize → _setHook(hook)</text>
-        <text x="26" y="86" class="mono">setPolicyHook(hook)</text>
+        <text x="26" y="66" class="mono">initialize → _installPolicy(hook, data)</text>
+        <text x="26" y="86" class="mono">installPolicy(hook, data)</text>
         <line class="ln" x1="362" y1="72" x2="536" y2="72" marker-end="url(#pr-arrow)"/>
         <text x="372" y="64" class="mono bold">HOOK</text>
 
         <rect class="band" x="12" y="108" width="350" height="56" rx="8"/>
-        <text x="26" y="130" class="mono">ComplianceHook.setRules(token, rules)</text>
+        <text x="26" y="130" class="mono">ComplianceHook.setRules(…), onInstall(…)</text>
         <text x="26" y="150" class="mono">Fund.setRule(rule)</text>
         <line class="ln" x1="362" y1="136" x2="536" y2="136" marker-end="url(#pr-arrow)"/>
         <text x="372" y="128" class="mono bold">RULE</text>
@@ -122,15 +122,16 @@
         <text x="668" y="485" class="sm m">attest, revoke</text>
       </svg>
     </div>
-    <figcaption><b>Thirteen calls, one question.</b> Each install asks whether the target's code hash is on the list for one kind, and reverts with its own error if it is not. The table below names each error and the main other checks; each contract's page has them all. Placing a token passes through three kinds in one transaction: the implementation (<code>ProxyDeployer.deploy</code>), the hook (the token's initialiser) and every rule in its first list (the initialiser installs it through <code>setRules</code> when it is not empty).</figcaption>
+    <figcaption><b>Fourteen calls, one question.</b> Each install asks whether the target's code hash is on the list for one kind, and reverts with its own error if it is not. The table below names each error and the main other checks; each contract's page has them all. Placing a token passes through three kinds in one transaction: the implementation (<code>ProxyDeployer.deploy</code>), the hook (the token's initialiser) and every rule in its first list (the initialiser passes it as the data of the hook's installation, and the hook installs it in <code>onInstall</code> when it is not empty).</figcaption>
   </figure>
   <div class="table-wrap">
     <table>
       <thead><tr><th>Kind</th><th>Where it is asked, and who can make that call</th><th>Reverts with</th><th>What the same call also checks</th></tr></thead>
       <tbody>
-        <tr><td><code>HOOK</code></td><td>The token's initialiser (<code>_setHook</code>), which runs inside <code>ProxyDeployer.deploy</code></td><td><code>PolicyGated_NotAttested</code></td><td>The hook's <code>REGISTRY()</code> is the token's own registry (<code>PolicyGated_HookRegistryMismatch</code>).</td></tr>
-        <tr><td><code>HOOK</code></td><td><code>setPolicyHook</code>: the token's <code>DEFAULT_ADMIN_ROLE</code></td><td><code>PolicyGated_NotAttested</code></td><td>The same registry check.</td></tr>
+        <tr><td><code>HOOK</code></td><td>The token's initialiser (<code>_installPolicy</code>), which runs inside <code>ProxyDeployer.deploy</code></td><td><code>PolicyGated_NotAttested</code></td><td>The hook's <code>REGISTRY()</code> is the token's own registry (<code>PolicyGated_HookRegistryMismatch</code>), and the hook answers the id of <code>IERC8473Policy</code> (<code>PolicyGated_NotAPolicy</code>).</td></tr>
+        <tr><td><code>HOOK</code></td><td><code>installPolicy</code>: the token's <code>DEFAULT_ADMIN_ROLE</code></td><td><code>PolicyGated_NotAttested</code></td><td>The same two checks.</td></tr>
         <tr><td><code>RULE</code></td><td><code>ComplianceHook.setRules</code>: the token itself, or a holder of its <code>DEFAULT_ADMIN_ROLE</code></td><td><code>ComplianceHook_NotAttested</code></td><td>The caller (<code>ComplianceHook_NotTokenAdmin</code>), at most 16 rules (<code>ComplianceHook_TooManyRules</code>), one rule per <code>ruleId</code> (<code>ComplianceHook_DuplicateRule</code>). Each rule in the list is asked about, and one unattested rule reverts the whole call.</td></tr>
+        <tr><td><code>RULE</code></td><td><code>ComplianceHook.onInstall</code>, when its data carries a rule list: the token itself, from its initialiser or from <code>installPolicy</code></td><td><code>ComplianceHook_NotAttested</code></td><td>The caller is the token (<code>ComplianceHook_OnlyToken</code>), and the same limits on the list as <code>setRules</code>. Empty data installs no list and asks nothing.</td></tr>
         <tr><td><code>RULE</code></td><td><code>Fund.setRule</code>: the fund's owner</td><td><code>Fund_NotAttested</code></td><td>The rule's <code>FUND()</code> is this fund (<code>Fund_RuleForAnotherFund</code>).</td></tr>
         <tr><td><code>IMPLEMENTATION</code></td><td><code>ProxyDeployer.deploy</code>: its owner, the operations account</td><td><code>ProxyDeployer_ImplementationNotAttested</code></td><td>Asked before the proxy is created. After setup it compares the token's registry with its own, and the token's hook, rule list and symbol with the call (<a href="ProxyDeployer.html">ProxyDeployer</a>).</td></tr>
         <tr><td><code>IMPLEMENTATION</code></td><td><code>_authorizeUpgrade</code>, inside <code>upgradeToAndCall</code>: the token's <code>UPGRADER_ROLE</code></td><td><code>PolicyGated_NotAttested</code></td><td>The new implementation reports the token's own <code>templateId()</code> (<code>Templated_WrongTemplate</code>), so an attested vault implementation is refused under an intent token.</td></tr>
@@ -171,7 +172,7 @@
     <ul class="plain">
       <li>A hook, rule, portfolio, adapter, validator or fee model that was revoked stays where it is and keeps working.</li>
       <li>A proxy over a revoked implementation keeps running that code. <code>ProxyDeployer.deploy</code> and an upgrade to it revert.</li>
-      <li><code>setRules</code> asks about each rule in the list it is given, so a later change to a token's list reverts if that list still names a revoked rule.</li>
+      <li><code>setRules</code>, and <code>onInstall</code> with a rule list, ask about each rule in the list they are given, so a later change to a token's list reverts if that list still names a revoked rule.</li>
       <li>The post-deploy check reads the registry for the fund's rule, the credential rule and each product's portfolio, adapters and fee model, so running it again after a revoke fails on those. That check runs off-chain, and nothing on chain acts on its result.</li>
     </ul>
     <p>If a revoke reached running tokens, it would have to do one of two things to each token that runs the revoked code: skip that check, so a rule silently stops applying, or fail every movement. Asking at install time leaves that decision to governance. The guardian can pause the affected tokens at once, and the main timelock replaces the component, which waits out its delay. A pause does not stop a forced transfer, which still runs the hook and its rules.</p>
@@ -232,7 +233,7 @@
   <div class="prose"><h2>Connected to</h2></div>
   <div class="cards">
     <a class="card" href="ProxyDeployer.html"><span class="name">ProxyDeployer</span><p>Asks about the implementation before it creates a token.</p></a>
-    <a class="card" href="PolicyGatedERC20Upgradeable.html"><span class="name">PolicyGatedERC20Upgradeable</span><p>The token base: asks about the hook at setup and on <code>setPolicyHook</code>, and about the implementation on upgrade.</p></a>
+    <a class="card" href="PolicyGatedERC20Upgradeable.html"><span class="name">PolicyGatedERC20Upgradeable</span><p>The token base: asks about the hook at setup and on <code>installPolicy</code>, and about the implementation on upgrade.</p></a>
     <a class="card" href="ComplianceHook.html"><span class="name">ComplianceHook</span><p>Asks about each rule in a token's list when the list is installed.</p></a>
     <a class="card" href="Fund.html"><span class="name">Fund</span><p>Asks about the fund-wide holder rule when it is set.</p></a>
     <a class="card" href="Portfolio.html"><span class="name">Portfolio</span><p>Asks about each adapter it adds and the successor it migrates to.</p></a>
@@ -254,7 +255,7 @@
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>4a906cc</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>6ef0d4e</code> on <code>erc8473-conformance</code>.</footer>
 </main>
 </body>
 </html>

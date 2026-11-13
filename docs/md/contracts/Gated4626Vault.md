@@ -11,6 +11,7 @@ An ERC-4626 vault whose shares are a gated token. An investor pays in an asset a
 - admin: **the main timelock**
 - implementation attested as **IMPLEMENTATION**
 - share decimals: **the asset's plus 6**
+- management code: **Gated4626Management**
 
 <a id="in-one-minute"></a>
 
@@ -19,13 +20,15 @@ An ERC-4626 vault whose shares are a gated token. An investor pays in an asset a
 > A vault is a shared pot. You put an asset in and receive shares that stand for your part of the pot. You hand the shares back and take your part out. ERC-4626 is the common standard for such vaults, so wallets and other contracts already know how to use this one. The shares are a gated token: creating, moving and destroying them goes through the same compliance checks as every other token in the system, and the vault reports refusals up front through `maxDeposit` and `maxRedeem`.
 >
 > On its own the vault holds the money and its price is its balance. With a [`Portfolio`](Portfolio.md) plugged, the money goes on to the portfolio, which can put it in other on-chain vaults. The price then follows the portfolio's value, with one difference that protects holders: a loss counts at once, a gain counts no faster than a yearly rate limit. A sudden rise, or someone sending money in, cannot be bought ahead of and cashed out in the same moment.
+>
+> Plugging a portfolio, the rate limit, the fee model and paying fees run in a second contract, [`Gated4626Management`](Gated4626Management.md), which the implementation creates and nobody can swap alone. Those four functions are called on this vault, and everything an investor calls runs on the vault itself.
 
 <a id="how"></a>
 ## One deposit and one redemption
 
 Deposits and redemptions are OpenZeppelin's `ERC4626Upgradeable` (version 5.6.1), with steps added around it. Every change to a share balance goes through the base token's single path, which asks the policy hook first. A deposit reaches the hook as a MINT to the receiver, a redemption as a BURN from the owner, and in both the caller is the operator, the account driving the movement. The asset moves as a plain ERC-20 transfer the hook does not see, which is why [`GatedVaultBase`](GatedVaultBase.md) checks a third party on that leg.
 
-> **Diagram.** The steps of a deposit and of a redemption, in order. Deposit: count the value and charge any fee, with a portfolio only. Check assets against maxDeposit of the receiver, else ERC4626ExceededMaxDeposit. Compute shares with previewDeposit. If the payer is not the receiver, run the enforcement probe on the payer, else GatedVault_ThirdPartyNotEligible. Add assets to last, with a portfolio only. Pull the asset from the payer to the vault. Mint shares to the receiver through the hook, else PolicyGated_TransferRejected, and emit Deposit. Send the asset on to the portfolio, with a portfolio only. Redemption: count the value and charge any fee, with a portfolio only. Check shares against maxRedeem of the owner, else ERC4626ExceededMaxRedeem. Compute assets with previewRedeem. If the receiver is not the owner, run the enforcement probe on the receiver, else GatedVault_ThirdPartyNotEligible. With a portfolio only, take assets off last, call raise on the portfolio, and pull the asset from the portfolio to the vault. If the caller is not the owner, spend its share allowance, else ERC20InsufficientAllowance. Burn the shares from the owner through the hook, else PolicyGated_TransferRejected. Pay the asset from the vault to the receiver and emit Withdraw.
+> **Diagram.** The steps of a deposit and of a redemption, in order. Deposit: count the value and charge any fee, with a portfolio only. Check assets against maxDeposit of the receiver, else ERC4626ExceededMaxDeposit. Compute shares with previewDeposit. If the payer is not the receiver, run the enforcement probe on the payer, else GatedVault_ThirdPartyNotEligible. Add assets to last, with a portfolio only. Pull the asset from the payer to the vault. Mint shares to the receiver through the hook, else ERC8473PolicyRejected, and emit Deposit. Send the asset on to the portfolio, with a portfolio only. Redemption: count the value and charge any fee, with a portfolio only. Check shares against maxRedeem of the owner, else ERC4626ExceededMaxRedeem. Compute assets with previewRedeem. If the receiver is not the owner, run the enforcement probe on the receiver, else GatedVault_ThirdPartyNotEligible. With a portfolio only, take assets off last, call raise on the portfolio, and pull the asset from the portfolio to the vault. If the caller is not the owner, spend its share allowance, else ERC20InsufficientAllowance. Burn the shares from the owner through the hook, else ERC8473PolicyRejected. Pay the asset from the vault to the receiver and emit Withdraw.
 >
 > **One transaction each way.** The asset comes in before the shares are minted and goes out after they are burned, in OpenZeppelin's order. Step 1 comes first so that the price a caller can read with a preview is the price it pays (`test_AFeeIsChargedBeforeADepositPrices`).
 
@@ -121,8 +124,8 @@ ERC-4626 lets a vault say how much an account may deposit or redeem right now, a
 
 - **Redeeming the maximum works.** `redeem(maxRedeem(owner))` succeeds and one more share reverts, with and without a portfolio, apart from the minimum-position case below (`test_WhenRedeemingMaxRedeem_ItSucceedsAndOneMoreReverts`, `test_RedeemingMaxRedeemSucceedsAndOneMoreReverts`). A position that is wholly liquid is not cut down by rounding (`testFuzz_WhenAHoldersWholePositionIsLiquid_MaxRedeemIsAllOfIt`).
 - **Rounding down for `maxWithdraw`.** `withdraw` rounds the shares it burns up. Deriving `maxWithdraw` from `maxRedeem` with floor rounding means it does not promise assets that `withdraw` could not deliver (`test_WhenThePriceMoves_WithdrawingMaxWithdrawAlwaysSucceeds`).
-- **Where `maxRedeem` can overstate.** With a minimum position set, if a remainder below the minimum would stay behind, whether a frozen amount or, with a portfolio, the part `liquidAssets()` cannot pay, `redeem(maxRedeem(owner))` reverts with `PolicyGated_TransferRejected(BELOW_MIN_POSITION)`: the minimum judges the whole balance, `maxRedeem` only the part it can pay. A test shows the frozen case (`test_WhenAFrozenRemainderBelowTheMinimumWouldStay_RedeemingAllOfMaxRedeemReverts`).
-- **Whose call it is.** The burn probe treats the owner as the operator, while a real redemption's operator is its caller. A `BURNER_ROLE` holder is the one case where that differs, and the deployment grants that role on no vault.
+- **Where `maxRedeem` can overstate.** With a minimum position set, if a remainder below the minimum would stay behind, whether a frozen amount or, with a portfolio, the part `liquidAssets()` cannot pay, `redeem(maxRedeem(owner))` reverts with `ERC8473PolicyRejected(BELOW_MIN_POSITION)`: the minimum judges the whole balance, `maxRedeem` only the part it can pay. A test shows the frozen case (`test_WhenAFrozenRemainderBelowTheMinimumWouldStay_RedeemingAllOfMaxRedeemReverts`).
+- **Whose call it is.** The burn probe names the owner as the operator, while a real redemption's operator is its caller. No check on the token and no shipped rule reads the operator, so the probe and the redemption get the same answer whoever calls.
 
 <a id="checks"></a>
 ## Who is checked
@@ -146,10 +149,10 @@ Three tools stop shares from moving, and each shows up differently. The guardian
 
 | Situation | Deposit, mint | Withdraw, redeem | Share transfer |
 |---|---|---|---|
-| Paused (`pause()` by `GUARDIAN_ROLE`) | The max is 0: `ERC4626ExceededMaxDeposit` or `ERC4626ExceededMaxMint` | The max is 0: `ERC4626ExceededMaxRedeem` or `ERC4626ExceededMaxWithdraw` | `PolicyGated_TransferRejected` with `PAUSED` |
+| Paused (`pause()` by `GUARDIAN_ROLE`) | The max is 0: `ERC4626ExceededMaxDeposit` or `ERC4626ExceededMaxMint` | The max is 0: `ERC4626ExceededMaxRedeem` or `ERC4626ExceededMaxWithdraw` | `ERC8473PolicyRejected` with `PAUSED` |
 | An amount frozen on the owner (`setFrozenTokens`) | Not affected | Only the unfrozen part. Above it, the same two errors with the unfrozen figure as the max. | Above the unfrozen balance: `ERC7943InsufficientUnfrozenBalance`. Above the whole balance: `ERC20InsufficientBalance`. |
-| Address frozen (`setFrozen` in the rule) | As receiver, the max is 0 (`RECEIVER_FROZEN`) | As owner, the max is 0 (`SENDER_FROZEN`) | `PolicyGated_TransferRejected` with `SENDER_FROZEN` or `RECEIVER_FROZEN` |
-| Locked up (`setLockup` in the rule) | Not affected | The max is 0 (`LOCKED`) | `PolicyGated_TransferRejected` with `LOCKED` |
+| Address frozen (`setFrozen` in the rule) | As receiver, the max is 0 (`RECEIVER_FROZEN`) | As owner, the max is 0 (`SENDER_FROZEN`) | `ERC8473PolicyRejected` with `SENDER_FROZEN` or `RECEIVER_FROZEN` |
+| Locked up (`setLockup` in the rule) | Not affected | The max is 0 (`LOCKED_UP`) | `ERC8473PolicyRejected` with `LOCKED_UP` |
 
 While paused, the agent's `forcedTransfer` and `setFrozenTokens` still work, and so does `accrue()`, which has no pause check. `collectFees()` reverts with `EnforcedPause`.
 
@@ -193,6 +196,7 @@ The previews are arithmetic only. They tell you what the formula gives, and the 
 | `setFeeModel(feeModel)` | `DEFAULT_ADMIN_ROLE` | Plugs a fee model ([above](#fees)). Errors: `Gated4626Vault_NoPortfolio`, `Gated4626Vault_NotAttested(target)`. Emits `FeeModelSet`. |
 | `accrue()` | Anyone | Counts the value and charges any fee; does nothing while no price can be used. Emits `Accrued(counted, fee)` when it counts, after `DepositsClosed(counted, last)` if that count closes deposits. Reverts `Gated4626Vault_NoPortfolio` with none plugged. |
 | `collectFees()` | Anyone | Pays fees owed from the portfolio's idle money. Emits `FeesCollected`. Reverts `Gated4626Vault_NoFeeModel` with no model, and `EnforcedPause` while paused. |
+| `MANAGEMENT_LOGIC()` | Anyone (read-only) | The second contract, [`Gated4626Management`](Gated4626Management.md), which four functions are handed to. An immutable of the implementation. |
 | `portfolio()`, `feeModel()`, `maxRate()`, `lastCounted()`, `feesOwed()`, `mark()`, `paidSinceMark()`, `exitOnly()` | Anyone (read-only) | The state described above. `portfolio()` and `feeModel()` read zero when none is plugged. |
 | `mint(address, uint256)`, `burn(address, uint256)` | Anyone, to no effect | The base token's issuer functions. They revert with `GatedVault_Unsupported`, even for a holder of `MINTER_ROLE` or `BURNER_ROLE` ([`GatedVaultBase`](GatedVaultBase.md)). |
 | `transfer`, `transferFrom`, `approve`, `permit` | `transfer`: a holder. `transferFrom`: a spender with the holder's allowance. `approve`: any account. `permit`: anyone with the owner's signature. | Ordinary share transfers and allowances. `transfer` and `transferFrom` are each a TRANSFER through the hook; `approve` and `permit` only set allowances. |
@@ -201,7 +205,7 @@ The previews are arithmetic only. They tell you what the formula gives, and the 
 | `initialize` | Once, in the transaction that creates the proxy | Takes the asset, name, symbol, admin, guardian, registry, hook and rules. Sets the asset and the base token, installs the hook and the vault's rule list. [`ProxyDeployer`](ProxyDeployer.md) makes this call. |
 | `supportsInterface`, `templateId()` | Anyone (read-only) | ERC-165, adding ERC-4626 to what the base token reports; and `keccak256("Gated4626Vault")`, which an upgrade must match. |
 
-The rest is the base token's: roles, `setPolicyHook`, upgrades, `canTransfer`, `canTransferWithReason`, `canSend`, `canReceive` and `multicall`. See [`PolicyGatedERC20Upgradeable`](PolicyGatedERC20Upgradeable.md). The portfolio asks this vault's role table for `ALLOCATOR_ROLE` and for its other gates.
+`setPortfolio`, `setMaxRate`, `setFeeModel` and `collectFees` are named here and run in [`Gated4626Management`](Gated4626Management.md), on this vault's storage, with its caller. The storage and the counting are in [`Gated4626Common`](Gated4626Common.md), which both contracts inherit. The rest is the base token's: roles, `installPolicy`, upgrades, `canTransfer`, `canTransferWithReason`, `canSend`, `canReceive` and `multicall`. See [`PolicyGatedERC20Upgradeable`](PolicyGatedERC20Upgradeable.md). The portfolio asks this vault's role table for `ALLOCATOR_ROLE` and for its other gates.
 
 <a id="why"></a>
 ## Why it is built this way
@@ -213,6 +217,7 @@ The rest is the base token's: roles, `setPolicyHook`, upgrades, `canTransfer`, `
 - **The policy shows through `max*`.** ERC-4626 expresses limits through these functions, and integrators read them before calling. A blocked account sees 0 instead of an unexplained revert, and the vault's own functions enforce the same answer.
 - **Shares only through deposits and redemptions.** The issuer `mint` and `burn` revert, so the share supply does not grow without assets coming in. An invariant on a vault with no portfolio checks that the whole share supply converts to no more assets than the vault holds (`invariant_SharesAreAlwaysBacked`).
 - **Attested code only.** The vault is a proxy: a small contract that keeps the address and the balances and runs shared code, its implementation. An upgrade (`UPGRADER_ROLE`, which the deployment gives to the main timelock) must target an implementation that the [`PolicyRegistry`](PolicyRegistry.md) attests, meaning an account with `ATTESTER_ROLE`, in a deployment the security council, has recorded its code hash, and that reports the same template id. Tests show the vault refusing attested `IntentToken` and `Gated7540Vault` implementations with `Templated_WrongTemplate`. An implementation that is not attested is refused before that, with `PolicyGated_NotAttested`.
+- **Two contracts.** One contract's code is limited to 24,576 bytes. The four management functions, which no investor calls, are in a second contract, and that leaves this vault room under the limit. [The second contract's page](Gated4626Management.md) says what fixes it in place and what it costs.
 - **No ETH.** There is no `receive` function. The one payable function is the inherited `upgradeToAndCall`, which only `UPGRADER_ROLE` can call and which refuses ETH when the upgrade carries no call. A test shows a plain ETH send reverting.
 
 <a id="limits"></a>
@@ -233,6 +238,8 @@ The rest is the base token's: roles, `setPolicyHook`, upgrades, `canTransfer`, `
 ## Connected to
 
 - [GatedVaultBase](GatedVaultBase.md): The third-party check, the probes behind `max*`, and the reverting issuer functions.
+- [Gated4626Management](Gated4626Management.md): The second contract: plugging a portfolio, the rate limit, the fee model and paying fees run there, on this vault's storage.
+- [Gated4626Common](Gated4626Common.md): The storage and the counting the two contracts share.
 - [PolicyGatedERC20Upgradeable](PolicyGatedERC20Upgradeable.md): The base token the shares are: roles, freezes, pause and the hook path.
 - [Portfolio](Portfolio.md): Where the money goes when one is plugged, and who may move it.
 - [ERC4626Adapter](ERC4626Adapter.md): How a portfolio holds a position in another on-chain vault.
@@ -245,9 +252,9 @@ The rest is the base token's: roles, `setPolicyHook`, upgrades, `canTransfer`, `
 <a id="source"></a>
 ## Source and tests
 
-- Contract: `contracts/vaults/Gated4626Vault.sol`, interface `IGated4626Vault.sol`. The vault logic it inherits is OpenZeppelin's `ERC4626Upgradeable` from `@openzeppelin/contracts-upgradeable` 5.6.1.
-- Tests: `Gated4626Vault.t.sol` (a vault with no portfolio: unit tests with a mocked hook, integration tests with the real hook, lockups and a minimum position, the donation attack, and invariants), `Gated4626VaultPortfolio.t.sol` (a real portfolio, adapter and outside vault: plugging, counting, write-offs and fees), `GatedVaultBase.t.sol` (third parties behind the real rules), `CredentialRuleVaults.t.sol` (a lapsed holder redeems but cannot deposit), `FundIntegration.t.sol` (the vault as a fund class at a full cap), and `test/nodejs/vaults.test.ts` (a deposit and `withdraw(maxWithdraw)` from TypeScript)
+- Contract: `contracts/vaults/Gated4626Vault.sol`, with `Gated4626Management.sol` and `Gated4626Common.sol`, interface `IGated4626Vault.sol`. The vault logic it inherits is OpenZeppelin's `ERC4626Upgradeable` from `@openzeppelin/contracts-upgradeable` 5.6.1.
+- Tests: `Gated4626Vault.t.sol` (a vault with no portfolio: unit tests with a mocked hook, integration tests with the real hook, lockups and a minimum position, the donation attack, and invariants), `Gated4626VaultPortfolio.t.sol` (a real portfolio, adapter and outside vault: plugging, counting, write-offs and fees), `Gated4626Management.t.sol` (the wiring, direct calls, the hand-off and upgrades), `GatedVaultBase.t.sol` (third parties behind the real rules), `CredentialRuleVaults.t.sol` (a lapsed holder redeems but cannot deposit), `FundIntegration.t.sol` (the vault as a fund class at a full cap), and `test/nodejs/vaults.test.ts` (a deposit and `withdraw(maxWithdraw)` from TypeScript)
 
 ---
 
-Describes the contracts at commit `4a906cc` on `main`.
+Describes the contracts at commit `6ef0d4e` on `erc8473-conformance`.

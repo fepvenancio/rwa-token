@@ -27,8 +27,8 @@ The owner calls `deploy(symbol, implementation, initData, hook, expectedRules)`.
 > **Nine steps, one transaction.** Red boxes are the reverts. Because a revert undoes the whole call, a failed deploy leaves no contract at the address and the symbol can be used again once the problem is fixed. The initialiser in step 5 can revert too, for example on an unattested hook or rule.
 
 1. **One symbol, one token.** The symbol's hash is the CREATE2 salt, and each salt can be used once, with any implementation (`ProxyDeployer_SaltUsed(salt)`). This check comes before the attestation check (`test_WhenTheSymbolWasUsedAndTheImplementationIsNotAttested_SaltUsedWins`).
-2. **Reviewed code only.** Before a proxy exists, the deployer asks its registry whether the implementation's code hash is attested as `IMPLEMENTATION` (`ProxyDeployer_ImplementationNotAttested(implementation)`). This check has to live here: the token's own setup function is the implementation's code, so code nobody reviewed would simply skip a check of its own. An address with no code fails this check too.
-3. **Set up in the same transaction.** The proxy is created without setup data, then the deployer calls it with `initData` straight away. Nobody can get in between and set it up first.
+2. **Reviewed code only.** Before a proxy exists, the deployer asks its registry whether the implementation's code hash is attested as `IMPLEMENTATION` (`ProxyDeployer_ImplementationNotAttested(implementation)`). This check has to live here: the token's own setup function is the implementation's code, so code nobody reviewed could leave out a check of its own. An address with no code fails this check too.
+3. **Set up in the same transaction.** The proxy is created without setup data, then the deployer calls it with `initData` straight away. Nobody can get in between and set it up first. In that call the token's initialiser installs the hook and passes it the rule list as the installation's data. The hook's `onInstall` accepts that only from the token, and installs the list for it (`test_WhenInitialising_TheTokenInstallsItsRulesOnTheHookAsItself`).
 4. **Read back and compare.** The token must name the deployer's registry (`ProxyDeployer_RegistryMismatch(expected, actual)`), its hook must be the `hook` argument (`ProxyDeployer_HookNotInstalled(expected, installed)`), the hook must hold exactly `expectedRules` for it, same length and same order (`ProxyDeployer_RulesMismatch(hook, proxy)`), and the token must report the symbol the salt came from (`ProxyDeployer_SymbolMismatch(expected, actual)`).
 
 <a id="owner"></a>
@@ -101,4 +101,4 @@ The constructor takes the owner and the registry. It refuses a zero registry (`P
 
 ---
 
-Describes the contracts at commit `4a906cc` on `main`.
+Describes the contracts at commit `6ef0d4e` on `erc8473-conformance`.

@@ -22,14 +22,14 @@ The NFT template. Each token is one item, with its own owner and its own metadat
 <a id="how"></a>
 ## How a movement is decided
 
-Transfers, mints and burns reach OpenZeppelin's `_update`, which the token overrides. A forced transfer goes straight to the token's movement path, `_move`, with its kind. The checks run in this order:
+Transfers and mints reach OpenZeppelin's `_update`, which the token overrides. A forced transfer and the burner's `burn` go straight to the token's movement path, `_move`, as FORCED. The checks run in this order:
 
 1. **ERC-721's own checks.** On a transfer, the caller must be the owner or approved for the item (`ERC721InsufficientApproval`, or `ERC721NonexistentToken` for a token that does not exist), and the hook is not asked (`test_WhenTheCallerIsNotApproved_ErcSevenTwentyOneRevertsBeforeTheHookIsAsked`). A transfer to the zero address reverts with `ERC721InvalidReceiver`. `mint` refuses an id that exists, and `burn` one that does not, before the hook is asked. On a transfer, a `from` that is not the owner reverts with `ERC721IncorrectOwner`, which OpenZeppelin checks after the move: when the pause, the freeze or the hook refuses first, that is the revert, judged against the real owner. `forcedTransfer` checks `from` up front, before the pause, the freeze and the hook.
-2. **Pause.** While paused, every kind except FORCED is refused with `PolicyGated_TransferRejected(PAUSED)`.
-3. **The freeze.** An item frozen for its owner cannot be moved by the owner or an approved operator: `ERC7943InsufficientUnfrozenBalance(owner, tokenId)`. A forced transfer and a burn by a `BURNER_ROLE` holder may take it. See [Freezes](#freeze).
-4. **The hook decides.** `beforeTransfer(ctx)` returns `TRANSFER_OK` or a reason, and anything else reverts with `PolicyGated_TransferRejected(reason)`.
+2. **Pause.** While paused, every kind except FORCED is refused with `ERC8473PolicyRejected(PAUSED)`. That stops transfers and mints. A forced transfer and the burner's `burn` pass (`test_WhenPaused_TransfersAndMintsAreRejectedAndTheEnforcementBurnPasses`).
+3. **The freeze.** An item frozen for its owner cannot be moved by the owner or an approved operator: `ERC7943InsufficientUnfrozenBalance(owner, tokenId)`. A FORCED movement may take it: a forced transfer or the burner's `burn`. See [Freezes](#freeze).
+4. **The hook decides.** `checkTransfer(ctx)` returns `TRANSFER_OK` or a reason, and anything else reverts with `ERC8473PolicyRejected(reason)`. The call goes through [the core's `_ask`](PolicyGatedCoreUpgradeable.md#asking): a hook that reverts, runs out of gas, answers fewer than 32 bytes or has no code gives the reason `CHECK_UNAVAILABLE`.
 5. **The item moves** with OpenZeppelin's logic, which clears its approval and emits `Transfer`.
-6. **After the move,** `afterTransfer(ctx)` runs if the hook wants it, inside the token's reentrancy guard: a hook or rule that starts another movement reverts with `ReentrancyGuardReentrantCall` (`test_WhenTheHookCallsBackIntoTheToken_TheGuardRefusesIt`).
+6. **After the move,** `afterTransfer(ctx)` runs if the hook's `wantsAfterTransfer()` is true, which the shared hook's always is, inside the token's reentrancy guard: a hook or rule that starts another movement reverts with `ReentrancyGuardReentrantCall` (`test_WhenTheHookCallsBackIntoTheToken_TheGuardRefusesIt`).
 
 `safeTransferFrom` calls the receiver's `onERC721Received` after all of that, outside the guard. A receiver that moves the item on from there takes the same path as anyone, and a refusal of that second move undoes both (`test_WhenTheReceiverForwardsTheTokenFromItsCallback_ThePolicyJudgesThatMoveToo`). `mint` calls no receiver.
 
@@ -42,13 +42,13 @@ The same `TransferContext` as a fungible token's, so the same hook and the same 
 |---|---|
 | `token` | The NFT's own address |
 | `from`, `to` | Owner and receiver; zero on a mint and a burn respectively |
-| `id` | The token id |
+| `tokenId` | The token id |
 | `amount` | Always 1 |
-| `operator` | The caller: the owner or an approved operator, the minter, the burner, or the agent |
-| `kind` | TRANSFER from `transferFrom` and `safeTransferFrom`, MINT, BURN, FORCED from `forcedTransfer`. There is no EXECUTED: the NFT has no signed intents. |
-| `extra` | `abi.encode(fromBalance, toBalance)`: how many items each side held before the move, zero for the zero address |
+| `operator` | The caller: the owner or an approved operator, the minter, the burner, or the agent. In a pre-flight it is `from` |
+| `kind` | TRANSFER from `transferFrom` and `safeTransferFrom`, MINT from `mint`, FORCED from `forcedTransfer` and `burn`. The NFT has no holder burn, so no item moves as BURN: that kind appears only in a pre-flight with a zero `to`. There is no EXECUTED: the NFT has no signed intents. |
+| `data` | `abi.encode(fromBalance, toBalance)`: how many items each side held before the move, zero for the zero address |
 
-The tests compare the context with what each route sends: `test_WhenTheOwnerTransfers_TheHookSeesATransferWithTheHoldings`, `test_WhenAnApprovedOperatorTransfers_TheOperatorIsInTheContext`, `test_WhenTheMinterMints_TheHookSeesAMintOfOneAndTheTokenHasItsUri`, `test_WhenTheBurnerBurns_TheHookSeesABurnAndTheTokenIsGone` and `test_WhenTheAgentForces_TheHookSeesAForcedMoveAndBothEventsCarryTheToken`.
+The tests compare the context with what each route sends: `test_WhenTheOwnerTransfers_TheHookSeesATransferWithTheHoldings`, `test_WhenAnApprovedOperatorTransfers_TheOperatorIsInTheContext`, `test_WhenTheMinterMints_TheHookSeesAMintOfOneAndTheTokenHasItsUri`, `test_WhenTheBurnerBurns_ThePolicySeesAForcedMovementToZeroAndTheTokenIsGone` and `test_WhenTheAgentForces_TheHookSeesAForcedMoveAndBothEventsCarryTheToken`.
 
 <a id="rules"></a>
 ## Which rules fit an NFT
@@ -59,7 +59,7 @@ The tests compare the context with what each route sends: `test_WhenTheOwnerTran
 | [`HolderRestrictionRule`](HolderRestrictionRule.md) | Works as on any token: a holder's lockup and an address freeze. The `nft` profile lists it. |
 | [`MinPositionRule`](MinPositionRule.md) | Refused by the profile check. On chain it would count items, which means nothing for unique ones. |
 | [`FundHoldersRule`](FundHoldersRule.md) | Refused by the profile check. A `Fund` registers only a token that reports `IPolicyGated`, which the NFT does not, so on chain the rule would refuse every movement with `NOT_FUND_CLASS`. |
-| [`SupplyCapRule`](SupplyCapRule.md) | Refused by the profile check. It reads an ERC-20 `totalSupply`, which the NFT does not have, so on chain every mint, and the pre-flight of one, would revert with no reason. |
+| [`SupplyCapRule`](SupplyCapRule.md) | Refused by the profile check. It reads an ERC-20 `totalSupply`, which the NFT does not have, so on chain the rule's check of a mint would revert: every mint would revert with `ERC8473PolicyRejected(CHECK_UNAVAILABLE)`, and the pre-flight of one would read false with that reason. |
 | [`SettlementWindowRule`](SettlementWindowRule.md), [`ExecutedOnlyRule`](ExecutedOnlyRule.md) | Refused, as on every template without signed intents. |
 
 <a id="freeze"></a>
@@ -70,12 +70,12 @@ ERC-7943's freeze for NFTs is a yes or no for one account and one token id. The 
 - **The owner and approved operators** cannot move a frozen item (`test_WhenFrozen_NeitherTheOwnerNorAnApprovedOperatorCanMoveIt`).
 - **Enforcement clears it.** `forcedTransfer` and `burn` clear the owner's freeze of that item before the move, emitting `Frozen(owner, tokenId, false)` before `Transfer`, as ERC-7943 asks. If the hook then refuses, the whole call reverts and the freeze stays (for `burn`: `test_WhenTheHookRejects_TheTokenAndItsFreezeStay`).
 - **The invariant** `invariant_AHolderMovesExactlyItsUnfrozenTokens` drives random transfers, freezes, forced transfers and burns, and checks that an owner's transfer succeeds exactly when the item is not frozen for it, and that enforcement always clears the freeze it takes.
-- **An address freeze is a different tool:** it is `HolderRestrictionRule`'s, in the hook, and stops an account sending or receiving any item. It also stops the burner's burn, so the route out of an address-frozen account is `forcedTransfer`.
+- **An address freeze is a different tool:** it is `HolderRestrictionRule`'s, in the hook, and stops an account sending or receiving any item. It does not stop enforcement out of the account: the rule exempts FORCED on the sender's side, so the burner's `burn` and a `forcedTransfer` to a receiver that is not frozen both pass.
 
 <a id="preflight"></a>
 ## Asking before moving
 
-`canTransferWithReason(from, to, tokenId)` runs the checks of the path without moving anything. A zero `from` reads as a mint and a zero `to` as a burn; both zero reads `ZERO_RECEIVER`. The operator is `from` for a transfer, and the caller for a mint or a burn, because only a role holder drives those. The caller's role is not judged, so a burn is asked about from the burner's address: then a frozen item or a holder's lockup does not stop it, as it does not stop `burn` (`test_WhenTheBurnerAsksAboutBurningAFrozenToken_ThePreflightAgreesWithTheBurn`, `testFuzz_TheBurnPreflightAgreesWithTheBurn`). Approval is not judged.
+`canTransferWithReason(from, to, tokenId)` runs the checks of the path without moving anything. A zero `from` reads as a mint and a zero `to` as a burn; both zero reads `ZERO_RECEIVER`. The operator is `from`, which is the zero address for a mint, so the answer does not depend on who asks (`test_WhenAnyoneAsksAboutABurn_TheOperatorIsTheSender`). No pre-flight simulates FORCED, so none predicts `burn` or `forcedTransfer`. A burn asked about is answered as a holder's own burn would be, which the NFT does not have: a frozen item or a holder's lockup refuses it, whoever asks, while `burn` itself still takes the item (`test_WhenTheBurnerAsksAboutBurningAFrozenToken_ItGetsTheHoldersAnswerAndTheBurnStillPasses`, `test_WhenTheHolderIsLocked_TheBurnerCanStillBurn`). `burn` succeeds exactly when the hook accepts the forced movement, frozen or not, paused or not (`testFuzz_TheEnforcementBurnFollowsThePolicyAlone`). Approval is not judged.
 
 | Situation | `canTransferWithReason` | `canTransfer` |
 |---|---|---|
@@ -87,7 +87,7 @@ ERC-7943's freeze for NFTs is a yes or no for one account and one token id. The 
 
 `canTransfer` is ERC-7943's yes or no. The standard says it must not answer no for a non-permissioned check such as a balance or an allowance, so it leaves ownership to ERC-721, while it does count the freeze (`test_WhenFromIsNotTheOwner_OnlyTheReasonedPreflightSaysSo`, `test_WhenFrozen_NeitherTheOwnerNorAnApprovedOperatorCanMoveIt`). `testFuzz_ThePreflightAgreesWithTheWrite` fuzzes the sender, the freeze, the pause and the hook's answer, and compares `canTransferWithReason` with a real transfer.
 
-`canSend(account)` and `canReceive(account)` are the account questions: false while paused or with no hook, otherwise the hook's account answers.
+`canSend(account)` and `canReceive(account)` are the account questions. They are true for the zero address, and the hook is not asked. For any other account they are false while paused, with no hook, or when the hook cannot be asked, and otherwise the hook's account answers.
 
 <a id="functions"></a>
 ## What it can do
@@ -96,7 +96,7 @@ ERC-7943's freeze for NFTs is a yes or no for one account and one token id. The 
 |---|---|---|
 | `initialize(name, symbol, admin, guardian, registry, hook, _initialRules)` | Once per proxy; `ProxyDeployer` runs it in the transaction that creates the proxy | Sets the name and symbol, then the core: roles, registry, hook and the rule list. See [the core's setup](PolicyGatedCoreUpgradeable.md#setup). |
 | `mint(to, tokenId, uri)` | `MINTER_ROLE` | Creates the item for `to` with its URI, decided as MINT. An existing id reverts with `ERC721InvalidSender(0)`, a zero receiver with `ERC721InvalidReceiver`. Emits `Transfer`, then ERC-4906's `MetadataUpdate`. |
-| `burn(tokenId)` | `BURNER_ROLE` | Destroys the item without approval, clearing its owner's freeze first. Decided as BURN. A missing id reverts with `ERC721NonexistentToken`. |
+| `burn(tokenId)` | `BURNER_ROLE` | Destroys the item without approval, clearing its owner's freeze first, also while paused. Decided as FORCED with a zero receiver. A missing id reverts with `ERC721NonexistentToken`. |
 | `forcedTransfer(from, to, tokenId)` | `AGENT_ROLE` | Moves the item without the owner's consent, also while paused, clearing its freeze first. Decided as FORCED, so the rules still judge the receiver. Emits `Transfer`, then `ForcedTransfer(from, to, tokenId)` and `ForcedTransferBy(from, to, tokenId, agent)`. Returns `true`. |
 | `setFrozenTokens(account, tokenId, frozenStatus)` | `AGENT_ROLE` | Sets the freeze of one item for one account. Returns `true`. Works while paused. |
 | `setTokenURI(tokenId, uri)` | `AGENT_ROLE` | Replaces an existing item's URI and emits `MetadataUpdate`. A missing id reverts with `ERC721NonexistentToken`. |
@@ -107,15 +107,15 @@ ERC-7943's freeze for NFTs is a yes or no for one account and one token id. The 
 | `templateId()` | Anyone (read-only) | `keccak256('Gated721')` |
 | Pause, hook, roles, upgrades, `multicall` | From [the core](PolicyGatedCoreUpgradeable.md#functions). An agent can freeze and force in one `multicall` (`test_WhenTheAgentBatchesCalls_MulticallRunsThemAsTheAgent`). |  |
 
-`supportsInterface` answers true for `IGated721` (`0x94f4fff1`), `IERC7943NonFungible` (`0xbf1ef5fe`), `IPolicyGatedCore`, ERC-721, its metadata extension, ERC-4906, `IAccessControl` and `IERC165`, and false for `IPolicyGated` and the fungible `0x3edbb4c4` (`test_WhenQueried_ItSupportsItsInterfacesAndNotTheFungibleOnes`). `ForcedTransferBy` has the fungible templates' signature and topic. The standard's NFT `ForcedTransfer` has the fungible one's topic, but indexes the token id.
+`supportsInterface` answers true for `IGated721` (`0x94f4fff1`), `IERC7943NonFungible` (`0xbf1ef5fe`), `IPolicyGatedCore`, `IERC8473` (`0x0505c8c9`), ERC-721, its metadata extension, ERC-4906, `IAccessControl` and `IERC165`, and false for `IPolicyGated` and the fungible `0x3edbb4c4` (`test_WhenQueried_ItSupportsItsInterfacesAndNotTheFungibleOnes`). `ForcedTransferBy` has the fungible templates' signature and topic. The standard's NFT `ForcedTransfer` has the fungible one's topic, but indexes the token id.
 
 <a id="why"></a>
 ## Why it is built this way
 
 - **The same hook, not a second one.** One attested hook serves every token of a deployment, with a rule list per token. The rules read who, which kind and who is driving, so the account-based ones serve an NFT unchanged.
 - **ERC-721 checks first.** An unapproved caller gets ERC-721's error, and the policy is asked only about the real owner's movement.
-- **A plain mint.** Issuance calls no receiver, so no receiver code runs between the mint and the URI being set. The hook's `afterTransfer` does, if a listed rule wants it; neither rule the `nft` profile lists does.
-- **Pre-flights that match the routes.** A transfer is driven by its owner, a mint and a burn by a role holder, so the pre-flight takes the operator each route has.
+- **A plain mint.** Issuance calls no receiver, so no receiver code runs between the mint and the URI being set. The hook's `afterTransfer` is called in between and runs the listed rules that want it; neither rule the `nft` profile lists does.
+- **Pre-flights that do not depend on who asks.** The operator simulated is `from`, zero for a mint, so every caller gets the same answer. Enforcement is not simulated: `burn` and `forcedTransfer` are the issuer's own actions.
 
 <a id="limits"></a>
 ## What it does not do
@@ -147,4 +147,4 @@ ERC-7943's freeze for NFTs is a yes or no for one account and one token id. The 
 
 ---
 
-Describes the contracts at commit `4a906cc` on `main`.
+Describes the contracts at commit `6ef0d4e` on `erc8473-conformance`.

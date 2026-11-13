@@ -53,32 +53,32 @@
         <tr><td>What is counted</td><td>Nothing</td><td>Balances and a supply (ERC-20, with <code>permit</code>)</td><td>Tokens, each with an owner and a metadata URI (ERC-721)</td></tr>
         <tr><td>Roles</td><td>The six role ids, <code>revokeRole</code> with the recovery exception, and OpenZeppelin <code>AccessControl</code></td><td colspan="2">The core's</td></tr>
         <tr><td>Pause</td><td><code>pause</code> by the guardian, <code>unpause</code> by either timelock</td><td colspan="2">The core's; each template's own path decides what a pause refuses</td></tr>
-        <tr><td>Hook and registry</td><td>The hook pointer, <code>setPolicyHook</code> with its checks, and the registry fixed at setup</td><td colspan="2">The core's</td></tr>
+        <tr><td>Hook and registry</td><td>The hook pointer, <code>installPolicy</code> with its checks, the call that asks the hook, and the registry fixed at setup</td><td colspan="2">The core's</td></tr>
         <tr><td>Upgrades</td><td><code>_authorizeUpgrade</code>: the role, the attestation and the template id</td><td colspan="2">The core's; each template names its own <code>templateId()</code></td></tr>
         <tr><td>Account answers</td><td>The logic behind <code>canSend</code> and <code>canReceive</code></td><td colspan="2">Each declares the two functions, as both ERC-7943 interfaces do, and calls the core</td></tr>
         <tr><td>Freezes</td><td>None</td><td>An amount per account</td><td>A yes or no per account and token</td></tr>
         <tr><td>Movement path and pre-flights</td><td>None</td><td><code>_move</code>, <code>canTransfer</code>, <code>canTransferWithReason</code></td><td>Its own <code>_move</code> and pre-flights</td></tr>
         <tr><td>Issuance and enforcement</td><td>None</td><td><code>mint(to, amount)</code>, <code>burn(from, amount)</code>, <code>forcedTransfer</code>, <code>setFrozenTokens</code></td><td><code>mint(to, tokenId, uri)</code>, <code>burn(tokenId)</code>, <code>forcedTransfer</code>, <code>setFrozenTokens</code>, <code>setTokenURI</code></td></tr>
-        <tr><td>Interfaces it reports</td><td><code>IPolicyGatedCore</code> (<code>0xcc8e18aa</code>), <code>IAccessControl</code>, <code>IERC165</code></td><td>Adds <code>IPolicyGated</code>, <code>IERC7943Fungible</code> (<code>0x3edbb4c4</code>), <code>IERC20</code>, <code>IERC20Permit</code></td><td>Adds <code>IGated721</code>, <code>IERC7943NonFungible</code> (<code>0xbf1ef5fe</code>), ERC-721, its metadata extension, and ERC-4906</td></tr>
+        <tr><td>Interfaces it reports</td><td><code>IPolicyGatedCore</code> (<code>0x4116c4d8</code>), <code>IERC8473</code> (<code>0x0505c8c9</code>), <code>IAccessControl</code>, <code>IERC165</code></td><td>Adds <code>IPolicyGated</code>, <code>IERC7943Fungible</code> (<code>0x3edbb4c4</code>), <code>IERC20</code>, <code>IERC20Permit</code></td><td>Adds <code>IGated721</code>, <code>IERC7943NonFungible</code> (<code>0xbf1ef5fe</code>), ERC-721, its metadata extension, and ERC-4906</td></tr>
       </tbody>
     </table>
   </div>
   <div class="prose wrap-any">
-    <p><code>IPolicyGated</code> and <code>IGated721</code> both inherit <code>IPolicyGatedCore</code>. So <code>PolicyHookChanged</code> and the errors <code>PolicyGated_NotAttested</code>, <code>PolicyGated_HookRegistryMismatch</code>, <code>PolicyGated_TransferRejected</code> and <code>PolicyGated_ZeroAddress</code> have the same topic and selectors on every template, and an integrator decodes them the same way.</p>
+    <p><code>IPolicyGated</code> and <code>IGated721</code> both inherit <code>IPolicyGatedCore</code>. So <code>PolicyChanged</code> and the errors <code>PolicyGated_NotAttested</code>, <code>PolicyGated_HookRegistryMismatch</code>, <code>PolicyGated_NotAPolicy</code>, <code>ERC8473PolicyRejected</code> and <code>PolicyGated_ZeroAddress</code> have the same topic and selectors on every template, and an integrator decodes them the same way.</p>
   </div>
 </section>
 
 <section id="setup">
   <div class="prose wrap-any">
     <h2>Setup</h2>
-    <p>A template's <code>initialize</code> first sets up its token parent, then calls <code>__PolicyGatedCore_init(admin, guardian, registry, hook, rules)</code>. That function sets up OpenZeppelin's <code>AccessControl</code>, <code>Pausable</code> and <code>Multicall</code>, then the core's own state:</p>
+    <p>A template's <code>initialize</code> first sets up its token parent, then calls <code>__PolicyGatedCore_init(admin, guardian, registry, hook, rules)</code>. That function sets up OpenZeppelin's <code>AccessControl</code>, <code>Pausable</code>, <code>Multicall</code> and <code>ReentrancyGuard</code>, then the core's own state:</p>
   </div>
   <ol class="steps wrap-any">
     <li><div>A zero <code>admin</code>, <code>guardian</code> or <code>registry</code> reverts with <code>PolicyGated_ZeroAddress</code>.</div></li>
     <li><div>The registry is stored. There is no setter, so it is fixed from here on.</div></li>
     <li><div><code>DEFAULT_ADMIN_ROLE</code> goes to <code>admin</code>, the operations account in a launch, which later hands it to the main timelock. <code>GUARDIAN_ROLE</code> goes to <code>guardian</code>.</div></li>
-    <li><div>The hook is installed with the checks of <a href="#hook">Replacing the hook</a>, and <code>PolicyHookChanged(0, hook)</code> is emitted.</div></li>
-    <li><div>If the rule list is not empty, the token calls <code>setRules(token, rules)</code> on the hook, so it is live with its policy from the transaction that creates it. An empty list installs none, and the hook then refuses every movement.</div></li>
+    <li><div>The hook is installed as in <a href="#hook">Installing a policy</a>: the same checks, then <code>PolicyChanged(0, hook)</code>, then the hook's <code>onInstall(token, 0, data)</code>. The data is <code>abi.encode(rules)</code>, or empty when the rule list is empty.</div></li>
+    <li><div>The hook installs a rule list that is not empty in that <code>onInstall</code> call, so the token is live with its policy from the transaction that creates it (<code>test_WhenInitialised_ItCallsOnInstallWithNoPreviousPolicyAndTheRuleList</code>). An empty list installs none, and the hook then refuses every movement.</div></li>
   </ol>
   <div class="prose wrap-any">
     <p><code>Gated4626Vault</code> calls the parents' setup functions one by one, because ERC-4626's setup sits between ERC-20's and <code>permit</code>'s, and ends with <code>__PolicyGatedCore_init_unchained</code>, the last step above alone. <code>npm run validate:upgrades</code> fails on a missing or repeated parent setup call, and warns on one out of order.</p>
@@ -94,7 +94,7 @@
     <table class="tight">
       <thead><tr><th>Role</th><th>In the core</th><th>In the templates</th></tr></thead>
       <tbody>
-        <tr><td><code>DEFAULT_ADMIN_ROLE</code></td><td>Grant and revoke roles, <code>setPolicyHook</code>, <code>unpause</code></td><td>The hook and the rules ask a token whether a caller holds it before they accept that token's rule list or settings. On <code>Gated4626Vault</code> it also plugs a portfolio and a fee model and raises the rate limit, and a vault's portfolio, guarded accounts and desk ask the vault for it</td></tr>
+        <tr><td><code>DEFAULT_ADMIN_ROLE</code></td><td>Grant and revoke roles, <code>installPolicy</code>, <code>unpause</code></td><td>The hook and the rules ask a token whether a caller holds it before they accept that token's rule list or settings. On <code>Gated4626Vault</code> it also plugs a portfolio and a fee model and raises the rate limit, and a vault's portfolio, guarded accounts and desk ask the vault for it</td></tr>
         <tr><td><code>GUARDIAN_ROLE</code></td><td><code>pause</code>, at once, and nothing else here</td><td><code>Gated4626Vault</code> also lets it lower the rate limit</td></tr>
         <tr><td><code>RECOVERY_ROLE</code></td><td>Exactly <code>unpause</code> and <code>revokeRole(GUARDIAN_ROLE, account)</code></td><td>Nothing more</td></tr>
         <tr><td><code>UPGRADER_ROLE</code></td><td>Upgrades, to attested code of the same template</td><td>Nothing more</td></tr>
@@ -109,9 +109,28 @@
 
 <section id="hook">
   <div class="prose wrap-any">
-    <h2>Replacing the hook</h2>
-    <p><code>setPolicyHook(_newHook)</code> needs <code>DEFAULT_ADMIN_ROLE</code>. The hook must not be zero (<code>PolicyGated_ZeroAddress</code>), its code hash must be attested as <code>HOOK</code> in the token's registry (<code>PolicyGated_NotAttested</code>), and it must name the same registry (<code>PolicyGated_HookRegistryMismatch</code>), because a hook shared by several tokens checks their rules against its own registry. The swap does not copy the token's rule list: the timelock sets it on the new hook with <code>setRules</code>, and until then that hook refuses the token's movements with <code>NO_RULES</code>.</p>
+    <h2>Installing a policy</h2>
+    <p>ERC-8473 calls the hook the token's policy, and <code>policy()</code> returns it. <code>installPolicy(_newPolicy, _data)</code> needs <code>DEFAULT_ADMIN_ROLE</code>. It installs a first hook, a replacement, or the current hook again. Four checks run, in this order:</p>
+  </div>
+  <ol class="steps wrap-any">
+    <li><div>The hook must not be the zero address (<code>PolicyGated_ZeroAddress</code>).</div></li>
+    <li><div>Its code hash must be attested as <code>HOOK</code> in the token's registry (<code>PolicyGated_NotAttested</code>).</div></li>
+    <li><div>Its <code>REGISTRY()</code> must be the token's registry (<code>PolicyGated_HookRegistryMismatch</code>), because a hook shared by several tokens checks their rules against its own registry.</div></li>
+    <li><div>It must answer <code>supportsInterface(0x9cb56a99)</code>, the id of <code>IERC8473Policy</code> (<code>PolicyGated_NotAPolicy</code>).</div></li>
+  </ol>
+  <div class="prose wrap-any">
+    <p>The token then stores the hook, emits <code>PolicyChanged(previous, new)</code> and calls <code>onInstall(token, previous, data)</code> on the new hook, with the data unchanged. If <code>onInstall</code> reverts, the installation reverts and the token keeps the hook it had (<code>test_WhenOnInstallReverts_TheInstallationRevertsAndThePolicyStays</code>). The outgoing hook is not called. Installing the hook the token already has is an installation too: the event is emitted and <code>onInstall</code> is called again (<code>test_WhenInstallingTheSamePolicyAgain_ItCallsOnInstallAndEmits</code>).</p>
+    <p>For <a href="ComplianceHook.html"><code>ComplianceHook</code></a>, data that is not empty is <code>abi.encode</code> of the token's ordered rule list, which the hook installs as <code>setRules</code> installs one. Empty data keeps the list the hook already holds for the token, and a hook that holds none refuses the token's movements with <code>NO_RULES</code>. Before it stores a list from the data, the hook calls <code>onInstall(token, previous)</code> on every rule in the list, after checking that each rule from the data is attested. A rule that reverts undoes the installation.</p>
+    <p>The whole installation holds the token's reentrancy guard, the one each template's movement path holds. So no movement and no other installation can begin while <code>onInstall</code> runs: the attempt reverts with <code>ReentrancyGuardReentrantCall</code> (<code>test_WhenThePolicyMovesTokensFromOnInstall_TheGuardRefuses</code>).</p>
     <p>Each template's movement path reads the hook once per movement, so the hook that approves a movement is the one that sees its <code>afterTransfer</code>.</p>
+  </div>
+</section>
+
+<section id="asking">
+  <div class="prose wrap-any">
+    <h2>Asking the hook</h2>
+    <p>Every check is made through one static call, <code>_ask</code>, which copies one word of the answer: <code>checkTransfer</code> on each template's movement path and in its pre-flights, and <code>checkSend</code> and <code>checkReceive</code> behind <code>canSend</code> and <code>canReceive</code>. A hook that reverts, runs out of gas, answers fewer than 32 bytes or has no code gives the reason <code>CHECK_UNAVAILABLE</code>. So <code>canSend</code>, <code>canReceive</code> and <code>canTransfer</code> return false and do not revert, <code>canTransferWithReason</code> says <code>CHECK_UNAVAILABLE</code>, and a movement reverts with <code>ERC8473PolicyRejected(CHECK_UNAVAILABLE)</code> (<code>test_WhenThePolicyCannotBeAsked_TheMovementReverts</code>). The hook's own revert data is not passed on.</p>
+    <p><code>canSend(account)</code> and <code>canReceive(account)</code> are true for the zero address, and the hook is not asked, even while paused: the zero side of a mint or a burn is no account (<code>test_TheZeroAddressMaySendAndReceive_AndThePolicyIsNotAsked</code>). For any other account they are false while paused and when the token has no hook. Otherwise they are true when the hook's <code>checkSend</code> or <code>checkReceive</code> answers <code>TRANSFER_OK</code>.</p>
   </div>
 </section>
 
@@ -130,12 +149,12 @@
       <tbody>
         <tr><td><code>pause()</code></td><td><code>GUARDIAN_ROLE</code></td><td>Pauses the token. Each template's movement path then refuses every kind except <span class="k k-forced">FORCED</span>, and a template can refuse other functions while paused too, such as a vault's settlement, its fee collection or a 7540 claim. See <a href="../roles.html#pause">what a pause leaves possible</a>.</td></tr>
         <tr><td><code>unpause()</code></td><td><code>DEFAULT_ADMIN_ROLE</code> or <code>RECOVERY_ROLE</code></td><td>Lifts the pause. Anyone else gets <code>AccessControlUnauthorizedAccount(caller, DEFAULT_ADMIN_ROLE)</code>.</td></tr>
-        <tr><td><code>setPolicyHook(_newHook)</code></td><td><code>DEFAULT_ADMIN_ROLE</code></td><td>Replaces the hook after the checks above.</td></tr>
-        <tr><td><code>policyHook()</code>, <code>registry()</code></td><td>Anyone (read-only)</td><td>The current hook, and the registry fixed at setup.</td></tr>
+        <tr><td><code>installPolicy(_newPolicy, _data)</code></td><td><code>DEFAULT_ADMIN_ROLE</code></td><td>Installs a hook after the checks above, then calls its <code>onInstall</code> with the data.</td></tr>
+        <tr><td><code>policy()</code>, <code>registry()</code></td><td>Anyone (read-only)</td><td>The current hook, and the registry fixed at setup.</td></tr>
         <tr><td><code>revokeRole(role, account)</code></td><td>The role's admin; <code>RECOVERY_ROLE</code> for <code>GUARDIAN_ROLE</code></td><td>OpenZeppelin's, with the recovery exception. <code>grantRole</code>, <code>renounceRole</code>, <code>hasRole</code> and <code>getRoleAdmin</code> are OpenZeppelin's.</td></tr>
         <tr><td><code>upgradeToAndCall(newImplementation, data)</code></td><td><code>UPGRADER_ROLE</code></td><td>Points the proxy at other code, after the checks above.</td></tr>
         <tr><td><code>multicall(data)</code></td><td>Anyone; each inner call keeps the caller's roles</td><td>Several calls on the token in one transaction, all or none. Not payable.</td></tr>
-        <tr><td><code>supportsInterface(interfaceId)</code></td><td>Anyone (read-only)</td><td>True for <code>IPolicyGatedCore</code>, <code>IAccessControl</code> and <code>IERC165</code>; each template adds its own.</td></tr>
+        <tr><td><code>supportsInterface(interfaceId)</code></td><td>Anyone (read-only)</td><td>True for <code>IPolicyGatedCore</code>, <code>IERC8473</code>, <code>IAccessControl</code> and <code>IERC165</code>; each template adds its own.</td></tr>
         <tr><td><code>templateId()</code></td><td>Anyone (read-only)</td><td>Declared here, defined by each template: <code>keccak256</code> of its name.</td></tr>
       </tbody>
     </table>
@@ -144,14 +163,15 @@
     <table class="tight">
       <thead><tr><th>Event or error</th><th>When</th></tr></thead>
       <tbody>
-        <tr><td><code>PolicyHookChanged(_oldHook, _newHook)</code></td><td>At setup, with <code>_oldHook</code> zero, and on <code>setPolicyHook</code></td></tr>
+        <tr><td><code>PolicyChanged(_previousPolicy, _newPolicy)</code></td><td>At setup, with <code>_previousPolicy</code> zero, and on every <code>installPolicy</code>, one that installs the current hook again included</td></tr>
         <tr><td><code>Paused</code>, <code>Unpaused</code>, <code>RoleGranted</code>, <code>RoleRevoked</code>, <code>Upgraded</code></td><td>OpenZeppelin's events</td></tr>
-        <tr><td><code>PolicyGated_ZeroAddress()</code></td><td>A zero admin, guardian, registry or hook at setup, or a zero hook in <code>setPolicyHook</code></td></tr>
+        <tr><td><code>PolicyGated_ZeroAddress()</code></td><td>A zero admin, guardian, registry or hook at setup, or a zero hook in <code>installPolicy</code></td></tr>
         <tr><td><code>PolicyGated_NotAttested(target, kind)</code></td><td>A hook not attested as <code>HOOK</code>, or an upgrade target not attested as <code>IMPLEMENTATION</code></td></tr>
         <tr><td><code>PolicyGated_HookRegistryMismatch(_hookRegistry, _tokenRegistry)</code></td><td>A hook that names another registry</td></tr>
-        <tr><td><code>PolicyGated_TransferRejected(reason)</code></td><td>Declared here; each template's movement path reverts with it when the pause or the hook refuses</td></tr>
+        <tr><td><code>PolicyGated_NotAPolicy(_target)</code></td><td>A hook that does not answer the id of <code>IERC8473Policy</code>, <code>0x9cb56a99</code></td></tr>
+        <tr><td><code>ERC8473PolicyRejected(reason)</code></td><td>Declared in <code>IERC8473</code>, which the core's interface inherits; each template's movement path reverts with it when the pause or the hook refuses, or the hook cannot be asked</td></tr>
         <tr><td><code>Templated_WrongTemplate(newImplementation, expected, actual)</code></td><td>An upgrade target of another template</td></tr>
-        <tr><td><code>AccessControlUnauthorizedAccount</code>, <code>EnforcedPause</code>, <code>ExpectedPause</code>, <code>InvalidInitialization</code></td><td>OpenZeppelin's errors for a missing role, a pause while paused, an unpause while not paused, and a second setup</td></tr>
+        <tr><td><code>AccessControlUnauthorizedAccount</code>, <code>EnforcedPause</code>, <code>ExpectedPause</code>, <code>InvalidInitialization</code>, <code>ReentrancyGuardReentrantCall</code></td><td>OpenZeppelin's errors for a missing role, a pause while paused, an unpause while not paused, a second setup, and a movement or an installation begun while one is running</td></tr>
       </tbody>
     </table>
   </div>
@@ -196,13 +216,13 @@
   <div class="prose wrap-any">
     <h2>Source and tests</h2>
     <ul class="plain wrap-any">
-      <li>Contract: <code>contracts/base/PolicyGatedCoreUpgradeable.sol</code>; interfaces <code>IPolicyGatedCore.sol</code>, <code>ITemplated.sol</code></li>
-      <li>Tests: through each template, in <code>PolicyGatedERC20Upgradeable.t.sol</code> (role gates, the guardian and recovery, the hook checks, upgrades, multicall) and <code>Gated721.t.sol</code> (the same for the NFT); the ids are pinned in <code>InterfaceFreeze.t.sol</code></li>
+      <li>Contract: <code>contracts/base/PolicyGatedCoreUpgradeable.sol</code>; interfaces <code>IPolicyGatedCore.sol</code>, <code>IERC8473.sol</code>, <code>ITemplated.sol</code></li>
+      <li>Tests: through each template, in <code>PolicyGatedERC20Upgradeable.t.sol</code> (role gates, the guardian and recovery, the hook checks, upgrades, multicall, and in <code>PolicyGatedUnit_Erc8473</code> the installation and the hook that cannot be asked) and <code>Gated721.t.sol</code> (the same for the NFT); the ids are pinned in <code>InterfaceFreeze.t.sol</code></li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>4a906cc</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>6ef0d4e</code> on <code>erc8473-conformance</code>.</footer>
 </main>
 </body>
 </html>
