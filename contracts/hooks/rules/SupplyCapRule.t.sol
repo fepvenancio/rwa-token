@@ -8,8 +8,8 @@ import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IERC8473} from 'interfaces/IERC8473.sol';
-import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
 import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
+import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {ISupplyCapRule} from 'interfaces/ISupplyCapRule.sol';
 
@@ -96,7 +96,8 @@ contract SupplyCapRuleUnit_Check is SupplyCapRuleUnitTest {
     _supply(_existing);
     bool _fits = _existing <= _CAP && _amount <= _CAP - _existing;
     assertEq(
-      _rule.check(_ctx(IERC8473Policy.TransferKind.MINT, _amount)), _fits ? Reasons.TRANSFER_OK : Reasons.ABOVE_SUPPLY_CAP
+      _rule.check(_ctx(IERC8473Policy.TransferKind.MINT, _amount)),
+      _fits ? Reasons.TRANSFER_OK : Reasons.ABOVE_SUPPLY_CAP
     );
   }
 
@@ -189,9 +190,7 @@ contract SupplyCapRuleIntegration is Helpers {
     (bool _ok, bytes32 _reason) = _token.canTransferWithReason(address(0), _alice, 1);
     assertFalse(_ok);
     assertEq(_reason, Reasons.ABOVE_SUPPLY_CAP);
-    vm.expectRevert(
-      abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, Reasons.ABOVE_SUPPLY_CAP)
-    );
+    vm.expectRevert(abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, Reasons.ABOVE_SUPPLY_CAP));
     vm.prank(_minter);
     _token.mint(_alice, 1);
     assertEq(_token.totalSupply(), _CAP);

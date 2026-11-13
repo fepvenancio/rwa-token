@@ -23,6 +23,7 @@ import {IERC7575} from 'interfaces/IERC7575.sol';
 import {IERC7943Fungible} from 'interfaces/IERC7943Fungible.sol';
 import {IERC7943NonFungible} from 'interfaces/IERC7943NonFungible.sol';
 import {IERC8473} from 'interfaces/IERC8473.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IFeeModel} from 'interfaces/IFeeModel.sol';
 import {IFund} from 'interfaces/IFund.sol';
 import {IFundHoldersRule} from 'interfaces/IFundHoldersRule.sol';
@@ -39,7 +40,6 @@ import {IMinPositionRule} from 'interfaces/IMinPositionRule.sol';
 import {INavDesk} from 'interfaces/INavDesk.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
-import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {IPortfolio} from 'interfaces/IPortfolio.sol';
 import {IProxyDeployer} from 'interfaces/IProxyDeployer.sol';
@@ -201,9 +201,7 @@ contract InterfaceFreezeTest is Test {
       IERC7943NonFungible.ForcedTransfer.selector, 0x7b3ce50c216d2ccf9919c6b9f1bfb33f0350a33010f188750b4af38e00448138
     );
     assertEq(IERC7943NonFungible.Frozen.selector, 0x110a31ef32e319c921a388ad15b3fcbf2dd8f62ab35795b611151ab36ed5b2af);
-    assertEq(
-      IERC8473.PolicyChanged.selector, 0x9fb4639eb3115274c0dca1893a5ffb376a717d9268b31846835ac71bcce5470b
-    );
+    assertEq(IERC8473.PolicyChanged.selector, 0x9fb4639eb3115274c0dca1893a5ffb376a717d9268b31846835ac71bcce5470b);
     assertEq(
       ITransferIntent.IntentExecuted.selector, 0xbfb47f4ecbd3340a56ddfb40a6e422e8805e7c3f5f2563dd89154d3da6c8aee8
     );

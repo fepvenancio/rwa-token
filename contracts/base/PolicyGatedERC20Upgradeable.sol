@@ -11,8 +11,8 @@ import {IERC165} from '@openzeppelin/contracts/utils/introspection/IERC165.sol';
 import {Reasons} from 'interfaces/Errors.sol';
 
 import {IERC7943Fungible} from 'interfaces/IERC7943Fungible.sol';
-import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
+import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 
 import {PolicyGatedCoreUpgradeable} from 'contracts/base/PolicyGatedCoreUpgradeable.sol';
 

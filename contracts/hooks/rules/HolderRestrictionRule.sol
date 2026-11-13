@@ -6,8 +6,8 @@ import {IAccessControl} from '@openzeppelin/contracts/access/IAccessControl.sol'
 import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
-import {IHolderRestrictionRule} from 'interfaces/IHolderRestrictionRule.sol';
 import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
+import {IHolderRestrictionRule} from 'interfaces/IHolderRestrictionRule.sol';
 
 import {BaseRule} from 'contracts/hooks/BaseRule.sol';
 

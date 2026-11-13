@@ -18,7 +18,7 @@ a single movement, deployment and governance, and where the money sits.
 PolicyGatedCoreUpgradeable         core: roles, guardian and recovery, pause, hook pointer, registry, upgrade checks (UUPS)
         ▲
         ├── PolicyGatedERC20Upgradeable   fungible base: accounting, frozen amounts, enforcement
-        │        ▲                        every movement → TransferContext → hook.beforeTransfer → balances → afterTransfer
+        │        ▲                        every movement → TransferContext → hook.checkTransfer → balances → afterTransfer
         │        │
         │   GatedToken                                the base and nothing else
         │   IntentToken (+ IntentSettledUpgradeable)  holder-signed EIP-712 TransferIntent, settled by EXECUTOR_ROLE
@@ -49,7 +49,7 @@ Distributor (one per token, immutable)           pays holders from an approved, 
 
 | Path | Contents |
 |---|---|
-| `contracts/interfaces/` | Frozen ABI: `IPolicyGatedCore`, `IPolicyGated`, `IERC7943Fungible`, `IERC7943NonFungible`, `IGated721`, `ITemplated`, `IPolicyHook`, `IComplianceRule`, `IComplianceHook`, `IPolicyRegistry`, `ITransferIntent`, `IIntentExecutor`, `IIntentExecutorBatch`, `IDvPExecutor`, `IERC3009`, `IIdentityRegistry`, `ICredentialRegistry`, `ICredentialRule`, `Quals`, `IMinPositionRule`, `IHolderRestrictionRule`, `ISettlementWindowRule`, `ISupplyCapRule`, `IExecutedOnlyRule`, `IFund`, `IFundHoldersRule`, `IProxyDeployer`, `IGovernanceTimelock`, `IGatedVaultBase`, `IGated4626Vault`, `IGated7540Vault`, `IPortfolio`, `IAdapter`, `IERC4626Adapter`, `IGuardedAccount`, `ICallValidator`, `IERC20CallValidator`, `INavDesk`, `IFeeModel`, `ISignedEntry`, `IDistributor`, `IERC7540Operator` / `IERC7540Deposit` / `IERC7540Redeem` / `IERC7575` (spec-exact ids), `Errors.sol` (reason codes) |
+| `contracts/interfaces/` | Frozen ABI: `IPolicyGatedCore`, `IPolicyGated`, `IERC7943Fungible`, `IERC7943NonFungible`, `IGated721`, `ITemplated`, `IERC8473`, `IERC8473Policy`, `IComplianceRule`, `IComplianceHook`, `IPolicyRegistry`, `ITransferIntent`, `IIntentExecutor`, `IIntentExecutorBatch`, `IDvPExecutor`, `IERC3009`, `IIdentityRegistry`, `ICredentialRegistry`, `ICredentialRule`, `Quals`, `IMinPositionRule`, `IHolderRestrictionRule`, `ISettlementWindowRule`, `ISupplyCapRule`, `IExecutedOnlyRule`, `IFund`, `IFundHoldersRule`, `IProxyDeployer`, `IGovernanceTimelock`, `IGatedVaultBase`, `IGated4626Vault`, `IGated7540Vault`, `IPortfolio`, `IAdapter`, `IERC4626Adapter`, `IGuardedAccount`, `ICallValidator`, `IERC20CallValidator`, `INavDesk`, `IFeeModel`, `ISignedEntry`, `IDistributor`, `IERC7540Operator` / `IERC7540Deposit` / `IERC7540Redeem` / `IERC7575` (spec-exact ids), `Errors.sol` (reason codes) |
 | `contracts/base/` | `PolicyGatedCoreUpgradeable`, `PolicyGatedERC20Upgradeable` |
 | `contracts/governance/` | `PolicyRegistry`, `GovernanceTimelock` |
 | `contracts/identity/` | `CredentialRegistry` |
@@ -79,11 +79,11 @@ two run the same code.
 
 | Power | Holder | Delay | Can |
 |---|---|---|---|
-| `DEFAULT_ADMIN_ROLE` | TimelockController | ≥ 24 hours | grant/revoke every role, `unpause`, `setPolicyHook`, change the token's rule list on the hook, manage attesters |
+| `DEFAULT_ADMIN_ROLE` | TimelockController | ≥ 24 hours | grant/revoke every role, `unpause`, `installPolicy`, change the token's rule list on the hook, manage attesters |
 | `GUARDIAN_ROLE` | multisig | none | `pause` the token and cancel pending main-timelock operations. **It can only stop things:** no unpause, no upgrades, no role or hook changes, and no veto over its own removal (see `RECOVERY_ROLE`) |
 | `RECOVERY_ROLE` | recovery timelock | ≥ 24 hours | on every token, vault and both executors: `unpause` and revoke `GUARDIAN_ROLE`; on the main timelock: revoke `CANCELLER_ROLE`; on the credential registry: revoke `GUARDIAN_ROLE`, clear a guardian block, revive an attester. Nothing else. Governance proposes and executes; nobody can cancel |
 | `UPGRADER_ROLE` | timelock | ≥ 24 hours | upgrade, only to an implementation attested as `IMPLEMENTATION` |
-| `MINTER_ROLE` / `BURNER_ROLE` | issuer | none | mint, and burn (enforcement burns can take frozen tokens) |
+| `MINTER_ROLE` / `BURNER_ROLE` | issuer | none | mint, and burn (an enforcement action: it takes frozen tokens and is not stopped by the pause) |
 | `AGENT_ROLE` | issuer | none | `forcedTransfer` (clawback; bypasses pause, frozen tokens and the sender's address freeze, still policy-checked: an address-frozen receiver refuses it), `setFrozenTokens`; on the 7540 vault, `recoverRedeemRequest` (one controller's escrow → recovery account whose credential the token's policy accepts; out of the vault's own address `forcedTransfer` takes only shares not booked to a pending redemption, and the vault's address cannot be frozen) and `recoverClaimable` (claimable assets and shares → recovery account whose credential the token's policy accepts, even while paused or at a full cap) |
 | `EXECUTOR_ROLE` | `IntentExecutor` and `DvPExecutor` contracts | none | settle holder-signed intents that name no executor or name that executor. `IntentExecutor` settles only intents that state no consideration; `DvPExecutor` settles trades. Neither can alter an intent |
 | `OPERATOR_ROLE` (executors) | issuer / relayer keys | none | submit intents via `execute` / `executeBatch` (all-or-nothing), or trades via `executeDvPGated` / `executeDvP3009` (both legs or neither) |
@@ -114,13 +114,14 @@ two run the same code.
 - **Fail closed.** `TRANSFER_OK` is non-zero, a hook with no rules rejects everything (`NO_RULES`), and a token that is
   not a registered class of its fund, or whose hook lists a rule the fund has replaced, rejects everything
   (`NOT_FUND_CLASS`). Every
-  policy rejection reverts with `PolicyGated_TransferRejected(bytes32 reason)`, the token's own frozen shortfall (an
+  policy rejection reverts with ERC-8473's `ERC8473PolicyRejected(bytes32 reason)`, also when the policy cannot be asked
+  (`CHECK_UNAVAILABLE`), the token's own frozen shortfall (an
   amount within the balance) with the standard's `ERC7943InsufficientUnfrozenBalance`, and an amount above the balance
   with the base's `ERC20InsufficientBalance`; `transfer` never returns `false`.
 - **Pre-flight parity.** `canTransferWithReason` and `canExecute` run the same checks as the state-changing path.
   `canTransfer` runs them too, except that ERC-7943 forbids it to fail on a balance check: an amount above the balance
-  reads true when the hook accepts it and no frozen amount is in the way (nothing frozen, or a burn by a sender that
-  holds `BURNER_ROLE`), and the write reverts with `ERC20InsufficientBalance`.
+  reads true when the hook accepts it and nothing is frozen on the sender, and the write reverts with
+  `ERC20InsufficientBalance`. No pre-flight depends on who asks, and none reverts: a hook that cannot be asked reads false.
   Use `canTransferWithReason` to learn whether a movement will succeed. `canSend` and `canReceive` are the
   account-level questions (ERC-7943): `canSend` is false while paused, for an account with no credential or a blocked one, an address-frozen account,
   a locked holder (a lapsed holder can send) and a token that is not a fund class; `canReceive` is false while paused, for an account without an active
@@ -128,10 +129,10 @@ two run the same code.
   the account questions must not encode quantitative rules (it names balance checks and amount limits), and we read the
   cap the same way, so it decides a movement only. For a plain transfer through the shipped rules `canTransfer` is not true
   while either answer is false, but not for every kind: an enforcement burn passes for a locked holder while `canSend`
-  says `LOCKED`. The vaults' `maxDeposit` and `maxMint` probe a mint of a very large amount instead.
-- **Pause.** A guardian pause blocks every balance movement except FORCED ones (`forcedTransfer`, and the 7540 vault's `recoverRedeemRequest` and `recoverClaimable`), so the issuer's mint and burn too. Enforcement
-  during a pause is `forcedTransfer` to a quarantine account, and the burn waits for the unpause. This differs from the
-  ERC-3643 reference token, whose agents can mint, burn and force while paused (the incident runbook in [Deployment and governance](docs/deployment.html) shows what a pause stops here).
+  says `LOCKED_UP`. The vaults' `maxDeposit` and `maxMint` probe a mint of a very large amount instead.
+- **Pause.** A guardian pause blocks every balance movement except FORCED ones (`forcedTransfer`, the issuer's `burn`, and the 7540 vault's `recoverRedeemRequest` and `recoverClaimable`), so the issuer's mint too. Enforcement
+  during a pause is `forcedTransfer` to a quarantine account, or `burn`. This differs from the
+  ERC-3643 reference token, whose agents can also mint while paused (the incident runbook in [Deployment and governance](docs/deployment.html) shows what a pause stops here).
   A vault's pause also stops `Portfolio.allocate` and `GuardedAccount.execute`, and `deallocate` still brings money back.
 - **Fund monitor.** `Fund.firstBrokenClass()` names the first class whose hook no longer lists the fund's rule, which the
   hook cannot know; the post-deploy check asserts it is the zero address. Alert too when `holderCount()` is above
@@ -285,7 +286,7 @@ exact sequence on the local network, playing the council and the KYC attester, a
 8. **Post-deploy checks** (the fixture's `assertHandedOver`):
    - the deployer and the operations account hold no role on either timelock, the policy registry, the core's own credential registry, the products or the executors;
    - the timelock holds DEFAULT_ADMIN_ROLE everywhere and is the only UPGRADER;
-   - every product's `policyHook()` is the hook the council attested, that hook's `REGISTRY()` is the registry, and its
+   - every product's `policy()` is the hook the council attested, that hook's `REGISTRY()` is the registry, and its
      `rules(token)` equals the rule list in the product's profile. A second hook on the same registry carries the same attested
      codehash and passes `ProxyDeployer`; this check is what refuses it;
    - the guardian can cancel main-timelock operations but cannot propose or execute them, and holds nothing on the
@@ -381,30 +382,35 @@ The brief is in [`CLAUDE.md`](CLAUDE.md). Where the code intentionally differs, 
   contract an interface. Structs and enums live inside their interfaces, so there is no `Types.sol`.
 - **Interfaces reopened.** The owner has reopened `contracts/interfaces/` on instruction several times, and
   `InterfaceFreeze.t.sol` dates each re-pin. The largest was the review items (2026-10-23 to 24: a shared hook, balances
-  in `TransferContext.extra`, ERC-7943 Final, the template id, two new rules); the latest is the shared core and the ERC-721
-  template (2026-11-05). They are frozen again at the ids and topics pinned there; [`PLAN.md`](PLAN.md) records each change.
-- **Error naming.** Errors follow `<Contract>_<Name>`, e.g. `PolicyGated_TransferRejected(bytes32)`. Event
+  in the context's token-built data, ERC-7943 Final, the template id, two new rules); then the shared core and the ERC-721
+  template (2026-11-05); the latest is ERC-8473 (2026-11-13: its names and ids, `onInstall`, and four reason names). They are frozen again at the ids and topics pinned there; [`PLAN.md`](PLAN.md) records each change.
+- **Error naming.** Errors follow `<Contract>_<Name>`, e.g. `PolicyGated_NotAttested(address,uint8)`; the errors of the standards keep the standards' names (`ERC8473PolicyRejected`, `ERC7943InsufficientUnfrozenBalance`). Event
   parameters are `_camelCase`; topics are unaffected.
 - **ERC-7943 Final.** `IPolicyGated` inherits `IERC7943Fungible` and the token advertises its id (`0x3edbb4c4`). The
   reasoned pre-flight is a second name, `canTransferWithReason`, and `ForcedTransferBy` carries the agent next to the
   standard's `ForcedTransfer`. The token's own frozen shortfall (an amount within the balance) reverts the standard's
   `ERC7943InsufficientUnfrozenBalance`, and an amount above the balance the base's `ERC20InsufficientBalance`; policy
-  rejections keep `PolicyGated_TransferRejected`.
+  rejections revert with ERC-8473's `ERC8473PolicyRejected`.
+- **ERC-8473 (uRWA Policy, draft).** Every template is an ERC-8473 token and `ComplianceHook` an ERC-8473 policy: the
+  token answers `0x0505c8c9`, the hook `0x9cb56a99`, and the selectors are the draft's. The draft is not final, so these
+  ids can still move with it. Two readings are ours. `wantsAfterTransfer()` takes no token and may not read the caller,
+  so the shared hook answers true for everyone. The fund's investor count is kept across installations, and
+  `FundHoldersRule.onInstall` goes live only when it can tell that no movement went unseen.
 - **Extra reason codes.** `NO_HOOK`, `NO_RULES` and `NOT_FUND_CLASS` are appended.
 - **`canTransfer` follows the standard where `canTransferWithReason` does not.** ERC-7943 (Final, checked 2026-10-24)
   says `canTransfer` must not return false on a balance check and must validate the unfrozen amount. It does not say
   which clause wins for an amount above the balance while something is frozen; `canTransfer` reads it as the draft ERC's
   reference does, so a one-unit freeze turns that answer false. So `canTransfer` reads true for an amount above the
-  balance when the hook accepts it and no frozen amount is in the way (nothing frozen, or a burn by a sender that holds
-  `BURNER_ROLE`), and false when a frozen amount keeps the amount from the unfrozen balance, above the balance too. The
+  balance when the hook accepts it and nothing is frozen on the sender, and false when a frozen amount keeps the amount from the unfrozen balance, above the balance too. The
   write reverts with `ERC7943InsufficientUnfrozenBalance` for an amount within the balance and
   `ERC20InsufficientBalance` above it. `canTransferWithReason` says no to every shortfall, with
   `INSUFFICIENT_UNFROZEN`, so for a balance shortfall it and `canExecute` say what the write does, and the boolean does
   not. [`PLAN.md`](PLAN.md) records the decision.
 - **`canTransferWithReason` scope.** It, and the boolean `canTransfer`, model holder-driven movements, with the operator
-  set to `from`. A simulated burn respects frozen tokens, except that a sender holding `BURNER_ROLE` is bounded by its
-  balance in the reasoned answer, as the write is. The enforcement paths `burn` and `forcedTransfer` release frozen tokens first. `Gated721` has no holder burn, so
-  its pre-flight takes the caller as a mint's or a burn's operator: asked from the burner's address, it answers for `burn`.
+  set to `from`, which is zero for a mint, so the answer does not depend on who asks. A simulated burn is a holder's
+  and respects frozen tokens. The enforcement paths `burn` and `forcedTransfer` are FORCED: they release frozen tokens
+  first, the pause does not stop them, and no pre-flight predicts them. `Gated721` has no holder burn, so a burn asked
+  about there is answered as a holder's would be, although `burn` takes a frozen token.
 - **Duplicate rules.** A duplicate `ruleId` reuses `ComplianceHook_DuplicateRule`, so the frozen ABI is unchanged.
 - **7540 operators are full delegates** (review L-5, owner decision): the code follows ERC-7540, so an approved
   operator can also create requests that pull the owner's assets or shares under any controller. Owners should approve

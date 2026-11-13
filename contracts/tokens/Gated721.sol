@@ -10,8 +10,8 @@ import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IERC7943NonFungible} from 'interfaces/IERC7943NonFungible.sol';
-import {IGated721} from 'interfaces/IGated721.sol';
 import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
+import {IGated721} from 'interfaces/IGated721.sol';
 import {ITemplated} from 'interfaces/ITemplated.sol';
 
 import {PolicyGatedCoreUpgradeable} from 'contracts/base/PolicyGatedCoreUpgradeable.sol';

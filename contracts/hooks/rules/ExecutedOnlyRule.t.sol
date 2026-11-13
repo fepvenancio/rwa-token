@@ -5,8 +5,8 @@ import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IERC8473} from 'interfaces/IERC8473.sol';
-import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
 import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
+import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
 
@@ -104,9 +104,7 @@ contract ExecutedOnlyRuleIntegration is Helpers {
     (bool _ok, bytes32 _reason) = _token.canTransferWithReason(_alice, _bob, 1);
     assertFalse(_ok);
     assertEq(_reason, Reasons.KIND_NOT_ALLOWED);
-    vm.expectRevert(
-      abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, Reasons.KIND_NOT_ALLOWED)
-    );
+    vm.expectRevert(abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, Reasons.KIND_NOT_ALLOWED));
     vm.prank(_alice);
     _token.transfer(_bob, 1);
   }

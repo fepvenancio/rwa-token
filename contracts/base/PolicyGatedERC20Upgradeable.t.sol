@@ -20,9 +20,9 @@ import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IERC7943Fungible} from 'interfaces/IERC7943Fungible.sol';
 import {IERC8473} from 'interfaces/IERC8473.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
-import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {ITemplated} from 'interfaces/ITemplated.sol';
 
@@ -343,7 +343,9 @@ contract PolicyGatedUnit_ForcedTransfer is PolicyGatedUnitTest {
     _amount = bound(_amount, 0, _INITIAL);
     vm.expectCall(
       _hook,
-      abi.encodeCall(IERC8473Policy.checkTransfer, (_ctx(_alice, _bob, _amount, _agent, IERC8473Policy.TransferKind.FORCED)))
+      abi.encodeCall(
+        IERC8473Policy.checkTransfer, (_ctx(_alice, _bob, _amount, _agent, IERC8473Policy.TransferKind.FORCED))
+      )
     );
     vm.expectEmit(address(_token));
     emit IERC20.Transfer(_alice, _bob, _amount);
@@ -645,7 +647,9 @@ contract PolicyGatedUnit_Transfer is PolicyGatedUnitTest {
     vm.mockCall(_hook, abi.encodeCall(IERC8473Policy.wantsAfterTransfer, ()), abi.encode(true));
     _mockAndExpect(
       _hook,
-      abi.encodeCall(IERC8473Policy.afterTransfer, (_ctx(_alice, _bob, 1, _alice, IERC8473Policy.TransferKind.TRANSFER))),
+      abi.encodeCall(
+        IERC8473Policy.afterTransfer, (_ctx(_alice, _bob, 1, _alice, IERC8473Policy.TransferKind.TRANSFER))
+      ),
       ''
     );
     vm.prank(_alice);
@@ -726,7 +730,9 @@ contract PolicyGatedUnit_CanTransfer is PolicyGatedUnitTest {
   function test_WhenCalledByAThirdParty_ItSimulatesATransferByFrom() external {
     vm.expectCall(
       _hook,
-      abi.encodeCall(IERC8473Policy.checkTransfer, (_ctx(_alice, _bob, 1, _alice, IERC8473Policy.TransferKind.TRANSFER)))
+      abi.encodeCall(
+        IERC8473Policy.checkTransfer, (_ctx(_alice, _bob, 1, _alice, IERC8473Policy.TransferKind.TRANSFER))
+      )
     );
     vm.prank(_stranger);
     assertTrue(_token.canTransfer(_alice, _bob, 1));
@@ -1397,13 +1403,17 @@ contract PolicyGatedUnit_Context is PolicyGatedUnitTest {
   }
 
   function test_WhenTransferring_ExtraCarriesBothBalancesBeforeTheMove() external {
-    _expectBefore(_alice, _bob, 10 ether, _alice, IERC8473Policy.TransferKind.TRANSFER, abi.encode(_INITIAL, uint256(0)));
+    _expectBefore(
+      _alice, _bob, 10 ether, _alice, IERC8473Policy.TransferKind.TRANSFER, abi.encode(_INITIAL, uint256(0))
+    );
     vm.prank(_alice);
     _token.transfer(_bob, 10 ether);
   }
 
   function test_WhenMinting_TheSenderBalanceIsZero() external {
-    _expectBefore(address(0), _alice, 5 ether, _minter, IERC8473Policy.TransferKind.MINT, abi.encode(uint256(0), _INITIAL));
+    _expectBefore(
+      address(0), _alice, 5 ether, _minter, IERC8473Policy.TransferKind.MINT, abi.encode(uint256(0), _INITIAL)
+    );
     vm.prank(_minter);
     _token.mint(_alice, 5 ether);
   }
@@ -1549,7 +1559,9 @@ contract PolicyGatedUnit_Multicall is PolicyGatedUnitTest {
   function test_WhenAHolderBatchesTransfers_TheHookSeesTheHolderAsOperator() external {
     vm.expectCall(
       _hook,
-      abi.encodeCall(IERC8473Policy.checkTransfer, (_ctx(_alice, _bob, 1, _alice, IERC8473Policy.TransferKind.TRANSFER)))
+      abi.encodeCall(
+        IERC8473Policy.checkTransfer, (_ctx(_alice, _bob, 1, _alice, IERC8473Policy.TransferKind.TRANSFER))
+      )
     );
     bytes[] memory _calls =
       _calls2(abi.encodeCall(_token.transfer, (_bob, 1)), abi.encodeCall(_token.transfer, (_bob, 2)));
@@ -1766,8 +1778,7 @@ contract PolicyGatedUnit_Erc8473 is PolicyGatedUnitTest {
     vm.expectCall(
       _hook,
       abi.encodeCall(
-        IERC8473Policy.checkTransfer,
-        (_ctx(address(0), _bob, _amount, address(0), IERC8473Policy.TransferKind.MINT))
+        IERC8473Policy.checkTransfer, (_ctx(address(0), _bob, _amount, address(0), IERC8473Policy.TransferKind.MINT))
       )
     );
     vm.prank(_caller);
@@ -1782,8 +1793,7 @@ contract PolicyGatedUnit_Erc8473 is PolicyGatedUnitTest {
     vm.expectCall(
       _hook,
       abi.encodeCall(
-        IERC8473Policy.checkTransfer,
-        (_ctx(_alice, address(0), _amount, _burner, IERC8473Policy.TransferKind.FORCED))
+        IERC8473Policy.checkTransfer, (_ctx(_alice, address(0), _amount, _burner, IERC8473Policy.TransferKind.FORCED))
       )
     );
     vm.prank(_burner);

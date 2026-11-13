@@ -9,8 +9,8 @@ import {IERC20Metadata} from '@openzeppelin/contracts/token/ERC20/extensions/IER
 
 import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
-import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
+import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';

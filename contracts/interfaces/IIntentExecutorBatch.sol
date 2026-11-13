@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import {IERC8473} from 'interfaces/IERC8473.sol';
 import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
 
 /**

@@ -3,8 +3,8 @@ pragma solidity ^0.8.28;
 
 import {Reasons} from 'interfaces/Errors.sol';
 
-import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
+import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 
 import {BaseRule} from 'contracts/hooks/BaseRule.sol';
 
@@ -35,7 +35,8 @@ contract MockIdentityRule is BaseRule {
   function check(
     IERC8473Policy.TransferContext calldata _ctx
   ) external view returns (bytes32 _reason) {
-    bool _checksSender = _ctx.kind != IERC8473Policy.TransferKind.MINT && _ctx.kind != IERC8473Policy.TransferKind.FORCED;
+    bool _checksSender =
+      _ctx.kind != IERC8473Policy.TransferKind.MINT && _ctx.kind != IERC8473Policy.TransferKind.FORCED;
     if (_checksSender && !IDENTITY.isVerified(_ctx.from)) return Reasons.SENDER_NOT_ELIGIBLE;
     if (_ctx.to != address(0) && !IDENTITY.isVerified(_ctx.to)) {
       return Reasons.RECEIVER_NOT_VERIFIED;

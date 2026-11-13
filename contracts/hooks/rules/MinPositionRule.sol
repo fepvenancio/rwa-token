@@ -6,8 +6,8 @@ import {IAccessControl} from '@openzeppelin/contracts/access/IAccessControl.sol'
 import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
-import {IMinPositionRule} from 'interfaces/IMinPositionRule.sol';
 import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
+import {IMinPositionRule} from 'interfaces/IMinPositionRule.sol';
 
 import {BaseRule} from 'contracts/hooks/BaseRule.sol';
 
@@ -133,5 +133,4 @@ contract MinPositionRule is BaseRule, IMinPositionRule {
   ) internal view returns (bool _exempt) {
     _exempt = _account == _token || _exempts[_token][_account];
   }
-
 }
