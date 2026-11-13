@@ -19,7 +19,7 @@ import {PolicyGatedCoreUpgradeable} from 'contracts/base/PolicyGatedCoreUpgradea
 /**
  * @title Gated721
  * @notice A policy-gated ERC-721 with a metadata URI per token. Every movement of a token is decided by the same hook
- *         and rules as the fungible templates, with `id` set to the token and `amount` to one. Deployed behind a UUPS
+ *         and rules as the fungible templates, with `tokenId` set to the token and `amount` to one. Deployed behind a UUPS
  *         proxy
  * @dev The core holds the roles, pause, the hook pointer and the upgrade checks; this contract adds the tokens, their
  *      freezes and the single `_move` path. ERC-721's own checks (existence, ownership, approval) come first, then

@@ -205,7 +205,7 @@ contract Gated721UnitTest is Helpers {
     vm.mockCall(_hook, abi.encodeWithSelector(IERC8473Policy.checkTransfer.selector), abi.encode(_reason));
   }
 
-  /// @dev The context the token builds: `id` is the token, `amount` one, `extra` the holdings before the move
+  /// @dev The context the token builds: `tokenId` is the token, `amount` one, `data` the holdings before the move
   function _ctx(
     address _from,
     address _to,
