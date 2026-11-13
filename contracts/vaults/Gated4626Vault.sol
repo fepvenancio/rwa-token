@@ -107,6 +107,7 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
     __AccessControl_init();
     __Pausable_init();
     __Multicall_init();
+    __ReentrancyGuard_init();
     __PolicyGatedCore_init_unchained(_admin, _guardian, _registry, _hook, _initialRules);
   }
 
@@ -119,9 +120,7 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
     if (_maxRateBps > _MAX_RATE_BPS) revert Gated4626Vault_RateTooHigh(_maxRateBps);
     // View interfaces, compiled to STATICCALL: nothing re-enters before the writes below.
     // aderyn-ignore-next-line(reentrancy-state-change)
-    if (!IPolicyRegistry(this.registry()).isAttested(_portfolio, IPolicyRegistry.AttestKind.PORTFOLIO)) {
-      revert Gated4626Vault_NotAttested(_portfolio);
-    }
+    _requireAttested(_portfolio, IPolicyRegistry.AttestKind.PORTFOLIO);
     IPortfolio _next = IPortfolio(_portfolio);
     // aderyn-ignore-next-line(reentrancy-state-change)
     IERC20 _asset = IERC20(asset());
@@ -139,14 +138,15 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
       // A replacement keeps the limit's clock, so the next count allows what it would have allowed anyway.
       // View interfaces, compiled to STATICCALL, and the portfolio is attested: nothing re-enters before these writes.
       // aderyn-ignore-next-line(reentrancy-state-change)
-      if (IPortfolio(_old).adapters().length != 0 || IPortfolio(_old).pricedValue() != 0) {
+      if (_hasAdapters(_old) || _pricedValue(IPortfolio(_old)) != 0) {
         revert Gated4626Vault_PortfolioNotEmpty();
       }
       // aderyn-ignore-next-line(reentrancy-state-change)
-      if (IPortfolio(_old).writtenOff()) $.exitOnly = true;
+      if (_writtenOff(IPortfolio(_old))) $.exitOnly = true;
     }
+    // OpenZeppelin's own count is the asset balance the vault itself holds, which is what is forwarded.
     // aderyn-ignore-next-line(reentrancy-state-change)
-    uint256 _held = _asset.balanceOf(address(this));
+    uint256 _held = super.totalAssets();
     $.portfolio = _portfolio;
     $.maxRateBps = _maxRateBps;
     $.last += _held;
@@ -180,9 +180,7 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
     if ($.portfolio == address(0)) revert Gated4626Vault_NoPortfolio();
     // A view interface, compiled to STATICCALL: nothing re-enters before the writes below.
     // aderyn-ignore-next-line(reentrancy-state-change)
-    if (!IPolicyRegistry(this.registry()).isAttested(_feeModel, IPolicyRegistry.AttestKind.FEE_MODEL)) {
-      revert Gated4626Vault_NotAttested(_feeModel);
-    }
+    _requireAttested(_feeModel, IPolicyRegistry.AttestKind.FEE_MODEL);
     _accrue();
     if ($.feeModel == address(0)) {
       if ($.mark == 0) {
@@ -335,7 +333,7 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
   function maxDeposit(
     address _receiver
   ) public view override returns (uint256 _maxAssets) {
-    if (_mintProbe(_receiver) != Reasons.TRANSFER_OK || _dealingStopped() || _closedForGood()) return 0;
+    if (_entryClosed(_receiver)) return 0;
     _maxAssets = super.maxDeposit(_receiver);
   }
 
@@ -346,7 +344,7 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
   function maxMint(
     address _receiver
   ) public view override returns (uint256 _maxShares) {
-    if (_mintProbe(_receiver) != Reasons.TRANSFER_OK || _dealingStopped() || _closedForGood()) return 0;
+    if (_entryClosed(_receiver)) return 0;
     _maxShares = super.maxMint(_receiver);
   }
 
@@ -499,14 +497,14 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
     _counted = $.last;
     _newMark = $.mark;
     _paidSince = $.paidSinceMark;
-    if (!_portfolio.priceFresh()) return (_counted, 0, _newMark, false, _paidSince);
+    if (!_priceFresh(_portfolio)) return (_counted, 0, _newMark, false, _paidSince);
     // With no shares nothing is anyone's. A price struck on what is left would be charged as a gain on the next
     // investor's principal, so they buy at par, and the mark starts there. What is left counts for them under the
     // limit. Fewer share units than one unit of the asset buys at par count as none: between them they own less than
     // that unit, and a count on a few of them could move the mark beyond any later gain.
     if (totalSupply() < _VIRTUAL_SHARES) return (0, 0, _PAR_MARK, true, 0);
 
-    uint256 _priced = _portfolio.pricedValue();
+    uint256 _priced = _pricedValue(_portfolio);
     uint256 _owed = $.feesOwed;
     uint256 _net = _priced > _owed ? _priced - _owed : 0;
     uint256 _limit = _counted + Math.mulDiv(_counted, $.maxRateBps * (block.timestamp - $.lastAt), _RATE_DENOMINATOR);
@@ -521,6 +519,83 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
   }
 
   /**
+   * @notice Whether a portfolio can give a price now. One place for a read that several functions make
+   * @param _portfolio The portfolio
+   * @return _fresh The portfolio's `priceFresh()`
+   */
+  function _priceFresh(
+    IPortfolio _portfolio
+  ) private view returns (bool _fresh) {
+    _fresh = _portfolio.priceFresh();
+  }
+
+  /**
+   * @notice The value a portfolio reports. One place for a read that several functions make
+   * @param _portfolio The portfolio
+   * @return _value The portfolio's `pricedValue()`
+   */
+  function _pricedValue(
+    IPortfolio _portfolio
+  ) private view returns (uint256 _value) {
+    _value = _portfolio.pricedValue();
+  }
+
+  /**
+   * @notice Whether a portfolio has written off an adapter. One place for a read that two functions make
+   * @param _portfolio The portfolio
+   * @return _written The portfolio's `writtenOff()`
+   */
+  function _writtenOff(
+    IPortfolio _portfolio
+  ) private view returns (bool _written) {
+    _written = _portfolio.writtenOff();
+  }
+
+  /**
+   * @notice Whether a portfolio still lists an adapter
+   * @dev `adapters()` answers with an array, encoded as its offset and then its length. Only those two words are
+   *      copied and the list itself is never decoded, which a call through the interface would do. A failed call or an
+   *      answer too short to hold a length reverts
+   * @param _portfolio The portfolio
+   * @return _has True when its list is not empty
+   */
+  function _hasAdapters(
+    address _portfolio
+  ) private view returns (bool _has) {
+    bytes4 _selector = IPortfolio.adapters.selector;
+    assembly ('memory-safe') {
+      mstore(0x00, _selector)
+      let _success := staticcall(gas(), _portfolio, 0x00, 0x04, 0x00, 0x40)
+      if or(iszero(_success), lt(returndatasize(), 0x40)) { revert(0x00, 0x00) }
+      _has := iszero(iszero(mload(0x20)))
+    }
+  }
+
+  /**
+   * @notice Reverts unless a lego's code is attested as the given kind in the vault's registry
+   * @param _target The lego
+   * @param _kind The kind it must be attested as
+   */
+  function _requireAttested(
+    address _target,
+    IPolicyRegistry.AttestKind _kind
+  ) private view {
+    if (!IPolicyRegistry(registry()).isAttested(_target, _kind)) revert Gated4626Vault_NotAttested(_target);
+  }
+
+  /**
+   * @notice Whether nothing can be deposited for a receiver: the policy refuses a mint to it, no price can be used, or
+   *         the vault is exit-only
+   * @param _receiver The receiver of the shares
+   * @return _closed True when a deposit or a mint for it would revert
+   */
+  function _entryClosed(
+    address _receiver
+  ) private view returns (bool _closed) {
+    _closed = _mintProbe(_receiver) != Reasons.TRANSFER_OK || _dealingStopped() || _closedForGood();
+  }
+
+  /**
    * @notice Whether no price can be used, which stops deposits and withdrawals: it cannot be read, or the value net of
    *         fees reads nothing although holders have a value counted. Holders of fewer share units than
    *         `_VIRTUAL_SHARES` count as none, as in `_counting`. Nothing is written down, so the value can come back
@@ -530,8 +605,8 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
     Gated4626Storage storage $ = _getGated4626Storage();
     IPortfolio _portfolio = IPortfolio($.portfolio);
     if (address(_portfolio) == address(0)) return false;
-    if (!_portfolio.priceFresh()) return true;
-    _stopped = $.last != 0 && totalSupply() >= _VIRTUAL_SHARES && _portfolio.pricedValue() <= $.feesOwed;
+    if (!_priceFresh(_portfolio)) return true;
+    _stopped = $.last != 0 && totalSupply() >= _VIRTUAL_SHARES && _pricedValue(_portfolio) <= $.feesOwed;
   }
 
   /**
@@ -544,7 +619,7 @@ contract Gated4626Vault is ERC4626Upgradeable, GatedVaultBase, IGated4626Vault {
     address _portfolio = $.portfolio;
     if ($.exitOnly) return true;
     if (_portfolio == address(0)) return false;
-    if (IPortfolio(_portfolio).writtenOff()) return true;
+    if (_writtenOff(IPortfolio(_portfolio))) return true;
     (uint256 _counted,,,,) = _counting();
     _closed = _fellTooFar(_counted);
   }

@@ -5,7 +5,7 @@ import {AccessControlUpgradeable} from '@openzeppelin/contracts-upgradeable/acce
 import {UUPSUpgradeable} from '@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol';
 import {MulticallUpgradeable} from '@openzeppelin/contracts-upgradeable/utils/MulticallUpgradeable.sol';
 import {PausableUpgradeable} from '@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol';
-import {ReentrancyGuardTransient} from '@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol';
+import {ReentrancyGuardUpgradeable} from '@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol';
 
 import {Reasons} from 'interfaces/Errors.sol';
 
@@ -30,7 +30,7 @@ abstract contract PolicyGatedCoreUpgradeable is
   PausableUpgradeable,
   MulticallUpgradeable,
   UUPSUpgradeable,
-  ReentrancyGuardTransient,
+  ReentrancyGuardUpgradeable,
   IPolicyGatedCore,
   ITemplated
 {
@@ -94,11 +94,6 @@ abstract contract PolicyGatedCoreUpgradeable is
     _hook = address(_policyHook());
   }
 
-  /// @inheritdoc IPolicyGatedCore
-  function registry() external view returns (address _registry) {
-    _registry = address(_getPolicyGatedCoreStorage().registry);
-  }
-
   /**
    * @inheritdoc AccessControlUpgradeable
    * @dev RECOVERY_ROLE may revoke GUARDIAN_ROLE and nothing else; every other revocation needs the role's admin
@@ -114,6 +109,11 @@ abstract contract PolicyGatedCoreUpgradeable is
       return;
     }
     super.revokeRole(_role, _account);
+  }
+
+  /// @inheritdoc IPolicyGatedCore
+  function registry() public view returns (address _registry) {
+    _registry = address(_getPolicyGatedCoreStorage().registry);
   }
 
   /// @inheritdoc AccessControlUpgradeable
@@ -145,6 +145,7 @@ abstract contract PolicyGatedCoreUpgradeable is
     __AccessControl_init();
     __Pausable_init();
     __Multicall_init();
+    __ReentrancyGuard_init();
     __PolicyGatedCore_init_unchained(_admin, _guardian, _registry, _hook, _initialRules);
   }
 

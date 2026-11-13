@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {ERC1967Proxy} from '@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol';
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
-import {ReentrancyGuardTransient} from '@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol';
+import {ReentrancyGuard} from '@openzeppelin/contracts/utils/ReentrancyGuard.sol';
 import {SafeCast} from '@openzeppelin/contracts/utils/math/SafeCast.sol';
 import {Test} from 'forge-std/Test.sol';
 
@@ -1503,20 +1503,20 @@ contract PortfolioIntegrationTest is Helpers {
     vm.prank(_timelock);
     _vault.grantRole(_ALLOCATOR_ROLE, address(_target)); // so only the guard can stop it
     _target.setReenter(address(_portfolio), address(_adapter));
-    vm.expectRevert(ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector);
+    vm.expectRevert(ReentrancyGuard.ReentrancyGuardReentrantCall.selector);
     _allocate(100e6);
   }
 
   function test_NothingCanReadThePriceDuringAnAllocation() external {
     _target.setReadsPriceOf(address(_portfolio));
-    vm.expectRevert(ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector);
+    vm.expectRevert(ReentrancyGuard.ReentrancyGuardReentrantCall.selector);
     _allocate(100e6);
   }
 
   function test_NothingCanReadThePriceDuringADeallocation() external {
     _allocate(100e6);
     _target.setReadsPriceOf(address(_portfolio));
-    vm.expectRevert(ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector);
+    vm.expectRevert(ReentrancyGuard.ReentrancyGuardReentrantCall.selector);
     vm.prank(_allocator);
     _portfolio.deallocate(address(_adapter), 10e6);
   }

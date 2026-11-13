@@ -5,7 +5,7 @@ import {IAccessControl} from '@openzeppelin/contracts/access/IAccessControl.sol'
 import {IERC20Errors} from '@openzeppelin/contracts/interfaces/draft-IERC6093.sol';
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {Pausable} from '@openzeppelin/contracts/utils/Pausable.sol';
-import {ReentrancyGuardTransient} from '@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol';
+import {ReentrancyGuard} from '@openzeppelin/contracts/utils/ReentrancyGuard.sol';
 import {IERC165} from '@openzeppelin/contracts/utils/introspection/IERC165.sol';
 
 import {Reasons} from 'interfaces/Errors.sol';
@@ -1307,7 +1307,7 @@ contract DvPExecutorIntegration_Reentrancy is DvPExecutorIntegrationTest {
     _evil.arm(address(_dvp), _call, 1);
     (bool _ok, bytes memory _returned) = _callAsOperator(_call);
     assertFalse(_ok);
-    assertEq(_returned, abi.encodeWithSelector(ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector));
+    assertEq(_returned, abi.encodeWithSelector(ReentrancyGuard.ReentrancyGuardReentrantCall.selector));
     assertEq(_token.balanceOf(_buyer), 0, 'nothing settled');
   }
 
@@ -1321,7 +1321,7 @@ contract DvPExecutorIntegration_Reentrancy is DvPExecutorIntegrationTest {
       abi.encodeWithSelector(
         IDvPExecutor.DvPExecutor_LegFailed.selector,
         IDvPExecutor.Leg.CASH,
-        abi.encodeWithSelector(ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector)
+        abi.encodeWithSelector(ReentrancyGuard.ReentrancyGuardReentrantCall.selector)
       )
     );
   }
@@ -1360,7 +1360,7 @@ contract DvPExecutorIntegration_ReentrancyGated is DvPExecutorIntegrationTest {
       abi.encodeWithSelector(
         IDvPExecutor.DvPExecutor_LegFailed.selector,
         IDvPExecutor.Leg.CASH,
-        abi.encodeWithSelector(ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector)
+        abi.encodeWithSelector(ReentrancyGuard.ReentrancyGuardReentrantCall.selector)
       )
     );
   }

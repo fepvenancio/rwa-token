@@ -105,7 +105,7 @@
 <section id="override">
   <div class="prose">
     <h2>The one override, and why it is safe here</h2>
-    <p>OpenZeppelin's <code>ERC1967Proxy</code> reverts with <code>ERC1967ProxyUninitialized</code> when it is created with empty setup data, because a proxy left without its settings could be set up by whoever calls it first. It offers a function to allow it, <code>_unsafeAllowUninitialized()</code>. <code>TokenProxy</code> overrides that function to return <code>true</code>, and changes nothing else.</p>
+    <p>OpenZeppelin's <code>ERC1967Proxy</code>, in the pinned release 5.3.0, accepts empty setup data. A proxy left without its settings could be set up by whoever calls it first, so <code>TokenProxy</code> is safe only as <code>ProxyDeployer</code> uses it: created and set up in one transaction. <code>TokenProxy</code> adds nothing to OpenZeppelin's proxy.</p>
     <p>The reason is the token's address. CREATE2 derives the address from the deployer's address, a salt and the creation code with its arguments. ProxyDeployer uses the hash of the symbol as the salt and passes the implementation as the one non-empty argument. If the setup data went into the creation code too, the address would change with each admin, guardian, hook or rule in it. With empty data, the address depends on the deployer, the symbol and the implementation, so it can be published and watched before the token exists.</p>
     <p>It is safe because of how ProxyDeployer uses it:</p>
     <ul class="plain">

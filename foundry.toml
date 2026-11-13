@@ -6,7 +6,7 @@ libs = ['node_modules']
 out = 'forge-out'
 cache_path = 'forge-cache'
 solc_version = '0.8.30'
-evm_version = 'cancun'
+evm_version = 'paris'
 optimizer = true
 optimizer_runs = 200
 # Same as hardhat.config.ts: no metadata hash, so bytecode does not depend on remappings or paths.

@@ -3990,6 +3990,48 @@ A separate review found no bug. From it: the check refuses an external profile w
 
 Left as limits: the check runs at deployment, so it does not stop the registry's admin granting a role later; it does not pin who holds `RECOVERY_ROLE` on the external registry, a power the registry's admin already governs. The pages follow in their own pull request.
 
+## The Paris build (branch `paris`, 2026-11-13)
+
+The owner asked for a branch that runs on an EVM at Paris: no transient storage (EIP-1153), no `MCOPY` and no `PUSH0`. The design, the interfaces and every interface id are unchanged. This reverses "Cancun is accepted" (2026-10-23, P23) for this branch only.
+
+### What needed Cancun
+
+| Where | What | Answer |
+|---|---|---|
+| `PolicyGatedCoreUpgradeable`, `Portfolio`, `DvPExecutor` | OpenZeppelin's `ReentrancyGuardTransient` | The storage guard: `ReentrancyGuardUpgradeable` on the templates (its own ERC-7201 slot, set in the initialiser, so no layout moves), `ReentrancyGuard` on the two immutable contracts. Same error, same behaviour, one storage write and its refund on each guarded call |
+| OpenZeppelin 5.6.1 | `MCOPY` in `Bytes` (through `Strings`, so every EIP-712 contract), `SignatureChecker`, `Memory` (through `ERC4626Upgradeable`) and `Arrays` (through `EnumerableSet`) | Pinned to 5.3.0, the newest release whose files used here have no Cancun opcode (5.4.0's `SignatureChecker` already imports `Bytes`) |
+| Compiler | `evmVersion: cancun` | `paris` in `hardhat.config.ts` and `foundry.toml`; solc stays 0.8.30, optimizer 200 runs |
+
+### What 5.3.0 changed in our code
+
+- **`GovernanceTimelock`.** In 5.3.0 `updateDelay` is external and `_minDelay` is private, so a subclass cannot call it and then check the floor. The contract keeps the delay itself: `updateDelay` repeats OpenZeppelin's caller check and event and adds the floor, and `getMinDelay`, the only reader in `TimelockController`, returns that value. Same errors, same event, same order of checks.
+- **`TokenProxy`.** 5.3.0's `ERC1967Proxy` accepts empty init data, so the `_unsafeAllowUninitialized` override is gone. The argument for safety is the same: `ProxyDeployer` creates and initialises in one transaction.
+- **`ERC4626Adapter`.** `LowLevelCall` does not exist in 5.3.0. `_ask` makes the same bounded static call in a few lines of assembly: one word copied to the scratch space, a failure or a short answer is no answer.
+
+### Size
+
+Paris has no one-byte `PUSH0`, which cost `Gated4626Vault` about 590 bytes: 25,286 against the 24,576 limit. The vault stays one contract with the same behaviour. Measured savings, at 200 runs:
+
+| Change | Bytes |
+|---|---|
+| One `_requireAttested` for the two attestation checks, calling `registry()` internally (now `public`, same ABI) | 307 (with the next row) |
+| One `_entryClosed` for `maxDeposit` and `maxMint` | |
+| `_hasAdapters` reads the offset and length of `adapters()` and never decodes the list | about 286 |
+| One `_priceFresh`, `_pricedValue` and `_writtenOff` for reads made from several functions | about 290 |
+| `setPortfolio` takes the vault's balance from OpenZeppelin's `totalAssets()` | 97 |
+
+Result: **24,305 bytes, 271 left.** Refused: fewer optimizer runs (1 run fits with 175 left and changes every contract), the IR pipeline (measured larger), and a second contract for the 4626.
+
+### Verified
+
+`npx hardhat test`: 1996 passing (1798 solidity, 198 nodejs) on the Paris build. Format, lint, typecheck, `validate:upgrades` (6 of 6) and `verify:reproducible` (31 contracts identical) pass.
+
+### Limits
+
+- A token already deployed from the Cancun build has no reentrancy flag written; the guard reads zero as not entered, so an upgrade onto this build would still work, but no such upgrade was tested.
+- OpenZeppelin 5.3.0 lacks the fixes made between 5.3.0 and 5.6.1; nothing in their changelogs was reviewed for this branch.
+- The pages in `docs/` were edited where they named the transient guard, 5.6.1 or the proxy override; their pin to a commit was not moved.
+
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
 2. Credential layer: none left. On 2026-10-30 the owner confirmed decisions 11, 12, 13, 15, 16 and 17 as built (17 at the measured +8,179 gas on a transfer). Decision 14 is moot, since `IdentityRule` was removed in the cleanup. Decisions 8 and 9 are recorded in the credential section's table.

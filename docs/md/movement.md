@@ -31,7 +31,7 @@ The NFT template, [`Gated721`](contracts/Gated721.md), has its own path in the s
 > **Two gates before the balances move, one notice after.** Red boxes are reverts, and a revert undoes the whole call. Steps 4 to 7 are the shared check, `_check`, which `canTransfer`, `canTransferWithReason` and `canExecute` also run. `_check` only returns a reason code; `_move` turns it into the error shown.
 
 - **Before `_move`.** Some entry points check things of their own first: the caller's role, the allowance in `transferFrom`, the intent and its signature in `executeTransfer`. `forcedTransfer` and the burner's `burn` also call `_releaseFrozen`. [What a rejection looks like](#rejections) lists them.
-- **Step 1, the guard.** `_move` is `nonReentrant` (OpenZeppelin's `ReentrancyGuardTransient`), so nothing called during the movement can start another movement on the same token.
+- **Step 1, the guard.** `_move` is `nonReentrant` (OpenZeppelin's `ReentrancyGuardUpgradeable`, which keeps its flag in storage), so nothing called during the movement can start another movement on the same token.
 - **Step 2, the context.** See [What the hook is told](#context). The kind is an argument: [The five kinds](#kinds) says where it comes from.
 - **Step 3, the hook.** The address is read once into a local variable, so the hook that approved the movement is the hook that hears about it afterwards.
 - **Steps 4 and 5.** See [The token's own checks](#own-checks).

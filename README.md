@@ -137,9 +137,9 @@ two run the same code.
   hook cannot know; the post-deploy check asserts it is the zero address. Alert too when `holderCount()` is above
   `holderCap()`: a recovery from a 7540 vault can put it there, and the agent should reject deposit requests near
   the cap (see [SECURITY.md](SECURITY.md)).
-- **Reentrancy.** `_move` is `nonReentrant` (transient storage), so no hook or rule can move balances during a
+- **Reentrancy.** `_move` is `nonReentrant` (OpenZeppelin's storage guard, so no Cancun opcode is needed), so no hook or rule can move balances during a
   movement; `check` is called as a view, and rules are attested.
-- **Reproducible builds.** solc 0.8.30, cancun, optimizer 200 runs, and no metadata hash, in both Hardhat and forge.
+- **Reproducible builds.** solc 0.8.30, paris, optimizer 200 runs, and no metadata hash, in both Hardhat and forge.
   Every codehash and CREATE2 address can be recomputed from the source at a tag; CI fails if two clean builds disagree.
 - **Deployment.** One implementation per template, deployed and attested once, with one proxy per token. Each
   implementation deployment has its own codehash, because UUPS stores `address(this)` in an immutable. Each proxy sits
@@ -419,6 +419,6 @@ The brief is in [`CLAUDE.md`](CLAUDE.md). Where the code intentionally differs, 
   only custodians they would trust with the assets.
 - **Deployment contracts.** Brief §3 lists `ProxyDeployer` and `TokenProxy` (in `contracts/deploy/`) and §4 lists
   `ProxyDeployer.deploy` among the attestation checks, but the brief does not describe the two contracts. `TokenProxy`
-  is OZ's `ERC1967Proxy` with only OZ's documented `_unsafeAllowUninitialized` override, so that it can be created
+  is OZ's `ERC1967Proxy` unchanged, which in the pinned release (5.3.0) can be created
   without init data. That keeps its CREATE2 address independent of the hook; `ProxyDeployer` initialises it in the same
   transaction.

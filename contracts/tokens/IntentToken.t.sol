@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import {IERC20Errors} from '@openzeppelin/contracts/interfaces/draft-IERC6093.sol';
 import {ERC1967Utils} from '@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol';
 import {Errors} from '@openzeppelin/contracts/utils/Errors.sol';
-import {ReentrancyGuardTransient} from '@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol';
+import {ReentrancyGuard} from '@openzeppelin/contracts/utils/ReentrancyGuard.sol';
 import {Test} from 'forge-std/Test.sol';
 
 import {Reasons} from 'interfaces/Errors.sol';
@@ -444,7 +444,7 @@ contract IntentTokenIntegration_Safety is IntentTokenIntegrationTest {
     _ruleSet[1] = _reentrant;
     _installRules(_ruleSet);
 
-    vm.expectRevert(ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector);
+    vm.expectRevert(ReentrancyGuard.ReentrancyGuardReentrantCall.selector);
     vm.prank(_alice);
     _token.transfer(_bob, 1);
   }
@@ -452,7 +452,7 @@ contract IntentTokenIntegration_Safety is IntentTokenIntegrationTest {
   /// @dev Announced moves take their own route to the guarded movement, so each is pinned on its own
   function test_WhenARuleReentersDuringAForcedTransfer_ItReverts() external {
     _installReentrantRule();
-    vm.expectRevert(ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector);
+    vm.expectRevert(ReentrancyGuard.ReentrancyGuardReentrantCall.selector);
     vm.prank(_agent);
     _token.forcedTransfer(_alice, _bob, 1);
   }
@@ -460,14 +460,14 @@ contract IntentTokenIntegration_Safety is IntentTokenIntegrationTest {
   function test_WhenARuleReentersDuringAnExecutedIntent_ItReverts() external {
     _installReentrantRule();
     (ITransferIntent.TransferIntent memory _i, bytes memory _sig) = _signedIntent(_bob, 1, keccak256('guard'));
-    vm.expectRevert(ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector);
+    vm.expectRevert(ReentrancyGuard.ReentrancyGuardReentrantCall.selector);
     vm.prank(_executor);
     _token.executeTransfer(_i, _sig);
   }
 
   function test_WhenARuleReentersDuringAMint_ItReverts() external {
     _installReentrantRule();
-    vm.expectRevert(ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector);
+    vm.expectRevert(ReentrancyGuard.ReentrancyGuardReentrantCall.selector);
     vm.prank(_minter);
     _token.mint(_bob, 1);
   }

@@ -307,7 +307,7 @@
       <dt>EXECUTOR_ROLE</dt><dd>Held by this contract on the tokens it settles. <code>Product</code> grants it on a token whose product lists <code>dvp</code> under <code>executors</code>.</dd>
     </dl>
     <p><code>Core</code> deploys the executor only when a product in the profile names it. Of the profiles in <code>ignition/profiles.ts</code>, <code>full</code> and <code>intent</code> do, each on its intent token. For a core built without it, <code>CoreParts</code> adds it and <code>PartsHandover</code> grants its roles and hands it to the main timelock, as <code>CoreHandover</code> does. No profile includes a gated cash token. Such a token is an <code>IntentToken</code> of its own, placed as a product of its own or deployed apart, as <code>test/nodejs/dvp.test.ts</code> does, and it has to grant this executor the role too.</p>
-    <p>Pausing the executor stops both entry points without touching the tokens. Both entry points carry OpenZeppelin's transient reentrancy guard, and the tests cover a cash token calling back during the pull, during the payout and during a gated leg. The pre-flights are read-only and unguarded.</p>
+    <p>Pausing the executor stops both entry points without touching the tokens. Both entry points carry OpenZeppelin's reentrancy guard, which keeps its flag in storage, and the tests cover a cash token calling back during the pull, during the payout and during a gated leg. The pre-flights are read-only and unguarded.</p>
   </div>
 </section>
 

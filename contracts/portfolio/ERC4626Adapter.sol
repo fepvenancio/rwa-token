@@ -4,7 +4,6 @@ pragma solidity ^0.8.28;
 import {IERC4626} from '@openzeppelin/contracts/interfaces/IERC4626.sol';
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {SafeERC20} from '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
-import {LowLevelCall} from '@openzeppelin/contracts/utils/LowLevelCall.sol';
 
 import {IAdapter} from 'interfaces/IAdapter.sol';
 import {IERC4626Adapter} from 'interfaces/IERC4626Adapter.sol';
@@ -129,10 +128,13 @@ contract ERC4626Adapter is IERC4626Adapter {
   function _ask(
     bytes memory _call
   ) private view returns (bool _ok, uint256 _answer) {
-    // The second word of the scratch space is not needed.
-    // slither-disable-next-line unused-return
-    (bool _success, bytes32 _word,) = LowLevelCall.staticcallReturn64Bytes(address(TARGET), _call);
-    _ok = _success && LowLevelCall.returnDataSize() >= 32;
-    if (_ok) _answer = uint256(_word);
+    address _target = address(TARGET);
+    // Only the first word of the answer is copied, into the scratch space, so a target cannot make the read costly
+    // with a long answer.
+    assembly ('memory-safe') {
+      let _success := staticcall(gas(), _target, add(_call, 0x20), mload(_call), 0x00, 0x20)
+      _ok := and(_success, gt(returndatasize(), 0x1f))
+      if _ok { _answer := mload(0x00) }
+    }
   }
 }

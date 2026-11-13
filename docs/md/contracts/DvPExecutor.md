@@ -173,7 +173,7 @@ Simulating the entry point itself from the operator's address shows the real out
 
 `Core` deploys the executor only when a product in the profile names it. Of the profiles in `ignition/profiles.ts`, `full` and `intent` do, each on its intent token. For a core built without it, `CoreParts` adds it and `PartsHandover` grants its roles and hands it to the main timelock, as `CoreHandover` does. No profile includes a gated cash token. Such a token is an `IntentToken` of its own, placed as a product of its own or deployed apart, as `test/nodejs/dvp.test.ts` does, and it has to grant this executor the role too.
 
-Pausing the executor stops both entry points without touching the tokens. Both entry points carry OpenZeppelin's transient reentrancy guard, and the tests cover a cash token calling back during the pull, during the payout and during a gated leg. The pre-flights are read-only and unguarded.
+Pausing the executor stops both entry points without touching the tokens. Both entry points carry OpenZeppelin's reentrancy guard, which keeps its flag in storage, and the tests cover a cash token calling back during the pull, during the payout and during a gated leg. The pre-flights are read-only and unguarded.
 
 <a id="functions"></a>
 ## What it can do

@@ -46,7 +46,7 @@
 <section id="how">
   <div class="prose wrap-any">
     <h2>One deposit and one redemption</h2>
-    <p>Deposits and redemptions are OpenZeppelin's <code>ERC4626Upgradeable</code> (version 5.6.1), with steps added around it. Every change to a share balance goes through the base token's single path, which asks the policy hook first. A deposit reaches the hook as a <span class="k k-mint">MINT</span> to the receiver, a redemption as a <span class="k k-burn">BURN</span> from the owner, and in both the caller is the operator, the account driving the movement. The asset moves as a plain ERC-20 transfer the hook does not see, which is why <a href="GatedVaultBase.html"><code>GatedVaultBase</code></a> checks a third party on that leg.</p>
+    <p>Deposits and redemptions are OpenZeppelin's <code>ERC4626Upgradeable</code> (version 5.3.0), with steps added around it. Every change to a share balance goes through the base token's single path, which asks the policy hook first. A deposit reaches the hook as a <span class="k k-mint">MINT</span> to the receiver, a redemption as a <span class="k k-burn">BURN</span> from the owner, and in both the caller is the operator, the account driving the movement. The asset moves as a plain ERC-20 transfer the hook does not see, which is why <a href="GatedVaultBase.html"><code>GatedVaultBase</code></a> checks a third party on that leg.</p>
   </div>
   <figure>
     <div class="fig-scroll">
@@ -473,7 +473,7 @@ assets = shares × (totalAssets + 1) / (totalSupply + 10^6)</pre>
   <div class="prose wrap-any">
     <h2>Source and tests</h2>
     <ul class="plain wrap-any">
-      <li>Contract: <code>contracts/vaults/Gated4626Vault.sol</code>, interface <code>IGated4626Vault.sol</code>. The vault logic it inherits is OpenZeppelin's <code>ERC4626Upgradeable</code> from <code>@openzeppelin/contracts-upgradeable</code> 5.6.1.</li>
+      <li>Contract: <code>contracts/vaults/Gated4626Vault.sol</code>, interface <code>IGated4626Vault.sol</code>. The vault logic it inherits is OpenZeppelin's <code>ERC4626Upgradeable</code> from <code>@openzeppelin/contracts-upgradeable</code> 5.3.0.</li>
       <li>Tests: <code>Gated4626Vault.t.sol</code> (a vault with no portfolio: unit tests with a mocked hook, integration tests with the real hook, lockups and a minimum position, the donation attack, and invariants), <code>Gated4626VaultPortfolio.t.sol</code> (a real portfolio, adapter and outside vault: plugging, counting, write-offs and fees), <code>GatedVaultBase.t.sol</code> (third parties behind the real rules), <code>CredentialRuleVaults.t.sol</code> (a lapsed holder redeems but cannot deposit), <code>FundIntegration.t.sol</code> (the vault as a fund class at a full cap), and <code>test/nodejs/vaults.test.ts</code> (a deposit and <code>withdraw(maxWithdraw)</code> from TypeScript)</li>
     </ul>
   </div>

@@ -6,7 +6,7 @@ import {IERC4626} from '@openzeppelin/contracts/interfaces/IERC4626.sol';
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {SafeERC20} from '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
 import {Pausable} from '@openzeppelin/contracts/utils/Pausable.sol';
-import {ReentrancyGuardTransient} from '@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol';
+import {ReentrancyGuard} from '@openzeppelin/contracts/utils/ReentrancyGuard.sol';
 import {SafeCast} from '@openzeppelin/contracts/utils/math/SafeCast.sol';
 import {EnumerableSet} from '@openzeppelin/contracts/utils/structs/EnumerableSet.sol';
 
@@ -23,7 +23,7 @@ import {IPortfolio} from 'interfaces/IPortfolio.sol';
  *      is read from the vault at call time rather than fixed here. A risk's allocation is the sum of its adapters';
  *      an adapter that named an id twice would only reach that cap sooner
  */
-contract Portfolio is ReentrancyGuardTransient, IPortfolio {
+contract Portfolio is ReentrancyGuard, IPortfolio {
   using EnumerableSet for EnumerableSet.AddressSet;
   using SafeERC20 for IERC20;
 

@@ -10,7 +10,7 @@ import { defineConfig } from "hardhat/config";
 const compiler = {
   version: "0.8.30",
   settings: {
-    evmVersion: "cancun",
+    evmVersion: "paris",
     optimizer: {
       enabled: true,
       runs: 200,

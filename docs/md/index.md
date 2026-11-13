@@ -7,7 +7,7 @@ Overview
 Tokens for fund shares and other real-world assets, where a policy decides who may hold them. Each token keeps its own books and its emergency powers, and asks a separate, replaceable set of compliance rules before a balance changes.
 
 - **37 contracts** in contracts/ (interfaces and test mocks aside)
-- Solidity **0.8.30**, OpenZeppelin **5.6.1**
+- Solidity **0.8.30**, OpenZeppelin **5.3.0**, EVM **paris**
 - ERC-20, ERC-721, **ERC-7943**, ERC-4626, ERC-7540
 - licence: **UNLICENSED**, proprietary
 - **no external audit** yet

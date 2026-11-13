@@ -25,6 +25,10 @@ contract GovernanceTimelock is TimelockController, IGovernanceTimelock {
   /// @notice The lowest delay the timelock accepts, at deployment and in `updateDelay`
   uint256 private constant _MIN_DELAY = 1 hours;
 
+  /// @notice The minimum delay. OZ's own is private and its `updateDelay` is external in the pinned release, so a
+  ///         subclass cannot extend it: this contract keeps the delay itself and `getMinDelay` reads it
+  uint256 private _delay;
+
   /**
    * @notice Deploys the timelock
    * @param _initialMinDelay The minimum delay, at least 1 hour (`GovernanceTimelock_DelayBelowFloor` otherwise)
@@ -42,9 +46,25 @@ contract GovernanceTimelock is TimelockController, IGovernanceTimelock {
     address _recovery
   ) TimelockController(_initialMinDelay, _proposers, _executors, _admin) {
     if (_initialMinDelay < _MIN_DELAY) revert GovernanceTimelock_DelayBelowFloor(_initialMinDelay, _MIN_DELAY);
+    _delay = _initialMinDelay;
     // _grantRole returns false only if the role is already held; either way the account ends up holding it.
     // aderyn-ignore-next-line(unchecked-return)
     if (_recovery != address(0)) _grantRole(RECOVERY_ROLE, _recovery);
+  }
+
+  /**
+   * @inheritdoc TimelockController
+   * @dev Reverts with `GovernanceTimelock_DelayBelowFloor` below one hour. It is OpenZeppelin's function with the
+   *      floor added: the caller check (only the timelock itself) runs first, with the same error and the same event
+   */
+  function updateDelay(
+    uint256 _newDelay
+  ) external override {
+    address _sender = _msgSender();
+    if (_sender != address(this)) revert TimelockUnauthorizedCaller(_sender);
+    if (_newDelay < _MIN_DELAY) revert GovernanceTimelock_DelayBelowFloor(_newDelay, _MIN_DELAY);
+    emit MinDelayChange(_delay, _newDelay);
+    _delay = _newDelay;
   }
 
   /**
@@ -64,15 +84,8 @@ contract GovernanceTimelock is TimelockController, IGovernanceTimelock {
     super.revokeRole(_role, _account);
   }
 
-  /**
-   * @inheritdoc TimelockController
-   * @dev Reverts with `GovernanceTimelock_DelayBelowFloor` below one hour. OpenZeppelin's caller check (only the
-   *      timelock itself) runs first; a delay below the floor then reverts the whole call
-   */
-  function updateDelay(
-    uint256 _newDelay
-  ) public override {
-    super.updateDelay(_newDelay);
-    if (_newDelay < _MIN_DELAY) revert GovernanceTimelock_DelayBelowFloor(_newDelay, _MIN_DELAY);
+  /// @inheritdoc TimelockController
+  function getMinDelay() public view override returns (uint256 _minDelay) {
+    _minDelay = _delay;
   }
 }

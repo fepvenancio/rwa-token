@@ -47,10 +47,10 @@ Also in scope: `ignition/modules/{Core,CoreHandover,CoreParts,PartsHandover,Fund
 `ignition/parts.ts` and `ignition/profiles.ts`, which carry the deployment order, the parts a core deploys and their hand-over,
 role grants, the hand-over to the timelock and each product's rule list.
 
-Out of scope: OpenZeppelin 5.6.1 (`@openzeppelin/contracts`, `-upgradeable`; `TimelockController` is the base of `GovernanceTimelock`, which both timelocks are),
+Out of scope: OpenZeppelin 5.3.0 (the newest release whose files used here need no Cancun opcode; `@openzeppelin/contracts`, `-upgradeable`; `TimelockController` is the base of `GovernanceTimelock`, which both timelocks are),
 the KYC attesters' off-chain verification, and test mocks.
 
-Build: solc 0.8.30, `evmVersion: cancun`, optimizer 200 runs, no metadata hash, the same in Hardhat and forge.
+Build: solc 0.8.30, `evmVersion: paris`, optimizer 200 runs, no metadata hash, the same in Hardhat and forge.
 
 ## 3. Things that differ from what you might assume
 
@@ -71,9 +71,9 @@ Build: solc 0.8.30, `evmVersion: cancun`, optimizer 200 runs, no metadata hash, 
 
    A reverted deploy leaves no proxy and does not use up the symbol. Tests: `contracts/deploy/ProxyDeployer.t.sol`,
    `test/nodejs/deployment.test.ts`.
-2. **`TokenProxy` overrides `_unsafeAllowUninitialized()` to return true.** OZ 5.6's `ERC1967Proxy` refuses empty init
-   data to prevent proxies left open for anyone to initialise first. The override is the extension point OZ documents
-   for code that initialises another way. Here, `ProxyDeployer` initialises in the same transaction that creates the
+2. **`TokenProxy` is created with empty init data.** OZ 5.3.0's `ERC1967Proxy` accepts that (later releases refuse it
+   unless a subclass allows it), and a proxy left open could be initialised by anyone first. Here, `ProxyDeployer`
+   initialises in the same transaction that creates the
    proxy, so no uninitialised `TokenProxy` of this system exists after any transaction. A `TokenProxy` deployed by any
    other route is not one of this system's tokens. Pinned by tests:
    - a failed `initialize` leaves no code at the address;
@@ -406,7 +406,6 @@ Inline suppressions (each carries its reason on the line above, in the source):
 | `Gated7540Vault` `requestDeposit` | `arbitrary-send-erc20` | `owner` is the caller or an approved operator. Fuzzed: a non-operator with a victim owner reverts and moves nothing. Removing the guard fails 2 tests |
 | `ProxyDeployer` `deploy` | `unused-return` | `initialize` returns nothing; success is checked by the post-init assertions |
 | `DvPExecutor` `canExecuteDvPGated`, `canExecuteDvP3009` | `unused-return` | The token's `ok` is `reason == TRANSFER_OK`, so the reason carries it |
-| `TokenProxy` `_unsafeAllowUninitialized` | `dead-code` | Called from `ERC1967Proxy`'s constructor; Slither does not trace it through the override |
 
 Aderyn 0.6.8 (Cyfrin) runs as a second CI gate (`npm run aderyn`, 0 findings), from the sha256-pinned release binary
 (§6). First run: 5 high and 13 low
@@ -418,7 +417,7 @@ Project-wide exclusions (`aderyn.toml`):
 | Detector | Reason |
 |---|---|
 | `centralization-risk` | Privileged roles are the product; each is held by the timelock, guardian, council or issuer |
-| `push-zero-opcode` | `evmVersion` is pinned to cancun; the target chain must support it (PUSH0, TSTORE, MCOPY) |
+| `push-zero-opcode` | `evmVersion` is pinned to paris, so the compiler emits no PUSH0; the detector reads the pragma |
 | `unspecific-solidity-pragma` | Brief rule 9 mandates `^0.8.28`; the exact compiler is pinned in config |
 | `uninitialized-local-variable` | `for (uint256 _i; ...)` loop counters and zero-start bitmasks |
 | `unused-import` | solhint already flags unused imports; Aderyn misses imports used only by `@inheritdoc` |
@@ -578,5 +577,5 @@ npm run verify:reproducible
 
 Tool versions: Node 24.21.0, Python 3.12.15, Hardhat 3.20.0, Foundry v1.8.1, slither 0.11.5, Aderyn 0.6.8, halmos 0.3.3,
 `@openzeppelin/upgrades-core` 1.46.0. CI (`.github/workflows/ci.yml`) runs all of them on every pull request and every push to `main`, except `verify:reproducible`, which runs on
-pull requests into `main` and, through `release.yml`, on every `v*` tag. Mythril is not used: it has no Cancun support
-(TSTORE/TLOAD/MCOPY).
+pull requests into `main` and, through `release.yml`, on every `v*` tag. Mythril is not used: it was dropped when the code needed Cancun
+(TSTORE/TLOAD/MCOPY), which it does not support, and it has not been added back for the Paris build.

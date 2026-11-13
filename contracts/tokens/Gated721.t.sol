@@ -10,7 +10,7 @@ import {Initializable} from '@openzeppelin/contracts/proxy/utils/Initializable.s
 import {IERC721} from '@openzeppelin/contracts/token/ERC721/IERC721.sol';
 import {IERC721Receiver} from '@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol';
 import {IERC721Metadata} from '@openzeppelin/contracts/token/ERC721/extensions/IERC721Metadata.sol';
-import {ReentrancyGuardTransient} from '@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol';
+import {ReentrancyGuard} from '@openzeppelin/contracts/utils/ReentrancyGuard.sol';
 import {IERC165} from '@openzeppelin/contracts/utils/introspection/IERC165.sol';
 import {Test} from 'forge-std/Test.sol';
 
@@ -431,7 +431,7 @@ contract Gated721Unit_Transfer is Gated721UnitTest {
     vm.prank(_bob);
     _token.setApprovalForAll(address(_reentrant), true);
 
-    vm.expectRevert(ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector);
+    vm.expectRevert(ReentrancyGuard.ReentrancyGuardReentrantCall.selector);
     vm.prank(_alice);
     _token.transferFrom(_alice, _bob, _ID);
   }

@@ -207,7 +207,7 @@
 <section id="functions">
   <div class="prose">
     <h2>What it can do</h2>
-    <p>The contract is OpenZeppelin's <code>TimelockController</code> (contracts 5.6.1), plus the floor, the role id and the one branch in <code>revokeRole</code>. Who can call is given as deployed.</p>
+    <p>The contract is OpenZeppelin's <code>TimelockController</code> (contracts 5.3.0), plus the floor, the role id and the one branch in <code>revokeRole</code>. In that release a subclass cannot extend <code>updateDelay</code>, so the contract keeps the delay itself: <code>updateDelay</code> repeats OpenZeppelin's caller check and event and adds the floor, and <code>getMinDelay</code> reads that value. Who can call is given as deployed.</p>
   </div>
   <div class="table-wrap">
     <table>

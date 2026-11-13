@@ -34,7 +34,7 @@ The proxy has no token logic. On each call it runs the implementation's code wit
 <a id="override"></a>
 ## The one override, and why it is safe here
 
-OpenZeppelin's `ERC1967Proxy` reverts with `ERC1967ProxyUninitialized` when it is created with empty setup data, because a proxy left without its settings could be set up by whoever calls it first. It offers a function to allow it, `_unsafeAllowUninitialized()`. `TokenProxy` overrides that function to return `true`, and changes nothing else.
+OpenZeppelin's `ERC1967Proxy`, in the pinned release 5.3.0, accepts empty setup data. A proxy left without its settings could be set up by whoever calls it first, so `TokenProxy` is safe only as `ProxyDeployer` uses it: created and set up in one transaction. `TokenProxy` adds nothing to OpenZeppelin's proxy.
 
 The reason is the token's address. CREATE2 derives the address from the deployer's address, a salt and the creation code with its arguments. ProxyDeployer uses the hash of the symbol as the salt and passes the implementation as the one non-empty argument. If the setup data went into the creation code too, the address would change with each admin, guardian, hook or rule in it. With empty data, the address depends on the deployer, the symbol and the implementation, so it can be published and watched before the token exists.
 

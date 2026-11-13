@@ -94,7 +94,8 @@ contract GuardedAccount is IGuardedAccount {
       }
       emit CallMade(_target, _selector, _data);
       // A permission is a timelock decision, and the validator has judged these parameters. What it returns is not needed.
-      // slither-disable-next-line unused-return
+      // Each call's event comes before that call; in a batch it follows the earlier calls, which is the order made.
+      // slither-disable-next-line unused-return,reentrancy-events
       Address.functionCall(_target, _data); // aderyn-ignore(unchecked-return)
     }
   }

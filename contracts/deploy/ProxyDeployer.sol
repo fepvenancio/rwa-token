@@ -68,7 +68,8 @@ contract ProxyDeployer is Ownable, IProxyDeployer {
     _proxy = address(new TokenProxy{salt: _salt}(_implementation, ''));
     // `initialize` returns nothing; its success is all that matters, and it is checked below.
     // Aderyn's form of the Slither finding below; initialize returns nothing.
-    // slither-disable-next-line unused-return
+    // The event after it names a proxy this call created and initialised: an owner-only call, and nothing is stale.
+    // slither-disable-next-line unused-return,reentrancy-events
     Address.functionCall(_proxy, _initData); // aderyn-ignore(unchecked-return)
 
     // A token on another registry could pass the implementation check and still have its own hook and rules attested.

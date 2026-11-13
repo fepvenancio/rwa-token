@@ -5,7 +5,7 @@ import {AccessControl} from '@openzeppelin/contracts/access/AccessControl.sol';
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {SafeERC20} from '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
 import {Pausable} from '@openzeppelin/contracts/utils/Pausable.sol';
-import {ReentrancyGuardTransient} from '@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol';
+import {ReentrancyGuard} from '@openzeppelin/contracts/utils/ReentrancyGuard.sol';
 
 import {Reasons} from 'interfaces/Errors.sol';
 
@@ -24,7 +24,7 @@ import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
  *      no sweep. Each token stays the single source of truth for signature, nonce, window, executor binding and policy
  *      checks. What this contract adds is the check that the two legs describe one trade, and atomicity
  */
-contract DvPExecutor is AccessControl, Pausable, ReentrancyGuardTransient, IDvPExecutor {
+contract DvPExecutor is AccessControl, Pausable, ReentrancyGuard, IDvPExecutor {
   using SafeERC20 for IERC20;
 
   /// @notice Role allowed to submit trades

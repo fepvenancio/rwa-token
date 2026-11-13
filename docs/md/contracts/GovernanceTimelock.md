@@ -97,7 +97,7 @@ On the main timelock, `RECOVERY_ROLE` cannot grant any role, revoke any other ro
 <a id="functions"></a>
 ## What it can do
 
-The contract is OpenZeppelin's `TimelockController` (contracts 5.6.1), plus the floor, the role id and the one branch in `revokeRole`. Who can call is given as deployed.
+The contract is OpenZeppelin's `TimelockController` (contracts 5.3.0), plus the floor, the role id and the one branch in `revokeRole`. In that release a subclass cannot extend `updateDelay`, so the contract keeps the delay itself: `updateDelay` repeats OpenZeppelin's caller check and event and adds the floor, and `getMinDelay` reads that value. Who can call is given as deployed.
 
 | Function | Who can call | What it does |
 |---|---|---|

@@ -155,7 +155,7 @@
   </figure>
   <ul class="plain wrap-any">
     <li><b>Before <code>_move</code>.</b> Some entry points check things of their own first: the caller's role, the allowance in <code>transferFrom</code>, the intent and its signature in <code>executeTransfer</code>. <code>forcedTransfer</code> and the burner's <code>burn</code> also call <code>_releaseFrozen</code>. <a href="#rejections">What a rejection looks like</a> lists them.</li>
-    <li><b>Step 1, the guard.</b> <code>_move</code> is <code>nonReentrant</code> (OpenZeppelin's <code>ReentrancyGuardTransient</code>), so nothing called during the movement can start another movement on the same token.</li>
+    <li><b>Step 1, the guard.</b> <code>_move</code> is <code>nonReentrant</code> (OpenZeppelin's <code>ReentrancyGuardUpgradeable</code>, which keeps its flag in storage), so nothing called during the movement can start another movement on the same token.</li>
     <li><b>Step 2, the context.</b> See <a href="#context">What the hook is told</a>. The kind is an argument: <a href="#kinds">The five kinds</a> says where it comes from.</li>
     <li><b>Step 3, the hook.</b> The address is read once into a local variable, so the hook that approved the movement is the hook that hears about it afterwards.</li>
     <li><b>Steps 4 and 5.</b> See <a href="#own-checks">The token's own checks</a>.</li>
