@@ -7,7 +7,8 @@
 //   3. production vs forge (different remappings and source paths);
 //   4. the TokenProxy artifact vs the TokenProxy creation code embedded in ProxyDeployer, which fixes every token's
 //      CREATE2 address. With solc's metadata hash on, (2)-(4) differ; this gate is what keeps it off;
-//   5. the Gated7540Settlement artifact vs the creation code embedded in Gated7540Vault's, which creates it.
+//   5. the Gated7540Settlement artifact vs the creation code embedded in Gated7540Vault's, which creates it, and the
+//      Gated4626Management artifact vs Gated4626Vault's likewise.
 //
 // Then writes `release-build/`: `manifest.json` (per contract: runtime and creation code hashes, immutable slots) and
 // the production build-info of the in-scope sources only (no tests, mocks or OZ-rooted jobs; the OZ sources a contract
@@ -54,6 +55,7 @@ const DEPLOYED = {
   Fund: "fund",
   TokenProxy: "deploy",
   Gated7540Settlement: "vaults",
+  Gated4626Management: "vaults",
 } as const;
 const CONTRACTS: Record<string, string> = { ...ATTESTED, ...DEPLOYED };
 
@@ -129,6 +131,10 @@ const settlementCreation = production.Gated7540Settlement.creation.replace(/^0x/
 if (!production.Gated7540Vault.creation.includes(settlementCreation)) {
   failures.push("Gated7540Vault does not embed the Gated7540Settlement artifact's creation code");
 }
+const managementCreation = production.Gated4626Management.creation.replace(/^0x/, "");
+if (!production.Gated4626Vault.creation.includes(managementCreation)) {
+  failures.push("Gated4626Vault does not embed the Gated4626Management artifact's creation code");
+}
 
 // Leave the production build in place and package it as the release reference.
 hardhatBuild("production");
@@ -171,7 +177,8 @@ if (failures.length > 0) {
 }
 console.log(
   `REPRODUCIBLE: ${Object.keys(CONTRACTS).length} contracts identical across 2 production builds, the default profile ` +
-    `and forge; TokenProxy matches ProxyDeployer and Gated7540Settlement matches Gated7540Vault. Release reference ` +
+    `and forge; TokenProxy matches ProxyDeployer, Gated7540Settlement matches Gated7540Vault and Gated4626Management ` +
+    `matches Gated4626Vault. Release reference ` +
     `written to release-build/ ` +
     `(${published} in-scope build-info files).`,
 );

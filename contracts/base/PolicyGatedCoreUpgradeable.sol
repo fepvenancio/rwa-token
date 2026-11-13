@@ -98,7 +98,7 @@ abstract contract PolicyGatedCoreUpgradeable is
   }
 
   /// @inheritdoc IPolicyGatedCore
-  function registry() external view returns (address _registry) {
+  function registry() public view returns (address _registry) {
     _registry = address(_getPolicyGatedCoreStorage().registry);
   }
 

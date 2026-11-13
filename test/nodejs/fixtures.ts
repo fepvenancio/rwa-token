@@ -110,6 +110,7 @@ const LEGO_ABI = parseAbi([
   "function feeModel() view returns (address)",
   "function adapters() view returns (address[])",
   "function SETTLEMENT_LOGIC() view returns (address)",
+  "function MANAGEMENT_LOGIC() view returns (address)",
   "function redemptionGate() view returns (uint256)",
 ]);
 const SAFE_ABI = parseAbi(["function getThreshold() view returns (uint256)"]);
@@ -814,7 +815,7 @@ export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
   }
 
   // A product's legos. Their roles live outside the vault's role scan, so they are asked by name.
-  const read = <T>(address: Address, functionName: "VAULT" | "portfolio" | "feeModel" | "adapters" | "SETTLEMENT_LOGIC" | "redemptionGate") =>
+  const read = <T>(address: Address, functionName: "VAULT" | "portfolio" | "feeModel" | "adapters" | "SETTLEMENT_LOGIC" | "MANAGEMENT_LOGIC" | "redemptionGate") =>
     s.publicClient.readContract({ address, abi: LEGO_ABI, functionName }) as Promise<T>;
   const isSame = async (address: Address, functionName: "VAULT" | "portfolio" | "feeModel", expected: Address) =>
     isAddressEqual(await read<Address>(address, functionName), expected);
@@ -832,9 +833,12 @@ export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
       ...(product.portfolio === undefined ? [] : [named.allocator]),
     ].map((account) => account.toLowerCase());
     assert.equal(new Set(functions).size, functions.length, `the reporter, the checker and the allocator of ${contract.address} are not different accounts`);
-    if (product.template === "Gated7540Vault") {
-      const logic = await read<Address>(contract.address, "SETTLEMENT_LOGIC");
-      const artifact = await hre.artifacts.readArtifact("Gated7540Settlement");
+    // Each vault names a second contract its implementation created: it must be the release's code.
+    const second = { Gated7540Vault: ["SETTLEMENT_LOGIC", "Gated7540Settlement"], Gated4626Vault: ["MANAGEMENT_LOGIC", "Gated4626Management"] } as const;
+    if (product.template === "Gated7540Vault" || product.template === "Gated4626Vault") {
+      const [getter, name] = second[product.template];
+      const logic = await read<Address>(contract.address, getter);
+      const artifact = await hre.artifacts.readArtifact(name);
       // Its one immutable is `__self`, its own address.
       let expected = artifact.deployedBytecode.slice(2);
       for (const { start, length } of Object.values(artifact.immutableReferences ?? {}).flat()) {

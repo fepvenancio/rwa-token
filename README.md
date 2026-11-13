@@ -61,10 +61,10 @@ Distributor (one per token, immutable)           pays holders from an approved, 
 | `contracts/nav/` | `NavDesk`, `FeeModel`: a 7540's price and the fee on it |
 | `contracts/distribution/` | `Distributor`: dividends and coupons |
 | `contracts/intents/` | `IntentExecutor`, `DvPExecutor`, `SignedEntry` |
-| `contracts/vaults/` | `GatedVaultBase`, which both vaults inherit, `Gated4626Vault`, `Gated7540Vault`, and `Gated7540Settlement`, the second contract the 7540 creates and hands its settlement and recovery functions to, with `Gated7540Common`, which the two share |
+| `contracts/vaults/` | `GatedVaultBase`, which both vaults inherit, `Gated4626Vault`, `Gated7540Vault`, and each vault's second contract, which its implementation creates: `Gated7540Settlement`, to which the 7540 hands its settlement and recovery functions, and `Gated4626Management`, to which the 4626 hands plugging a portfolio, the rate limit, the fee model and paying fees; with `Gated7540Common` and `Gated4626Common`, which each pair shares |
 | `contracts/test/` | Test helpers and mocks, interface-freeze and contract-size guards, Halmos properties |
 
-Every contract except the abstract `BaseRule`, `PolicyGatedCoreUpgradeable` and `Gated7540Common` has its `.t.sol` next to it; those three are tested through the contracts that inherit them. [`PLAN.md`](PLAN.md) tracks phases and decisions;
+Every contract except the abstract `BaseRule`, `PolicyGatedCoreUpgradeable`, `Gated7540Common` and `Gated4626Common` has its `.t.sol` next to it; those four are tested through the contracts that inherit them. [`PLAN.md`](PLAN.md) tracks phases and decisions;
 [`CLAUDE.md`](CLAUDE.md) is the build brief.
 
 ## Security model
