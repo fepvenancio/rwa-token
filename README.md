@@ -323,8 +323,8 @@ exact sequence on the local network, playing the council and the KYC attester, a
 
 ## Commands
 
-Requires Node 24 (CI pins 24.21.0). Foundry v1.8.1, Python 3.12 with `ci/requirements.txt` (slither, halmos) and the
-pinned Aderyn binary are needed only for the analysis commands.
+Requires Node 24 (CI pins 24.21.0). Foundry v1.8.1 and Python 3.12 with `ci/requirements.txt` (slither, halmos)
+are needed only for the analysis commands.
 
 ```bash
 npm ci
@@ -348,14 +348,6 @@ npm run fmt:check     # forge fmt (Wonderland profile in foundry.toml)
 
 ```bash
 npm run slither       # static-analysis gate on the contracts that ship; accepted findings in slither.config.json and inline
-```
-
-```bash
-scripts/fetch-tool.sh aderyn   # installs the sha256-pinned Aderyn release binary (tools.lock) into .tools/bin
-```
-
-```bash
-npm run aderyn        # second static-analysis gate (Cyfrin Aderyn); exclusions in aderyn.toml, the rest inline
 ```
 
 ```bash

@@ -37,7 +37,6 @@ case "$archive" in
   *) echo "fetch-tool: unknown archive type $archive" >&2; exit 1 ;;
 esac
 case "$tool" in
-  aderyn) install -m 0755 "$(find "$work/x" -type f -name aderyn | head -1)" "$root/.tools/bin/aderyn" ;;
   foundry) for bin in forge cast anvil chisel; do install -m 0755 "$work/x/$bin" "$root/.tools/bin/$bin"; done ;;
   *) echo "fetch-tool: no install rule for $tool" >&2; exit 1 ;;
 esac
