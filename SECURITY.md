@@ -427,8 +427,11 @@ Inline suppressions (each carries its reason on the line above, in the source):
 | `ProxyDeployer` `deploy` | `unused-return`, `reentrancy-events` | `initialize` returns nothing; success is checked by the post-init assertions. The event after it names a proxy this owner-only call created and initialised, so nothing in it is stale |
 | `DvPExecutor` `canExecuteDvPGated`, `canExecuteDvP3009` | `unused-return` | The token's `ok` is `reason == TRANSFER_OK`, so the reason carries it |
 
-Aderyn 0.6.8 (Cyfrin) runs as a second CI gate (`npm run aderyn`, 0 findings), from the sha256-pinned release binary
-(§6). First run: 5 high and 13 low
+Aderyn 0.6.8 (Cyfrin) was a second CI gate from 2026-10-17 to 2026-11-14, when it was removed: Aderyn was retired
+upstream on 2026-11-13 and its release binaries were deleted, so the pinned binary can no longer be fetched. Its last
+run, on commit `259d82b` with a binary installed before the retirement, had 0 findings. Nothing checks the tables
+below any longer; they record what was accepted while the gate ran, and the inline `aderyn-ignore` comments and
+`aderyn.toml` are kept as that record. Slither is the static-analysis gate. First run: 5 high and 13 low
 detector types. One real fix: `ProxyDeployer`'s constructor parameter shadowed `Ownable._owner` and was renamed. Every
 other finding is acknowledged below. Where a finding is a real property rather than a false positive, a test pins it.
 
@@ -500,7 +503,6 @@ Each row is a bug deliberately planted, the tests that caught it, then the file 
 | Core and products (2026-10-30) | The timelock floor at 7 days, 2 hours or zero; `GatedToken` reporting another template, its implementation left initialisable, ignoring the decimals it is given, reporting 18 whatever it was given, or keeping them at another location; the default delay at 7 days or 23 hours; `Core` always deploying the window rule; `ProxyDeployer` left with the deployer or moved to the timelock; the deployer keeping the timelock admin; the guardian not made a canceller; the operations account keeping a product's admin, or the admin going elsewhere; UPGRADER to the agent; RECOVERY skipped; a product's stated policy ignored, or its decimals ignored, or a plain token defaulting to 6; MINTER not granted on a plain token; the window rule allowed on any template; a fund rule without a fund accepted, or a fund without the fund rule; every fund opening with every class; a fund starting with the deployer; opening without installing the rule or setting the cap; a fund left with the operations account; classes opening in reverse order | 32 of 32 caught, by `GatedToken.t.sol`, `GovernanceTimelock.t.sol`, `products.test.ts` and `deployment.test.ts` |
 | Ignition `Activate` | UPGRADER to an ops account; deployer keeps timelock admin; deployer keeps `ProxyDeployer` ownership | 54 / 54 / 55 failing |
 | upgrades-core | upgrade-unsafe state initialiser | `validate` FAILED |
-| Aderyn gate | one inline suppression removed | `npm run aderyn` fails (1 high) |
 | 7540 invariant handler | every action of a family silently turned into a no-op | `afterInvariant` fails (each family must execute in every run) |
 | `Gated7540Vault` access | controller/operator check removed from `redeem`, `withdraw`, `_claimMint`, `_claimDeposit`; the settler's and the agent's roles removed from settlement and rejects; `whenNotPaused` removed from `withdraw` | 1 to 2 tests each (`Gated7540VaultUnit_ClaimAccess` and others). Before the 2026-10-17 review, 6 of these 9 survived |
 | `Gated7540Vault.requestDeposit` | eligibility checked on the owner instead of the controller | `test_WhenAVerifiedOwnerRequestsForAnUnverifiedController_ItIsRefused`, the only test where owner differs from controller |
@@ -552,8 +554,7 @@ Everything CI fetches at run time is pinned, and verified wherever the distribut
 | npm packages | `package-lock.json` | Lockfile integrity (sha512); `npm ci --ignore-scripts`, so no package install script runs; forge-std pinned to a git commit |
 | Slither, Halmos and their dependencies, 61 Python packages in all | `ci/requirements.txt` | `pip install --require-hashes` |
 | forge 1.8.1 | `tools.lock` | sha256 checked by `scripts/fetch-tool.sh`; also checked once against GitHub's asset digest, Foundry's `.sha256` and its sigstore attestation (`gh attestation verify`) |
-| Aderyn 0.6.8 | `tools.lock` | sha256 checked by `scripts/fetch-tool.sh`; also checked once against GitHub's asset digest and Aderyn's `.sha256`. Aderyn publishes no attestation. The npm package, whose installer downloaded the binary unverified, was removed |
-| solc 0.8.30 | `hardhat.config.ts`, `foundry.toml` | Downloaded by Hardhat, forge and Aderyn, each verifying against soliditylang.org's published hashes |
+| solc 0.8.30 | `hardhat.config.ts`, `foundry.toml` | Downloaded by Hardhat and forge, each verifying against soliditylang.org's published hashes |
 
 Tamper checks: one changed character in a `tools.lock` hash makes `fetch-tool.sh` fail. Corrupted hashes in
 `ci/requirements.txt` make pip refuse the install. The suite passes on an `--ignore-scripts` install.
@@ -577,14 +578,6 @@ npm run slither
 ```
 
 ```bash
-scripts/fetch-tool.sh aderyn
-```
-
-```bash
-npm run aderyn
-```
-
-```bash
 npm run test:halmos
 ```
 
@@ -596,7 +589,7 @@ npm run validate:upgrades
 npm run verify:reproducible
 ```
 
-Tool versions: Node 24.21.0, Python 3.12.15, Hardhat 3.20.0, Foundry v1.8.1, slither 0.11.5, Aderyn 0.6.8, halmos 0.3.3,
+Tool versions: Node 24.21.0, Python 3.12.15, Hardhat 3.20.0, Foundry v1.8.1, slither 0.11.5, halmos 0.3.3,
 `@openzeppelin/upgrades-core` 1.46.0. CI (`.github/workflows/ci.yml`) runs all of them on every pull request and every push to `main`, except `verify:reproducible`, which runs on
 pull requests into `main` and, through `release.yml`, on every `v*` tag. Mythril is not used: it was dropped when the code needed Cancun
 (TSTORE/TLOAD/MCOPY), which it does not support, and it has not been added back for the Paris build.
