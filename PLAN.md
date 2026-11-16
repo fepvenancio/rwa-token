@@ -4248,6 +4248,49 @@ Asked for by the owner on 2026-11-13, on branch `erc8473-conformance`.
 
 **Not covered.** The worked numbers on `money.html` and `FeeModel.html` were not recomputed, and statements about the Ignition modules and the TypeScript checks were spot-checked, not re-derived. The footers name a commit of this branch: when the branch lands on `main` by squash, the commit changes and the footers need the new one.
 
+### The port as built (2026-11-16)
+
+The owner approved the plan and its three recommendations on 2026-11-16 ("Yes, start"). The fourteen commits are
+applied in order on `erc8473-main`, with the three conflicts resolved as planned.
+
+**P1 was settled by the code.** With the conformance code and before the split, `Gated4626Vault` measured 24,655
+bytes on this build, 79 above the limit, and the deployment tests failed for that reason. So the second contract is
+needed here too, not only for keeping the lines alike.
+
+**What differs from the Paris line, after the port.** Checked with `git diff --stat` against `erc8473-conformance`:
+
+- The Paris build itself, in the files that differed between `main` and `paris` before: the compiler's `evmVersion`,
+  the OpenZeppelin pin and the lockfile, the reentrancy guard and its initialiser call, `TokenProxy`,
+  `GovernanceTimelock` and its one test, `ERC4626Adapter`, six comments on `Gated7540Vault`, and the sentences in the
+  brief, `README.md`, `SECURITY.md` and eight pages that name them.
+- `ContractSizes.t.sol`: one comment, which on `paris` says an EVM at Paris has no creation-code limit.
+- `Gated7540Settlement`'s page: this build's sizes.
+- Every page's footer, and this plan.
+
+Nothing else differs. `registry()` on the core is `public` on both lines now; on `main` it was `external`, and the
+vault's second contract calls it internally.
+
+**Sizes on this build** (the default profile's artifacts; limit 24,576, and 49,152 for creation code):
+
+| Contract | Deployed | Left | Creation |
+|---|---|---|---|
+| `Gated4626Vault` | 22,007 | 2,569 | 42,449 |
+| `Gated4626Management` | 20,057 | 4,519 | 20,114 |
+| `Gated7540Vault` | 22,315 | 2,261 | 41,162 |
+| `Gated7540Settlement` | 18,462 | 6,114 | 18,519 |
+| `IntentToken` | 18,228 | 6,348 | 18,477 |
+| `Gated721` | 15,817 | 8,759 | 16,066 |
+| `GatedToken` | 15,303 | 9,273 | 15,552 |
+
+**Verified on `ea062b5`, the last commit that changes a contract.** `npx hardhat test`: 2041 passing (1843 solidity,
+198 nodejs), one fewer than `paris`, whose timelock overrides `updateDelay` and has a test for its event. Format, lint
+and typecheck clean. Slither 0 results. Halmos 22 of 22. `validate:upgrades` 7 of 7. `verify:reproducible`: 32
+contracts identical. `md_check.py`: 44 pages, 0 problems.
+
+**Not done.** The pages were not rewritten or re-read for this line: they are the Paris line's pages with the build's
+sentences and sizes corrected, so anything wrong there is wrong here. They were not opened in a browser on this
+branch. The footers name `ea062b5` on `erc8473-main` and need the merge commit after a squash.
+
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
 2. Credential layer: none left. On 2026-10-30 the owner confirmed decisions 11, 12, 13, 15, 16 and 17 as built (17 at the measured +8,179 gas on a transfer). Decision 14 is moot, since `IdentityRule` was removed in the cleanup. Decisions 8 and 9 are recorded in the credential section's table.

@@ -121,4 +121,4 @@ A pause on the vault stops `execute`, after the role check (`test_WhileTheVaultI
 
 ---
 
-Describes the contracts at commit `0f8b72f` on `erc8473-main`.
+Describes the contracts at commit `ea062b5` on `erc8473-main`.

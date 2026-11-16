@@ -134,4 +134,4 @@ The contract adds no state, no event and no role. Everything else a vault inheri
 
 ---
 
-Describes the contracts at commit `0f8b72f` on `erc8473-main`.
+Describes the contracts at commit `ea062b5` on `erc8473-main`.

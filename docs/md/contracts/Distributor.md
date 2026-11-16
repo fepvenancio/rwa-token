@@ -122,4 +122,4 @@ A caller without the role gets `Distributor_Unauthorized(_caller)`.
 
 ---
 
-Describes the contracts at commit `0f8b72f` on `erc8473-main`.
+Describes the contracts at commit `ea062b5` on `erc8473-main`.
