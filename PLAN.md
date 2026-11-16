@@ -4289,7 +4289,7 @@ contracts identical. `md_check.py`: 44 pages, 0 problems.
 
 **Not done.** The pages were not rewritten or re-read for this line: they are the Paris line's pages with the build's
 sentences and sizes corrected, so anything wrong there is wrong here. They were not opened in a browser on this
-branch. The footers name `e728b81` on `erc8473-main` (the same tree as `ea062b5`, before the rebase onto the merged Aderyn removal) and need the merge commit after a squash.
+branch. The footers name `01024e9` on `main`, the squash of this port (#49), re-pinned after the merge.
 
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.

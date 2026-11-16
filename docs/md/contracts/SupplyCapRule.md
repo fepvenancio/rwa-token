@@ -114,4 +114,4 @@ Both vault templates decide whether a receiver is allowed in by asking the rules
 
 ---
 
-Describes the contracts at commit `e728b81` on `erc8473-main`.
+Describes the contracts at commit `01024e9` on `main`.

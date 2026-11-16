@@ -155,4 +155,4 @@ Each token is a UUPS proxy. `_authorizeUpgrade` checks, in order: the caller hol
 
 ---
 
-Describes the contracts at commit `e728b81` on `erc8473-main`.
+Describes the contracts at commit `01024e9` on `main`.

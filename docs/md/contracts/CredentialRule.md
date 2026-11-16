@@ -167,4 +167,4 @@ The `Core` module deploys one `CredentialRegistry` and one rule reading it, if a
 
 ---
 
-Describes the contracts at commit `e728b81` on `erc8473-main`.
+Describes the contracts at commit `01024e9` on `main`.

@@ -129,4 +129,4 @@ Every product in every profile of `ignition/profiles.ts` lists it. In the demo d
 
 ---
 
-Describes the contracts at commit `e728b81` on `erc8473-main`.
+Describes the contracts at commit `01024e9` on `main`.

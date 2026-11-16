@@ -108,4 +108,4 @@ The demo deployment does not list it, and neither does any other profile in `ign
 
 ---
 
-Describes the contracts at commit `e728b81` on `erc8473-main`.
+Describes the contracts at commit `01024e9` on `main`.
