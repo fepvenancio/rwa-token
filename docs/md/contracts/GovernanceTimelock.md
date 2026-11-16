@@ -154,4 +154,4 @@ The constructor takes the delay, the proposers, the executors, an optional boots
 
 ---
 
-Describes the contracts at commit `ea062b5` on `erc8473-main`.
+Describes the contracts at commit `e728b81` on `erc8473-main`.

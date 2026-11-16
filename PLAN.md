@@ -4282,14 +4282,14 @@ vault's second contract calls it internally.
 | `Gated721` | 15,817 | 8,759 | 16,066 |
 | `GatedToken` | 15,303 | 9,273 | 15,552 |
 
-**Verified on `ea062b5`, the last commit that changes a contract.** `npx hardhat test`: 2041 passing (1843 solidity,
+**Verified on `e728b81`, the last commit that changes a contract.** `npx hardhat test`: 2041 passing (1843 solidity,
 198 nodejs), one fewer than `paris`, whose timelock overrides `updateDelay` and has a test for its event. Format, lint
 and typecheck clean. Slither 0 results. Halmos 22 of 22. `validate:upgrades` 7 of 7. `verify:reproducible`: 32
 contracts identical. `md_check.py`: 44 pages, 0 problems.
 
 **Not done.** The pages were not rewritten or re-read for this line: they are the Paris line's pages with the build's
 sentences and sizes corrected, so anything wrong there is wrong here. They were not opened in a browser on this
-branch. The footers name `ea062b5` on `erc8473-main` and need the merge commit after a squash.
+branch. The footers name `e728b81` on `erc8473-main` (the same tree as `ea062b5`, before the rebase onto the merged Aderyn removal) and need the merge commit after a squash.
 
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.

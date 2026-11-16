@@ -268,4 +268,4 @@ OpenZeppelin then checks that the target is a UUPS implementation (`UUPSUnsuppor
 
 ---
 
-Describes the contracts at commit `ea062b5` on `erc8473-main`.
+Describes the contracts at commit `e728b81` on `erc8473-main`.
