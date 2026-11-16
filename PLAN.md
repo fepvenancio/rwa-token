@@ -4009,6 +4009,74 @@ pin moves. Nothing checks those comments any longer.
 **State.** Aderyn's last run, in CI on `68d470c` before the binaries were removed, had 0 findings. Slither is
 the static-analysis gate.
 
+## ERC-8473 on this line: the port from `paris` (plan, 2026-11-16, nothing built)
+
+The owner decided on 2026-11-14 that `paris` is a permanent line for an EVM at Paris and is never merged into `main`,
+which stays the Cancun build. ERC-8473 conformance, the 4626 vault's second contract and their pages were built on
+`paris` (branch `erc8473-conformance`). This section is the plan for bringing the same work to `main`, as rule 3 asks
+before a change across files.
+
+### Goal
+
+After the port the two lines differ only by what the Paris build needs: the compiler's `evmVersion`, the OpenZeppelin
+pin, the reentrancy guard, and the few contracts that changed for those reasons. Same interfaces, same interface ids,
+same reason codes, same behaviour, same pages apart from sizes and the build they name.
+
+**Check for done.** The files that differ between this branch and `erc8473-conformance` are the files that differ
+between `main` and `paris` today (28 outside the pages and this plan, listed by `git diff --stat`), plus the page
+footers, the size figures and this plan. Any other differing file is a mistake in the port.
+
+### How
+
+Fourteen commits are cherry-picked in order (`315c805` to `259d82b`, the conformance branch without the Paris build
+and without its merge commit). A trial run on 2026-11-16 applied eleven cleanly and stopped on three:
+
+| Commit | Conflicts | Resolution |
+|---|---|---|
+| `7248555` the brief, README and SECURITY | `CLAUDE.md` (2 places), `SECURITY.md` (1), `PolicyGatedCoreUpgradeable.sol` (1) | Keep this line's rule 1 and rule 9 (5.6.1, `cancun`) and its transient guard; take the ERC-8473 text |
+| `99b2693` the 4626's second contract | `Gated4626Vault.sol` (3 places) | The split was written on the Paris vault, which had been reshaped for size. Take the split's version of the vault, `Gated4626Common` and `Gated4626Management` whole, then put back what this line's vault has and Paris's lacks, if anything is left after the move |
+| `ee2c0b6` the pages | 6 files: three pages and their Markdown copies | Take the new text; correct the sentences that name the build |
+
+A clean apply is not a correct port. The trial left Paris wording in `CLAUDE.md` (3 lines), `ContractSizes.t.sol`
+(1), the core (1: both guards imported) and 4 pages, and those are corrected by hand. The copied sections of this plan
+keep their text, as a record of where the work was built.
+
+### Decisions for the owner
+
+- **P1. The 4626 keeps its second contract on this line too.** On Cancun the vault might fit in one contract again.
+  I recommend keeping the split: with it the two lines have the same interface (`MANAGEMENT_LOGIC()`), the same
+  interface ids and the same pages, and an upgrade or an audit of one reads onto the other. Without it `main` needs
+  its own vault, its own tests and its own pages.
+- **P2. Order with the Aderyn change.** This branch is cut from `ci-drop-aderyn`, because CI on `main` fails at the
+  Aderyn download until that lands. I recommend merging that pull request first; this branch is then rebased onto
+  `main` and loses that one commit.
+- **P3. The pages.** The site is published from `main`, so after this lands it describes ERC-8473 on the Cancun
+  build. Footers are pinned to this branch's last contract commit, and re-pinned after the squash.
+
+### Steps
+
+Each step ends with its check; the next does not start until it passes.
+
+1. A worktree with its own `npm ci`, since the two lines pin different OpenZeppelin versions. Check: `npx hardhat test`
+   passes on the untouched base, with the count `main` has today.
+2. Cherry-pick the code commits (`14fdab0`, `acd846b`, `55cd9aa`), resolving as above. Check: `npx hardhat test`, both
+   runners; `InterfaceFreeze.t.sol` passes with the ids `paris` has.
+3. The 4626's second contract (`99b2693`, `1c27fc0`) and the fixes after it (`502a717`, `c0ad7b0`, `6ef0d4e`). Check:
+   the suite passes; `ContractSizes.t.sol` passes with this build's sizes, which are measured and written down here.
+4. The documents (`315c805`, `7248555`, `a8bcd58`, `745608e`, `259d82b`) with the Paris wording corrected. Check: no
+   line added by the port names Paris, 5.3.0 or the storage guard, outside the copied plan sections.
+5. The pages (`ee2c0b6`): build wording and sizes corrected, footers pinned, Markdown copies regenerated. Check:
+   `md_check.py` reports 44 pages and 0 problems; a script finds no page naming a member that does not exist.
+6. Gates on the final code: format, lint, typecheck, Slither, Halmos, `validate:upgrades`, `verify:reproducible`.
+7. The check for done, above: the list of differing files against `erc8473-conformance`.
+
+### Not covered
+
+- The draft's two wording changes, which belong to the other repository.
+- Running CI on pushes to `paris`.
+- Anything new: this is a port, and a difference in behaviour between the lines found on the way is reported, not
+  settled here.
+
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
 2. Credential layer: none left. On 2026-10-30 the owner confirmed decisions 11, 12, 13, 15, 16 and 17 as built (17 at the measured +8,179 gas on a transfer). Decision 14 is moot, since `IdentityRule` was removed in the cleanup. Decisions 8 and 9 are recorded in the credential section's table.
