@@ -97,11 +97,6 @@ abstract contract PolicyGatedCoreUpgradeable is
     _installed = address(_policy());
   }
 
-  /// @inheritdoc IPolicyGatedCore
-  function registry() public view returns (address _registry) {
-    _registry = address(_getPolicyGatedCoreStorage().registry);
-  }
-
   /**
    * @inheritdoc AccessControlUpgradeable
    * @dev RECOVERY_ROLE may revoke GUARDIAN_ROLE and nothing else; every other revocation needs the role's admin
@@ -117,6 +112,11 @@ abstract contract PolicyGatedCoreUpgradeable is
       return;
     }
     super.revokeRole(_role, _account);
+  }
+
+  /// @inheritdoc IPolicyGatedCore
+  function registry() public view returns (address _registry) {
+    _registry = address(_getPolicyGatedCoreStorage().registry);
   }
 
   /// @inheritdoc AccessControlUpgradeable
