@@ -45,7 +45,6 @@
 /forge-upgrades-cache
 /forge-repro
 /forge-repro-cache
-/aderyn-report.json
 
 # Pinned tool binaries fetched by scripts/fetch-tool.sh (see tools.lock)
 /.tools

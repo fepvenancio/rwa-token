@@ -3990,6 +3990,25 @@ A separate review found no bug. From it: the check refuses an external profile w
 
 Left as limits: the check runs at deployment, so it does not stop the registry's admin granting a role later; it does not pin who holds `RECOVERY_ROLE` on the external registry, a power the registry's admin already governs. The pages follow in their own pull request.
 
+## The Aderyn gate is removed (owner decision, 2026-11-14)
+
+Aderyn was retired upstream on 2026-11-13: its README says it is no longer maintained and has no supported install
+path, and the binaries were deleted from every release, 0.6.8 included. `scripts/fetch-tool.sh aderyn` then answered
+404, and the CI analysis job stopped there, before Halmos, the upgrade check and the reproducible build. The owner
+chose to drop the gate rather than build the tool from its source in CI.
+
+**Removed.** The two Aderyn steps in `ci.yml` and the job's name; the `aderyn` script in `package.json` and
+`scripts/aderyn-gate.ts`; the two rows in `tools.lock` and the install rule in `scripts/fetch-tool.sh`; the
+`.gitignore` line for its report; the commands, the supply-chain row and the mutation row in `SECURITY.md`, and the
+commands in `README.md`.
+
+**Kept.** The inline `aderyn-ignore` comments in the contracts and `aderyn.toml`, as the record of what was accepted
+while the gate ran, with the tables in `SECURITY.md` section 4. No contract changes, so no bytecode, codehash or page
+pin moves. Nothing checks those comments any longer.
+
+**State.** Aderyn's last run, in CI on `68d470c` before the binaries were removed, had 0 findings. Slither is
+the static-analysis gate.
+
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
 2. Credential layer: none left. On 2026-10-30 the owner confirmed decisions 11, 12, 13, 15, 16 and 17 as built (17 at the measured +8,179 gas on a transfer). Decision 14 is moot, since `IdentityRule` was removed in the cleanup. Decisions 8 and 9 are recorded in the credential section's table.

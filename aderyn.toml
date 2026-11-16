@@ -1,5 +1,6 @@
-# Aderyn static analysis (CI gate: `npm run aderyn` fails on any finding). Hardhat builds this project; Aderyn reads
-# the sources via foundry.toml + remappings.txt.
+# Aderyn static analysis. Not run in CI since 2026-11-14: Aderyn was retired upstream and its release binaries were
+# removed. This file and the inline suppressions record the findings accepted while it was a gate (SECURITY.md, section 4).
+# Hardhat builds this project; Aderyn reads the sources via foundry.toml + remappings.txt.
 version = 1
 root = "."
 src = "contracts"

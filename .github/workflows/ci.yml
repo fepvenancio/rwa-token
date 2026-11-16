@@ -17,8 +17,8 @@ env:
   HARDHAT_DISABLE_TELEMETRY: "true"
 
 # Supply chain: actions pinned to commit SHAs; exact Node and Python; npm packages verified by lockfile integrity with
-# install scripts disabled; Python tools from a --require-hashes lock (ci/requirements.txt); forge and Aderyn from
-# release assets whose sha256 is pinned in tools.lock (scripts/fetch-tool.sh).
+# install scripts disabled; Python tools from a --require-hashes lock (ci/requirements.txt); forge from a
+# release asset whose sha256 is pinned in tools.lock (scripts/fetch-tool.sh).
 
 jobs:
   test:
@@ -43,7 +43,7 @@ jobs:
       - run: npx hardhat test solidity --test-profile isolated
 
   analysis:
-    name: Format, Slither + Aderyn gates, Halmos, upgrade safety, reproducibility (PRs into main)
+    name: Format, Slither gate, Halmos, upgrade safety, reproducibility (PRs into main)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -62,10 +62,6 @@ jobs:
       # The contracts that ship. Test contracts were nearly all of Slither's time and memory, and slither.config.json
       # drops findings in them anyway.
       - run: npm run slither
-      # Second static analyser (Cyfrin Aderyn): fails on any finding not excluded in aderyn.toml or suppressed inline
-      # with a reason. The binary is the sha256-pinned release asset from tools.lock.
-      - run: scripts/fetch-tool.sh aderyn
-      - run: npm run aderyn
       - run: npm run test:halmos
       - run: npm run validate:upgrades
       # Same bytecode from 2 clean production builds, the default profile and forge; TokenProxy matches ProxyDeployer.
