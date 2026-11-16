@@ -62,7 +62,11 @@ const CONTRACTS: Record<string, string> = { ...ATTESTED, ...DEPLOYED };
 type Entry = { runtime: string; creation: string; immutables: string };
 type Manifest = Record<string, Entry>;
 
-const sh = (command: string) => execSync(command, { stdio: ["ignore", "ignore", "inherit"] });
+// A clean production build needs more than Node's default heap on a hosted runner (about 2 GB there): it died at
+// that limit in CI. 4 GB fits the runner's memory. NODE_OPTIONS reaches the Hardhat builds; forge ignores it.
+const NODE_OPTIONS = `${process.env.NODE_OPTIONS ?? ""} --max-old-space-size=4096`.trim();
+const sh = (command: string) =>
+  execSync(command, { stdio: ["ignore", "ignore", "inherit"], env: { ...process.env, NODE_OPTIONS } });
 
 /** Immutable slots as sorted `start:length` pairs: AST ids differ between jobs, positions must not. */
 function immutableSlots(references: Record<string, { start: number; length: number }[]> | undefined) {
