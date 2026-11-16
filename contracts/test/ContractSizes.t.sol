@@ -102,8 +102,7 @@ contract ContractSizesTest is Test {
     );
   }
 
-  /// @dev Each vault's creation code carries its second contract's, so they are the ones close to this limit. An EVM at
-  ///      Paris has no such limit; it is kept so the same code deploys on a later one
+  /// @dev Each vault's creation code carries its second contract's, so they are the ones close to this limit
   function test_WhenDeployed_TheVaultsWithASecondContractFitTheEip3860Limit() external {
     vm.skip(_isInstrumented(address(new IntentToken()).code));
     assertLe(type(Gated7540Vault).creationCode.length, _EIP3860_LIMIT);

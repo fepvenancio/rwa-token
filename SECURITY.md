@@ -389,7 +389,7 @@ Slither 0.11.5 runs as a CI gate with 0 findings, on the contracts that ship: `n
 | Detector | Reason |
 |---|---|
 | `naming-convention` | Wonderland style uses `_camelCase` for parameters and internals |
-| `assembly` | ERC-7201 storage accessors, and three bounded static calls that copy a fixed number of words and decode nothing: `PolicyGatedCoreUpgradeable` `_ask` (one word, every policy check), `ERC4626Adapter` `_ask` (one word) and `Gated4626Management` `_hasAdapters` (two) |
+| `assembly` | ERC-7201 storage accessors, and two bounded static calls that copy a fixed number of words and decode nothing: `PolicyGatedCoreUpgradeable` `_ask` (one word, every policy check) and `Gated4626Management` `_hasAdapters` (two) |
 | `timestamp` | Intent deadlines and `validAfter`, lockups and settlement windows are time-based by specification |
 | `calls-loop` | The hook calls at most 16 attested rules, the fund at most 32 classes and the portfolio its attested adapters; a batch (`IntentExecutor.executeBatch`, `GuardedAccount.execute`) is the caller's own and atomic |
 
