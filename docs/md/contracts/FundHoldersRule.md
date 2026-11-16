@@ -167,4 +167,4 @@ A class is set up with no supply, so its first installation passes. A class that
 
 ---
 
-Describes the contracts at commit `6ef0d4e` on `erc8473-conformance`.
+Describes the contracts at commit `0f8b72f` on `erc8473-main`.

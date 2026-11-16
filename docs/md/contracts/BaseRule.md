@@ -119,4 +119,4 @@ The interface sets the terms between the hook and a rule. `BaseRule` cannot enfo
 
 ---
 
-Describes the contracts at commit `6ef0d4e` on `erc8473-conformance`.
+Describes the contracts at commit `0f8b72f` on `erc8473-main`.

@@ -96,8 +96,8 @@ Nothing changes this contract alone. An upgrade moves the proxy to a new impleme
 ## What it costs
 
 - **Two contracts to read as one.** This is `delegatecall` inside a UUPS implementation, a pattern OpenZeppelin does not ship, though the call itself is theirs. `npm run validate:upgrades` passes because the hand-off, the immutable, the constructor and the missing initializer carry `@custom:oz-upgrades-unsafe-allow` annotations: the tool is told to allow them, and does not prove them safe.
-- **An unreachable copy of the base.** Its runtime code is 19,118 bytes, against the vault's 23,126. Most of it is the base it inherits, and no vault can call that code's external functions.
-- **A larger deployment.** The vault's creation code carries this contract's, for 42,641 bytes against the 49,152 that EIP-3860 allows (`test_WhenDeployed_TheVaultsWithASecondContractFitTheEip3860Limit`).
+- **An unreachable copy of the base.** Its runtime code is 18,462 bytes, against the vault's 22,315. Most of it is the base it inherits, and no vault can call that code's external functions.
+- **A larger deployment.** The vault's creation code carries this contract's, for 41,162 bytes against the 49,152 that EIP-3860 allows (`test_WhenDeployed_TheVaultsWithASecondContractFitTheEip3860Limit`).
 - **Some gas on each hand-off.** `PLAN.md` estimates about 3,000 to 3,700 more gas on a handed call, and at most 35 on an investor's call.
 - **No fix without an upgrade.** A bug here is fixed the way a bug in the vault is: through the timelock, to a newly attested implementation.
 - **Not reviewed.** No review has covered this contract, and nothing here has had an external audit.
@@ -121,4 +121,4 @@ Nothing changes this contract alone. An upgrade moves the proxy to a new impleme
 
 ---
 
-Describes the contracts at commit `6ef0d4e` on `erc8473-conformance`.
+Describes the contracts at commit `0f8b72f` on `erc8473-main`.

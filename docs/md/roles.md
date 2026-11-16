@@ -308,4 +308,4 @@ The registries, the hook, the rules, the funds and `ProxyDeployer` have no pause
 
 ---
 
-Describes the contracts at commit `6ef0d4e` on `erc8473-conformance`.
+Describes the contracts at commit `0f8b72f` on `erc8473-main`.
