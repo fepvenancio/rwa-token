@@ -9,6 +9,7 @@ import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IERC7943Fungible} from 'interfaces/IERC7943Fungible.sol';
+import {IERC8473} from 'interfaces/IERC8473.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
@@ -91,7 +92,7 @@ contract GatedTokenIntegrationTest is Test {
     assertTrue(_token.hasRole(_token.DEFAULT_ADMIN_ROLE(), _admin));
     assertTrue(_token.hasRole(_token.GUARDIAN_ROLE(), _guardian));
     assertEq(_token.registry(), address(_registry));
-    assertEq(_token.policyHook(), address(_hook));
+    assertEq(_token.policy(), address(_hook));
     assertEq(address(_hook.rules(address(_token))[0]), address(_rule));
   }
 
@@ -159,7 +160,7 @@ contract GatedTokenIntegrationTest is Test {
     (bool _allowed, bytes32 _reason) = _token.canTransferWithReason(_alice, _eve, 40);
     assertFalse(_allowed);
 
-    vm.expectRevert(abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, _reason));
+    vm.expectRevert(abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, _reason));
     vm.prank(_alice);
     _token.transfer(_eve, 40); // solhint-disable-line unchecked-transfer
   }

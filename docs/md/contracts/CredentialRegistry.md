@@ -49,7 +49,7 @@ What each standing allows is decided by [`CredentialRule`](CredentialRule.md), t
 | `ACTIVE` | yes | yes, if the token's policy accepts the record |
 | `EXIT_ONLY` | yes | no |
 | `LAPSED` | yes | no |
-| `BLOCKED` | no, except a burn by a `BURNER_ROLE` holder and the agent's `forcedTransfer` | no |
+| `BLOCKED` | no, except the two enforcement actions, the burner's `burn` and the agent's `forcedTransfer` | no |
 | `NONE` | no, with the same two exceptions | no |
 
 <a id="record"></a>
@@ -165,7 +165,7 @@ The registry trusts an attester's call or signature. Whoever controls an atteste
 - **Other attesters' records.** It cannot overwrite or change a record another attester wrote while that attester is not killed.
 - **The guardian.** `killAttester` stops it at once, and `blockSubject` stops an address it vouched for. It cannot clear a guardian block.
 
-After a kill, the holders it vouched for read `EXIT_ONLY`: they can leave, and cannot receive. Holders it had set to `BLOCKED` read `BLOCKED`, because a stored block beats a kill. Another attester can write over its records, and that write makes such a holder read `ACTIVE` unless the guardian has blocked it too. The agent's `forcedTransfer` and a burn by a `BURNER_ROLE` holder still work on a blocked holder. Then the main timelock rotates the attester's account with `setAttesterAccount`, which makes signatures by the previous key fail. `reviveAttester` changes nothing but the kill flag, so the account is rotated before the attester is revived.
+After a kill, the holders it vouched for read `EXIT_ONLY`: they can leave, and cannot receive. Holders it had set to `BLOCKED` read `BLOCKED`, because a stored block beats a kill. Another attester can write over its records, and that write makes such a holder read `ACTIVE` unless the guardian has blocked it too. The agent's `forcedTransfer` and the burner's `burn` still work on a blocked holder. Then the main timelock rotates the attester's account with `setAttesterAccount`, which makes signatures by the previous key fail. `reviveAttester` changes nothing but the kill flag, so the account is rotated before the attester is revived.
 
 <a id="functions"></a>
 ## What it can do
@@ -248,4 +248,4 @@ The calls that do nothing (blocking twice, clearing a block that is not there, k
 
 ---
 
-Describes the contracts at commit `4a906cc` on `main`.
+Describes the contracts at commit `e728b81` on `erc8473-main`.

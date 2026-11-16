@@ -61,11 +61,11 @@ const REASON_NAMES = [
   "TRANSFER_OK",
   "PAUSED",
   "INSUFFICIENT_UNFROZEN",
-  "SENDER_NOT_VERIFIED",
+  "SENDER_NOT_ELIGIBLE",
   "RECEIVER_NOT_VERIFIED",
-  "OUTSIDE_SETTLEMENT_WINDOW",
+  "WINDOW_CLOSED",
   "MAX_HOLDERS",
-  "LOCKED",
+  "LOCKED_UP",
   "INTENT_EXPIRED",
   "NONCE_USED",
   "BAD_SIGNATURE",
@@ -84,8 +84,9 @@ const REASON_NAMES = [
   "NOT_EXECUTOR",
   "ZERO_RECEIVER",
   "ABOVE_SUPPLY_CAP",
-  "TRANSFER_NOT_EXECUTED",
+  "KIND_NOT_ALLOWED",
   "NOT_TOKEN_OWNER",
+  "CHECK_UNAVAILABLE",
 ] as const;
 
 /** `Errors.sol` reason codes, keyed by name; `reasonName` maps a code back for readable assertions. */
@@ -109,6 +110,7 @@ const LEGO_ABI = parseAbi([
   "function feeModel() view returns (address)",
   "function adapters() view returns (address[])",
   "function SETTLEMENT_LOGIC() view returns (address)",
+  "function MANAGEMENT_LOGIC() view returns (address)",
   "function redemptionGate() view returns (uint256)",
 ]);
 const SAFE_ABI = parseAbi(["function getThreshold() view returns (uint256)"]);
@@ -708,7 +710,7 @@ export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
   // check each product runs that exact instance and that its rule list on it is the intended one.
   assert.ok(isAddressEqual(await s.hook.read.REGISTRY(), s.registry.address), `hook ${s.hook.address} names another registry`);
   for (const { product, contract } of s.deployed) {
-    assert.ok(isAddressEqual(await contract.read.policyHook(), s.hook.address), `token ${contract.address} runs another hook`);
+    assert.ok(isAddressEqual(await contract.read.policy(), s.hook.address), `token ${contract.address} runs another hook`);
     const expected = product.rules.map((name) => (name === "fundHoldersRule" ? s.funds[product.fund!].rule.address : s.rules[name]!.address));
     const actual = await s.hook.read.rules([contract.address]);
     assert.equal(actual.length, expected.length, `token ${contract.address} rule count`);
@@ -813,7 +815,7 @@ export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
   }
 
   // A product's legos. Their roles live outside the vault's role scan, so they are asked by name.
-  const read = <T>(address: Address, functionName: "VAULT" | "portfolio" | "feeModel" | "adapters" | "SETTLEMENT_LOGIC" | "redemptionGate") =>
+  const read = <T>(address: Address, functionName: "VAULT" | "portfolio" | "feeModel" | "adapters" | "SETTLEMENT_LOGIC" | "MANAGEMENT_LOGIC" | "redemptionGate") =>
     s.publicClient.readContract({ address, abi: LEGO_ABI, functionName }) as Promise<T>;
   const isSame = async (address: Address, functionName: "VAULT" | "portfolio" | "feeModel", expected: Address) =>
     isAddressEqual(await read<Address>(address, functionName), expected);
@@ -831,9 +833,12 @@ export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
       ...(product.portfolio === undefined ? [] : [named.allocator]),
     ].map((account) => account.toLowerCase());
     assert.equal(new Set(functions).size, functions.length, `the reporter, the checker and the allocator of ${contract.address} are not different accounts`);
-    if (product.template === "Gated7540Vault") {
-      const logic = await read<Address>(contract.address, "SETTLEMENT_LOGIC");
-      const artifact = await hre.artifacts.readArtifact("Gated7540Settlement");
+    // Each vault names a second contract its implementation created: it must be the release's code.
+    const second = { Gated7540Vault: ["SETTLEMENT_LOGIC", "Gated7540Settlement"], Gated4626Vault: ["MANAGEMENT_LOGIC", "Gated4626Management"] } as const;
+    if (product.template === "Gated7540Vault" || product.template === "Gated4626Vault") {
+      const [getter, name] = second[product.template];
+      const logic = await read<Address>(contract.address, getter);
+      const artifact = await hre.artifacts.readArtifact(name);
       // Its one immutable is `__self`, its own address.
       let expected = artifact.deployedBytecode.slice(2);
       for (const { start, length } of Object.values(artifact.immutableReferences ?? {}).flat()) {

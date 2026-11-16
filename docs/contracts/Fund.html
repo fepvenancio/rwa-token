@@ -146,7 +146,7 @@
         <tr><td>The minter mints INT to Alice</td><td><span class="k k-mint">MINT</span></td><td><code>join(INT, Alice)</code>: her first class</td><td class="c">1</td><td class="c">1</td></tr>
         <tr><td>Alice deposits into the gFUND vault</td><td><span class="k k-mint">MINT</span></td><td><code>join(gFUND, Alice)</code></td><td class="c">3</td><td class="c">1</td></tr>
         <tr><td>Alice claims her settled gASYNC deposit</td><td><span class="k k-mint">MINT</span></td><td><code>join(gASYNC, Alice)</code></td><td class="c">7</td><td class="c">1</td></tr>
-        <tr><td>The burner burns all her INT</td><td><span class="k k-burn">BURN</span></td><td><code>leave(INT, Alice)</code></td><td class="c">6</td><td class="c">1</td></tr>
+        <tr><td>The burner burns all her INT</td><td><span class="k k-forced">FORCED</span></td><td><code>leave(INT, Alice)</code></td><td class="c">6</td><td class="c">1</td></tr>
         <tr><td>Alice redeems all her gFUND shares</td><td><span class="k k-burn">BURN</span></td><td><code>leave(gFUND, Alice)</code></td><td class="c">4</td><td class="c">1</td></tr>
         <tr><td>Alice requests redemption of all her gASYNC shares, which move to the vault's escrow</td><td><span class="k k-transfer">TRANSFER</span></td><td><code>leave(gASYNC, Alice)</code>, then <code>join(gASYNC, vault)</code>, which the fund ignores because the vault is the class itself</td><td class="c">0</td><td class="c">0</td></tr>
       </tbody>
@@ -308,7 +308,7 @@
   <div class="prose wrap-any">
     <h2>What it does not do</h2>
     <ul class="plain">
-      <li><b>It does not stop a class dropping the rule.</b> The hook accepts a list without <code>FundHoldersRule</code>, and then the class stops counting investors and stops enforcing the cap. The monitor detects it, and nothing prevents it (<code>test_WhenAClassDropsTheFundRule_ItIsUncappedAndTheMonitorNamesIt</code>). The same is true of a hook swap.</li>
+      <li><b>It does not stop a class dropping the rule.</b> The hook accepts a list without <code>FundHoldersRule</code>, and then the class stops counting investors and stops enforcing the cap. The monitor detects it, and nothing prevents it (<code>test_WhenAClassDropsTheFundRule_ItIsUncappedAndTheMonitorNamesIt</code>). The same is true of a swap to a hook whose list for the class lacks the rule. A swap to a hook that lists the rule is refused by the rule's <code>onInstall</code> with <code>FundHoldersRule_CountNotCurrent</code> when the class has a supply and the hook it leaves does not list the rule.</li>
       <li><b>It does not repair a gap.</b> While a class's list lacks the rule its movements are not recorded, and no function sets a mask directly. A seller in the gap stays counted until a later full exit, or until the fund's owner exempts it with <code>setExempt</code>, which takes it out of the count. A buyer with no other class stays uncounted, with the cap treating it as new, until it takes up another class, or its balance reaches zero and it receives again.</li>
       <li><b>The cap is not an absolute ceiling on the count.</b> A forced move is exempt from the cap and still counted, so the agent's recovery of a stranded position can put the count above the cap, where it stays until investors leave. Ending an exemption can do the same. A monitor should alert when <code>holderCount()</code> is above <code>holderCap()</code>.</li>
       <li><b>It holds no place for an open request.</b> A full <code>requestRedeem</code> on a 7540 class takes the investor out of the count while the shares wait in the escrow, and <code>requestDeposit</code> reserves nothing. If the fund fills up meanwhile, a reject that returns the shares, or a deposit claim, is refused with <code>MAX_HOLDERS</code> (<code>test_WhenARejectedRedemptionReturnsSharesToAnInvestorWhoWasReplaced_TheFundCapAppliesAndRecoveryIsCounted</code>). The agent's recovery path still works. Whether a redeeming investor still counts as a holder is for counsel.</li>
@@ -344,7 +344,7 @@
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>4a906cc</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>e728b81</code> on <code>erc8473-main</code>.</footer>
 </main>
 </body>
 </html>

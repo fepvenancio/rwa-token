@@ -20,17 +20,18 @@ The list of reviewed code. For each code hash the security council has reviewed,
 <a id="how"></a>
 ## How it works
 
-The registry stores one kind per code hash. The kinds are the values of `AttestKind`: `HOOK`, `RULE`, `IMPLEMENTATION`, `PORTFOLIO`, `ADAPTER`, `VALIDATOR` and `FEE_MODEL`, with `NONE` meaning nothing is stored. `isAttested(target, kind)` reads the code hash of the address it is given and compares the stored kind with the kind asked for. Thirteen calls in the system ask it, and no token movement does.
+The registry stores one kind per code hash. The kinds are the values of `AttestKind`: `HOOK`, `RULE`, `IMPLEMENTATION`, `PORTFOLIO`, `ADAPTER`, `VALIDATOR` and `FEE_MODEL`, with `NONE` meaning nothing is stored. `isAttested(target, kind)` reads the code hash of the address it is given and compares the stored kind with the kind asked for. Fourteen calls in the system ask it, and no token movement does.
 
-> **Diagram.** Thirteen install calls ask the registry. For HOOK: the token initialiser through \_setHook, and setPolicyHook. For RULE: ComplianceHook.setRules and Fund.setRule. For IMPLEMENTATION: ProxyDeployer.deploy and the upgrade check. For PORTFOLIO: Gated4626Vault.setPortfolio, NavDesk.setSettings and Portfolio.migrateTo. For ADAPTER: Portfolio.addAdapter. For VALIDATOR: GuardedAccount.setPermission. For FEE_MODEL: Gated4626Vault.setFeeModel and NavDesk.setFeeModel. Each asks isAttested with the target and the kind. The registry maps code hashes to kinds. The security council attests and revokes; the main timelock manages who holds ATTESTER_ROLE.
+> **Diagram.** Fourteen install calls ask the registry. For HOOK: the token initialiser through \_installPolicy, and installPolicy. For RULE: ComplianceHook.setRules, ComplianceHook.onInstall when it is given a rule list, and Fund.setRule. For IMPLEMENTATION: ProxyDeployer.deploy and the upgrade check. For PORTFOLIO: Gated4626Vault.setPortfolio, NavDesk.setSettings and Portfolio.migrateTo. For ADAPTER: Portfolio.addAdapter. For VALIDATOR: GuardedAccount.setPermission. For FEE_MODEL: Gated4626Vault.setFeeModel and NavDesk.setFeeModel. Each asks isAttested with the target and the kind. The registry maps code hashes to kinds. The security council attests and revokes; the main timelock manages who holds ATTESTER_ROLE.
 >
-> **Thirteen calls, one question.** Each install asks whether the target's code hash is on the list for one kind, and reverts with its own error if it is not. The table below names each error and the main other checks; each contract's page has them all. Placing a token passes through three kinds in one transaction: the implementation (`ProxyDeployer.deploy`), the hook (the token's initialiser) and every rule in its first list (the initialiser installs it through `setRules` when it is not empty).
+> **Fourteen calls, one question.** Each install asks whether the target's code hash is on the list for one kind, and reverts with its own error if it is not. The table below names each error and the main other checks; each contract's page has them all. Placing a token passes through three kinds in one transaction: the implementation (`ProxyDeployer.deploy`), the hook (the token's initialiser) and every rule in its first list (the initialiser passes it as the data of the hook's installation, and the hook installs it in `onInstall` when it is not empty).
 
 | Kind | Where it is asked, and who can make that call | Reverts with | What the same call also checks |
 |---|---|---|---|
-| `HOOK` | The token's initialiser (`_setHook`), which runs inside `ProxyDeployer.deploy` | `PolicyGated_NotAttested` | The hook's `REGISTRY()` is the token's own registry (`PolicyGated_HookRegistryMismatch`). |
-| `HOOK` | `setPolicyHook`: the token's `DEFAULT_ADMIN_ROLE` | `PolicyGated_NotAttested` | The same registry check. |
+| `HOOK` | The token's initialiser (`_installPolicy`), which runs inside `ProxyDeployer.deploy` | `PolicyGated_NotAttested` | The hook's `REGISTRY()` is the token's own registry (`PolicyGated_HookRegistryMismatch`), and the hook answers the id of `IERC8473Policy` (`PolicyGated_NotAPolicy`). |
+| `HOOK` | `installPolicy`: the token's `DEFAULT_ADMIN_ROLE` | `PolicyGated_NotAttested` | The same two checks. |
 | `RULE` | `ComplianceHook.setRules`: the token itself, or a holder of its `DEFAULT_ADMIN_ROLE` | `ComplianceHook_NotAttested` | The caller (`ComplianceHook_NotTokenAdmin`), at most 16 rules (`ComplianceHook_TooManyRules`), one rule per `ruleId` (`ComplianceHook_DuplicateRule`). Each rule in the list is asked about, and one unattested rule reverts the whole call. |
+| `RULE` | `ComplianceHook.onInstall`, when its data carries a rule list: the token itself, from its initialiser or from `installPolicy` | `ComplianceHook_NotAttested` | The caller is the token (`ComplianceHook_OnlyToken`), and the same limits on the list as `setRules`. Empty data installs no list and asks nothing. |
 | `RULE` | `Fund.setRule`: the fund's owner | `Fund_NotAttested` | The rule's `FUND()` is this fund (`Fund_RuleForAnotherFund`). |
 | `IMPLEMENTATION` | `ProxyDeployer.deploy`: its owner, the operations account | `ProxyDeployer_ImplementationNotAttested` | Asked before the proxy is created. After setup it compares the token's registry with its own, and the token's hook, rule list and symbol with the call ([ProxyDeployer](ProxyDeployer.md)). |
 | `IMPLEMENTATION` | `_authorizeUpgrade`, inside `upgradeToAndCall`: the token's `UPGRADER_ROLE` | `PolicyGated_NotAttested` | The new implementation reports the token's own `templateId()` (`Templated_WrongTemplate`), so an attested vault implementation is refused under an intent token. |
@@ -64,7 +65,7 @@ No token asks the registry when tokens move. The registry is read when a compone
 
 - A hook, rule, portfolio, adapter, validator or fee model that was revoked stays where it is and keeps working.
 - A proxy over a revoked implementation keeps running that code. `ProxyDeployer.deploy` and an upgrade to it revert.
-- `setRules` asks about each rule in the list it is given, so a later change to a token's list reverts if that list still names a revoked rule.
+- `setRules`, and `onInstall` with a rule list, ask about each rule in the list they are given, so a later change to a token's list reverts if that list still names a revoked rule.
 - The post-deploy check reads the registry for the fund's rule, the credential rule and each product's portfolio, adapters and fee model, so running it again after a revoke fails on those. That check runs off-chain, and nothing on chain acts on its result.
 
 If a revoke reached running tokens, it would have to do one of two things to each token that runs the revoked code: skip that check, so a rule silently stops applying, or fail every movement. Asking at install time leaves that decision to governance. The guardian can pause the affected tokens at once, and the main timelock replaces the component, which waits out its delay. A pause does not stop a forced transfer, which still runs the hook and its rules.
@@ -111,7 +112,7 @@ The constructor takes the admin and the first attester and refuses a zero addres
 ## Connected to
 
 - [ProxyDeployer](ProxyDeployer.md): Asks about the implementation before it creates a token.
-- [PolicyGatedERC20Upgradeable](PolicyGatedERC20Upgradeable.md): The token base: asks about the hook at setup and on `setPolicyHook`, and about the implementation on upgrade.
+- [PolicyGatedERC20Upgradeable](PolicyGatedERC20Upgradeable.md): The token base: asks about the hook at setup and on `installPolicy`, and about the implementation on upgrade.
 - [ComplianceHook](ComplianceHook.md): Asks about each rule in a token's list when the list is installed.
 - [Fund](Fund.md): Asks about the fund-wide holder rule when it is set.
 - [Portfolio](Portfolio.md): Asks about each adapter it adds and the successor it migrates to.
@@ -129,4 +130,4 @@ The constructor takes the admin and the first attester and refuses a zero addres
 
 ---
 
-Describes the contracts at commit `4a906cc` on `main`.
+Describes the contracts at commit `e728b81` on `erc8473-main`.

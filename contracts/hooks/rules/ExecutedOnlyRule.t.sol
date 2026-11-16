@@ -4,8 +4,9 @@ pragma solidity ^0.8.28;
 import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+import {IERC8473} from 'interfaces/IERC8473.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
 
@@ -27,25 +28,25 @@ contract ExecutedOnlyRuleUnit is Helpers {
   }
 
   function _ctx(
-    IPolicyHook.TransferKind _kind,
+    IERC8473Policy.TransferKind _kind,
     uint256 _amount
-  ) internal view returns (IPolicyHook.TransferContext memory _context) {
-    _context = IPolicyHook.TransferContext({
-      token: _token, from: _from, to: _to, id: 0, amount: _amount, operator: _from, kind: _kind, extra: ''
+  ) internal view returns (IERC8473Policy.TransferContext memory _context) {
+    _context = IERC8473Policy.TransferContext({
+      token: _token, from: _from, to: _to, tokenId: 0, amount: _amount, operator: _from, kind: _kind, data: ''
     });
   }
 
   function testFuzz_APlainTransferIsRefusedAtAnyAmount(
     uint256 _amount
   ) external view {
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.TRANSFER, _amount)), Reasons.TRANSFER_NOT_EXECUTED);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.TRANSFER, _amount)), Reasons.KIND_NOT_ALLOWED);
   }
 
   function test_EveryOtherKindPasses() external view {
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.EXECUTED, 1)), Reasons.TRANSFER_OK);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.FORCED, 1)), Reasons.TRANSFER_OK);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.MINT, 1)), Reasons.TRANSFER_OK);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.BURN, 1)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.EXECUTED, 1)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.FORCED, 1)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.MINT, 1)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.BURN, 1)), Reasons.TRANSFER_OK);
   }
 
   function test_ItHasNoAccountLevelOpinion() external view {
@@ -102,10 +103,8 @@ contract ExecutedOnlyRuleIntegration is Helpers {
   function test_APlainTransferIsRefusedAndThePreFlightSaysSo() external {
     (bool _ok, bytes32 _reason) = _token.canTransferWithReason(_alice, _bob, 1);
     assertFalse(_ok);
-    assertEq(_reason, Reasons.TRANSFER_NOT_EXECUTED);
-    vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.TRANSFER_NOT_EXECUTED)
-    );
+    assertEq(_reason, Reasons.KIND_NOT_ALLOWED);
+    vm.expectRevert(abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, Reasons.KIND_NOT_ALLOWED));
     vm.prank(_alice);
     _token.transfer(_bob, 1);
   }

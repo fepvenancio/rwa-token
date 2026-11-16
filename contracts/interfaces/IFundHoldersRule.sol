@@ -22,6 +22,13 @@ interface IFundHoldersRule is IComplianceRule {
                             ERRORS
   //////////////////////////////////////////////////////////////*/
 
+  /**
+   * @notice Thrown from `onInstall` when the rule cannot tell that the fund's count saw every movement of the class:
+   *         the class has a supply, and the policy the token consulted until now did not list this rule for it
+   * @param _token The class
+   */
+  error FundHoldersRule_CountNotCurrent(address _token);
+
   /// @notice Thrown when the constructor argument is the zero address
   error FundHoldersRule_ZeroAddress();
 

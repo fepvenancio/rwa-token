@@ -192,8 +192,8 @@ In a deployment, `Legos` deploys a model with the terms of the product's profile
 ## Source and tests
 
 - Contract: `contracts/nav/FeeModel.sol`, interface `IFeeModel.sol`
-- Tests: `FeeModel.t.sol` (the arithmetic and its properties), the fee tests in `NavDesk.t.sol` and Gated4626VaultPortfolio.t.sol (what each caller keeps and pays), and `test/nodejs/legos.test.ts` (a deployed model)
+- Tests: `FeeModel.t.sol` (the arithmetic and its properties), the fee tests in `NavDesk.t.sol` and `Gated4626VaultPortfolio.t.sol` (what each caller keeps and pays), and `test/nodejs/legos.test.ts` (a deployed model)
 
 ---
 
-Describes the contracts at commit `4a906cc` on `main`.
+Describes the contracts at commit `e728b81` on `erc8473-main`.

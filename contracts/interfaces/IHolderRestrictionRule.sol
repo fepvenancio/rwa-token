@@ -8,9 +8,9 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
  * @notice Per-(token, holder) restrictions set by the token's AGENT_ROLE: a lockup and an address freeze, packed in one
  *         storage word so a movement costs one read per side
  * @dev Lockup: TRANSFER, EXECUTED and holder-initiated BURN (e.g. an ERC-4626 redeem) from a locked holder are rejected
- *      with `Reasons.LOCKED` until the unlock time; FORCED, MINT and BURN driven by the token's BURNER_ROLE are exempt.
- *      The lock covers the whole balance. `checkSend` returns `Reasons.LOCKED` for a holder whose lockup is running, so
- *      `canSend` says so; `check` applies the lock by kind, and the exemptions (FORCED, an enforcement burn) are for the
+ *      with `Reasons.LOCKED_UP` until the unlock time; FORCED (the burner's burn included) and MINT are exempt.
+ *      The lock covers the whole balance. `checkSend` returns `Reasons.LOCKED_UP` for a holder whose lockup is running, so
+ *      `canSend` says so; `check` applies the lock by kind, and the exemption (FORCED) is for the
  *      movement to decide, which an account question cannot know.
  *      Freeze: a frozen account can send only by a FORCED move, and cannot receive. `checkSend` returns `Reasons.SENDER_FROZEN` and
  *      `checkReceive` returns `Reasons.RECEIVER_FROZEN`, and `check` applies the same to a movement: a frozen sender is

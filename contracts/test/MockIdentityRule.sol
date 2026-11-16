@@ -3,8 +3,8 @@ pragma solidity ^0.8.28;
 
 import {Reasons} from 'interfaces/Errors.sol';
 
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 
 import {BaseRule} from 'contracts/hooks/BaseRule.sol';
 
@@ -30,14 +30,15 @@ contract MockIdentityRule is BaseRule {
   /**
    * @notice Rejects an unverified sender (except on MINT and FORCED) or receiver (except on BURN)
    * @param _ctx The movement
-   * @return _reason `TRANSFER_OK`, `SENDER_NOT_VERIFIED` or `RECEIVER_NOT_VERIFIED`
+   * @return _reason `TRANSFER_OK`, `SENDER_NOT_ELIGIBLE` or `RECEIVER_NOT_VERIFIED`
    */
   function check(
-    IPolicyHook.TransferContext calldata _ctx
+    IERC8473Policy.TransferContext calldata _ctx
   ) external view returns (bytes32 _reason) {
-    bool _checksSender = _ctx.kind != IPolicyHook.TransferKind.MINT && _ctx.kind != IPolicyHook.TransferKind.FORCED;
-    if (_checksSender && !IDENTITY.isVerified(_ctx.from)) return Reasons.SENDER_NOT_VERIFIED;
-    if (_ctx.kind != IPolicyHook.TransferKind.BURN && !IDENTITY.isVerified(_ctx.to)) {
+    bool _checksSender =
+      _ctx.kind != IERC8473Policy.TransferKind.MINT && _ctx.kind != IERC8473Policy.TransferKind.FORCED;
+    if (_checksSender && !IDENTITY.isVerified(_ctx.from)) return Reasons.SENDER_NOT_ELIGIBLE;
+    if (_ctx.to != address(0) && !IDENTITY.isVerified(_ctx.to)) {
       return Reasons.RECEIVER_NOT_VERIFIED;
     }
     _reason = Reasons.TRANSFER_OK;
@@ -58,13 +59,13 @@ contract MockIdentityRule is BaseRule {
   /**
    * @notice Whether the account is verified, as a sender
    * @param _account The account
-   * @return _reason `TRANSFER_OK` or `SENDER_NOT_VERIFIED`
+   * @return _reason `TRANSFER_OK` or `SENDER_NOT_ELIGIBLE`
    */
   function checkSend(
     address,
     address _account
   ) external view override returns (bytes32 _reason) {
-    _reason = IDENTITY.isVerified(_account) ? Reasons.TRANSFER_OK : Reasons.SENDER_NOT_VERIFIED;
+    _reason = IDENTITY.isVerified(_account) ? Reasons.TRANSFER_OK : Reasons.SENDER_NOT_ELIGIBLE;
   }
 
   /**

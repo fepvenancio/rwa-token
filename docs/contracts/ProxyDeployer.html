@@ -86,7 +86,7 @@
 
         <rect class="b2" x="20" y="372" width="400" height="50" rx="8"/>
         <text x="38" y="393">5. Run initData on the proxy: the token sets its</text>
-        <text x="38" y="411">   admin, registry and hook, and installs its rules</text>
+        <text x="38" y="411">   admin, registry and hook, and passes it the rules</text>
         <line class="ln" x1="220" y1="422" x2="220" y2="444" marker-end="url(#pd-arrow)"/>
 
         <rect class="b" x="20" y="446" width="400" height="44" rx="8"/>
@@ -129,8 +129,8 @@
   </figure>
   <ol class="steps wrap-any">
     <li><div><b>One symbol, one token.</b> The symbol's hash is the CREATE2 salt, and each salt can be used once, with any implementation (<code>ProxyDeployer_SaltUsed(salt)</code>). This check comes before the attestation check (<code>test_WhenTheSymbolWasUsedAndTheImplementationIsNotAttested_SaltUsedWins</code>).</div></li>
-    <li><div><b>Reviewed code only.</b> Before a proxy exists, the deployer asks its registry whether the implementation's code hash is attested as <code>IMPLEMENTATION</code> (<code>ProxyDeployer_ImplementationNotAttested(implementation)</code>). This check has to live here: the token's own setup function is the implementation's code, so code nobody reviewed would simply skip a check of its own. An address with no code fails this check too.</div></li>
-    <li><div><b>Set up in the same transaction.</b> The proxy is created without setup data, then the deployer calls it with <code>initData</code> straight away. Nobody can get in between and set it up first.</div></li>
+    <li><div><b>Reviewed code only.</b> Before a proxy exists, the deployer asks its registry whether the implementation's code hash is attested as <code>IMPLEMENTATION</code> (<code>ProxyDeployer_ImplementationNotAttested(implementation)</code>). This check has to live here: the token's own setup function is the implementation's code, so code nobody reviewed could leave out a check of its own. An address with no code fails this check too.</div></li>
+    <li><div><b>Set up in the same transaction.</b> The proxy is created without setup data, then the deployer calls it with <code>initData</code> straight away. Nobody can get in between and set it up first. In that call the token's initialiser installs the hook and passes it the rule list as the installation's data. The hook's <code>onInstall</code> accepts that only from the token, and installs the list for it (<code>test_WhenInitialising_TheTokenInstallsItsRulesOnTheHookAsItself</code>).</div></li>
     <li><div><b>Read back and compare.</b> The token must name the deployer's registry (<code>ProxyDeployer_RegistryMismatch(expected, actual)</code>), its hook must be the <code>hook</code> argument (<code>ProxyDeployer_HookNotInstalled(expected, installed)</code>), the hook must hold exactly <code>expectedRules</code> for it, same length and same order (<code>ProxyDeployer_RulesMismatch(hook, proxy)</code>), and the token must report the symbol the salt came from (<code>ProxyDeployer_SymbolMismatch(expected, actual)</code>).</div></li>
   </ol>
 </section>
@@ -221,7 +221,7 @@
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>4a906cc</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>e728b81</code> on <code>erc8473-main</code>.</footer>
 </main>
 </body>
 </html>

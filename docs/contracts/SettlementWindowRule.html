@@ -38,7 +38,7 @@
 <section id="in-one-minute">
   <div class="callout">
     <h3>In one minute</h3>
-    <p>On an <a href="IntentToken.html">IntentToken</a> a holder can sign a transfer in advance (an intent) and let an executor carry it out, alone or as one side of a trade against cash. This rule gives those settlements opening hours, for example 09:00 to 17:00 UTC, Monday to Friday. Outside the hours the executor's call is refused with <code>OUTSIDE_SETTLEMENT_WINDOW</code>, and the signed intent can be settled later, until its own deadline. The holder's own transfers, mints, burns and the agent's forced transfers are not affected. A token that lists the rule but has no hours set refuses every executor settlement.</p>
+    <p>On an <a href="IntentToken.html">IntentToken</a> a holder can sign a transfer in advance (an intent) and let an executor carry it out, alone or as one side of a trade against cash. This rule gives those settlements opening hours, for example 09:00 to 17:00 UTC, Monday to Friday. Outside the hours the executor's call is refused with <code>WINDOW_CLOSED</code>, and the signed intent can be settled later, until its own deadline. The holder's own transfers, mints, burns and the agent's forced transfers are not affected. A token that lists the rule but has no hours set refuses every executor settlement.</p>
   </div>
 </section>
 
@@ -144,7 +144,7 @@
       <thead><tr><th>Kind</th><th>What the rule checks</th></tr></thead>
       <tbody>
         <tr><td><span class="k k-transfer">TRANSFER</span></td><td class="ok">nothing: passes at any time</td></tr>
-        <tr><td><span class="k k-executed">EXECUTED</span></td><td>the window must be open at the block's timestamp; otherwise <span class="no"><code>OUTSIDE_SETTLEMENT_WINDOW</code></span>, the one reason code, and the answer at any time while no window is set</td></tr>
+        <tr><td><span class="k k-executed">EXECUTED</span></td><td>the window must be open at the block's timestamp; otherwise <span class="no"><code>WINDOW_CLOSED</code></span>, the one reason code, and the answer at any time while no window is set</td></tr>
         <tr><td><span class="k k-forced">FORCED</span></td><td class="ok">nothing: passes at any time, the enforcement mint included</td></tr>
         <tr><td><span class="k k-mint">MINT</span></td><td class="ok">nothing: passes at any time</td></tr>
         <tr><td><span class="k k-burn">BURN</span></td><td class="ok">nothing: passes at any time</td></tr>
@@ -152,8 +152,8 @@
     </table>
   </div>
   <div class="prose">
-    <p>Executed movements come from <code>executeTransfer</code> on the intent token, which <a href="IntentExecutor.html"><code>IntentExecutor</code></a> calls for single intents and for atomic batches, and <a href="DvPExecutor.html"><code>DvPExecutor</code></a> calls for a leg on a token that supports intents. The token reverts a refused settlement with <code>PolicyGated_TransferRejected(OUTSIDE_SETTLEMENT_WINDOW)</code>. <code>IntentExecutor</code>'s <code>execute</code> passes that error on, its <code>executeBatch</code> wraps it in <code>IntentExecutor_BatchItemFailed(index, reason)</code>, and <code>DvPExecutor</code> wraps it in <code>DvPExecutor_LegFailed(leg, reason)</code>.</p>
-    <p>The pre-flight <code>canExecute</code> runs the same rule with the same kind, so it says <code>OUTSIDE_SETTLEMENT_WINDOW</code> before an executor submits a call that would fail. <code>canTransfer</code> and <code>canTransferWithReason</code> ask about a plain transfer, so they do not see the window.</p>
+    <p>Executed movements come from <code>executeTransfer</code> on the intent token, which <a href="IntentExecutor.html"><code>IntentExecutor</code></a> calls for single intents and for atomic batches, and <a href="DvPExecutor.html"><code>DvPExecutor</code></a> calls for a leg on a token that supports intents. The token reverts a refused settlement with <code>ERC8473PolicyRejected(WINDOW_CLOSED)</code>. <code>IntentExecutor</code>'s <code>execute</code> passes that error on, its <code>executeBatch</code> wraps it in <code>IntentExecutor_BatchItemFailed(index, reason)</code>, and <code>DvPExecutor</code> wraps it in <code>DvPExecutor_LegFailed(leg, reason)</code>.</p>
+    <p>The pre-flight <code>canExecute</code> runs the same rule with the same kind, so it says <code>WINDOW_CLOSED</code> before an executor submits a call that would fail. <code>canTransfer</code> and <code>canTransferWithReason</code> ask about a plain transfer, so they do not see the window.</p>
   </div>
 </section>
 
@@ -186,12 +186,13 @@
       <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
       <tbody>
         <tr><td><code>setWindow(token, open, close, dayMask)</code></td><td>The token's <code>DEFAULT_ADMIN_ROLE</code></td><td>Sets the token's window, replacing any earlier one. <code>open</code> and <code>close</code> must each be below 86400 and differ, and <code>dayMask</code> must be non-zero and fit in 7 bits, or it reverts with <code>SettlementWindowRule_InvalidWindow</code>. Emits <code>WindowSet(token, open, close, dayMask)</code>. Reverts with <code>SettlementWindowRule_OnlyTokenAdmin(token, caller)</code> for anyone else.</td></tr>
-        <tr><td><code>check(ctx)</code></td><td>Anyone (read-only); the hook in practice</td><td><code>TRANSFER_OK</code> for every kind but <code>EXECUTED</code>; for <code>EXECUTED</code>, <code>TRANSFER_OK</code> inside the window and <code>OUTSIDE_SETTLEMENT_WINDOW</code> outside it.</td></tr>
+        <tr><td><code>check(ctx)</code></td><td>Anyone (read-only); the hook in practice</td><td><code>TRANSFER_OK</code> for every kind but <code>EXECUTED</code>; for <code>EXECUTED</code>, <code>TRANSFER_OK</code> inside the window and <code>WINDOW_CLOSED</code> outside it.</td></tr>
         <tr><td><code>isOpen(token, timestamp)</code></td><td>Anyone (read-only)</td><td>Whether the token's window is open at a given timestamp, past or future; false when no window is set. A fuzz test pins that it agrees with <code>check</code>.</td></tr>
         <tr><td><code>windowOf(token)</code></td><td>Anyone (read-only)</td><td>The token's <code>open</code>, <code>close</code> and <code>dayMask</code>; a <code>dayMask</code> of 0 means no window.</td></tr>
         <tr><td><code>MON_TO_FRI()</code></td><td>Anyone (read-only)</td><td><code>0x1F</code>, the mask for Monday to Friday.</td></tr>
         <tr><td><code>checkSend</code>, <code>checkReceive</code></td><td>Anyone (read-only)</td><td><code>TRANSFER_OK</code> for every account.</td></tr>
         <tr><td><code>after_(ctx)</code></td><td>The hook of <code>ctx.token</code></td><td>The empty default. The hook does not call it, because <code>wantsAfter()</code> is false.</td></tr>
+        <tr><td><code>onInstall(token, previousPolicy)</code></td><td>Anyone; the hook when a token installs it</td><td>The empty default: the rule keeps no state derived from movements.</td></tr>
         <tr><td><code>ruleId()</code>, <code>wantsAfter()</code>, <code>supportsInterface(id)</code></td><td>Anyone (read-only)</td><td><code>keccak256('SettlementWindowRule.v1')</code>; false; ERC-165 for <code>ISettlementWindowRule</code>, <code>IComplianceRule</code> and <code>IERC165</code>.</td></tr>
       </tbody>
     </table>
@@ -246,7 +247,7 @@
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>4a906cc</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>e728b81</code> on <code>erc8473-main</code>.</footer>
 </main>
 </body>
 </html>

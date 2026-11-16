@@ -9,11 +9,12 @@ import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+import {IERC8473} from 'interfaces/IERC8473.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IFund} from 'interfaces/IFund.sol';
 import {IFundHoldersRule} from 'interfaces/IFundHoldersRule.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 
 import {Fund} from 'contracts/fund/Fund.sol';
@@ -40,7 +41,7 @@ contract FundHoldersRuleUnitTest is Helpers {
     _fund = _mockContract('fund');
     _token = _mockContract('token');
     vm.etch(_hook, hex'01');
-    vm.mockCall(_token, abi.encodeCall(IPolicyGatedCore.policyHook, ()), abi.encode(_hook));
+    vm.mockCall(_token, abi.encodeCall(IERC8473.policy, ()), abi.encode(_hook));
     _rule = new FundHoldersRule(IFund(_fund));
   }
 
@@ -78,25 +79,25 @@ contract FundHoldersRuleUnitTest is Helpers {
   }
 
   function _ctx(
-    IPolicyHook.TransferKind _kind,
+    IERC8473Policy.TransferKind _kind,
     address _sender,
     address _receiver,
     uint256 _amount
-  ) internal view returns (IPolicyHook.TransferContext memory _context) {
-    _context = IPolicyHook.TransferContext({
+  ) internal view returns (IERC8473Policy.TransferContext memory _context) {
+    _context = IERC8473Policy.TransferContext({
       token: _token,
       from: _sender,
       to: _receiver,
-      id: 0,
+      tokenId: 0,
       amount: _amount,
       operator: _sender,
       kind: _kind,
-      extra: abi.encode(_pre[_sender], _pre[_receiver])
+      data: abi.encode(_pre[_sender], _pre[_receiver])
     });
   }
 
   function _check(
-    IPolicyHook.TransferKind _kind,
+    IERC8473Policy.TransferKind _kind,
     address _sender,
     address _receiver,
     uint256 _amount
@@ -105,7 +106,7 @@ contract FundHoldersRuleUnitTest is Helpers {
   }
 
   function _after(
-    IPolicyHook.TransferContext memory _context
+    IERC8473Policy.TransferContext memory _context
   ) internal {
     vm.prank(_hook);
     _rule.after_(_context);
@@ -114,12 +115,12 @@ contract FundHoldersRuleUnitTest is Helpers {
   /// @dev Maps a fuzzed seed onto the movement kinds that can add an investor: not FORCED
   function _capped(
     uint8 _seedValue
-  ) internal pure returns (IPolicyHook.TransferKind _kind) {
+  ) internal pure returns (IERC8473Policy.TransferKind _kind) {
     uint256 _pick = bound(_seedValue, 0, 3);
-    if (_pick == 0) return IPolicyHook.TransferKind.TRANSFER;
-    if (_pick == 1) return IPolicyHook.TransferKind.EXECUTED;
-    if (_pick == 2) return IPolicyHook.TransferKind.MINT;
-    return IPolicyHook.TransferKind.BURN;
+    if (_pick == 0) return IERC8473Policy.TransferKind.TRANSFER;
+    if (_pick == 1) return IERC8473Policy.TransferKind.EXECUTED;
+    if (_pick == 2) return IERC8473Policy.TransferKind.MINT;
+    return IERC8473Policy.TransferKind.BURN;
   }
 }
 
@@ -149,7 +150,7 @@ contract FundHoldersRuleUnit_Check is FundHoldersRuleUnitTest {
     uint256 _amount,
     bool _burn
   ) external {
-    IPolicyHook.TransferKind _kind = IPolicyHook.TransferKind(bound(_kindSeed, 0, 4));
+    IERC8473Policy.TransferKind _kind = IERC8473Policy.TransferKind(bound(_kindSeed, 0, 4));
     address _receiver = _burn ? address(0) : _to;
     vm.mockCall(
       _fund, abi.encodeCall(IFund.admission, (_token, _receiver)), abi.encode(0, 0, false, 0, 5, address(_rule))
@@ -159,7 +160,7 @@ contract FundHoldersRuleUnit_Check is FundHoldersRuleUnitTest {
 
   function test_WhenTheTokenIsNotAClass_AZeroAmountIsStillRejectedSoAProbeFailsClosed() external {
     vm.mockCall(_fund, abi.encodeCall(IFund.admission, (_token, _to)), abi.encode(0, 0, false, 0, 5, address(_rule)));
-    assertEq(_check(IPolicyHook.TransferKind.MINT, address(0), _to, 0), Reasons.NOT_FUND_CLASS);
+    assertEq(_check(IERC8473Policy.TransferKind.MINT, address(0), _to, 0), Reasons.NOT_FUND_CLASS);
   }
 
   function testFuzz_WhenTheRuleIsNotTheFundsInstalledOne_EveryMovementIsRejected(
@@ -169,7 +170,7 @@ contract FundHoldersRuleUnit_Check is FundHoldersRuleUnitTest {
     address _installed
   ) external {
     if (_installed == address(_rule)) _installed = address(uint160(_installed) ^ 1); // remap rather than vm.assume
-    IPolicyHook.TransferKind _kind = IPolicyHook.TransferKind(bound(_kindSeed, 0, 4));
+    IERC8473Policy.TransferKind _kind = IERC8473Policy.TransferKind(bound(_kindSeed, 0, 4));
     address _receiver = _burn ? address(0) : _to;
     // A registered class, an uncapped fund and a receiver who already holds a class: only the retired rule is wrong.
     vm.mockCall(
@@ -184,58 +185,58 @@ contract FundHoldersRuleUnit_Check is FundHoldersRuleUnitTest {
     vm.mockCall(
       _fund, abi.encodeCall(IFund.admission, (_token, _to)), abi.encode(_INDEX, 0, false, 0, 5, makeAddr('newRule'))
     );
-    assertEq(_check(IPolicyHook.TransferKind.MINT, address(0), _to, 0), Reasons.NOT_FUND_CLASS);
+    assertEq(_check(IERC8473Policy.TransferKind.MINT, address(0), _to, 0), Reasons.NOT_FUND_CLASS);
   }
 
   function test_WhenTheAmountIsZero_ItIsOkEvenAtAFullCap() external {
     _newReceiver(3, 3);
-    assertEq(_check(IPolicyHook.TransferKind.TRANSFER, _from, _to, 0), Reasons.TRANSFER_OK);
+    assertEq(_check(IERC8473Policy.TransferKind.TRANSFER, _from, _to, 0), Reasons.TRANSFER_OK);
   }
 
   function test_WhenTheTransferIsToSelf_ItIsOkEvenAtAFullCap() external {
     _admit(_to, 0, false, 3, 3);
-    assertEq(_check(IPolicyHook.TransferKind.TRANSFER, _to, _to, 1), Reasons.TRANSFER_OK);
+    assertEq(_check(IERC8473Policy.TransferKind.TRANSFER, _to, _to, 1), Reasons.TRANSFER_OK);
   }
 
   function test_WhenTheMovementIsABurn_ItIsOkEvenAtAFullCap() external {
     _admit(address(0), 0, false, 3, 3);
-    assertEq(_check(IPolicyHook.TransferKind.BURN, _from, address(0), 1), Reasons.TRANSFER_OK);
+    assertEq(_check(IERC8473Policy.TransferKind.BURN, _from, address(0), 1), Reasons.TRANSFER_OK);
   }
 
   function test_WhenTheMovementIsForced_ItIsOkAtAFullCapAndAtCapZero() external {
     _newReceiver(3, 3);
-    assertEq(_check(IPolicyHook.TransferKind.FORCED, _from, _to, 1), Reasons.TRANSFER_OK);
+    assertEq(_check(IERC8473Policy.TransferKind.FORCED, _from, _to, 1), Reasons.TRANSFER_OK);
     _newReceiver(0, 0);
-    assertEq(_check(IPolicyHook.TransferKind.FORCED, _from, _to, 1), Reasons.TRANSFER_OK);
+    assertEq(_check(IERC8473Policy.TransferKind.FORCED, _from, _to, 1), Reasons.TRANSFER_OK);
     _newReceiver(9, 3);
-    assertEq(_check(IPolicyHook.TransferKind.FORCED, address(0), _to, 1), Reasons.TRANSFER_OK);
+    assertEq(_check(IERC8473Policy.TransferKind.FORCED, address(0), _to, 1), Reasons.TRANSFER_OK);
   }
 
   function test_WhenTheReceiverIsTheClassItself_ItIsOkAtAFullCap() external {
     vm.mockCall(
       _fund, abi.encodeCall(IFund.admission, (_token, _token)), abi.encode(_INDEX, 0, false, 3, 3, address(_rule))
     );
-    assertEq(_check(IPolicyHook.TransferKind.TRANSFER, _from, _token, 1), Reasons.TRANSFER_OK);
+    assertEq(_check(IERC8473Policy.TransferKind.TRANSFER, _from, _token, 1), Reasons.TRANSFER_OK);
   }
 
   function test_WhenTheReceiverIsExempt_ItIsOkAtAFullCap() external {
     _admit(_to, 0, true, 3, 3);
-    assertEq(_check(IPolicyHook.TransferKind.TRANSFER, _from, _to, 1), Reasons.TRANSFER_OK);
+    assertEq(_check(IERC8473Policy.TransferKind.TRANSFER, _from, _to, 1), Reasons.TRANSFER_OK);
   }
 
   function test_WhenTheReceiverAlreadyHoldsAnotherClass_ItIsOkAtAFullCap() external {
     _admit(_to, _OTHER_BIT, false, 3, 3);
-    assertEq(_check(IPolicyHook.TransferKind.TRANSFER, _from, _to, 1), Reasons.TRANSFER_OK);
+    assertEq(_check(IERC8473Policy.TransferKind.TRANSFER, _from, _to, 1), Reasons.TRANSFER_OK);
   }
 
   function test_WhenTheReceiverAlreadyHoldsThisClass_ItIsOkAtAFullCap() external {
     _admit(_to, _BIT, false, 3, 3);
-    assertEq(_check(IPolicyHook.TransferKind.TRANSFER, _from, _to, 1), Reasons.TRANSFER_OK);
+    assertEq(_check(IERC8473Policy.TransferKind.TRANSFER, _from, _to, 1), Reasons.TRANSFER_OK);
   }
 
   function test_WhenTheCapIsZero_ANewInvestorIsRejected() external {
     _newReceiver(0, 0);
-    assertEq(_check(IPolicyHook.TransferKind.TRANSFER, _from, _to, 1), Reasons.MAX_HOLDERS);
+    assertEq(_check(IERC8473Policy.TransferKind.TRANSFER, _from, _to, 1), Reasons.MAX_HOLDERS);
   }
 
   function testFuzz_WhenTheCountIsBelowTheCap_ANewInvestorIsAdmitted(
@@ -246,9 +247,9 @@ contract FundHoldersRuleUnit_Check is FundHoldersRuleUnitTest {
     _cap = bound(_cap, 1, type(uint128).max);
     _count = bound(_count, 0, _cap - 1);
     _newReceiver(_count, _cap);
-    IPolicyHook.TransferKind _kind = _capped(_kindSeed);
-    if (_kind == IPolicyHook.TransferKind.BURN) return;
-    address _sender = _kind == IPolicyHook.TransferKind.MINT ? address(0) : _from;
+    IERC8473Policy.TransferKind _kind = _capped(_kindSeed);
+    if (_kind == IERC8473Policy.TransferKind.BURN) return;
+    address _sender = _kind == IERC8473Policy.TransferKind.MINT ? address(0) : _from;
     assertEq(_check(_kind, _sender, _to, 1), Reasons.TRANSFER_OK);
   }
 
@@ -260,10 +261,10 @@ contract FundHoldersRuleUnit_Check is FundHoldersRuleUnitTest {
     _cap = bound(_cap, 1, type(uint128).max - 1);
     _excess = bound(_excess, 0, type(uint128).max - _cap);
     _newReceiver(_cap + _excess, _cap);
-    IPolicyHook.TransferKind _kind = _capped(_kindSeed);
-    if (_kind == IPolicyHook.TransferKind.BURN) return;
+    IERC8473Policy.TransferKind _kind = _capped(_kindSeed);
+    if (_kind == IERC8473Policy.TransferKind.BURN) return;
     // A sender that keeps a balance never frees a slot; mints have no sender.
-    address _sender = _kind == IPolicyHook.TransferKind.MINT ? address(0) : _from;
+    address _sender = _kind == IERC8473Policy.TransferKind.MINT ? address(0) : _from;
     _admit(_from, _BIT, false, _cap + _excess, _cap);
     _bal(_from, 10);
     assertEq(_check(_kind, _sender, _to, 1), Reasons.MAX_HOLDERS);
@@ -273,29 +274,29 @@ contract FundHoldersRuleUnit_Check is FundHoldersRuleUnitTest {
     _newReceiver(3, 3);
     _admit(_from, _BIT, false, 3, 3);
     _bal(_from, 10);
-    assertEq(_check(IPolicyHook.TransferKind.TRANSFER, _from, _to, 10), Reasons.TRANSFER_OK);
-    assertEq(_check(IPolicyHook.TransferKind.EXECUTED, _from, _to, 10), Reasons.TRANSFER_OK);
+    assertEq(_check(IERC8473Policy.TransferKind.TRANSFER, _from, _to, 10), Reasons.TRANSFER_OK);
+    assertEq(_check(IERC8473Policy.TransferKind.EXECUTED, _from, _to, 10), Reasons.TRANSFER_OK);
   }
 
   function test_WhenTheSenderKeepsAnotherClass_TheNetZeroMoveIsRejectedAtAFullCap() external {
     _newReceiver(3, 3);
     _admit(_from, _BIT | _OTHER_BIT, false, 3, 3);
     _bal(_from, 10);
-    assertEq(_check(IPolicyHook.TransferKind.TRANSFER, _from, _to, 10), Reasons.MAX_HOLDERS);
+    assertEq(_check(IERC8473Policy.TransferKind.TRANSFER, _from, _to, 10), Reasons.MAX_HOLDERS);
   }
 
   function test_WhenTheSenderKeepsABalanceInThisClass_TheMoveIsRejectedAtAFullCap() external {
     _newReceiver(3, 3);
     _admit(_from, _BIT, false, 3, 3);
     _bal(_from, 11);
-    assertEq(_check(IPolicyHook.TransferKind.TRANSFER, _from, _to, 10), Reasons.MAX_HOLDERS);
+    assertEq(_check(IERC8473Policy.TransferKind.TRANSFER, _from, _to, 10), Reasons.MAX_HOLDERS);
   }
 
   function test_WhenTheSenderIsExempt_EmptyingItFreesNoSlot() external {
     _newReceiver(3, 3);
     _admit(_from, _BIT, true, 3, 3);
     _bal(_from, 10);
-    assertEq(_check(IPolicyHook.TransferKind.TRANSFER, _from, _to, 10), Reasons.MAX_HOLDERS);
+    assertEq(_check(IERC8473Policy.TransferKind.TRANSFER, _from, _to, 10), Reasons.MAX_HOLDERS);
   }
 
   function test_WhenTheSenderIsTheClassItself_EmptyingItFreesNoSlot() external {
@@ -304,32 +305,32 @@ contract FundHoldersRuleUnit_Check is FundHoldersRuleUnitTest {
       _fund, abi.encodeCall(IFund.admission, (_token, _token)), abi.encode(_INDEX, _BIT, false, 3, 3, address(_rule))
     );
     _bal(_token, 10);
-    assertEq(_check(IPolicyHook.TransferKind.TRANSFER, _token, _to, 10), Reasons.MAX_HOLDERS);
+    assertEq(_check(IERC8473Policy.TransferKind.TRANSFER, _token, _to, 10), Reasons.MAX_HOLDERS);
   }
 
   function test_WhenTheMovementIsAMintAtAFullCap_TheNewInvestorIsRejected() external {
     _newReceiver(3, 3);
-    assertEq(_check(IPolicyHook.TransferKind.MINT, address(0), _to, 1), Reasons.MAX_HOLDERS);
+    assertEq(_check(IERC8473Policy.TransferKind.MINT, address(0), _to, 1), Reasons.MAX_HOLDERS);
   }
 
   function test_WhenTheCountIsAboveALoweredCap_ANetZeroMoveIsStillRejected() external {
     _newReceiver(4, 3);
     _admit(_from, _BIT, false, 4, 3);
     _bal(_from, 10);
-    assertEq(_check(IPolicyHook.TransferKind.TRANSFER, _from, _to, 10), Reasons.MAX_HOLDERS);
+    assertEq(_check(IERC8473Policy.TransferKind.TRANSFER, _from, _to, 10), Reasons.MAX_HOLDERS);
   }
 
   function test_WhenTheCountIsBelowTheCap_TheSenderIsNotConsulted() external {
     _newReceiver(2, 3);
     vm.expectCall(_fund, abi.encodeCall(IFund.admission, (_token, _from)), 0);
     vm.expectCall(_token, abi.encodeCall(IERC20.balanceOf, (_from)), 0);
-    assertEq(_check(IPolicyHook.TransferKind.TRANSFER, _from, _to, 10), Reasons.TRANSFER_OK);
+    assertEq(_check(IERC8473Policy.TransferKind.TRANSFER, _from, _to, 10), Reasons.TRANSFER_OK);
   }
 
   function test_WhenTheReceiverIsDecided_TheFundIsReadOnce() external {
     _newReceiver(1, 3);
     vm.expectCall(_fund, abi.encodeCall(IFund.admission, (_token, _to)), 1);
-    _check(IPolicyHook.TransferKind.TRANSFER, _from, _to, 1);
+    _check(IERC8473Policy.TransferKind.TRANSFER, _from, _to, 1);
   }
 }
 
@@ -353,31 +354,31 @@ contract FundHoldersRuleUnit_After is FundHoldersRuleUnitTest {
   function test_WhenCallerIsNotTheTokensHook_Reverts() external {
     vm.expectRevert(abi.encodeWithSelector(IComplianceRule.ComplianceRule_OnlyHook.selector, _stranger));
     vm.prank(_stranger);
-    _rule.after_(_ctx(IPolicyHook.TransferKind.MINT, address(0), _to, 1));
+    _rule.after_(_ctx(IERC8473Policy.TransferKind.MINT, address(0), _to, 1));
   }
 
   function test_WhenAMintGivesTheReceiverItsFirstBalance_ItJoins() external {
     _bal(_to, 0);
     _expectJoin(_to, 1);
-    _after(_ctx(IPolicyHook.TransferKind.MINT, address(0), _to, 5));
+    _after(_ctx(IERC8473Policy.TransferKind.MINT, address(0), _to, 5));
   }
 
   function test_WhenAMintAddsToAnExistingBalance_NothingIsRecorded() external {
     _bal(_to, 4);
     _expectJoin(_to, 0);
-    _after(_ctx(IPolicyHook.TransferKind.MINT, address(0), _to, 5));
+    _after(_ctx(IERC8473Policy.TransferKind.MINT, address(0), _to, 5));
   }
 
   function test_WhenABurnEmptiesTheSender_ItLeaves() external {
     _bal(_from, 5);
     _expectLeave(_from, 1);
-    _after(_ctx(IPolicyHook.TransferKind.BURN, _from, address(0), 5));
+    _after(_ctx(IERC8473Policy.TransferKind.BURN, _from, address(0), 5));
   }
 
   function test_WhenABurnLeavesABalance_NothingIsRecorded() external {
     _bal(_from, 6);
     _expectLeave(_from, 0);
-    _after(_ctx(IPolicyHook.TransferKind.BURN, _from, address(0), 5));
+    _after(_ctx(IERC8473Policy.TransferKind.BURN, _from, address(0), 5));
   }
 
   function test_WhenATransferMovesAWholeBalanceToANewHolder_BothSidesAreRecorded() external {
@@ -385,7 +386,7 @@ contract FundHoldersRuleUnit_After is FundHoldersRuleUnitTest {
     _bal(_from, 5);
     _expectJoin(_to, 1);
     _expectLeave(_from, 1);
-    _after(_ctx(IPolicyHook.TransferKind.TRANSFER, _from, _to, 5));
+    _after(_ctx(IERC8473Policy.TransferKind.TRANSFER, _from, _to, 5));
   }
 
   function test_WhenATransferIsBetweenExistingHoldersWhoStayHolders_NothingIsRecorded() external {
@@ -393,7 +394,7 @@ contract FundHoldersRuleUnit_After is FundHoldersRuleUnitTest {
     _bal(_from, 8);
     _expectJoin(_to, 0);
     _expectLeave(_from, 0);
-    _after(_ctx(IPolicyHook.TransferKind.TRANSFER, _from, _to, 5));
+    _after(_ctx(IERC8473Policy.TransferKind.TRANSFER, _from, _to, 5));
   }
 
   function test_WhenTheAmountIsZero_NothingIsReadOrRecorded() external {
@@ -401,14 +402,14 @@ contract FundHoldersRuleUnit_After is FundHoldersRuleUnitTest {
     _expectLeave(_from, 0);
     vm.expectCall(_token, abi.encodeCall(IERC20.balanceOf, (_to)), 0);
     vm.expectCall(_token, abi.encodeCall(IERC20.balanceOf, (_from)), 0);
-    _after(_ctx(IPolicyHook.TransferKind.TRANSFER, _from, _to, 0));
+    _after(_ctx(IERC8473Policy.TransferKind.TRANSFER, _from, _to, 0));
   }
 
   function test_WhenTheTransferIsToSelf_NothingIsReadOrRecorded() external {
     _expectJoin(_to, 0);
     _expectLeave(_to, 0);
     vm.expectCall(_token, abi.encodeCall(IERC20.balanceOf, (_to)), 0);
-    _after(_ctx(IPolicyHook.TransferKind.TRANSFER, _to, _to, 5));
+    _after(_ctx(IERC8473Policy.TransferKind.TRANSFER, _to, _to, 5));
   }
 
   function test_WhenTheReceiverIsTheClassItself_TheFundIsStillToldAndIgnoresIt() external {
@@ -416,7 +417,7 @@ contract FundHoldersRuleUnit_After is FundHoldersRuleUnitTest {
     _bal(_from, 6);
     vm.mockCall(_fund, abi.encodeCall(IFund.join, (_token, _token)), '');
     vm.expectCall(_fund, abi.encodeCall(IFund.join, (_token, _token)), 1);
-    _after(_ctx(IPolicyHook.TransferKind.TRANSFER, _from, _token, 5));
+    _after(_ctx(IERC8473Policy.TransferKind.TRANSFER, _from, _token, 5));
   }
 
   function test_WhenTheFundRejectsTheToken_TheMovementReverts() external {
@@ -425,11 +426,11 @@ contract FundHoldersRuleUnit_After is FundHoldersRuleUnitTest {
       _fund, abi.encodeCall(IFund.join, (_token, _to)), abi.encodeWithSelector(IFund.Fund_NotAClass.selector, _token)
     );
     vm.expectRevert(abi.encodeWithSelector(IFund.Fund_NotAClass.selector, _token));
-    _after(_ctx(IPolicyHook.TransferKind.MINT, address(0), _to, 5));
+    _after(_ctx(IERC8473Policy.TransferKind.MINT, address(0), _to, 5));
   }
 }
 
-/// @notice A class token whose `balanceOf` writes. Its `policyHook` does not, so `onlyHook` passes; the rule reads the
+/// @notice A class token whose `balanceOf` writes. Its `policy` does not, so `onlyHook` passes; the rule reads the
 ///         balances from the context, so `balanceOf` must never be reached
 contract FundHoldersRuleStatefulBalanceToken {
   address public immutable HOOK;
@@ -441,7 +442,7 @@ contract FundHoldersRuleStatefulBalanceToken {
     HOOK = _hook;
   }
 
-  function policyHook() external view returns (address _hook) {
+  function policy() external view returns (address _hook) {
     _hook = HOOK;
   }
 
@@ -482,7 +483,7 @@ contract FundHoldersRuleUnit_TokenAndFundCallsAreStatic is FundHoldersRuleUnitTe
     MockStatefulFund _stateful = new MockStatefulFund();
     FundHoldersRule _statefulRule = new FundHoldersRule(IFund(address(_stateful)));
     vm.expectRevert(bytes('')); // a write inside a STATICCALL reverts with empty data, bubbled by the rule
-    _statefulRule.check(_ctx(IPolicyHook.TransferKind.TRANSFER, _from, _to, 1));
+    _statefulRule.check(_ctx(IERC8473Policy.TransferKind.TRANSFER, _from, _to, 1));
   }
 
   function test_WhenTheFundTriesToWriteDuringTheSenderRead_CheckReverts() external {
@@ -491,7 +492,7 @@ contract FundHoldersRuleUnit_TokenAndFundCallsAreStatic is FundHoldersRuleUnitTe
     FundHoldersRule _quietRule = new FundHoldersRule(IFund(address(_quiet)));
     _bal(_from, 10);
     assertEq(
-      _quietRule.check(_ctx(IPolicyHook.TransferKind.TRANSFER, _from, _to, 10)),
+      _quietRule.check(_ctx(IERC8473Policy.TransferKind.TRANSFER, _from, _to, 10)),
       Reasons.TRANSFER_OK,
       'control: net zero'
     );
@@ -499,7 +500,7 @@ contract FundHoldersRuleUnit_TokenAndFundCallsAreStatic is FundHoldersRuleUnitTe
     FundHoldersRuleFundWritingOnSender _writing = new FundHoldersRuleFundWritingOnSender(_from, true);
     FundHoldersRule _writingRule = new FundHoldersRule(IFund(address(_writing)));
     vm.expectRevert(bytes('')); // a write inside a STATICCALL reverts with empty data, bubbled by the rule
-    _writingRule.check(_ctx(IPolicyHook.TransferKind.TRANSFER, _from, _to, 10));
+    _writingRule.check(_ctx(IERC8473Policy.TransferKind.TRANSFER, _from, _to, 10));
   }
 
   /// @dev The balances come in the context, so the rule never calls `balanceOf`; a token that writes there is not reached
@@ -508,17 +509,17 @@ contract FundHoldersRuleUnit_TokenAndFundCallsAreStatic is FundHoldersRuleUnitTe
     FundHoldersRule _quietRule = new FundHoldersRule(IFund(address(_quiet)));
     FundHoldersRuleStatefulBalanceToken _stateful = new FundHoldersRuleStatefulBalanceToken(_hook);
     _bal(_from, 10);
-    IPolicyHook.TransferContext memory _context = _ctx(IPolicyHook.TransferKind.TRANSFER, _from, _to, 10);
+    IERC8473Policy.TransferContext memory _context = _ctx(IERC8473Policy.TransferKind.TRANSFER, _from, _to, 10);
     _context.token = address(_stateful);
     assertEq(_quietRule.check(_context), Reasons.TRANSFER_OK, 'net zero, decided from the context');
     assertEq(_stateful.writes(), 0);
   }
 
   function test_WhenTheTokenWouldWriteOnABalanceRead_AfterNeverReadsIt() external {
-    // The token passes `onlyHook` (its `policyHook` does not write); `balanceOf` is never called.
+    // The token passes `onlyHook` (its `policy` does not write); `balanceOf` is never called.
     FundHoldersRuleStatefulBalanceToken _stateful = new FundHoldersRuleStatefulBalanceToken(_hook);
     _bal(_to, 0);
-    IPolicyHook.TransferContext memory _context = _ctx(IPolicyHook.TransferKind.MINT, address(0), _to, 10);
+    IERC8473Policy.TransferContext memory _context = _ctx(IERC8473Policy.TransferKind.MINT, address(0), _to, 10);
     _context.token = address(_stateful);
     vm.mockCall(_fund, abi.encodeCall(IFund.join, (address(_stateful), _to)), '');
     vm.expectCall(_fund, abi.encodeCall(IFund.join, (address(_stateful), _to)), 1);
@@ -529,7 +530,7 @@ contract FundHoldersRuleUnit_TokenAndFundCallsAreStatic is FundHoldersRuleUnitTe
 
   function test_WhenTheTokenTriesToWriteDuringTheHookLookup_AfterReverts() external {
     MockStatefulToken _stateful = new MockStatefulToken();
-    IPolicyHook.TransferContext memory _context = _ctx(IPolicyHook.TransferKind.MINT, address(0), _to, 1);
+    IERC8473Policy.TransferContext memory _context = _ctx(IERC8473Policy.TransferKind.MINT, address(0), _to, 1);
     _context.token = address(_stateful);
     vm.expectRevert(bytes('')); // a write inside a STATICCALL reverts with empty data, bubbled by the rule
     _rule.after_(_context);
@@ -549,7 +550,7 @@ contract FundHoldersRuleUnit_Fuzz is FundHoldersRuleUnitTest {
     uint256 _amount,
     uint256 _senderBalance
   ) external {
-    IPolicyHook.TransferKind _kind = IPolicyHook.TransferKind(bound(_kindSeed, 0, 4));
+    IERC8473Policy.TransferKind _kind = IERC8473Policy.TransferKind(bound(_kindSeed, 0, 4));
     vm.mockCall(
       _fund,
       abi.encodeCall(IFund.admission, (_token, _to)),
@@ -604,7 +605,7 @@ contract FundHoldersRuleGate is Helpers {
     vm.mockCall(
       _realClass, abi.encodeCall(IERC165.supportsInterface, (type(IPolicyGated).interfaceId)), abi.encode(true)
     );
-    vm.mockCall(_realClass, abi.encodeCall(IPolicyGatedCore.policyHook, ()), abi.encode(_realHook));
+    vm.mockCall(_realClass, abi.encodeCall(IERC8473.policy, ()), abi.encode(_realHook));
     vm.mockCall(_realClass, abi.encodeCall(IERC20.totalSupply, ()), abi.encode(0));
     IComplianceRule[] memory _list = new IComplianceRule[](1);
     _list[0] = _rule;
@@ -613,22 +614,22 @@ contract FundHoldersRuleGate is Helpers {
 
     // A token nobody registered, whose "hook" is the attacker.
     _fake = _mockContract('fake');
-    vm.mockCall(_fake, abi.encodeCall(IPolicyGatedCore.policyHook, ()), abi.encode(_attacker));
+    vm.mockCall(_fake, abi.encodeCall(IERC8473.policy, ()), abi.encode(_attacker));
   }
 
   function _ctx(
     address _token,
     address _receiver
-  ) internal view returns (IPolicyHook.TransferContext memory _context) {
-    _context = IPolicyHook.TransferContext({
+  ) internal view returns (IERC8473Policy.TransferContext memory _context) {
+    _context = IERC8473Policy.TransferContext({
       token: _token,
       from: address(0),
       to: _receiver,
-      id: 0,
+      tokenId: 0,
       amount: 7,
       operator: _attacker,
-      kind: IPolicyHook.TransferKind.MINT,
-      extra: abi.encode(uint256(0), uint256(0))
+      kind: IERC8473Policy.TransferKind.MINT,
+      data: abi.encode(uint256(0), uint256(0))
     });
   }
 
@@ -692,7 +693,7 @@ contract FundHoldersRuleUnit_AccountChecks is FundHoldersRuleUnitTest {
   /// @dev At a full fund `check` refuses a mint to a new investor, and the account answer still accepts
   function test_WhenTheFundIsFull_ANewInvestorIsStillAcceptedAtAccountLevel() external {
     _admit(_to, 0, false, 3, 3);
-    assertEq(_check(IPolicyHook.TransferKind.MINT, address(0), _to, 1), Reasons.MAX_HOLDERS);
+    assertEq(_check(IERC8473Policy.TransferKind.MINT, address(0), _to, 1), Reasons.MAX_HOLDERS);
     assertEq(_rule.checkReceive(_token, _to), Reasons.TRANSFER_OK);
     assertEq(_rule.checkSend(_token, _to), Reasons.TRANSFER_OK);
   }
@@ -730,9 +731,73 @@ contract FundHoldersRuleUnit_AccountChecks is FundHoldersRuleUnitTest {
     uint8 _kindSeed,
     uint256 _amount
   ) external {
-    IPolicyHook.TransferKind _kind = IPolicyHook.TransferKind(bound(_kindSeed, 0, 4));
+    IERC8473Policy.TransferKind _kind = IERC8473Policy.TransferKind(bound(_kindSeed, 0, 4));
     vm.mockCall(_fund, abi.encodeCall(IFund.admission, (_token, _to)), abi.encode(0, 0, false, 0, 5, address(_rule)));
     assertEq(_rule.checkReceive(_token, _to), Reasons.NOT_FUND_CLASS);
     assertEq(_check(_kind, _from, _to, _amount), Reasons.NOT_FUND_CLASS);
+  }
+}
+
+/// @dev ERC-8473, policy requirement 16: the investor count is derived from the class's movements, so the rule goes
+///      live only when it can tell that no movement went unseen
+contract FundHoldersRuleUnit_OnInstall is FundHoldersRuleUnitTest {
+  address internal _previous;
+
+  function setUp() public override {
+    super.setUp();
+    _previous = _mockContract('previousPolicy');
+  }
+
+  function _supplyIs(
+    uint256 _supply
+  ) internal {
+    vm.mockCall(_token, abi.encodeCall(IERC20.totalSupply, ()), abi.encode(_supply));
+  }
+
+  function _previousLists(
+    address _listed
+  ) internal {
+    IComplianceRule[] memory _list = new IComplianceRule[](2);
+    _list[0] = IComplianceRule(makeAddr('anotherRule'));
+    _list[1] = IComplianceRule(_listed);
+    vm.mockCall(_previous, abi.encodeCall(IComplianceHook.rules, (_token)), abi.encode(_list));
+  }
+
+  /// @dev Nothing issued: nothing to count
+  function test_WhenTheClassHasNoSupply_ItAccepts() external {
+    _supplyIs(0);
+    _rule.onInstall(_token, address(0));
+  }
+
+  /// @dev A first installation on a class that already has holders: they were never counted
+  function test_WhenTheClassHasSupplyAndNoPreviousPolicy_ItReverts() external {
+    _supplyIs(1);
+    vm.expectRevert(abi.encodeWithSelector(IFundHoldersRule.FundHoldersRule_CountNotCurrent.selector, _token));
+    _rule.onInstall(_token, address(0));
+  }
+
+  /// @dev The policy consulted until now listed this rule for the class, so every movement was counted
+  function test_WhenThePreviousPolicyListedThisRule_ItAccepts() external {
+    _supplyIs(1);
+    _previousLists(address(_rule));
+    _rule.onInstall(_token, _previous);
+  }
+
+  /// @dev The policy consulted until now did not list this rule: movements went uncounted
+  function test_WhenThePreviousPolicyDidNotListThisRule_ItReverts() external {
+    _supplyIs(1);
+    _previousLists(makeAddr('yetAnotherRule'));
+    vm.expectRevert(abi.encodeWithSelector(IFundHoldersRule.FundHoldersRule_CountNotCurrent.selector, _token));
+    _rule.onInstall(_token, _previous);
+  }
+
+  /// @dev It writes nothing, so it needs no caller check, and it changes no state whoever calls
+  function test_ItWritesNothing() external {
+    _supplyIs(0);
+    vm.record();
+    vm.prank(_stranger);
+    _rule.onInstall(_token, address(0));
+    (, bytes32[] memory _writes) = vm.accesses(address(_rule));
+    assertEq(_writes.length, 0);
   }
 }

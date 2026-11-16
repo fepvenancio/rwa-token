@@ -38,20 +38,20 @@
 <section id="in-one-minute">
   <div class="callout">
     <h3>In one minute</h3>
-    <p>A plain token transfer says nothing about why it happened. Some products want each movement between holders tied to an instruction. On an <a href="IntentToken.html">IntentToken</a> a holder can sign an intent that names the receiver, the amount and a reference (<code>ref</code>, the hash of the issuer's message), and an executor submits it. This rule makes that the way a holder moves tokens: <code>transfer</code> and <code>transferFrom</code> revert with <code>TRANSFER_NOT_EXECUTED</code>. Mints, burns, the agent's forced moves and executed intents pass. It has no settings and keeps no data: listing it is the whole configuration.</p>
+    <p>A plain token transfer says nothing about why it happened. Some products want each movement between holders tied to an instruction. On an <a href="IntentToken.html">IntentToken</a> a holder can sign an intent that names the receiver, the amount and a reference (<code>ref</code>, the hash of the issuer's message), and an executor submits it. This rule makes that the way a holder moves tokens: <code>transfer</code> and <code>transferFrom</code> revert with <code>KIND_NOT_ALLOWED</code>. Mints, burns, the agent's forced moves and executed intents pass. It has no settings and keeps no data: listing it is the whole configuration.</p>
   </div>
 </section>
 
 <section id="how">
   <div class="prose">
     <h2>How it decides</h2>
-    <p><code>check(ctx)</code> reads one field, the kind. A <code>TRANSFER</code> gets <code>TRANSFER_NOT_EXECUTED</code>, whatever the amount. Everything else gets <code>TRANSFER_OK</code>. It reads no balance, no role and no storage, and it does not look at the reference.</p>
+    <p><code>check(ctx)</code> reads one field, the kind. A <code>TRANSFER</code> gets <code>KIND_NOT_ALLOWED</code>, whatever the amount. Everything else gets <code>TRANSFER_OK</code>. It reads no balance, no role and no storage, and it does not look at the reference.</p>
   </div>
   <div class="table-wrap">
     <table>
       <thead><tr><th>Kind</th><th>What the rule does</th></tr></thead>
       <tbody>
-        <tr><td><span class="k k-transfer">TRANSFER</span></td><td class="no"><code>TRANSFER_NOT_EXECUTED</code>, the one reason code, at any amount</td></tr>
+        <tr><td><span class="k k-transfer">TRANSFER</span></td><td class="no"><code>KIND_NOT_ALLOWED</code>, the one reason code, at any amount</td></tr>
         <tr><td><span class="k k-executed">EXECUTED</span></td><td class="ok">passes</td></tr>
         <tr><td><span class="k k-forced">FORCED</span></td><td class="ok">passes</td></tr>
         <tr><td><span class="k k-mint">MINT</span></td><td class="ok">passes</td></tr>
@@ -65,7 +65,7 @@
   <div class="prose">
     <h2>What it means for a holder</h2>
     <ul class="plain">
-      <li><b>The send button reverts.</b> <code>transfer</code> reverts with <code>PolicyGated_TransferRejected(TRANSFER_NOT_EXECUTED)</code>. So does <code>transferFrom</code>: <code>approve</code> and <code>permit</code> still set an allowance, but a spender cannot use it to move the tokens.</li>
+      <li><b>The send button reverts.</b> <code>transfer</code> reverts with <code>ERC8473PolicyRejected(KIND_NOT_ALLOWED)</code>. So does <code>transferFrom</code>: <code>approve</code> and <code>permit</code> still set an allowance, but a spender cannot use it to move the tokens.</li>
       <li><b>To move, the holder signs.</b> The holder signs a <code>TransferIntent</code> (EIP-712 typed data) and hands it to whoever runs the executor. An account holding the token's <code>EXECUTOR_ROLE</code> calls <code>executeTransfer</code>, in a deployment <a href="IntentExecutor.html"><code>IntentExecutor</code></a> or <a href="DvPExecutor.html"><code>DvPExecutor</code></a>. The other rules on the list still apply to that movement.</li>
       <li><b>The holder depends on the executor.</b> The rule leaves no way for a holder to move tokens alone. An <code>IntentToken</code> has no holder burn either: <code>burn</code> needs <code>BURNER_ROLE</code>. If nobody submits the intent, nothing moves, and the intent lapses at its deadline.</li>
       <li><b>Each such movement leaves its reference on chain.</b> <code>executeTransfer</code> emits <code>IntentExecuted(intentHash, from, to, amount, executor, ref)</code>.</li>
@@ -78,7 +78,7 @@
   <div class="prose">
     <h2>The account questions and the pre-flights</h2>
     <p><code>checkSend</code> and <code>checkReceive</code> answer <code>TRANSFER_OK</code> for every account: they are the <a href="BaseRule.html"><code>BaseRule</code></a> defaults, and the rule has no opinion about an account. So <code>canSend</code> and <code>canReceive</code> can read true while a plain transfer is refused.</p>
-    <p><code>canTransfer</code> and <code>canTransferWithReason</code> ask about a plain transfer, so between two holders they read false, the latter with <code>TRANSFER_NOT_EXECUTED</code>. The pre-flight for a signed intent is <code>canExecute</code>.</p>
+    <p><code>canTransfer</code> and <code>canTransferWithReason</code> ask about a plain transfer, so between two holders they read false, the latter with <code>KIND_NOT_ALLOWED</code>. The pre-flight for a signed intent is <code>canExecute</code>.</p>
   </div>
 </section>
 
@@ -107,9 +107,10 @@
     <table>
       <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
       <tbody>
-        <tr><td><code>check(ctx)</code></td><td>Anyone (read-only); the hook in practice</td><td><code>TRANSFER_NOT_EXECUTED</code> for a <code>TRANSFER</code>, otherwise <code>TRANSFER_OK</code>.</td></tr>
+        <tr><td><code>check(ctx)</code></td><td>Anyone (read-only); the hook in practice</td><td><code>KIND_NOT_ALLOWED</code> for a <code>TRANSFER</code>, otherwise <code>TRANSFER_OK</code>.</td></tr>
         <tr><td><code>checkSend</code>, <code>checkReceive</code></td><td>Anyone (read-only)</td><td><code>TRANSFER_OK</code> for every account.</td></tr>
         <tr><td><code>after_(ctx)</code></td><td>The hook of <code>ctx.token</code></td><td>The empty default. The hook does not call it, because <code>wantsAfter()</code> is false.</td></tr>
+        <tr><td><code>onInstall(token, previousPolicy)</code></td><td>Anyone; the hook when a token installs it</td><td>The empty default: the rule keeps no state derived from movements.</td></tr>
         <tr><td><code>ruleId()</code>, <code>wantsAfter()</code>, <code>supportsInterface(id)</code></td><td>Anyone (read-only)</td><td><code>keccak256('ExecutedOnlyRule.v1')</code>; false; ERC-165 for <code>IComplianceRule</code> and <code>IERC165</code>, the <code>BaseRule</code> answer.</td></tr>
       </tbody>
     </table>
@@ -162,7 +163,7 @@
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>4a906cc</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>e728b81</code> on <code>erc8473-main</code>.</footer>
 </main>
 </body>
 </html>

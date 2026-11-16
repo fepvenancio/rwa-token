@@ -16,7 +16,7 @@ Opening hours for executor-settled transfers. An intent carried out by an execut
 
 > ### In one minute
 >
-> On an [IntentToken](IntentToken.md) a holder can sign a transfer in advance (an intent) and let an executor carry it out, alone or as one side of a trade against cash. This rule gives those settlements opening hours, for example 09:00 to 17:00 UTC, Monday to Friday. Outside the hours the executor's call is refused with `OUTSIDE_SETTLEMENT_WINDOW`, and the signed intent can be settled later, until its own deadline. The holder's own transfers, mints, burns and the agent's forced transfers are not affected. A token that lists the rule but has no hours set refuses every executor settlement.
+> On an [IntentToken](IntentToken.md) a holder can sign a transfer in advance (an intent) and let an executor carry it out, alone or as one side of a trade against cash. This rule gives those settlements opening hours, for example 09:00 to 17:00 UTC, Monday to Friday. Outside the hours the executor's call is refused with `WINDOW_CLOSED`, and the signed intent can be settled later, until its own deadline. The holder's own transfers, mints, burns and the agent's forced transfers are not affected. A token that lists the rule but has no hours set refuses every executor settlement.
 
 <a id="how"></a>
 ## How the window works over a week
@@ -44,14 +44,14 @@ A window is three numbers: `open` and `close`, each a second of the UTC day (0 t
 | Kind | What the rule checks |
 |---|---|
 | TRANSFER | nothing: passes at any time |
-| EXECUTED | the window must be open at the block's timestamp; otherwise `OUTSIDE_SETTLEMENT_WINDOW`, the one reason code, and the answer at any time while no window is set |
+| EXECUTED | the window must be open at the block's timestamp; otherwise `WINDOW_CLOSED`, the one reason code, and the answer at any time while no window is set |
 | FORCED | nothing: passes at any time, the enforcement mint included |
 | MINT | nothing: passes at any time |
 | BURN | nothing: passes at any time |
 
-Executed movements come from `executeTransfer` on the intent token, which [`IntentExecutor`](IntentExecutor.md) calls for single intents and for atomic batches, and [`DvPExecutor`](DvPExecutor.md) calls for a leg on a token that supports intents. The token reverts a refused settlement with `PolicyGated_TransferRejected(OUTSIDE_SETTLEMENT_WINDOW)`. `IntentExecutor`'s `execute` passes that error on, its `executeBatch` wraps it in `IntentExecutor_BatchItemFailed(index, reason)`, and `DvPExecutor` wraps it in `DvPExecutor_LegFailed(leg, reason)`.
+Executed movements come from `executeTransfer` on the intent token, which [`IntentExecutor`](IntentExecutor.md) calls for single intents and for atomic batches, and [`DvPExecutor`](DvPExecutor.md) calls for a leg on a token that supports intents. The token reverts a refused settlement with `ERC8473PolicyRejected(WINDOW_CLOSED)`. `IntentExecutor`'s `execute` passes that error on, its `executeBatch` wraps it in `IntentExecutor_BatchItemFailed(index, reason)`, and `DvPExecutor` wraps it in `DvPExecutor_LegFailed(leg, reason)`.
 
-The pre-flight `canExecute` runs the same rule with the same kind, so it says `OUTSIDE_SETTLEMENT_WINDOW` before an executor submits a call that would fail. `canTransfer` and `canTransferWithReason` ask about a plain transfer, so they do not see the window.
+The pre-flight `canExecute` runs the same rule with the same kind, so it says `WINDOW_CLOSED` before an executor submits a call that would fail. `canTransfer` and `canTransferWithReason` ask about a plain transfer, so they do not see the window.
 
 <a id="account"></a>
 ## The account questions
@@ -76,12 +76,13 @@ One product lists it at this commit: the intent token of the demo deployment (`f
 | Function | Who can call | What it does |
 |---|---|---|
 | `setWindow(token, open, close, dayMask)` | The token's `DEFAULT_ADMIN_ROLE` | Sets the token's window, replacing any earlier one. `open` and `close` must each be below 86400 and differ, and `dayMask` must be non-zero and fit in 7 bits, or it reverts with `SettlementWindowRule_InvalidWindow`. Emits `WindowSet(token, open, close, dayMask)`. Reverts with `SettlementWindowRule_OnlyTokenAdmin(token, caller)` for anyone else. |
-| `check(ctx)` | Anyone (read-only); the hook in practice | `TRANSFER_OK` for every kind but `EXECUTED`; for `EXECUTED`, `TRANSFER_OK` inside the window and `OUTSIDE_SETTLEMENT_WINDOW` outside it. |
+| `check(ctx)` | Anyone (read-only); the hook in practice | `TRANSFER_OK` for every kind but `EXECUTED`; for `EXECUTED`, `TRANSFER_OK` inside the window and `WINDOW_CLOSED` outside it. |
 | `isOpen(token, timestamp)` | Anyone (read-only) | Whether the token's window is open at a given timestamp, past or future; false when no window is set. A fuzz test pins that it agrees with `check`. |
 | `windowOf(token)` | Anyone (read-only) | The token's `open`, `close` and `dayMask`; a `dayMask` of 0 means no window. |
 | `MON_TO_FRI()` | Anyone (read-only) | `0x1F`, the mask for Monday to Friday. |
 | `checkSend`, `checkReceive` | Anyone (read-only) | `TRANSFER_OK` for every account. |
 | `after_(ctx)` | The hook of `ctx.token` | The empty default. The hook does not call it, because `wantsAfter()` is false. |
+| `onInstall(token, previousPolicy)` | Anyone; the hook when a token installs it | The empty default: the rule keeps no state derived from movements. |
 | `ruleId()`, `wantsAfter()`, `supportsInterface(id)` | Anyone (read-only) | `keccak256('SettlementWindowRule.v1')`; false; ERC-165 for `ISettlementWindowRule`, `IComplianceRule` and `IERC165`. |
 
 <a id="why"></a>
@@ -120,4 +121,4 @@ One product lists it at this commit: the intent token of the demo deployment (`f
 
 ---
 
-Describes the contracts at commit `4a906cc` on `main`.
+Describes the contracts at commit `e728b81` on `erc8473-main`.

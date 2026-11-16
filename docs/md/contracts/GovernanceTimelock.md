@@ -68,7 +68,7 @@ After the hand-overs, the main timelock holds these, and each power runs only as
 
 | Where | What it holds | What that lets governance do |
 |---|---|---|
-| Each product | `DEFAULT_ADMIN_ROLE` (from the end of `Product`), and `UPGRADER_ROLE` | Grant and revoke the product's roles, `unpause`, `setPolicyHook`, upgrade to an attested implementation of the same template, change the token's rule list on the hook (`setRules`) and the settings that rules keep under the token's admin, such as `setPolicy`. On a 4626 vault, `setPortfolio` and `setFeeModel`. |
+| Each product | `DEFAULT_ADMIN_ROLE` (from the end of `Product`), and `UPGRADER_ROLE` | Grant and revoke the product's roles, `unpause`, `installPolicy`, upgrade to an attested implementation of the same template, change the token's rule list on the hook (`setRules`) and the settings that rules keep under the token's admin, such as `setPolicy`. On a 4626 vault, `setPortfolio` and `setFeeModel`. |
 | A vault's legos, through the vault's role | Nothing of their own: `Portfolio`, `GuardedAccount` and `NavDesk` ask the vault | Add or remove an adapter, raise caps, migrate a portfolio; set a permission on a guarded account; change a desk's settings and fee model, and `adopt` on a successor desk. |
 | `IntentExecutor`, `DvPExecutor` | `DEFAULT_ADMIN_ROLE` | Grant and revoke `OPERATOR_ROLE` and `GUARDIAN_ROLE`, `unpause`. |
 | `PolicyRegistry` | `DEFAULT_ADMIN_ROLE`, from the constructor | Decide who holds `ATTESTER_ROLE`. Attesting itself is the council's. |
@@ -154,4 +154,4 @@ The constructor takes the delay, the proposers, the executors, an optional boots
 
 ---
 
-Describes the contracts at commit `4a906cc` on `main`.
+Describes the contracts at commit `e728b81` on `erc8473-main`.

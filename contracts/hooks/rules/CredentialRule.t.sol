@@ -9,7 +9,7 @@ import {Reasons} from 'interfaces/Errors.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {ICredentialRegistry} from 'interfaces/ICredentialRegistry.sol';
 import {ICredentialRule} from 'interfaces/ICredentialRule.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {Quals} from 'interfaces/Quals.sol';
 
 import {CredentialRule} from 'contracts/hooks/rules/CredentialRule.sol';
@@ -75,17 +75,17 @@ contract CredentialRuleUnitTest is Helpers {
   }
 
   function _ctx(
-    IPolicyHook.TransferKind _kind
-  ) internal view returns (IPolicyHook.TransferContext memory _context) {
-    _context = IPolicyHook.TransferContext({
+    IERC8473Policy.TransferKind _kind
+  ) internal view returns (IERC8473Policy.TransferContext memory _context) {
+    _context = IERC8473Policy.TransferContext({
       token: _token,
-      from: _kind == IPolicyHook.TransferKind.MINT ? address(0) : _from,
-      to: _kind == IPolicyHook.TransferKind.BURN ? address(0) : _to,
-      id: 0,
+      from: _kind == IERC8473Policy.TransferKind.MINT ? address(0) : _from,
+      to: _kind == IERC8473Policy.TransferKind.BURN ? address(0) : _to,
+      tokenId: 0,
       amount: 1,
-      operator: _kind == IPolicyHook.TransferKind.BURN ? _burner : _from,
+      operator: _kind == IERC8473Policy.TransferKind.BURN ? _burner : _from,
       kind: _kind,
-      extra: ''
+      data: ''
     });
   }
 
@@ -98,8 +98,8 @@ contract CredentialRuleUnitTest is Helpers {
   /// @dev The kind of each uint8 in 0..4, as the hook enum orders them
   function _kind(
     uint8 _seed
-  ) internal pure returns (IPolicyHook.TransferKind _k) {
-    _k = IPolicyHook.TransferKind(bound(_seed, 0, 4));
+  ) internal pure returns (IERC8473Policy.TransferKind _k) {
+    _k = IERC8473Policy.TransferKind(bound(_seed, 0, 4));
   }
 
   function _statusOf(
@@ -190,7 +190,7 @@ contract CredentialRuleUnit_Sender is CredentialRuleUnitTest {
     uint8 _kindSeed,
     uint8 _statusSeed
   ) external {
-    IPolicyHook.TransferKind _k = IPolicyHook.TransferKind(bound(_kindSeed, 0, 1)); // TRANSFER, EXECUTED
+    IERC8473Policy.TransferKind _k = IERC8473Policy.TransferKind(bound(_kindSeed, 0, 1)); // TRANSFER, EXECUTED
     ICredentialRegistry.Status _s = ICredentialRegistry.Status(bound(_statusSeed, 1, 2)); // ACTIVE, EXIT_ONLY
     _stand(_from, _s);
     _stand(_to, ICredentialRegistry.Status.ACTIVE);
@@ -200,9 +200,9 @@ contract CredentialRuleUnit_Sender is CredentialRuleUnitTest {
   function test_WhenTheSenderIsLapsed_ItCanStillSendAndBurn() external {
     _stand(_from, ICredentialRegistry.Status.LAPSED);
     _stand(_to, ICredentialRegistry.Status.ACTIVE);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.TRANSFER)), Reasons.TRANSFER_OK);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.EXECUTED)), Reasons.TRANSFER_OK);
-    IPolicyHook.TransferContext memory _burn = _ctx(IPolicyHook.TransferKind.BURN);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.TRANSFER)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.EXECUTED)), Reasons.TRANSFER_OK);
+    IERC8473Policy.TransferContext memory _burn = _ctx(IERC8473Policy.TransferKind.BURN);
     _burn.operator = _from; // a holder or vault burn, not an enforcement one
     assertEq(_rule.check(_burn), Reasons.TRANSFER_OK);
   }
@@ -211,65 +211,71 @@ contract CredentialRuleUnit_Sender is CredentialRuleUnitTest {
     uint8 _kindSeed,
     bool _blocked
   ) external {
-    IPolicyHook.TransferKind _k = IPolicyHook.TransferKind(bound(_kindSeed, 0, 1));
+    IERC8473Policy.TransferKind _k = IERC8473Policy.TransferKind(bound(_kindSeed, 0, 1));
     _stand(_from, _blocked ? ICredentialRegistry.Status.BLOCKED : ICredentialRegistry.Status.NONE);
     _stand(_to, ICredentialRegistry.Status.ACTIVE);
-    assertEq(_rule.check(_ctx(_k)), Reasons.SENDER_NOT_VERIFIED);
+    assertEq(_rule.check(_ctx(_k)), Reasons.SENDER_NOT_ELIGIBLE);
   }
 
   function test_WhenAHolderBurnsAndTheSenderIsNoneOrBlocked_ItIsRejected(
     bool _blocked
   ) external {
     _stand(_from, _blocked ? ICredentialRegistry.Status.BLOCKED : ICredentialRegistry.Status.NONE);
-    IPolicyHook.TransferContext memory _burn = _ctx(IPolicyHook.TransferKind.BURN);
+    IERC8473Policy.TransferContext memory _burn = _ctx(IERC8473Policy.TransferKind.BURN);
     _burn.operator = _from;
-    assertEq(_rule.check(_burn), Reasons.SENDER_NOT_VERIFIED);
+    assertEq(_rule.check(_burn), Reasons.SENDER_NOT_ELIGIBLE);
   }
 
   function test_WhenBothLegsAreBad_TheSenderIsReportedFirst() external {
     _stand(_from, ICredentialRegistry.Status.NONE);
     _stand(_to, ICredentialRegistry.Status.NONE);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.TRANSFER)), Reasons.SENDER_NOT_VERIFIED);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.TRANSFER)), Reasons.SENDER_NOT_ELIGIBLE);
   }
 }
 
+/// @dev The burner's burn is enforcement: the token announces it as FORCED with no receiver (ERC-8473, transfer kinds)
 contract CredentialRuleUnit_EnforcementBurn is CredentialRuleUnitTest {
+  function _forcedBurn() internal view returns (IERC8473Policy.TransferContext memory _context) {
+    _context = _ctx(IERC8473Policy.TransferKind.FORCED);
+    _context.to = address(0);
+    _context.operator = _burner;
+  }
+
   function test_WhenTheBurnerBurnsFromAnyStanding_ItIsOk(
     uint8 _statusSeed
   ) external {
     _stand(_from, _statusOf(_statusSeed));
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.BURN)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_forcedBurn()), Reasons.TRANSFER_OK);
   }
 
-  function test_WhenTheSenderCanLeave_TheBurnerRoleIsNotLookedUp() external {
-    _stand(_from, ICredentialRegistry.Status.ACTIVE);
-    vm.expectCall(_token, abi.encodeCall(IAccessControl.hasRole, (_BURNER_ROLE, _burner)), 0);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.BURN)), Reasons.TRANSFER_OK);
+  /// @dev No receiver, so the registry is not asked about one, and the rule never asks the token who the operator is
+  function test_WhenTheBurnerBurns_NeitherTheRegistryNorTheTokenIsAsked() external {
+    vm.expectCall(_registry, _call(address(0)), 0);
+    vm.expectCall(_token, abi.encodeWithSelector(IAccessControl.hasRole.selector), 0);
+    assertEq(_rule.check(_forcedBurn()), Reasons.TRANSFER_OK);
   }
 
-  function test_WhenTheSenderCannotLeave_TheBurnerRoleIsLookedUpOnce() external {
+  /// @dev A BURN is the holder's own: a holder that cannot leave cannot burn, whoever the operator is
+  function test_WhenAHolderThatCannotLeaveBurns_ItIsRejectedWhoeverTheOperator(
+    bool _operatorIsTheBurner
+  ) external {
     _stand(_from, ICredentialRegistry.Status.BLOCKED);
-    vm.expectCall(_token, abi.encodeCall(IAccessControl.hasRole, (_BURNER_ROLE, _burner)), 1);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.BURN)), Reasons.TRANSFER_OK);
-  }
-
-  function test_WhenTheOperatorIsNotTheBurner_TheBurnIsRejected() external {
-    _stand(_from, ICredentialRegistry.Status.BLOCKED);
-    IPolicyHook.TransferContext memory _burn = _ctx(IPolicyHook.TransferKind.BURN);
-    _burn.operator = _from;
-    assertEq(_rule.check(_burn), Reasons.SENDER_NOT_VERIFIED);
+    IERC8473Policy.TransferContext memory _burn = _ctx(IERC8473Policy.TransferKind.BURN);
+    _burn.operator = _operatorIsTheBurner ? _burner : _from;
+    vm.expectCall(_token, abi.encodeWithSelector(IAccessControl.hasRole.selector), 0);
+    assertEq(_rule.check(_burn), Reasons.SENDER_NOT_ELIGIBLE);
   }
 
   function test_WhenTheKindIsNotBurn_TheBurnerRoleNeverHelps(
     uint8 _kindSeed
   ) external {
-    IPolicyHook.TransferKind _k = IPolicyHook.TransferKind(bound(_kindSeed, 0, 1));
+    IERC8473Policy.TransferKind _k = IERC8473Policy.TransferKind(bound(_kindSeed, 0, 1));
     _stand(_from, ICredentialRegistry.Status.BLOCKED);
     _stand(_to, ICredentialRegistry.Status.ACTIVE);
-    IPolicyHook.TransferContext memory _c = _ctx(_k);
+    IERC8473Policy.TransferContext memory _c = _ctx(_k);
     _c.operator = _burner;
     vm.expectCall(_token, abi.encodeCall(IAccessControl.hasRole, (_BURNER_ROLE, _burner)), 0);
-    assertEq(_rule.check(_c), Reasons.SENDER_NOT_VERIFIED);
+    assertEq(_rule.check(_c), Reasons.SENDER_NOT_ELIGIBLE);
   }
 }
 
@@ -278,7 +284,7 @@ contract CredentialRuleUnit_Receiver is CredentialRuleUnitTest {
     uint8 _kindSeed
   ) external {
     uint8 _pick = uint8(bound(_kindSeed, 0, 3));
-    IPolicyHook.TransferKind _k = _pick == 3 ? IPolicyHook.TransferKind.MINT : IPolicyHook.TransferKind(_pick);
+    IERC8473Policy.TransferKind _k = _pick == 3 ? IERC8473Policy.TransferKind.MINT : IERC8473Policy.TransferKind(_pick);
     _stand(_from, ICredentialRegistry.Status.ACTIVE);
     _stand(_to, ICredentialRegistry.Status.ACTIVE);
     assertEq(_rule.check(_ctx(_k)), Reasons.TRANSFER_OK);
@@ -288,7 +294,7 @@ contract CredentialRuleUnit_Receiver is CredentialRuleUnitTest {
     uint8 _kindSeed,
     uint8 _statusSeed
   ) external {
-    IPolicyHook.TransferKind _k = IPolicyHook.TransferKind(bound(_kindSeed, 0, 3));
+    IERC8473Policy.TransferKind _k = IERC8473Policy.TransferKind(bound(_kindSeed, 0, 3));
     uint256 _pick = bound(_statusSeed, 0, 2);
     ICredentialRegistry.Status _s = _pick == 0
       ? ICredentialRegistry.Status.NONE
@@ -301,14 +307,14 @@ contract CredentialRuleUnit_Receiver is CredentialRuleUnitTest {
   function test_WhenTheReceiverIsLapsed_ItIsRejectedAsExpired(
     uint8 _kindSeed
   ) external {
-    IPolicyHook.TransferKind _k = IPolicyHook.TransferKind(bound(_kindSeed, 0, 3));
+    IERC8473Policy.TransferKind _k = IERC8473Policy.TransferKind(bound(_kindSeed, 0, 3));
     _stand(_from, ICredentialRegistry.Status.ACTIVE);
     _stand(_to, ICredentialRegistry.Status.LAPSED);
     assertEq(_rule.check(_ctx(_k)), Reasons.CREDENTIAL_EXPIRED);
   }
 
   function test_WhenAForcedMoveHasNoSender_TheReceiverIsStillChecked() external {
-    IPolicyHook.TransferContext memory _c = _ctx(IPolicyHook.TransferKind.FORCED);
+    IERC8473Policy.TransferContext memory _c = _ctx(IERC8473Policy.TransferKind.FORCED);
     _c.from = address(0); // an enforcement mint
     _stand(_to, ICredentialRegistry.Status.ACTIVE);
     assertEq(_rule.check(_c), Reasons.TRANSFER_OK);
@@ -317,7 +323,7 @@ contract CredentialRuleUnit_Receiver is CredentialRuleUnitTest {
   }
 
   function test_WhenTheAmountIsZero_TheLegsAreStillChecked() external {
-    IPolicyHook.TransferContext memory _c = _ctx(IPolicyHook.TransferKind.TRANSFER);
+    IERC8473Policy.TransferContext memory _c = _ctx(IERC8473Policy.TransferKind.TRANSFER);
     _c.amount = 0;
     _stand(_from, ICredentialRegistry.Status.ACTIVE);
     _stand(_to, ICredentialRegistry.Status.NONE);
@@ -334,7 +340,7 @@ contract CredentialRuleUnit_Policy is CredentialRuleUnitTest {
   ) internal returns (bytes32 _reason) {
     _stand(_from, ICredentialRegistry.Status.ACTIVE);
     _standing(_to, ICredentialRegistry.Status.ACTIVE, _quals, _attester);
-    _reason = _rule.check(_ctx(IPolicyHook.TransferKind.TRANSFER));
+    _reason = _rule.check(_ctx(IERC8473Policy.TransferKind.TRANSFER));
   }
 
   function test_WhenARequiredBitIsMissing_ItIsNotEligible() external {
@@ -404,8 +410,8 @@ contract CredentialRuleUnit_Unconfigured is CredentialRuleUnitTest {
   }
 
   function _bare(
-    IPolicyHook.TransferKind _k
-  ) internal view returns (IPolicyHook.TransferContext memory _c) {
+    IERC8473Policy.TransferKind _k
+  ) internal view returns (IERC8473Policy.TransferContext memory _c) {
     _c = _ctx(_k);
     _c.token = _bareToken;
   }
@@ -415,14 +421,14 @@ contract CredentialRuleUnit_Unconfigured is CredentialRuleUnitTest {
   ) external {
     _stand(_from, ICredentialRegistry.Status.ACTIVE);
     _stand(_to, _statusOf(_statusSeed));
-    assertEq(_rule.check(_bare(IPolicyHook.TransferKind.TRANSFER)), Reasons.RECEIVER_NOT_ELIGIBLE);
-    assertEq(_rule.check(_bare(IPolicyHook.TransferKind.MINT)), Reasons.RECEIVER_NOT_ELIGIBLE);
-    assertEq(_rule.check(_bare(IPolicyHook.TransferKind.FORCED)), Reasons.RECEIVER_NOT_ELIGIBLE);
+    assertEq(_rule.check(_bare(IERC8473Policy.TransferKind.TRANSFER)), Reasons.RECEIVER_NOT_ELIGIBLE);
+    assertEq(_rule.check(_bare(IERC8473Policy.TransferKind.MINT)), Reasons.RECEIVER_NOT_ELIGIBLE);
+    assertEq(_rule.check(_bare(IERC8473Policy.TransferKind.FORCED)), Reasons.RECEIVER_NOT_ELIGIBLE);
   }
 
   function test_WhenTheTokenHasNoPolicy_HoldersCanStillBurnAndExit() external {
     _stand(_from, ICredentialRegistry.Status.ACTIVE);
-    IPolicyHook.TransferContext memory _burn = _bare(IPolicyHook.TransferKind.BURN);
+    IERC8473Policy.TransferContext memory _burn = _bare(IERC8473Policy.TransferKind.BURN);
     _burn.operator = _from;
     assertEq(_rule.check(_burn), Reasons.TRANSFER_OK);
   }
@@ -430,9 +436,9 @@ contract CredentialRuleUnit_Unconfigured is CredentialRuleUnitTest {
   function test_WhenAPolicyIsRemoved_ReceiversAreRejectedAgain() external {
     _stand(_from, ICredentialRegistry.Status.ACTIVE);
     _stand(_to, ICredentialRegistry.Status.ACTIVE);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.TRANSFER)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.TRANSFER)), Reasons.TRANSFER_OK);
     _policy(Quals.KYC, 0, 0, 0);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.TRANSFER)), Reasons.RECEIVER_NOT_ELIGIBLE);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.TRANSFER)), Reasons.RECEIVER_NOT_ELIGIBLE);
   }
 }
 
@@ -441,27 +447,27 @@ contract CredentialRuleUnit_Legs is CredentialRuleUnitTest {
     _stand(_to, ICredentialRegistry.Status.ACTIVE);
     vm.expectCall(_registry, _call(_to), 1);
     vm.expectCall(_registry, _call(address(0)), 0);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.MINT)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.MINT)), Reasons.TRANSFER_OK);
   }
 
   function test_WhenBurning_OnlyTheSenderIsRead() external {
     _stand(_from, ICredentialRegistry.Status.ACTIVE);
     vm.expectCall(_registry, _call(_from), 1);
     vm.expectCall(_registry, _call(address(0)), 0);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.BURN)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.BURN)), Reasons.TRANSFER_OK);
   }
 
   function test_WhenForcing_OnlyTheReceiverIsRead() external {
     _stand(_to, ICredentialRegistry.Status.ACTIVE);
     vm.expectCall(_registry, _call(_to), 1);
     vm.expectCall(_registry, _call(_from), 0);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.FORCED)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.FORCED)), Reasons.TRANSFER_OK);
   }
 
   function test_WhenTransferring_BothLegsAreReadOnce(
     uint8 _kindSeed
   ) external {
-    IPolicyHook.TransferKind _k = IPolicyHook.TransferKind(bound(_kindSeed, 0, 1));
+    IERC8473Policy.TransferKind _k = IERC8473Policy.TransferKind(bound(_kindSeed, 0, 1));
     _stand(_from, ICredentialRegistry.Status.ACTIVE);
     _stand(_to, ICredentialRegistry.Status.ACTIVE);
     vm.expectCall(_registry, _call(_from), 1);
@@ -472,26 +478,25 @@ contract CredentialRuleUnit_Legs is CredentialRuleUnitTest {
   function test_WhenTheSenderFails_TheReceiverIsNotRead() external {
     _stand(_from, ICredentialRegistry.Status.NONE);
     vm.expectCall(_registry, _call(_to), 0);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.TRANSFER)), Reasons.SENDER_NOT_VERIFIED);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.TRANSFER)), Reasons.SENDER_NOT_ELIGIBLE);
   }
 }
 
 contract CredentialRuleUnit_Model is CredentialRuleUnitTest {
   function _expected(
-    IPolicyHook.TransferKind _k,
+    IERC8473Policy.TransferKind _k,
     ICredentialRegistry.Status _sender,
     ICredentialRegistry.Status _receiver,
-    bool _isBurner
+    bool
   ) internal pure returns (bytes32 _reason) {
-    bool _checksSender = _k == IPolicyHook.TransferKind.TRANSFER || _k == IPolicyHook.TransferKind.EXECUTED
-      || _k == IPolicyHook.TransferKind.BURN;
+    bool _checksSender = _k == IERC8473Policy.TransferKind.TRANSFER || _k == IERC8473Policy.TransferKind.EXECUTED
+      || _k == IERC8473Policy.TransferKind.BURN;
     if (_checksSender) {
       bool _canLeave = _sender == ICredentialRegistry.Status.ACTIVE || _sender == ICredentialRegistry.Status.EXIT_ONLY
         || _sender == ICredentialRegistry.Status.LAPSED;
-      bool _enforcement = _k == IPolicyHook.TransferKind.BURN && _isBurner;
-      if (!_canLeave && !_enforcement) return Reasons.SENDER_NOT_VERIFIED;
+      if (!_canLeave) return Reasons.SENDER_NOT_ELIGIBLE;
     }
-    if (_k != IPolicyHook.TransferKind.BURN) {
+    if (_k != IERC8473Policy.TransferKind.BURN) {
       if (_receiver == ICredentialRegistry.Status.LAPSED) return Reasons.CREDENTIAL_EXPIRED;
       if (_receiver != ICredentialRegistry.Status.ACTIVE) return Reasons.RECEIVER_NOT_VERIFIED;
     }
@@ -504,12 +509,12 @@ contract CredentialRuleUnit_Model is CredentialRuleUnitTest {
     uint8 _receiverSeed,
     bool _isBurner
   ) external {
-    IPolicyHook.TransferKind _k = _kind(_kindSeed);
+    IERC8473Policy.TransferKind _k = _kind(_kindSeed);
     ICredentialRegistry.Status _sender = _statusOf(_senderSeed);
     ICredentialRegistry.Status _receiver = _statusOf(_receiverSeed);
     _stand(_from, _sender);
     _stand(_to, _receiver);
-    IPolicyHook.TransferContext memory _c = _ctx(_k);
+    IERC8473Policy.TransferContext memory _c = _ctx(_k);
     _c.operator = _isBurner ? _burner : _from;
     assertEq(_rule.check(_c), _expected(_k, _sender, _receiver, _isBurner));
   }
@@ -528,21 +533,11 @@ contract CredentialRuleUnit_TokenCallsAreStatic is CredentialRuleUnitTest {
     assertEq(_rule.policyOf(address(_stateful)).attesters, 0);
   }
 
-  function test_WhenTheTokenTriesToWriteDuringTheBurnerCheck_CheckReverts() external {
-    MockStatefulToken _stateful = new MockStatefulToken();
-    _stand(_from, ICredentialRegistry.Status.BLOCKED);
-    IPolicyHook.TransferContext memory _c = _ctx(IPolicyHook.TransferKind.BURN);
-    _c.token = address(_stateful);
-    vm.expectRevert(bytes(''));
-    _rule.check(_c);
-    assertEq(_stateful.writes(), 0);
-  }
-
   function test_WhenCalledWithStaticcall_CheckSucceeds() external {
     _stand(_from, ICredentialRegistry.Status.ACTIVE);
     _stand(_to, ICredentialRegistry.Status.ACTIVE);
     (bool _ok, bytes memory _ret) =
-      address(_rule).staticcall(abi.encodeCall(_rule.check, (_ctx(IPolicyHook.TransferKind.TRANSFER))));
+      address(_rule).staticcall(abi.encodeCall(_rule.check, (_ctx(IERC8473Policy.TransferKind.TRANSFER))));
     assertTrue(_ok);
     assertEq(abi.decode(_ret, (bytes32)), Reasons.TRANSFER_OK);
   }
@@ -563,7 +558,7 @@ contract CredentialRuleUnit_TheTokensOwnAddress is CredentialRuleUnitTest {
     _standingOfTheToken(_statusSeed);
     assertEq(_rule.checkReceive(_token, _token), Reasons.TRANSFER_OK);
 
-    IPolicyHook.TransferContext memory _c = _ctx(IPolicyHook.TransferKind.TRANSFER);
+    IERC8473Policy.TransferContext memory _c = _ctx(IERC8473Policy.TransferKind.TRANSFER);
     _c.to = _token;
     _stand(_from, ICredentialRegistry.Status.ACTIVE);
     assertEq(_rule.check(_c), Reasons.TRANSFER_OK);
@@ -575,7 +570,7 @@ contract CredentialRuleUnit_TheTokensOwnAddress is CredentialRuleUnitTest {
     _standingOfTheToken(_statusSeed);
     assertEq(_rule.checkSend(_token, _token), Reasons.TRANSFER_OK);
 
-    IPolicyHook.TransferContext memory _c = _ctx(IPolicyHook.TransferKind.BURN);
+    IERC8473Policy.TransferContext memory _c = _ctx(IERC8473Policy.TransferKind.BURN);
     _c.from = _token;
     _c.operator = _from; // not a burner: a settlement burn is the vault's own
     assertEq(_rule.check(_c), Reasons.TRANSFER_OK);
@@ -596,14 +591,14 @@ contract CredentialRuleUnit_TheTokensOwnAddress is CredentialRuleUnitTest {
     address _other = _mockContract('other');
     _stand(_other, ICredentialRegistry.Status.NONE);
     assertEq(_rule.checkReceive(_token, _other), Reasons.RECEIVER_NOT_VERIFIED);
-    assertEq(_rule.checkSend(_token, _other), Reasons.SENDER_NOT_VERIFIED);
+    assertEq(_rule.checkSend(_token, _other), Reasons.SENDER_NOT_ELIGIBLE);
   }
 
   function test_TheTokenInAnotherTokensQuestionIsJudgedToo() external {
     address _other = _mockContract('other');
     _stand(_token, ICredentialRegistry.Status.BLOCKED);
     assertEq(_rule.checkReceive(_other, _token), Reasons.RECEIVER_NOT_ELIGIBLE); // that token has no policy
-    assertEq(_rule.checkSend(_other, _token), Reasons.SENDER_NOT_VERIFIED);
+    assertEq(_rule.checkSend(_other, _token), Reasons.SENDER_NOT_ELIGIBLE);
   }
 }
 
@@ -614,7 +609,7 @@ contract CredentialRuleUnit_AccountProbes is CredentialRuleUnitTest {
     ICredentialRegistry.Status _s = _statusOf(_statusSeed);
     _stand(_from, _s);
     bool _cannot = _s == ICredentialRegistry.Status.NONE || _s == ICredentialRegistry.Status.BLOCKED;
-    bytes32 _expected = _cannot ? Reasons.SENDER_NOT_VERIFIED : Reasons.TRANSFER_OK;
+    bytes32 _expected = _cannot ? Reasons.SENDER_NOT_ELIGIBLE : Reasons.TRANSFER_OK;
     assertEq(_rule.checkSend(_token, _from), _expected);
     assertEq(_rule.checkSend(address(0xBEEF), _from), _expected);
   }
@@ -636,7 +631,9 @@ contract CredentialRuleUnit_AccountProbes is CredentialRuleUnitTest {
     _rule.checkReceive(_token, _to);
   }
 
-  function test_WhenKindStandingsAndPolicyAreFuzzed_CheckIsTheProbesInOrderWithTheEnforcementBurnExempt(
+  /// @dev ERC-8473, policy requirement 4, for this rule: `check` is the two account answers in order for every kind
+  ///      that has the account, whoever the operator is. Only FORCED skips the sender
+  function test_WhenKindStandingsAndPolicyAreFuzzed_CheckIsTheProbesInOrderWhoeverTheOperator(
     uint8 _kindSeed,
     uint8 _senderSeed,
     uint8 _receiverSeed,
@@ -645,19 +642,19 @@ contract CredentialRuleUnit_AccountProbes is CredentialRuleUnitTest {
     bool _isBurner
   ) external {
     _policy(_requireAll, 0, 0, 1);
-    IPolicyHook.TransferKind _k = _kind(_kindSeed);
+    IERC8473Policy.TransferKind _k = _kind(_kindSeed);
     _standing(_from, _statusOf(_senderSeed), 0, 0);
     _standing(_to, _statusOf(_receiverSeed), _quals, 0);
-    IPolicyHook.TransferContext memory _c = _ctx(_k);
+    IERC8473Policy.TransferContext memory _c = _ctx(_k);
     _c.operator = _isBurner ? _burner : _from;
 
     bytes32 _send = _rule.checkSend(_token, _from);
     bytes32 _receive = _rule.checkReceive(_token, _to);
     bytes32 _expected;
-    if (_k == IPolicyHook.TransferKind.TRANSFER || _k == IPolicyHook.TransferKind.EXECUTED) {
+    if (_k == IERC8473Policy.TransferKind.TRANSFER || _k == IERC8473Policy.TransferKind.EXECUTED) {
       _expected = _send != Reasons.TRANSFER_OK ? _send : _receive;
-    } else if (_k == IPolicyHook.TransferKind.BURN) {
-      _expected = _isBurner ? Reasons.TRANSFER_OK : _send;
+    } else if (_k == IERC8473Policy.TransferKind.BURN) {
+      _expected = _send; // no receiver, and the operator's role changes nothing
     } else {
       _expected = _receive; // MINT and FORCED check the receiver only
     }

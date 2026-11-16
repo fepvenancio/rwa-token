@@ -267,10 +267,10 @@
     <table class="tight">
       <thead><tr><th>Role and holder</th><th>Can</th><th>Cannot, or only with limits</th></tr></thead>
       <tbody>
-        <tr><td><code>DEFAULT_ADMIN_ROLE</code><br><span class="small">main timelock</span></td><td>Grant and revoke every role. <code>setPolicyHook</code>. <code>unpause()</code>. It is also the "token admin" that the hook asks before <code>setRules</code>, that the rules ask before their settings, and that a portfolio, a guarded account and a desk ask.</td><td>A hook must be attested as <code>HOOK</code> and name the token's registry (<code>PolicyGated_NotAttested</code>, <code>PolicyGated_HookRegistryMismatch</code>). The registry itself has no setter.</td></tr>
+        <tr><td><code>DEFAULT_ADMIN_ROLE</code><br><span class="small">main timelock</span></td><td>Grant and revoke every role. <code>installPolicy</code>. <code>unpause()</code>. It is also the "token admin" that the hook asks before <code>setRules</code>, that the rules ask before their settings, and that a portfolio, a guarded account and a desk ask.</td><td>A hook must be attested as <code>HOOK</code>, name the token's registry and answer the policy interface id (<code>PolicyGated_NotAttested</code>, <code>PolicyGated_HookRegistryMismatch</code>, <code>PolicyGated_NotAPolicy</code>). The registry itself has no setter.</td></tr>
         <tr><td><code>UPGRADER_ROLE</code><br><span class="small">main timelock</span></td><td><code>upgradeToAndCall(implementation, data)</code></td><td>The implementation must be attested as <code>IMPLEMENTATION</code> and report the same <code>templateId()</code> (<code>PolicyGated_NotAttested</code>, <code>Templated_WrongTemplate</code>).</td></tr>
         <tr><td><code>MINTER_ROLE</code><br><span class="small">minter, on token templates</span></td><td><code>mint(to, amount)</code>, which runs the hook as a <span class="k k-mint">MINT</span></td><td>The receiver must pass the rules. Refused while paused. On both vaults this function reverts for every caller (<code>GatedVault_Unsupported</code>): shares come only from deposits, deposit claims and the agent's <code>recoverClaimable</code>, which delivers claimable shares as a <span class="k k-forced">FORCED</span> mint.</td></tr>
-        <tr><td><code>BURNER_ROLE</code><br><span class="small">burner, on token templates</span></td><td><code>burn(from, amount)</code> with no allowance. It may take frozen tokens and lowers the frozen amount by the part it takes.</td><td>Refused for an address-frozen holder (<code>SENDER_FROZEN</code>) and while paused. Reverts on both vaults for every caller. The rules read the role, not the intent: any burn this account drives counts as enforcement, so it is a service account and not an investor.</td></tr>
+        <tr><td><code>BURNER_ROLE</code><br><span class="small">burner, on token templates</span></td><td><code>burn(from, amount)</code> with no allowance, a <span class="k k-forced">FORCED</span> move with no receiver that works while paused. It may take frozen tokens and lowers the frozen amount by the part it takes. The holder's lockup, address freeze, standing and minimum position do not stop it.</td><td>Never more than the balance (<code>ERC20InsufficientBalance</code>). It still runs the hook, so a token with no rules refuses it. Reverts on both vaults for every caller. No rule reads the role: the kind decides, so an account that holds the role and moves its own tokens is judged like any holder.</td></tr>
         <tr><td><code>AGENT_ROLE</code><br><span class="small">agent</span></td><td><code>forcedTransfer(from, to, amount)</code>, a <span class="k k-forced">FORCED</span> move that works while paused and may take frozen tokens. <code>setFrozenTokens(account, amount)</code>. On <code>HolderRestrictionRule</code>, <code>setLockup</code> and <code>setFrozen</code> for this token.</td><td>The receiver of a forced move is still judged: it needs a credential the token's policy accepts and must not be address-frozen.</td></tr>
         <tr><td><code>GUARDIAN_ROLE</code><br><span class="small">guardian multisig</span></td><td><code>pause()</code>, with no delay. <a href="#guardian">What else the role allows</a>, on a 4626 and on a vault's legos.</td><td>Cannot unpause, grant roles, change the hook or upgrade.</td></tr>
         <tr><td><code>RECOVERY_ROLE</code><br><span class="small">recovery timelock</span></td><td><code>unpause()</code> and <code>revokeRole(GUARDIAN_ROLE, account)</code></td><td>Nothing else: it is not a role admin, so it cannot grant, and every other revocation needs the role's admin.</td></tr>
@@ -286,7 +286,7 @@
       <thead><tr><th>Template</th><th>Who</th><th>What</th></tr></thead>
       <tbody>
         <tr><td rowspan="5"><code>Gated721</code></td><td><code>MINTER_ROLE</code></td><td><code>mint(to, tokenId, uri)</code>, a <span class="k k-mint">MINT</span> of one item with its metadata URI.</td></tr>
-        <tr><td><code>BURNER_ROLE</code></td><td><code>burn(tokenId)</code>, with no approval. It may take an item frozen for its owner and clears that freeze.</td></tr>
+        <tr><td><code>BURNER_ROLE</code></td><td><code>burn(tokenId)</code>, with no approval, a <span class="k k-forced">FORCED</span> move with no receiver that works while paused. It may take an item frozen for its owner and clears that freeze.</td></tr>
         <tr><td><code>AGENT_ROLE</code></td><td><code>forcedTransfer(from, to, tokenId)</code>, <code>setFrozenTokens(account, tokenId, frozenStatus)</code>, a freeze of one item for one account, and <code>setTokenURI(tokenId, uri)</code>.</td></tr>
         <tr><td>The owner, or an approved operator</td><td><code>transferFrom</code> and <code>safeTransferFrom</code>, judged as <span class="k k-transfer">TRANSFER</span>.</td></tr>
         <tr><td>Any account</td><td><code>setApprovalForAll</code> for itself, and <code>approve</code> of an item it owns or is approved for all of. There is no <code>permit</code>.</td></tr>
@@ -359,7 +359,7 @@
         <tr><td><code>GUARDIAN_ROLE</code></td><td><code>blockSubject(subject)</code>. <code>killAttester(id)</code>, which the admin may also call.</td></tr>
         <tr><td><code>DEFAULT_ADMIN_ROLE</code> or <code>RECOVERY_ROLE</code></td><td><code>clearGuardianBlock(subject)</code>, <code>reviveAttester(id)</code>.</td></tr>
         <tr><td><code>DEFAULT_ADMIN_ROLE</code></td><td><code>addAttester</code>, <code>setAttesterAccount</code>, <code>setAttesterQuals</code>, roles. <code>RECOVERY_ROLE</code> may also revoke <code>GUARDIAN_ROLE</code>.</td></tr>
-        <tr><td><a href="contracts/ComplianceHook.html"><code>ComplianceHook</code></a></td><td>The token itself, or the holder of <code>DEFAULT_ADMIN_ROLE</code> on that token</td><td><code>setRules(token, rules)</code>. The hook has no roles of its own: it asks the token at call time (<code>ComplianceHook_NotTokenAdmin</code> otherwise). <code>afterTransfer</code> is open only to the token the context names (<code>ComplianceHook_OnlyToken</code>).</td></tr>
+        <tr><td><a href="contracts/ComplianceHook.html"><code>ComplianceHook</code></a></td><td>The token itself, or the holder of <code>DEFAULT_ADMIN_ROLE</code> on that token</td><td><code>setRules(token, rules)</code>. The hook has no roles of its own: it asks the token at call time (<code>ComplianceHook_NotTokenAdmin</code> otherwise). <code>afterTransfer</code> is open only to the token the context names, and <code>onInstall</code> only to the token it names (<code>ComplianceHook_OnlyToken</code>).</td></tr>
         <tr><td rowspan="4">Rules</td><td>The holder of <code>DEFAULT_ADMIN_ROLE</code> on the token</td><td><code>CredentialRule.setPolicy</code>, <code>SettlementWindowRule.setWindow</code>, <code>MinPositionRule.setMinPosition</code> and <code>setExempt</code>, <code>SupplyCapRule.setSupplyCap</code>. Each rule asks the token at call time.</td></tr>
         <tr><td>The holder of <code>AGENT_ROLE</code> on the token</td><td><code>HolderRestrictionRule.setLockup</code>, <code>setFrozen</code>.</td></tr>
         <tr><td>The hook the token has installed</td><td><code>after_</code> (<code>ComplianceRule_OnlyHook</code>), which <code>FundHoldersRule</code> uses to record investors.</td></tr>
@@ -479,7 +479,7 @@
     <table class="tight">
       <thead><tr><th>Waits for a timelock</th><th>Takes effect at once</th></tr></thead>
       <tbody>
-        <tr><td>Unpause. Replacing a hook or a rule list. Rule settings: credential policy, settlement window, minimum position and exemptions, supply cap. A fund's rule, cap, exemptions and later classes. Upgrades. Every role grant and revocation. Attester list changes in the credential registry. Adding, removing or writing off an adapter, raising a cap, granting a permission, plugging in a portfolio or a fee model, raising a 4626's rate, a desk's settings and its replacement.</td><td>Guardian: every power <a href="#guardian">above</a>. Council: attest, revoke. KYC attester: credentials. Operations account: placing a product. Agent: forced transfers, frozen amounts, lockups, address freezes, 7540 recoveries. Minter, burner and operator: their daily work. Allocator: moving money under caps on the allocation and through validators. Distribution maker and checker: proposing and approving. Holders: their own movements.</td></tr>
+        <tr><td>Unpause. Replacing a hook (<code>installPolicy</code>) or a rule list (<code>setRules</code>). Rule settings: credential policy, settlement window, minimum position and exemptions, supply cap. A fund's rule, cap, exemptions and later classes. Upgrades. Every role grant and revocation. Attester list changes in the credential registry. Adding, removing or writing off an adapter, raising a cap, granting a permission, plugging in a portfolio or a fee model, raising a 4626's rate, a desk's settings and its replacement.</td><td>Guardian: every power <a href="#guardian">above</a>. Council: attest, revoke. KYC attester: credentials. Operations account: placing a product. Agent: forced transfers, frozen amounts, lockups, address freezes, 7540 recoveries. Minter, burner and operator: their daily work. Allocator: moving money under caps on the allocation and through validators. Distribution maker and checker: proposing and approving. Holders: their own movements.</td></tr>
       </tbody>
     </table>
   </div>
@@ -491,11 +491,11 @@
 <section id="pause">
   <div class="prose">
     <h2>During a pause</h2>
-    <p>A product's pause is one check at the start of every balance movement, before the frozen-balance check and before the hook. It lets one kind through: an enforcement move, by the agent or, for <code>recoverRedeemRequest</code> once the request's period has closed, by <code>SETTLER_ROLE</code>. Calls that move no balance are not affected unless they check the pause themselves.</p>
+    <p>A product's pause is one check at the start of every balance movement, before the frozen-balance check and before the hook. It lets one kind through: an enforcement move, by the agent, by the burner with <code>burn</code> or, for <code>recoverRedeemRequest</code> once the request's period has closed, by <code>SETTLER_ROLE</code>. Calls that move no balance are not affected unless they check the pause themselves.</p>
   </div>
   <figure>
     <div class="fig-scroll">
-      <svg class="d" viewBox="0 0 780 230" role="img" aria-label="While a product is paused, a movement of kind TRANSFER, EXECUTED, MINT or BURN is rejected with PolicyGated_TransferRejected(PAUSED). A FORCED movement continues to the frozen-balance check and the hook.">
+      <svg class="d" viewBox="0 0 780 230" role="img" aria-label="While a product is paused, a movement of kind TRANSFER, EXECUTED, MINT or BURN is rejected with ERC8473PolicyRejected(PAUSED). A FORCED movement continues to the frozen-balance check and the hook.">
         <defs>
           <marker id="ro-p" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
           <marker id="ro-p-rej" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="rej"/></marker>
@@ -525,7 +525,7 @@
         <line class="ln-rej" x1="424" y1="92" x2="488" y2="92" marker-end="url(#ro-p-rej)"/>
         <text x="456" y="84" class="sm m" text-anchor="middle">no</text>
         <rect class="rejbox" x="490" y="70" width="278" height="44" rx="6"/>
-        <text x="504" y="97" class="mono sm rej">PolicyGated_TransferRejected(PAUSED)</text>
+        <text x="504" y="97" class="mono sm rej">ERC8473PolicyRejected(PAUSED)</text>
 
         <line class="ln" x1="424" y1="140" x2="488" y2="140" marker-end="url(#ro-p)"/>
         <text x="456" y="132" class="sm m" text-anchor="middle">yes</text>
@@ -533,41 +533,43 @@
         <text x="504" y="153" class="sm">continues to the frozen check and the hook</text>
       </svg>
     </div>
-    <figcaption><b>Only an enforcement move gets past a pause.</b> <code>forcedTransfer</code>, and the 7540 vault's two recoveries, which announce the <span class="k k-forced">FORCED</span> kind, still run the rules, so the receiver must still hold a credential and must not be address-frozen.</figcaption>
+    <figcaption><b>Only an enforcement move gets past a pause.</b> <code>forcedTransfer</code>, and the 7540 vault's two recoveries, which announce the <span class="k k-forced">FORCED</span> kind, still run the rules, so the receiver must still hold a credential and must not be address-frozen. The burner's <code>burn</code> announces <span class="k k-forced">FORCED</span> too, and has no receiver to judge.</figcaption>
   </figure>
   <div class="table-wrap">
     <table class="tight">
       <thead><tr><th>Where</th><th>Entry point</th><th>While paused</th></tr></thead>
       <tbody>
-        <tr><td rowspan="6">Every product</td><td><code>transfer</code>, <code>transferFrom</code></td><td class="no">reverts <code>PolicyGated_TransferRejected(PAUSED)</code></td></tr>
+        <tr><td rowspan="6">Every product</td><td><code>transfer</code>, <code>transferFrom</code></td><td class="no">reverts <code>ERC8473PolicyRejected(PAUSED)</code></td></tr>
         <tr><td><code>forcedTransfer</code></td><td class="ok">works</td></tr>
         <tr><td><code>setFrozenTokens</code>, <code>approve</code>, and <code>permit</code> where the template has it</td><td class="ok">works: no balance moves</td></tr>
-        <tr><td><code>canTransfer</code>, <code>canTransferWithReason</code>, <code>canSend</code>, <code>canReceive</code></td><td><code>false</code>; <code>canTransferWithReason</code> gives the reason <code>PAUSED</code></td></tr>
-        <tr><td><code>setPolicyHook</code>, <code>upgradeToAndCall</code>, <code>grantRole</code>, <code>revokeRole</code></td><td class="ok">works, for their role holders</td></tr>
+        <tr><td><code>canTransfer</code>, <code>canTransferWithReason</code>, <code>canSend</code>, <code>canReceive</code></td><td><code>false</code>; <code>canTransferWithReason</code> gives the reason <code>PAUSED</code>. <code>canSend</code> and <code>canReceive</code> stay <code>true</code> for the zero address</td></tr>
+        <tr><td><code>installPolicy</code>, <code>upgradeToAndCall</code>, <code>grantRole</code>, <code>revokeRole</code></td><td class="ok">works, for their role holders</td></tr>
         <tr><td><code>unpause</code></td><td>main or recovery timelock only; on a product that is not paused it reverts <code>ExpectedPause</code></td></tr>
-        <tr><td rowspan="2"><code>Gated721</code></td><td><code>mint</code>, <code>burn</code>, <code>safeTransferFrom</code></td><td class="no">reverts <code>PolicyGated_TransferRejected(PAUSED)</code></td></tr>
+        <tr><td rowspan="3"><code>Gated721</code></td><td><code>mint</code>, <code>safeTransferFrom</code></td><td class="no">reverts <code>ERC8473PolicyRejected(PAUSED)</code></td></tr>
+        <tr><td><code>burn</code></td><td class="ok">works: <span class="k k-forced">FORCED</span></td></tr>
         <tr><td><code>setTokenURI</code>, <code>setApprovalForAll</code></td><td class="ok">works: nothing moves</td></tr>
-        <tr><td rowspan="3"><code>GatedToken</code>, <code>IntentToken</code></td><td><code>mint</code>, <code>burn</code></td><td class="no">reverts <code>PolicyGated_TransferRejected(PAUSED)</code></td></tr>
-        <tr><td><code>executeTransfer</code>, on <code>IntentToken</code></td><td class="no">an intent that passes its own checks reverts <code>PolicyGated_TransferRejected(PAUSED)</code>; <code>canExecute</code> says <code>PAUSED</code></td></tr>
+        <tr><td rowspan="4"><code>GatedToken</code>, <code>IntentToken</code></td><td><code>mint</code></td><td class="no">reverts <code>ERC8473PolicyRejected(PAUSED)</code></td></tr>
+        <tr><td><code>burn</code></td><td class="ok">works: <span class="k k-forced">FORCED</span></td></tr>
+        <tr><td><code>executeTransfer</code>, on <code>IntentToken</code></td><td class="no">an intent that passes its own checks reverts <code>ERC8473PolicyRejected(PAUSED)</code>; <code>canExecute</code> says <code>PAUSED</code></td></tr>
         <tr><td><code>cancelIntent</code>, on <code>IntentToken</code></td><td class="ok">works</td></tr>
         <tr><td rowspan="5"><code>Gated4626Vault</code></td><td><code>deposit</code>, <code>mint</code></td><td class="no">a non-zero amount reverts <code>ERC4626ExceededMaxDeposit</code> or <code>ERC4626ExceededMaxMint</code>, because <code>maxDeposit</code> and <code>maxMint</code> return 0</td></tr>
         <tr><td><code>withdraw</code>, <code>redeem</code></td><td class="no">a non-zero amount reverts <code>ERC4626ExceededMaxWithdraw</code> or <code>ERC4626ExceededMaxRedeem</code></td></tr>
-        <tr><td>the same four with 0</td><td class="no">reverts <code>PolicyGated_TransferRejected(PAUSED)</code></td></tr>
+        <tr><td>the same four with 0</td><td class="no">reverts <code>ERC8473PolicyRejected(PAUSED)</code></td></tr>
         <tr><td><code>collectFees</code></td><td class="no">reverts <code>EnforcedPause()</code></td></tr>
         <tr><td><code>accrue</code>, <code>setPortfolio</code>, <code>setFeeModel</code>, <code>setMaxRate</code></td><td class="ok">works: none checks the pause</td></tr>
         <tr><td rowspan="10"><code>Gated7540Vault</code></td><td><code>requestDeposit</code></td><td class="no">reverts <code>Gated7540Vault_ControllerNotEligible(PAUSED)</code></td></tr>
-        <tr><td><code>requestRedeem</code></td><td class="no">reverts <code>PolicyGated_TransferRejected(PAUSED)</code></td></tr>
+        <tr><td><code>requestRedeem</code></td><td class="no">reverts <code>ERC8473PolicyRejected(PAUSED)</code></td></tr>
         <tr><td><code>closePeriod</code></td><td class="ok">works: a period can close during a pause</td></tr>
         <tr><td><code>settlePeriod</code></td><td class="no">reverts <code>EnforcedPause()</code></td></tr>
         <tr><td><code>rejectDepositRequest</code></td><td class="ok">works: it moves the asset only, no shares</td></tr>
-        <tr><td><code>rejectRedeemRequest</code></td><td class="no">reverts <code>PolicyGated_TransferRejected(PAUSED)</code>; the shares stay in escrow</td></tr>
+        <tr><td><code>rejectRedeemRequest</code></td><td class="no">reverts <code>ERC8473PolicyRejected(PAUSED)</code>; the shares stay in escrow</td></tr>
         <tr><td><code>recoverRedeemRequest</code>, <code>recoverClaimable</code></td><td class="ok">works: <span class="k k-forced">FORCED</span></td></tr>
         <tr><td><code>deposit</code>, <code>mint</code> (claims)</td><td class="no">reverts <code>Gated7540Vault_ControllerNotEligible(PAUSED)</code></td></tr>
         <tr><td><code>redeem</code>, <code>withdraw</code> (claims)</td><td class="no">reverts <code>EnforcedPause()</code></td></tr>
         <tr><td><code>setOperator</code></td><td class="ok">works</td></tr>
         <tr><td rowspan="3"><code>NavDesk</code>, its vault paused</td><td><code>closePeriod</code>, <code>propose</code>, <code>accept</code>, <code>cancel</code></td><td class="ok">works: none checks the pause</td></tr>
         <tr><td><code>execute</code></td><td class="no">reverts <code>EnforcedPause()</code>, from the vault; the proposal stays on the table</td></tr>
-        <tr><td><code>refundRequest</code>, <code>recoverRequest</code></td><td><span class="ok">works</span> for a deposit's refund and a recovery; a redemption's refund reverts <code>PolicyGated_TransferRejected(PAUSED)</code></td></tr>
+        <tr><td><code>refundRequest</code>, <code>recoverRequest</code></td><td><span class="ok">works</span> for a deposit's refund and a recovery; a redemption's refund reverts <code>ERC8473PolicyRejected(PAUSED)</code></td></tr>
         <tr><td rowspan="3"><code>Portfolio</code>, <code>GuardedAccount</code>, the vault paused</td><td><code>Portfolio.allocate</code></td><td class="no">reverts <code>Portfolio_VaultPaused</code></td></tr>
         <tr><td><code>GuardedAccount.execute</code></td><td class="no">reverts <code>GuardedAccount_VaultPaused</code>. So a permission that pulls money back through <code>execute</code> waits for the unpause.</td></tr>
         <tr><td><code>Portfolio.deallocate</code>, <code>setCaps</code>, and the admin's calls</td><td class="ok">works: a pause stops <code>allocate</code> and <code>GuardedAccount.execute</code>. Money still comes back by <code>deallocate</code>, and still leaves the portfolio by <code>migrateTo</code>.</td></tr>
@@ -576,7 +578,7 @@
         <tr><td><code>SignedEntry</code>, the vault paused</td><td><code>enterWithPermit</code>, <code>enterWith3009</code></td><td class="no">reverts with the vault's error for a deposit or a request</td></tr>
         <tr><td rowspan="2">An executor paused</td><td><code>IntentExecutor.execute</code>, <code>executeBatch</code></td><td class="no">reverts <code>EnforcedPause()</code></td></tr>
         <tr><td><code>DvPExecutor.executeDvPGated</code>, <code>executeDvP3009</code></td><td class="no">reverts <code>EnforcedPause()</code>; the two pre-flights answer <code>PAUSED</code></td></tr>
-        <tr><td rowspan="2">A token paused, its executor not</td><td><code>IntentExecutor.execute</code>, <code>executeBatch</code></td><td class="no"><code>execute</code> passes the token's <code>PolicyGated_TransferRejected(PAUSED)</code> through unchanged; <code>executeBatch</code> wraps it in <code>IntentExecutor_BatchItemFailed(index, reason)</code></td></tr>
+        <tr><td rowspan="2">A token paused, its executor not</td><td><code>IntentExecutor.execute</code>, <code>executeBatch</code></td><td class="no"><code>execute</code> passes the token's <code>ERC8473PolicyRejected(PAUSED)</code> through unchanged; <code>executeBatch</code> wraps it in <code>IntentExecutor_BatchItemFailed(index, reason)</code></td></tr>
         <tr><td><code>DvPExecutor</code> trades</td><td class="no">reverts <code>DvPExecutor_LegFailed(leg, reason)</code>, with the token's revert data as <code>reason</code></td></tr>
       </tbody>
     </table>
@@ -609,6 +611,7 @@
       <li><b>Nothing on chain makes an account a multisig.</b> Governance, the guardian, the council and the operations account are addresses given to the modules. The post-deploy check asks for a threshold on four roles only, on the accounts it is told about.</li>
       <li><b>There is no list of holders on chain.</b> The contracts do not enumerate a role's holders, so a complete list comes from <code>RoleGranted</code> and <code>RoleRevoked</code> events, and the check sees only the accounts it is given.</li>
       <li><b>The agent's power is large and immediate.</b> A stolen agent key can force any holder's tokens to an account the policy accepts, and set frozen amounts, lockups and freezes, with no delay, until the timelock revokes the role. On a 7540 it can also pay a controller's claimable redemption cash, and deliver its claimable shares, to any account the policy accepts (<code>recoverClaimable</code>). The guardian's pause does not stop a forced move or this.</li>
+      <li><b>The burner's power is not stopped by a pause.</b> A stolen burner key can destroy any holder's balance on a token, or any item on a <code>Gated721</code>, with no delay. <code>burn</code> is a <span class="k k-forced">FORCED</span> move, so the guardian's pause does not stop it, and neither does a lockup, an address freeze or a frozen amount. The remedy is for the timelock to revoke <code>BURNER_ROLE</code>.</li>
       <li><b>The minter's power is bounded only by the rules.</b> A stolen minter key can mint to any eligible account. <code>SupplyCapRule</code> limits that where a product lists it, and no shipped profile does.</li>
       <li><b>Who holds <code>SETTLER_ROLE</code> sets the price and the redemption limit.</b> The vault takes whatever <code>settlePeriod</code> is given and does not check the holder. The role belongs with a desk, and the timelock can grant it to anyone: that is delayed and visible, not prevented.</li>
       <li><b>An attester decides who may hold.</b> A stolen attester key can credential any address that no other live attester has a record for, with any bit it may assert, for every token whose policy trusts it, until the guardian kills it.</li>
@@ -637,13 +640,13 @@
     <ul class="plain">
       <li>Role grants: <code>Core.ts</code>, <code>CoreHandover.ts</code>, <code>PartsHandover.ts</code> and <code>handOverParts</code> in <code>ignition/parts.ts</code>, <code>Product.ts</code>, <code>FundOpen.ts</code>; role ids in <code>roles.ts</code>; exceptions in <code>profiles.ts</code></li>
       <li>Hand-over check: <code>assertHandedOver</code> in <code>test/nodejs/fixtures.ts</code></li>
-      <li>Role gates in code: <code>PolicyGatedCoreUpgradeable.sol</code>, <code>PolicyGatedERC20Upgradeable.sol</code>, <code>IntentSettledUpgradeable.sol</code>, <code>Gated721.sol</code>, <code>Gated4626Vault.sol</code>, <code>Gated7540Vault.sol</code>, <code>Gated7540Settlement.sol</code>, <code>PolicyRegistry.sol</code>, <code>GovernanceTimelock.sol</code>, <code>CredentialRegistry.sol</code>, <code>IntentExecutor.sol</code>, <code>DvPExecutor.sol</code>, <code>Portfolio.sol</code>, <code>GuardedAccount.sol</code>, <code>NavDesk.sol</code>, <code>Distributor.sol</code>, <code>ComplianceHook.sol</code>, and the rules' setters, which ask the token's roles</li>
+      <li>Role gates in code: <code>PolicyGatedCoreUpgradeable.sol</code>, <code>PolicyGatedERC20Upgradeable.sol</code>, <code>IntentSettledUpgradeable.sol</code>, <code>Gated721.sol</code>, <code>Gated4626Vault.sol</code>, <code>Gated4626Management.sol</code>, <code>Gated7540Vault.sol</code>, <code>Gated7540Settlement.sol</code>, <code>PolicyRegistry.sol</code>, <code>GovernanceTimelock.sol</code>, <code>CredentialRegistry.sol</code>, <code>IntentExecutor.sol</code>, <code>DvPExecutor.sol</code>, <code>Portfolio.sol</code>, <code>GuardedAccount.sol</code>, <code>NavDesk.sol</code>, <code>Distributor.sol</code>, <code>ComplianceHook.sol</code>, and the rules' setters, which ask the token's roles</li>
       <li>Tests: <code>test/nodejs/governance.test.ts</code> (the delay, the guardian's veto and the recovery batch), <code>test/nodejs/legos.test.ts</code> (what the hand-over check refuses), <code>GovernanceTimelock.t.sol</code>, and behaviour while paused in <code>Gated7540Vault.t.sol</code>, <code>Gated4626Vault.t.sol</code>, <code>NavDesk.t.sol</code>, <code>Portfolio.t.sol</code> and <code>GuardedAccount.t.sol</code></li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>4a906cc</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>e728b81</code> on <code>erc8473-main</code>.</footer>
 </main>
 </body>
 </html>

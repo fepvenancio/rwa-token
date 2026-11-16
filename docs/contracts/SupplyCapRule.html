@@ -71,7 +71,7 @@
     </table>
   </div>
   <div class="prose">
-    <p>The token reverts a refused mint with <code>PolicyGated_TransferRejected(ABOVE_SUPPLY_CAP)</code>, and <code>canTransferWithReason(address(0), to, amount)</code> says the same without moving anything.</p>
+    <p>The token reverts a refused mint with <code>ERC8473PolicyRejected(ABOVE_SUPPLY_CAP)</code>, and <code>canTransferWithReason(address(0), to, amount)</code> says the same without moving anything.</p>
   </div>
 </section>
 
@@ -121,6 +121,7 @@
         <tr><td><code>check(ctx)</code></td><td>Anyone (read-only); the hook in practice</td><td>The decision above: <code>TRANSFER_OK</code> or <code>ABOVE_SUPPLY_CAP</code>.</td></tr>
         <tr><td><code>checkSend</code>, <code>checkReceive</code></td><td>Anyone (read-only)</td><td><code>TRANSFER_OK</code> for every account.</td></tr>
         <tr><td><code>after_(ctx)</code></td><td>The hook of <code>ctx.token</code></td><td>The empty default. The hook does not call it, because <code>wantsAfter()</code> is false.</td></tr>
+        <tr><td><code>onInstall(token, previousPolicy)</code></td><td>Anyone; the hook when a token installs it</td><td>The empty default: the rule keeps no state derived from movements.</td></tr>
         <tr><td><code>ruleId()</code>, <code>wantsAfter()</code>, <code>supportsInterface(id)</code></td><td>Anyone (read-only)</td><td><code>keccak256('SupplyCapRule.v1')</code>; false; ERC-165 for <code>ISupplyCapRule</code>, <code>IComplianceRule</code> and <code>IERC165</code> (<code>test_ItAnswersForItsInterfaces</code>).</td></tr>
       </tbody>
     </table>
@@ -172,7 +173,7 @@
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>4a906cc</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>e728b81</code> on <code>erc8473-main</code>.</footer>
 </main>
 </body>
 </html>

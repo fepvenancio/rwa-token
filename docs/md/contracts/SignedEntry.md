@@ -226,4 +226,4 @@ The checks run in the order of the table, from `SignedEntry_Expired` to `SignedE
 
 ---
 
-Describes the contracts at commit `4a906cc` on `main`.
+Describes the contracts at commit `e728b81` on `erc8473-main`.

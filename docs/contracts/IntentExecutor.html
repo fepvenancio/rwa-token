@@ -48,7 +48,7 @@
   </div>
   <figure>
     <div class="fig-scroll">
-      <svg class="d" viewBox="0 0 780 592" role="img" aria-label="The holder signs an intent off-chain and gives it to the operator. The operator calls execute on the IntentExecutor. The executor checks that the caller holds OPERATOR_ROLE, that it is not paused, and that the intent states no consideration, otherwise it reverts. It forwards the same intent to the token with executeTransfer. The token checks, in order, the caller's EXECUTOR_ROLE, the deadline, the nonce, a stated consideration and the named executor, validAfter, a zero receiver and the holder's signature, then marks the nonce used. It asks the hook with beforeTransfer, kind EXECUTED; the hook answers TRANSFER_OK or the token reverts. Balances move, afterTransfer runs if the hook wants it, IntentExecuted is emitted, and the intent hash returns to the executor and the operator.">
+      <svg class="d" viewBox="0 0 780 592" role="img" aria-label="The holder signs an intent off-chain and gives it to the operator. The operator calls execute on the IntentExecutor. The executor checks that the caller holds OPERATOR_ROLE, that it is not paused, and that the intent states no consideration, otherwise it reverts. It forwards the same intent to the token with executeTransfer. The token checks, in order, the caller's EXECUTOR_ROLE, the deadline, the nonce, a stated consideration and the named executor, validAfter, a zero receiver and the holder's signature, then marks the nonce used. It asks the hook with checkTransfer, kind EXECUTED; the hook answers TRANSFER_OK or the token reverts. Balances move, afterTransfer runs on the hook, IntentExecuted is emitted, and the intent hash returns to the executor and the operator.">
         <defs>
           <marker id="ie-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
           <marker id="ie-arrow-ex" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="t-executed"/></marker>
@@ -98,7 +98,7 @@
         <text x="480" y="375" class="sm bold">then: nonce marked used</text>
 
         <line class="ln c-executed" x1="560" y1="410" x2="716" y2="410" marker-end="url(#ie-arrow-ex)"/>
-        <text x="568" y="402" class="mono sm">beforeTransfer</text>
+        <text x="568" y="402" class="mono sm">checkTransfer</text>
         <text x="568" y="426" class="sm t-executed">kind EXECUTED</text>
         <line class="ln dash" x1="720" y1="460" x2="564" y2="460" marker-end="url(#ie-arrow)"/>
         <text x="568" y="452" class="sm">TRANSFER_OK, or revert</text>
@@ -112,11 +112,11 @@
         <text x="180" y="564" class="mono sm">intentHash</text>
       </svg>
     </div>
-    <figcaption><b>The executor forwards; the token decides.</b> A revert anywhere undoes the whole call, the nonce write included, so a refused intent can be submitted again once whatever refused it has changed, until its deadline. <code>execute</code> passes the token's revert data through unchanged, for example <code>PolicyGated_TransferRejected(reason)</code>.</figcaption>
+    <figcaption><b>The executor forwards; the token decides.</b> A revert anywhere undoes the whole call, the nonce write included, so a refused intent can be submitted again once whatever refused it has changed, until its deadline. <code>execute</code> passes the token's revert data through unchanged, for example <code>ERC8473PolicyRejected(reason)</code>.</figcaption>
   </figure>
   <ol class="steps">
     <li><div><b>Executor checks.</b> The caller holds <code>OPERATOR_ROLE</code> (<code>AccessControlUnauthorizedAccount</code>), the executor is not paused (<code>EnforcedPause</code>), and the intent states no consideration (<code>IntentExecutor_ConsiderationNotSupported(0)</code>). The role check comes first. If any of these fails, the token is not called.</div></li>
-    <li><div><b>Token checks.</b> <code>executeTransfer</code> requires <code>EXECUTOR_ROLE</code> on its caller, then checks in this order: the deadline (<code>INTENT_EXPIRED</code>), the nonce (<code>NONCE_USED</code>), that a stated consideration names an executor (<code>CONSIDERATION_NEEDS_EXECUTOR</code>), that a named executor is the caller (<code>WRONG_EXECUTOR</code>), <code>validAfter</code> (<code>INTENT_NOT_YET_VALID</code>), that the receiver is not the zero address (<code>ZERO_RECEIVER</code>), and the signature (<code>BAD_SIGNATURE</code>). Each of those reason codes reaches the operator inside <code>PolicyGated_TransferRejected(reason)</code>.</div></li>
+    <li><div><b>Token checks.</b> <code>executeTransfer</code> requires <code>EXECUTOR_ROLE</code> on its caller, then checks in this order: the deadline (<code>INTENT_EXPIRED</code>), the nonce (<code>NONCE_USED</code>), that a stated consideration names an executor (<code>CONSIDERATION_NEEDS_EXECUTOR</code>), that a named executor is the caller (<code>WRONG_EXECUTOR</code>), <code>validAfter</code> (<code>INTENT_NOT_YET_VALID</code>), that the receiver is not the zero address (<code>ZERO_RECEIVER</code>), and the signature (<code>BAD_SIGNATURE</code>). Each of those reason codes reaches the operator inside <code>ERC8473PolicyRejected(reason)</code>.</div></li>
     <li><div><b>Policy.</b> The movement goes through the token's pause and frozen-balance checks and its hook as <span class="k k-executed">EXECUTED</span>, so the rules the token lists apply to it, and <a href="SettlementWindowRule.html">SettlementWindowRule</a>, which judges this kind alone, applies if listed (<a href="../movement.html">One movement</a>).</div></li>
     <li><div><b>Record.</b> The token emits <code>IntentExecuted(intentHash, from, to, amount, executor, ref)</code>, where <code>executor</code> is the account that called the token: this contract's address.</div></li>
   </ol>
@@ -296,7 +296,7 @@
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>4a906cc</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>e728b81</code> on <code>erc8473-main</code>.</footer>
 </main>
 </body>
 </html>

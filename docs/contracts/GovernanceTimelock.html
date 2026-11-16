@@ -167,7 +167,7 @@
     <table>
       <thead><tr><th>Where</th><th>What it holds</th><th>What that lets governance do</th></tr></thead>
       <tbody>
-        <tr><td>Each product</td><td><code>DEFAULT_ADMIN_ROLE</code> (from the end of <code>Product</code>), and <code>UPGRADER_ROLE</code></td><td>Grant and revoke the product's roles, <code>unpause</code>, <code>setPolicyHook</code>, upgrade to an attested implementation of the same template, change the token's rule list on the hook (<code>setRules</code>) and the settings that rules keep under the token's admin, such as <code>setPolicy</code>. On a 4626 vault, <code>setPortfolio</code> and <code>setFeeModel</code>.</td></tr>
+        <tr><td>Each product</td><td><code>DEFAULT_ADMIN_ROLE</code> (from the end of <code>Product</code>), and <code>UPGRADER_ROLE</code></td><td>Grant and revoke the product's roles, <code>unpause</code>, <code>installPolicy</code>, upgrade to an attested implementation of the same template, change the token's rule list on the hook (<code>setRules</code>) and the settings that rules keep under the token's admin, such as <code>setPolicy</code>. On a 4626 vault, <code>setPortfolio</code> and <code>setFeeModel</code>.</td></tr>
         <tr><td>A vault's legos, through the vault's role</td><td>Nothing of their own: <code>Portfolio</code>, <code>GuardedAccount</code> and <code>NavDesk</code> ask the vault</td><td>Add or remove an adapter, raise caps, migrate a portfolio; set a permission on a guarded account; change a desk's settings and fee model, and <code>adopt</code> on a successor desk.</td></tr>
         <tr><td><code>IntentExecutor</code>, <code>DvPExecutor</code></td><td><code>DEFAULT_ADMIN_ROLE</code></td><td>Grant and revoke <code>OPERATOR_ROLE</code> and <code>GUARDIAN_ROLE</code>, <code>unpause</code>.</td></tr>
         <tr><td><code>PolicyRegistry</code></td><td><code>DEFAULT_ADMIN_ROLE</code>, from the constructor</td><td>Decide who holds <code>ATTESTER_ROLE</code>. Attesting itself is the council's.</td></tr>
@@ -281,7 +281,7 @@
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>4a906cc</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>e728b81</code> on <code>erc8473-main</code>.</footer>
 </main>
 </body>
 </html>

@@ -74,10 +74,10 @@ All five templates, [`GatedToken`](contracts/GatedToken.md), [`IntentToken`](con
 
 | Role and holder | Can | Cannot, or only with limits |
 |---|---|---|
-| `DEFAULT_ADMIN_ROLE`<br>main timelock | Grant and revoke every role. `setPolicyHook`. `unpause()`. It is also the "token admin" that the hook asks before `setRules`, that the rules ask before their settings, and that a portfolio, a guarded account and a desk ask. | A hook must be attested as `HOOK` and name the token's registry (`PolicyGated_NotAttested`, `PolicyGated_HookRegistryMismatch`). The registry itself has no setter. |
+| `DEFAULT_ADMIN_ROLE`<br>main timelock | Grant and revoke every role. `installPolicy`. `unpause()`. It is also the "token admin" that the hook asks before `setRules`, that the rules ask before their settings, and that a portfolio, a guarded account and a desk ask. | A hook must be attested as `HOOK`, name the token's registry and answer the policy interface id (`PolicyGated_NotAttested`, `PolicyGated_HookRegistryMismatch`, `PolicyGated_NotAPolicy`). The registry itself has no setter. |
 | `UPGRADER_ROLE`<br>main timelock | `upgradeToAndCall(implementation, data)` | The implementation must be attested as `IMPLEMENTATION` and report the same `templateId()` (`PolicyGated_NotAttested`, `Templated_WrongTemplate`). |
 | `MINTER_ROLE`<br>minter, on token templates | `mint(to, amount)`, which runs the hook as a MINT | The receiver must pass the rules. Refused while paused. On both vaults this function reverts for every caller (`GatedVault_Unsupported`): shares come only from deposits, deposit claims and the agent's `recoverClaimable`, which delivers claimable shares as a FORCED mint. |
-| `BURNER_ROLE`<br>burner, on token templates | `burn(from, amount)` with no allowance. It may take frozen tokens and lowers the frozen amount by the part it takes. | Refused for an address-frozen holder (`SENDER_FROZEN`) and while paused. Reverts on both vaults for every caller. The rules read the role, not the intent: any burn this account drives counts as enforcement, so it is a service account and not an investor. |
+| `BURNER_ROLE`<br>burner, on token templates | `burn(from, amount)` with no allowance, a FORCED move with no receiver that works while paused. It may take frozen tokens and lowers the frozen amount by the part it takes. The holder's lockup, address freeze, standing and minimum position do not stop it. | Never more than the balance (`ERC20InsufficientBalance`). It still runs the hook, so a token with no rules refuses it. Reverts on both vaults for every caller. No rule reads the role: the kind decides, so an account that holds the role and moves its own tokens is judged like any holder. |
 | `AGENT_ROLE`<br>agent | `forcedTransfer(from, to, amount)`, a FORCED move that works while paused and may take frozen tokens. `setFrozenTokens(account, amount)`. On `HolderRestrictionRule`, `setLockup` and `setFrozen` for this token. | The receiver of a forced move is still judged: it needs a credential the token's policy accepts and must not be address-frozen. |
 | `GUARDIAN_ROLE`<br>guardian multisig | `pause()`, with no delay. [What else the role allows](#guardian), on a 4626 and on a vault's legos. | Cannot unpause, grant roles, change the hook or upgrade. |
 | `RECOVERY_ROLE`<br>recovery timelock | `unpause()` and `revokeRole(GUARDIAN_ROLE, account)` | Nothing else: it is not a role admin, so it cannot grant, and every other revocation needs the role's admin. |
@@ -88,7 +88,7 @@ All five templates, [`GatedToken`](contracts/GatedToken.md), [`IntentToken`](con
 | Template | Who | What |
 |---|---|---|
 | `Gated721` | `MINTER_ROLE` | `mint(to, tokenId, uri)`, a MINT of one item with its metadata URI. |
-|  | `BURNER_ROLE` | `burn(tokenId)`, with no approval. It may take an item frozen for its owner and clears that freeze. |
+|  | `BURNER_ROLE` | `burn(tokenId)`, with no approval, a FORCED move with no receiver that works while paused. It may take an item frozen for its owner and clears that freeze. |
 |  | `AGENT_ROLE` | `forcedTransfer(from, to, tokenId)`, `setFrozenTokens(account, tokenId, frozenStatus)`, a freeze of one item for one account, and `setTokenURI(tokenId, uri)`. |
 |  | The owner, or an approved operator | `transferFrom` and `safeTransferFrom`, judged as TRANSFER. |
 |  | Any account | `setApprovalForAll` for itself, and `approve` of an item it owns or is approved for all of. There is no `permit`. |
@@ -147,7 +147,7 @@ These have no role table of their own, and none is a proxy. Each names its vault
 |  | `GUARDIAN_ROLE` | `blockSubject(subject)`. `killAttester(id)`, which the admin may also call. |
 |  | `DEFAULT_ADMIN_ROLE` or `RECOVERY_ROLE` | `clearGuardianBlock(subject)`, `reviveAttester(id)`. |
 |  | `DEFAULT_ADMIN_ROLE` | `addAttester`, `setAttesterAccount`, `setAttesterQuals`, roles. `RECOVERY_ROLE` may also revoke `GUARDIAN_ROLE`. |
-| [`ComplianceHook`](contracts/ComplianceHook.md) | The token itself, or the holder of `DEFAULT_ADMIN_ROLE` on that token | `setRules(token, rules)`. The hook has no roles of its own: it asks the token at call time (`ComplianceHook_NotTokenAdmin` otherwise). `afterTransfer` is open only to the token the context names (`ComplianceHook_OnlyToken`). |
+| [`ComplianceHook`](contracts/ComplianceHook.md) | The token itself, or the holder of `DEFAULT_ADMIN_ROLE` on that token | `setRules(token, rules)`. The hook has no roles of its own: it asks the token at call time (`ComplianceHook_NotTokenAdmin` otherwise). `afterTransfer` is open only to the token the context names, and `onInstall` only to the token it names (`ComplianceHook_OnlyToken`). |
 | Rules | The holder of `DEFAULT_ADMIN_ROLE` on the token | `CredentialRule.setPolicy`, `SettlementWindowRule.setWindow`, `MinPositionRule.setMinPosition` and `setExempt`, `SupplyCapRule.setSupplyCap`. Each rule asks the token at call time. |
 |  | The holder of `AGENT_ROLE` on the token | `HolderRestrictionRule.setLockup`, `setFrozen`. |
 |  | The hook the token has installed | `after_` (`ComplianceRule_OnlyHook`), which `FundHoldersRule` uses to record investors. |
@@ -203,50 +203,52 @@ A timelock operation can run no sooner than the delay it was scheduled with, and
 
 | Waits for a timelock | Takes effect at once |
 |---|---|
-| Unpause. Replacing a hook or a rule list. Rule settings: credential policy, settlement window, minimum position and exemptions, supply cap. A fund's rule, cap, exemptions and later classes. Upgrades. Every role grant and revocation. Attester list changes in the credential registry. Adding, removing or writing off an adapter, raising a cap, granting a permission, plugging in a portfolio or a fee model, raising a 4626's rate, a desk's settings and its replacement. | Guardian: every power [above](#guardian). Council: attest, revoke. KYC attester: credentials. Operations account: placing a product. Agent: forced transfers, frozen amounts, lockups, address freezes, 7540 recoveries. Minter, burner and operator: their daily work. Allocator: moving money under caps on the allocation and through validators. Distribution maker and checker: proposing and approving. Holders: their own movements. |
+| Unpause. Replacing a hook (`installPolicy`) or a rule list (`setRules`). Rule settings: credential policy, settlement window, minimum position and exemptions, supply cap. A fund's rule, cap, exemptions and later classes. Upgrades. Every role grant and revocation. Attester list changes in the credential registry. Adding, removing or writing off an adapter, raising a cap, granting a permission, plugging in a portfolio or a fee model, raising a 4626's rate, a desk's settings and its replacement. | Guardian: every power [above](#guardian). Council: attest, revoke. KYC attester: credentials. Operations account: placing a product. Agent: forced transfers, frozen amounts, lockups, address freezes, 7540 recoveries. Minter, burner and operator: their daily work. Allocator: moving money under caps on the allocation and through validators. Distribution maker and checker: proposing and approving. Holders: their own movements. |
 
 A desk has its own wait, which is no timelock: a price runs only after a `cooldown` of 1 hour to 3 days from its proposal, in which the guardian or a checker can cancel it.
 
 <a id="pause"></a>
 ## During a pause
 
-A product's pause is one check at the start of every balance movement, before the frozen-balance check and before the hook. It lets one kind through: an enforcement move, by the agent or, for `recoverRedeemRequest` once the request's period has closed, by `SETTLER_ROLE`. Calls that move no balance are not affected unless they check the pause themselves.
+A product's pause is one check at the start of every balance movement, before the frozen-balance check and before the hook. It lets one kind through: an enforcement move, by the agent, by the burner with `burn` or, for `recoverRedeemRequest` once the request's period has closed, by `SETTLER_ROLE`. Calls that move no balance are not affected unless they check the pause themselves.
 
-> **Diagram.** While a product is paused, a movement of kind TRANSFER, EXECUTED, MINT or BURN is rejected with PolicyGated_TransferRejected(PAUSED). A FORCED movement continues to the frozen-balance check and the hook.
+> **Diagram.** While a product is paused, a movement of kind TRANSFER, EXECUTED, MINT or BURN is rejected with ERC8473PolicyRejected(PAUSED). A FORCED movement continues to the frozen-balance check and the hook.
 >
-> **Only an enforcement move gets past a pause.** `forcedTransfer`, and the 7540 vault's two recoveries, which announce the FORCED kind, still run the rules, so the receiver must still hold a credential and must not be address-frozen.
+> **Only an enforcement move gets past a pause.** `forcedTransfer`, and the 7540 vault's two recoveries, which announce the FORCED kind, still run the rules, so the receiver must still hold a credential and must not be address-frozen. The burner's `burn` announces FORCED too, and has no receiver to judge.
 
 | Where | Entry point | While paused |
 |---|---|---|
-| Every product | `transfer`, `transferFrom` | reverts `PolicyGated_TransferRejected(PAUSED)` |
+| Every product | `transfer`, `transferFrom` | reverts `ERC8473PolicyRejected(PAUSED)` |
 |  | `forcedTransfer` | works |
 |  | `setFrozenTokens`, `approve`, and `permit` where the template has it | works: no balance moves |
-|  | `canTransfer`, `canTransferWithReason`, `canSend`, `canReceive` | `false`; `canTransferWithReason` gives the reason `PAUSED` |
-|  | `setPolicyHook`, `upgradeToAndCall`, `grantRole`, `revokeRole` | works, for their role holders |
+|  | `canTransfer`, `canTransferWithReason`, `canSend`, `canReceive` | `false`; `canTransferWithReason` gives the reason `PAUSED`. `canSend` and `canReceive` stay `true` for the zero address |
+|  | `installPolicy`, `upgradeToAndCall`, `grantRole`, `revokeRole` | works, for their role holders |
 |  | `unpause` | main or recovery timelock only; on a product that is not paused it reverts `ExpectedPause` |
-| `Gated721` | `mint`, `burn`, `safeTransferFrom` | reverts `PolicyGated_TransferRejected(PAUSED)` |
+| `Gated721` | `mint`, `safeTransferFrom` | reverts `ERC8473PolicyRejected(PAUSED)` |
+|  | `burn` | works: FORCED |
 |  | `setTokenURI`, `setApprovalForAll` | works: nothing moves |
-| `GatedToken`, `IntentToken` | `mint`, `burn` | reverts `PolicyGated_TransferRejected(PAUSED)` |
-|  | `executeTransfer`, on `IntentToken` | an intent that passes its own checks reverts `PolicyGated_TransferRejected(PAUSED)`; `canExecute` says `PAUSED` |
+| `GatedToken`, `IntentToken` | `mint` | reverts `ERC8473PolicyRejected(PAUSED)` |
+|  | `burn` | works: FORCED |
+|  | `executeTransfer`, on `IntentToken` | an intent that passes its own checks reverts `ERC8473PolicyRejected(PAUSED)`; `canExecute` says `PAUSED` |
 |  | `cancelIntent`, on `IntentToken` | works |
 | `Gated4626Vault` | `deposit`, `mint` | a non-zero amount reverts `ERC4626ExceededMaxDeposit` or `ERC4626ExceededMaxMint`, because `maxDeposit` and `maxMint` return 0 |
 |  | `withdraw`, `redeem` | a non-zero amount reverts `ERC4626ExceededMaxWithdraw` or `ERC4626ExceededMaxRedeem` |
-|  | the same four with 0 | reverts `PolicyGated_TransferRejected(PAUSED)` |
+|  | the same four with 0 | reverts `ERC8473PolicyRejected(PAUSED)` |
 |  | `collectFees` | reverts `EnforcedPause()` |
 |  | `accrue`, `setPortfolio`, `setFeeModel`, `setMaxRate` | works: none checks the pause |
 | `Gated7540Vault` | `requestDeposit` | reverts `Gated7540Vault_ControllerNotEligible(PAUSED)` |
-|  | `requestRedeem` | reverts `PolicyGated_TransferRejected(PAUSED)` |
+|  | `requestRedeem` | reverts `ERC8473PolicyRejected(PAUSED)` |
 |  | `closePeriod` | works: a period can close during a pause |
 |  | `settlePeriod` | reverts `EnforcedPause()` |
 |  | `rejectDepositRequest` | works: it moves the asset only, no shares |
-|  | `rejectRedeemRequest` | reverts `PolicyGated_TransferRejected(PAUSED)`; the shares stay in escrow |
+|  | `rejectRedeemRequest` | reverts `ERC8473PolicyRejected(PAUSED)`; the shares stay in escrow |
 |  | `recoverRedeemRequest`, `recoverClaimable` | works: FORCED |
 |  | `deposit`, `mint` (claims) | reverts `Gated7540Vault_ControllerNotEligible(PAUSED)` |
 |  | `redeem`, `withdraw` (claims) | reverts `EnforcedPause()` |
 |  | `setOperator` | works |
 | `NavDesk`, its vault paused | `closePeriod`, `propose`, `accept`, `cancel` | works: none checks the pause |
 |  | `execute` | reverts `EnforcedPause()`, from the vault; the proposal stays on the table |
-|  | `refundRequest`, `recoverRequest` | works for a deposit's refund and a recovery; a redemption's refund reverts `PolicyGated_TransferRejected(PAUSED)` |
+|  | `refundRequest`, `recoverRequest` | works for a deposit's refund and a recovery; a redemption's refund reverts `ERC8473PolicyRejected(PAUSED)` |
 | `Portfolio`, `GuardedAccount`, the vault paused | `Portfolio.allocate` | reverts `Portfolio_VaultPaused` |
 |  | `GuardedAccount.execute` | reverts `GuardedAccount_VaultPaused`. So a permission that pulls money back through `execute` waits for the unpause. |
 |  | `Portfolio.deallocate`, `setCaps`, and the admin's calls | works: a pause stops `allocate` and `GuardedAccount.execute`. Money still comes back by `deallocate`, and still leaves the portfolio by `migrateTo`. |
@@ -255,7 +257,7 @@ A product's pause is one check at the start of every balance movement, before th
 | `SignedEntry`, the vault paused | `enterWithPermit`, `enterWith3009` | reverts with the vault's error for a deposit or a request |
 | An executor paused | `IntentExecutor.execute`, `executeBatch` | reverts `EnforcedPause()` |
 |  | `DvPExecutor.executeDvPGated`, `executeDvP3009` | reverts `EnforcedPause()`; the two pre-flights answer `PAUSED` |
-| A token paused, its executor not | `IntentExecutor.execute`, `executeBatch` | `execute` passes the token's `PolicyGated_TransferRejected(PAUSED)` through unchanged; `executeBatch` wraps it in `IntentExecutor_BatchItemFailed(index, reason)` |
+| A token paused, its executor not | `IntentExecutor.execute`, `executeBatch` | `execute` passes the token's `ERC8473PolicyRejected(PAUSED)` through unchanged; `executeBatch` wraps it in `IntentExecutor_BatchItemFailed(index, reason)` |
 |  | `DvPExecutor` trades | reverts `DvPExecutor_LegFailed(leg, reason)`, with the token's revert data as `reason` |
 
 The registries, the hook, the rules, the funds and `ProxyDeployer` have no pause, so a product can launch and its settings can change while another is paused. In the credential registry the guardian's equivalent is blocking an address or killing an attester. [The incident runbook](deployment.md#incident) puts the pause, the agent's enforcement and the resume in order.
@@ -278,6 +280,7 @@ The registries, the hook, the rules, the funds and `ProxyDeployer` have no pause
 - **Nothing on chain makes an account a multisig.** Governance, the guardian, the council and the operations account are addresses given to the modules. The post-deploy check asks for a threshold on four roles only, on the accounts it is told about.
 - **There is no list of holders on chain.** The contracts do not enumerate a role's holders, so a complete list comes from `RoleGranted` and `RoleRevoked` events, and the check sees only the accounts it is given.
 - **The agent's power is large and immediate.** A stolen agent key can force any holder's tokens to an account the policy accepts, and set frozen amounts, lockups and freezes, with no delay, until the timelock revokes the role. On a 7540 it can also pay a controller's claimable redemption cash, and deliver its claimable shares, to any account the policy accepts (`recoverClaimable`). The guardian's pause does not stop a forced move or this.
+- **The burner's power is not stopped by a pause.** A stolen burner key can destroy any holder's balance on a token, or any item on a `Gated721`, with no delay. `burn` is a FORCED move, so the guardian's pause does not stop it, and neither does a lockup, an address freeze or a frozen amount. The remedy is for the timelock to revoke `BURNER_ROLE`.
 - **The minter's power is bounded only by the rules.** A stolen minter key can mint to any eligible account. `SupplyCapRule` limits that where a product lists it, and no shipped profile does.
 - **Who holds `SETTLER_ROLE` sets the price and the redemption limit.** The vault takes whatever `settlePeriod` is given and does not check the holder. The role belongs with a desk, and the timelock can grant it to anyone: that is delayed and visible, not prevented.
 - **An attester decides who may hold.** A stolen attester key can credential any address that no other live attester has a record for, with any bit it may assert, for every token whose policy trusts it, until the guardian kills it.
@@ -300,9 +303,9 @@ The registries, the hook, the rules, the funds and `ProxyDeployer` have no pause
 
 - Role grants: `Core.ts`, `CoreHandover.ts`, `PartsHandover.ts` and `handOverParts` in `ignition/parts.ts`, `Product.ts`, `FundOpen.ts`; role ids in `roles.ts`; exceptions in `profiles.ts`
 - Hand-over check: `assertHandedOver` in `test/nodejs/fixtures.ts`
-- Role gates in code: `PolicyGatedCoreUpgradeable.sol`, `PolicyGatedERC20Upgradeable.sol`, `IntentSettledUpgradeable.sol`, `Gated721.sol`, `Gated4626Vault.sol`, `Gated7540Vault.sol`, `Gated7540Settlement.sol`, `PolicyRegistry.sol`, `GovernanceTimelock.sol`, `CredentialRegistry.sol`, `IntentExecutor.sol`, `DvPExecutor.sol`, `Portfolio.sol`, `GuardedAccount.sol`, `NavDesk.sol`, `Distributor.sol`, `ComplianceHook.sol`, and the rules' setters, which ask the token's roles
+- Role gates in code: `PolicyGatedCoreUpgradeable.sol`, `PolicyGatedERC20Upgradeable.sol`, `IntentSettledUpgradeable.sol`, `Gated721.sol`, `Gated4626Vault.sol`, `Gated4626Management.sol`, `Gated7540Vault.sol`, `Gated7540Settlement.sol`, `PolicyRegistry.sol`, `GovernanceTimelock.sol`, `CredentialRegistry.sol`, `IntentExecutor.sol`, `DvPExecutor.sol`, `Portfolio.sol`, `GuardedAccount.sol`, `NavDesk.sol`, `Distributor.sol`, `ComplianceHook.sol`, and the rules' setters, which ask the token's roles
 - Tests: `test/nodejs/governance.test.ts` (the delay, the guardian's veto and the recovery batch), `test/nodejs/legos.test.ts` (what the hand-over check refuses), `GovernanceTimelock.t.sol`, and behaviour while paused in `Gated7540Vault.t.sol`, `Gated4626Vault.t.sol`, `NavDesk.t.sol`, `Portfolio.t.sol` and `GuardedAccount.t.sol`
 
 ---
 
-Describes the contracts at commit `4a906cc` on `main`.
+Describes the contracts at commit `e728b81` on `erc8473-main`.

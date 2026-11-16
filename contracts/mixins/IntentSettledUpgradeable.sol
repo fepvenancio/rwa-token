@@ -5,7 +5,7 @@ import {SignatureChecker} from '@openzeppelin/contracts/utils/cryptography/Signa
 
 import {Reasons} from 'interfaces/Errors.sol';
 
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
 
 import {PolicyGatedERC20Upgradeable} from 'contracts/base/PolicyGatedERC20Upgradeable.sol';
@@ -47,15 +47,17 @@ abstract contract IntentSettledUpgradeable is PolicyGatedERC20Upgradeable, ITran
     bytes calldata _sig
   ) external onlyRole(EXECUTOR_ROLE) returns (bytes32 _intentHash) {
     bytes32 _reason = _intentPreflight(_intent, _msgSender());
-    if (_reason != Reasons.TRANSFER_OK) revert PolicyGated_TransferRejected(_reason);
+    if (_reason != Reasons.TRANSFER_OK) revert ERC8473PolicyRejected(_reason);
 
     _intentHash = intentHash(_intent);
     if (!SignatureChecker.isValidSignatureNow(_intent.from, _intentHash, _sig)) {
-      revert PolicyGated_TransferRejected(Reasons.BAD_SIGNATURE);
+      revert ERC8473PolicyRejected(Reasons.BAD_SIGNATURE);
     }
 
     _getIntentSettledStorage().nonces[_intent.from][_intent.nonce] = true;
-    _moveAs(_intent.from, _intent.to, _intent.amount, IPolicyHook.TransferKind.EXECUTED, _intent.ref, _intent.deadline);
+    _moveAs(
+      _intent.from, _intent.to, _intent.amount, IERC8473Policy.TransferKind.EXECUTED, _intent.ref, _intent.deadline
+    );
 
     // Emitted after the hook's afterTransfer: re-entry is blocked by `_move`'s guard and the hook is attested.
     // slither-disable-next-line reentrancy-events
@@ -67,7 +69,7 @@ abstract contract IntentSettledUpgradeable is PolicyGatedERC20Upgradeable, ITran
     bytes32 _nonce
   ) external {
     IntentSettledStorage storage $ = _getIntentSettledStorage();
-    if ($.nonces[_msgSender()][_nonce]) revert PolicyGated_TransferRejected(Reasons.NONCE_USED);
+    if ($.nonces[_msgSender()][_nonce]) revert ERC8473PolicyRejected(Reasons.NONCE_USED);
     $.nonces[_msgSender()][_nonce] = true;
     emit IntentCancelled(_msgSender(), _nonce);
   }
@@ -91,11 +93,11 @@ abstract contract IntentSettledUpgradeable is PolicyGatedERC20Upgradeable, ITran
           _intent.to,
           _intent.amount,
           _executor,
-          IPolicyHook.TransferKind.EXECUTED,
+          IERC8473Policy.TransferKind.EXECUTED,
           _intent.ref,
           _intent.deadline
         ),
-        _policyHook()
+        _policy()
       );
     }
     _ok = _reason == Reasons.TRANSFER_OK;

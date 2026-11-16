@@ -235,7 +235,7 @@
 <section id="errors">
   <div class="prose">
     <h2>When a leg fails</h2>
-    <p><code>DvPExecutor_LegFailed(leg, reason)</code> wraps the token's revert data so the operator knows which leg failed. <code>leg</code> is <code>CASH</code> (0) or <code>SECURITIES</code> (1), and <code>reason</code> is the token's revert data, for example <code>PolicyGated_TransferRejected(reason)</code>. The cash leg runs first, so if both legs would fail the cash leg is the one reported (<code>test_WhenBothLegsFail_TheCashLegIsReportedBecauseItRunsFirst</code>). In the ERC-3009 form the cash leg is the pull, and the securities leg runs between the pull and the payout.</p>
+    <p><code>DvPExecutor_LegFailed(leg, reason)</code> wraps the token's revert data so the operator knows which leg failed. <code>leg</code> is <code>CASH</code> (0) or <code>SECURITIES</code> (1), and <code>reason</code> is the token's revert data, for example <code>ERC8473PolicyRejected(reason)</code>. The cash leg runs first, so if both legs would fail the cash leg is the one reported (<code>test_WhenBothLegsFail_TheCashLegIsReportedBecauseItRunsFirst</code>). In the ERC-3009 form the cash leg is the pull, and the securities leg runs between the pull and the payout.</p>
     <p>Not wrapped, so they arrive with their own error:</p>
     <ul class="plain">
       <li>The payout to the seller in the ERC-3009 form: the cash token's own error (for a blocklisted seller, say), <code>SafeERC20FailedOperation(token)</code> for a token that returns false, and <code>ReentrancyGuardReentrantCall</code> for a token that calls back into the executor during the payout. A token that calls back during the pull, or during a gated leg, is reported as that leg's <code>DvPExecutor_LegFailed</code> with the guard's error inside.</li>
@@ -258,7 +258,7 @@
         <li><div>The executor's pause: <code>PAUSED</code>.</div></li>
         <li><div>The mirror: <code>LEGS_DO_NOT_MATCH</code>.</div></li>
         <li><div>The cash token's <code>canExecute</code> for the buyer's intent: its reason, such as <code>NOT_EXECUTOR</code> or <code>NONCE_USED</code>.</div></li>
-        <li><div>The security token's <code>canExecute</code> for the seller's intent: its reason, such as <code>LOCKED</code>.</div></li>
+        <li><div>The security token's <code>canExecute</code> for the seller's intent: its reason, such as <code>LOCKED_UP</code>.</div></li>
       </ol>
     </div>
     <div class="prose">
@@ -395,7 +395,7 @@
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>4a906cc</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>e728b81</code> on <code>erc8473-main</code>.</footer>
 </main>
 </body>
 </html>

@@ -146,7 +146,7 @@ describe("a deployment that sets minimum positions", async function () {
     await connection.viem.assertions.revertWithCustomErrorWithArgs(
       s.token.write.transfer([bob, 1n], { account: s.holders.alice.account }),
       s.token,
-      "PolicyGated_TransferRejected",
+      "ERC8473PolicyRejected",
       [REASONS.BELOW_MIN_POSITION],
     );
     // The account-level answers do not read a minimum as a block.

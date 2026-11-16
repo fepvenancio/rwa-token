@@ -147,8 +147,8 @@
     <table class="tight">
       <thead><tr><th>Rule</th><th>Enforcement probe</th><th>Mint probe</th><th>Burn probe</th></tr></thead>
       <tbody>
-        <tr><td><a href="CredentialRule.html"><code>CredentialRule</code></a></td><td colspan="2">The account must be <code>ACTIVE</code> and meet the token's policy. Otherwise <code>CREDENTIAL_EXPIRED</code>, <code>RECEIVER_NOT_VERIFIED</code> or <code>RECEIVER_NOT_ELIGIBLE</code>.</td><td><code>ACTIVE</code>, <code>EXIT_ONLY</code> and <code>LAPSED</code> pass. Otherwise <code>SENDER_NOT_VERIFIED</code>.</td></tr>
-        <tr><td><a href="HolderRestrictionRule.html"><code>HolderRestrictionRule</code></a></td><td colspan="2">The account must not be address-frozen (<code>RECEIVER_FROZEN</code>). A lockup does not matter.</td><td><code>SENDER_FROZEN</code>, then <code>LOCKED</code></td></tr>
+        <tr><td><a href="CredentialRule.html"><code>CredentialRule</code></a></td><td colspan="2">The account must be <code>ACTIVE</code> and meet the token's policy. Otherwise <code>CREDENTIAL_EXPIRED</code>, <code>RECEIVER_NOT_VERIFIED</code> or <code>RECEIVER_NOT_ELIGIBLE</code>.</td><td><code>ACTIVE</code>, <code>EXIT_ONLY</code> and <code>LAPSED</code> pass. Otherwise <code>SENDER_NOT_ELIGIBLE</code>.</td></tr>
+        <tr><td><a href="HolderRestrictionRule.html"><code>HolderRestrictionRule</code></a></td><td colspan="2">The account must not be address-frozen (<code>RECEIVER_FROZEN</code>). A lockup does not matter.</td><td><code>SENDER_FROZEN</code>, then <code>LOCKED_UP</code></td></tr>
         <tr><td><a href="MinPositionRule.html"><code>MinPositionRule</code></a></td><td>Passes: <span class="k k-forced">FORCED</span> is exempt.</td><td>Passes while the minimum is at most <code>type(uint128).max</code>.</td><td>Passes: an amount of zero is not judged.</td></tr>
         <tr><td><a href="FundHoldersRule.html"><code>FundHoldersRule</code></a></td><td><code>NOT_FUND_CLASS</code> if the vault is not a registered class under this rule. The amount is zero, so the cap does not apply.</td><td><code>NOT_FUND_CLASS</code> as before, and <code>MAX_HOLDERS</code> for a new investor at a full fund.</td><td><code>NOT_FUND_CLASS</code> as before. The cap does not apply to a burn.</td></tr>
       </tbody>
@@ -250,7 +250,7 @@
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>4a906cc</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>e728b81</code> on <code>erc8473-main</code>.</footer>
 </main>
 </body>
 </html>

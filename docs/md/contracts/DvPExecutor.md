@@ -116,7 +116,7 @@ The gated form has no balance checks. Its cash moves directly between the partie
 <a id="errors"></a>
 ## When a leg fails
 
-`DvPExecutor_LegFailed(leg, reason)` wraps the token's revert data so the operator knows which leg failed. `leg` is `CASH` (0) or `SECURITIES` (1), and `reason` is the token's revert data, for example `PolicyGated_TransferRejected(reason)`. The cash leg runs first, so if both legs would fail the cash leg is the one reported (`test_WhenBothLegsFail_TheCashLegIsReportedBecauseItRunsFirst`). In the ERC-3009 form the cash leg is the pull, and the securities leg runs between the pull and the payout.
+`DvPExecutor_LegFailed(leg, reason)` wraps the token's revert data so the operator knows which leg failed. `leg` is `CASH` (0) or `SECURITIES` (1), and `reason` is the token's revert data, for example `ERC8473PolicyRejected(reason)`. The cash leg runs first, so if both legs would fail the cash leg is the one reported (`test_WhenBothLegsFail_TheCashLegIsReportedBecauseItRunsFirst`). In the ERC-3009 form the cash leg is the pull, and the securities leg runs between the pull and the payout.
 
 Not wrapped, so they arrive with their own error:
 
@@ -135,7 +135,7 @@ Not wrapped, so they arrive with their own error:
 1. The executor's pause: `PAUSED`.
 2. The mirror: `LEGS_DO_NOT_MATCH`.
 3. The cash token's `canExecute` for the buyer's intent: its reason, such as `NOT_EXECUTOR` or `NONCE_USED`.
-4. The security token's `canExecute` for the seller's intent: its reason, such as `LOCKED`.
+4. The security token's `canExecute` for the seller's intent: its reason, such as `LOCKED_UP`.
 
 ### `canExecuteDvP3009`
 
@@ -238,4 +238,4 @@ Pausing the executor stops both entry points without touching the tokens. Both e
 
 ---
 
-Describes the contracts at commit `4a906cc` on `main`.
+Describes the contracts at commit `e728b81` on `erc8473-main`.

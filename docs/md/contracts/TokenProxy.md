@@ -102,4 +102,4 @@ The proxy has a constructor and a forwarding fallback, nothing else. The upgrade
 
 ---
 
-Describes the contracts at commit `4a906cc` on `main`.
+Describes the contracts at commit `e728b81` on `erc8473-main`.

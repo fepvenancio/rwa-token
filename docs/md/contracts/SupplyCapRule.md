@@ -38,7 +38,7 @@ A ceiling on what can be minted. A mint that would take a token's supply above i
 | MINT | judged against the cap: `ABOVE_SUPPLY_CAP`, the one reason code, when the supply is above the cap or the amount does not fit under it |
 | BURN | passes; not judged |
 
-The token reverts a refused mint with `PolicyGated_TransferRejected(ABOVE_SUPPLY_CAP)`, and `canTransferWithReason(address(0), to, amount)` says the same without moving anything.
+The token reverts a refused mint with `ERC8473PolicyRejected(ABOVE_SUPPLY_CAP)`, and `canTransferWithReason(address(0), to, amount)` says the same without moving anything.
 
 <a id="account"></a>
 ## The account questions
@@ -78,6 +78,7 @@ Both vault templates decide whether a receiver is allowed in by asking the rules
 | `check(ctx)` | Anyone (read-only); the hook in practice | The decision above: `TRANSFER_OK` or `ABOVE_SUPPLY_CAP`. |
 | `checkSend`, `checkReceive` | Anyone (read-only) | `TRANSFER_OK` for every account. |
 | `after_(ctx)` | The hook of `ctx.token` | The empty default. The hook does not call it, because `wantsAfter()` is false. |
+| `onInstall(token, previousPolicy)` | Anyone; the hook when a token installs it | The empty default: the rule keeps no state derived from movements. |
 | `ruleId()`, `wantsAfter()`, `supportsInterface(id)` | Anyone (read-only) | `keccak256('SupplyCapRule.v1')`; false; ERC-165 for `ISupplyCapRule`, `IComplianceRule` and `IERC165` (`test_ItAnswersForItsInterfaces`). |
 
 <a id="why"></a>
@@ -113,4 +114,4 @@ Both vault templates decide whether a receiver is allowed in by asking the rules
 
 ---
 
-Describes the contracts at commit `4a906cc` on `main`.
+Describes the contracts at commit `e728b81` on `erc8473-main`.

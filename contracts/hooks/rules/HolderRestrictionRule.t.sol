@@ -7,8 +7,8 @@ import {IERC165} from '@openzeppelin/contracts/utils/introspection/IERC165.sol';
 import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IHolderRestrictionRule} from 'interfaces/IHolderRestrictionRule.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 
 import {HolderRestrictionRule} from 'contracts/hooks/rules/HolderRestrictionRule.sol';
 import {Helpers} from 'contracts/test/Helpers.sol';
@@ -62,25 +62,25 @@ contract HolderRestrictionRuleUnitTest is Helpers {
   }
 
   function _ctx(
-    IPolicyHook.TransferKind _kind
-  ) internal view returns (IPolicyHook.TransferContext memory _context) {
-    _context = IPolicyHook.TransferContext({
+    IERC8473Policy.TransferKind _kind
+  ) internal view returns (IERC8473Policy.TransferContext memory _context) {
+    _context = IERC8473Policy.TransferContext({
       token: _token,
-      from: _kind == IPolicyHook.TransferKind.MINT ? address(0) : _holder,
-      to: _kind == IPolicyHook.TransferKind.BURN ? address(0) : _to,
-      id: 0,
+      from: _kind == IERC8473Policy.TransferKind.MINT ? address(0) : _holder,
+      to: _kind == IERC8473Policy.TransferKind.BURN ? address(0) : _to,
+      tokenId: 0,
       amount: 1,
       operator: _holder,
       kind: _kind,
-      extra: abi.encode(uint256(0), uint256(0))
+      data: abi.encode(uint256(0), uint256(0))
     });
   }
 
   /// @dev Maps a fuzzed seed onto TRANSFER or EXECUTED, the kinds a lockup restricts
   function _restrictedKind(
     uint8 _seed
-  ) internal pure returns (IPolicyHook.TransferKind _kind) {
-    _kind = IPolicyHook.TransferKind(bound(_seed, 0, 1));
+  ) internal pure returns (IERC8473Policy.TransferKind _kind) {
+    _kind = IERC8473Policy.TransferKind(bound(_seed, 0, 1));
   }
 }
 
@@ -135,7 +135,7 @@ contract HolderRestrictionRuleUnit_SetLockup is HolderRestrictionRuleUnitTest {
     emit IHolderRestrictionRule.LockupSet(_token, _holder, 0);
     _lock(_holder, _until);
     assertEq(_rule.unlockTime(_token, _holder), 0);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.TRANSFER)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.TRANSFER)), Reasons.TRANSFER_OK);
   }
 
   /// @dev A time far in the past or at zero never reaches the 64-bit check: it is a clear, not a store
@@ -164,7 +164,7 @@ contract HolderRestrictionRuleUnit_SetLockup is HolderRestrictionRuleUnitTest {
 
     assertEq(_rule.unlockTime(_fakeToken, _holder), _NOW + 365 days);
     assertEq(_rule.unlockTime(_token, _holder), 0);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.TRANSFER)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.TRANSFER)), Reasons.TRANSFER_OK);
   }
 }
 
@@ -219,7 +219,7 @@ contract HolderRestrictionRuleUnit_SetFrozen is HolderRestrictionRuleUnitTest {
 
     assertTrue(_rule.isFrozen(_fakeToken, _holder));
     assertFalse(_rule.isFrozen(_token, _holder));
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.TRANSFER)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.TRANSFER)), Reasons.TRANSFER_OK);
   }
 }
 
@@ -236,7 +236,7 @@ contract HolderRestrictionRuleUnit_CheckLockup is HolderRestrictionRuleUnitTest 
   ) external {
     _remaining = bound(_remaining, 1, 3650 days);
     _lock(_holder, _NOW + _remaining);
-    assertEq(_rule.check(_ctx(_restrictedKind(_seed))), Reasons.LOCKED);
+    assertEq(_rule.check(_ctx(_restrictedKind(_seed))), Reasons.LOCKED_UP);
   }
 
   function test_WhenTheUnlockSecondArrives_ItReturnsOk(
@@ -246,33 +246,44 @@ contract HolderRestrictionRuleUnit_CheckLockup is HolderRestrictionRuleUnitTest 
     _remaining = bound(_remaining, 1, 3650 days);
     _lock(_holder, _NOW + _remaining);
     vm.warp(_NOW + _remaining - 1);
-    assertEq(_rule.check(_ctx(_restrictedKind(_seed))), Reasons.LOCKED);
+    assertEq(_rule.check(_ctx(_restrictedKind(_seed))), Reasons.LOCKED_UP);
     vm.warp(_NOW + _remaining);
     assertEq(_rule.check(_ctx(_restrictedKind(_seed))), Reasons.TRANSFER_OK);
   }
 
   function test_WhenLocked_ForcedAndMintAreExempt() external {
     _lock(_holder, _NOW + 30 days);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.FORCED)), Reasons.TRANSFER_OK);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.MINT)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.FORCED)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.MINT)), Reasons.TRANSFER_OK);
   }
 
   /// @dev V1 regression: a holder-initiated burn (e.g. an ERC-4626 redeem) let a locked holder exit
   function test_WhenLockedAndTheHolderBurns_ItReturnsLocked() external {
     _lock(_holder, _NOW + 30 days);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.BURN)), Reasons.LOCKED);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.BURN)), Reasons.LOCKED_UP);
   }
 
-  function test_WhenLockedAndAnEnforcementBurnerBurns_ItIsExempt() external {
+  /// @dev The burner's burn is enforcement, which the token announces as FORCED with no receiver
+  function test_WhenLockedAndAnEnforcementBurnHappens_ItIsExempt() external {
     _lock(_holder, _NOW + 30 days);
-    IPolicyHook.TransferContext memory _burnCtx = _ctx(IPolicyHook.TransferKind.BURN);
+    IERC8473Policy.TransferContext memory _burnCtx = _ctx(IERC8473Policy.TransferKind.FORCED);
+    _burnCtx.to = address(0);
     _burnCtx.operator = _burner;
     assertEq(_rule.check(_burnCtx), Reasons.TRANSFER_OK);
   }
 
+  /// @dev A BURN is the holder's own and respects the lockup, whoever the operator is
+  function test_WhenLockedAndTheOperatorOfABurnHoldsTheBurnerRole_ItIsStillLocked() external {
+    _lock(_holder, _NOW + 30 days);
+    IERC8473Policy.TransferContext memory _burnCtx = _ctx(IERC8473Policy.TransferKind.BURN);
+    _burnCtx.operator = _burner;
+    vm.expectCall(_token, abi.encodeWithSelector(IAccessControl.hasRole.selector), 0);
+    assertEq(_rule.check(_burnCtx), Reasons.LOCKED_UP);
+  }
+
   function test_WhenNotLocked_ABurnNeverAsksTheTokenForRoles() external {
     vm.expectCall(_token, abi.encodeWithSelector(IAccessControl.hasRole.selector), 0);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.BURN)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.BURN)), Reasons.TRANSFER_OK);
   }
 
   /// @dev The lock is on the sender's side only: a locked receiver can be paid
@@ -286,9 +297,9 @@ contract HolderRestrictionRuleUnit_CheckLockup is HolderRestrictionRuleUnitTest 
   function test_WhenCalledWithStaticcall_ItDoesNotWrite() external {
     _lock(_holder, _NOW + 1 days);
     (bool _ok, bytes memory _out) =
-      address(_rule).staticcall(abi.encodeCall(IComplianceRule.check, (_ctx(IPolicyHook.TransferKind.TRANSFER))));
+      address(_rule).staticcall(abi.encodeCall(IComplianceRule.check, (_ctx(IERC8473Policy.TransferKind.TRANSFER))));
     assertTrue(_ok);
-    assertEq(abi.decode(_out, (bytes32)), Reasons.LOCKED);
+    assertEq(abi.decode(_out, (bytes32)), Reasons.LOCKED_UP);
   }
 }
 
@@ -298,28 +309,29 @@ contract HolderRestrictionRuleUnit_CheckFreeze is HolderRestrictionRuleUnitTest 
     uint8 _seed
   ) external {
     _freeze(_holder, true);
-    IPolicyHook.TransferKind _kind = IPolicyHook.TransferKind(bound(_seed, 0, 1));
+    IERC8473Policy.TransferKind _kind = IERC8473Policy.TransferKind(bound(_seed, 0, 1));
     assertEq(_rule.check(_ctx(_kind)), Reasons.SENDER_FROZEN);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.BURN)), Reasons.SENDER_FROZEN);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.BURN)), Reasons.SENDER_FROZEN);
   }
 
-  /// @dev RD4: the enforcement route out of a frozen account is a forced transfer, not a burn
-  function test_WhenTheSenderIsFrozen_AnEnforcementBurnIsRejectedToo() external {
+  /// @dev A BURN is the holder's own, and a frozen holder cannot burn, whoever the operator is. The burner's enforcement
+  ///      burn arrives as FORCED, which the next test covers
+  function test_WhenTheSenderIsFrozen_AHoldersBurnIsRejectedWhoeverTheOperator() external {
     _freeze(_holder, true);
-    IPolicyHook.TransferContext memory _burnCtx = _ctx(IPolicyHook.TransferKind.BURN);
+    IERC8473Policy.TransferContext memory _burnCtx = _ctx(IERC8473Policy.TransferKind.BURN);
     _burnCtx.operator = _burner;
     assertEq(_rule.check(_burnCtx), Reasons.SENDER_FROZEN);
   }
 
   function test_WhenTheSenderIsFrozen_ForcedIsExempt() external {
     _freeze(_holder, true);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.FORCED)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.FORCED)), Reasons.TRANSFER_OK);
   }
 
   /// @dev A frozen address in the sender slot of a mint means nothing: the sender is the zero address
   function test_WhenTheSenderIsFrozen_AMintToAnotherAccountIsOk() external {
     _freeze(_holder, true);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.MINT)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.MINT)), Reasons.TRANSFER_OK);
   }
 
   /// @dev RD4, confirmed by the owner: the freeze on the receiver applies to mint and to forced transfers
@@ -327,13 +339,13 @@ contract HolderRestrictionRuleUnit_CheckFreeze is HolderRestrictionRuleUnitTest 
     uint8 _seed
   ) external {
     _freeze(_to, true);
-    IPolicyHook.TransferKind _kind = IPolicyHook.TransferKind(bound(_seed, 0, 3));
+    IERC8473Policy.TransferKind _kind = IERC8473Policy.TransferKind(bound(_seed, 0, 3));
     assertEq(_rule.check(_ctx(_kind)), Reasons.RECEIVER_FROZEN);
   }
 
   function test_WhenTheReceiverIsFrozen_AnEnforcementMintIsRejected() external {
     _freeze(_to, true);
-    IPolicyHook.TransferContext memory _context = _ctx(IPolicyHook.TransferKind.FORCED);
+    IERC8473Policy.TransferContext memory _context = _ctx(IERC8473Policy.TransferKind.FORCED);
     _context.from = address(0);
     assertEq(_rule.check(_context), Reasons.RECEIVER_FROZEN);
   }
@@ -341,20 +353,20 @@ contract HolderRestrictionRuleUnit_CheckFreeze is HolderRestrictionRuleUnitTest 
   function test_WhenTheSenderIsFrozen_ABurnNeverAsksTheTokenForRoles() external {
     _freeze(_holder, true);
     vm.expectCall(_token, abi.encodeWithSelector(IAccessControl.hasRole.selector), 0);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.BURN)), Reasons.SENDER_FROZEN);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.BURN)), Reasons.SENDER_FROZEN);
   }
 
   /// @dev The sender is judged first: a frozen and locked sender reads as frozen
   function test_WhenTheSenderIsFrozenAndLocked_ItReturnsFrozen() external {
     _freeze(_holder, true);
     _lock(_holder, _NOW + 30 days);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.TRANSFER)), Reasons.SENDER_FROZEN);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.TRANSFER)), Reasons.SENDER_FROZEN);
   }
 
   function test_WhenTheSenderIsLockedAndTheReceiverFrozen_ItReturnsLocked() external {
     _freeze(_to, true);
     _lock(_holder, _NOW + 30 days);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.TRANSFER)), Reasons.LOCKED);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.TRANSFER)), Reasons.LOCKED_UP);
   }
 
   function test_WhenUnfrozen_ItReturnsOkAgain(
@@ -372,13 +384,13 @@ contract HolderRestrictionRuleUnit_CheckFreeze is HolderRestrictionRuleUnitTest 
     _role(_otherToken, _agent, true);
     vm.prank(_agent);
     _rule.setFrozen(_otherToken, _holder, true);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.TRANSFER)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.TRANSFER)), Reasons.TRANSFER_OK);
   }
 
   function test_WhenCalledWithStaticcall_ItDoesNotWrite() external {
     _freeze(_holder, true);
     (bool _ok, bytes memory _out) =
-      address(_rule).staticcall(abi.encodeCall(IComplianceRule.check, (_ctx(IPolicyHook.TransferKind.TRANSFER))));
+      address(_rule).staticcall(abi.encodeCall(IComplianceRule.check, (_ctx(IERC8473Policy.TransferKind.TRANSFER))));
     assertTrue(_ok);
     assertEq(abi.decode(_out, (bytes32)), Reasons.SENDER_FROZEN);
   }
@@ -402,7 +414,7 @@ contract HolderRestrictionRuleUnit_AccountChecks is HolderRestrictionRuleUnitTes
   ///      sender's, and a locked account can still be paid
   function test_WhenTheAccountIsLocked_SendReturnsLockedAndReceiveAccepts() external {
     _lock(_holder, block.timestamp + 1 days);
-    assertEq(_rule.checkSend(_token, _holder), Reasons.LOCKED);
+    assertEq(_rule.checkSend(_token, _holder), Reasons.LOCKED_UP);
     assertEq(_rule.checkReceive(_token, _holder), Reasons.TRANSFER_OK);
   }
 
@@ -412,7 +424,7 @@ contract HolderRestrictionRuleUnit_AccountChecks is HolderRestrictionRuleUnitTes
     _remaining = bound(_remaining, 1, 3650 days);
     _lock(_holder, _NOW + _remaining);
     vm.warp(_NOW + _remaining - 1);
-    assertEq(_rule.checkSend(_token, _holder), Reasons.LOCKED);
+    assertEq(_rule.checkSend(_token, _holder), Reasons.LOCKED_UP);
     vm.warp(_NOW + _remaining);
     assertEq(_rule.checkSend(_token, _holder), Reasons.TRANSFER_OK);
   }
@@ -434,17 +446,17 @@ contract HolderRestrictionRuleUnit_AccountChecks is HolderRestrictionRuleUnitTes
   function test_WhenTheAccountIsLocked_SendNeverAsksTheTokenForRoles() external {
     _lock(_holder, block.timestamp + 1 days);
     vm.expectCall(_token, abi.encodeWithSelector(IAccessControl.hasRole.selector), 0);
-    assertEq(_rule.checkSend(_token, _holder), Reasons.LOCKED);
+    assertEq(_rule.checkSend(_token, _holder), Reasons.LOCKED_UP);
   }
 
   /// @dev The account answer and `check` agree for the kinds a rule does not exempt (see `IComplianceRule`): a locked
   ///      holder cannot send, yet the kinds the lockup exempts still pass `check`
   function test_WhenTheAccountIsLocked_TheKindsTheLockupExemptsStillPassCheck() external {
     _lock(_holder, block.timestamp + 1 days);
-    assertEq(_rule.checkSend(_token, _holder), Reasons.LOCKED);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.FORCED)), Reasons.TRANSFER_OK);
-    IPolicyHook.TransferContext memory _burnCtx = _ctx(IPolicyHook.TransferKind.BURN);
-    _burnCtx.operator = _burner;
+    assertEq(_rule.checkSend(_token, _holder), Reasons.LOCKED_UP);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.FORCED)), Reasons.TRANSFER_OK);
+    IERC8473Policy.TransferContext memory _burnCtx = _ctx(IERC8473Policy.TransferKind.FORCED);
+    _burnCtx.to = address(0);
     assertEq(_rule.check(_burnCtx), Reasons.TRANSFER_OK);
   }
 
@@ -460,7 +472,7 @@ contract HolderRestrictionRuleUnit_AccountChecks is HolderRestrictionRuleUnitTes
     if (_senderLocked) _lock(_holder, block.timestamp + 1 days);
     bytes32 _send = _rule.checkSend(_token, _holder);
     bytes32 _receive = _rule.checkReceive(_token, _to);
-    assertEq(_send, _senderFrozen ? Reasons.SENDER_FROZEN : (_senderLocked ? Reasons.LOCKED : Reasons.TRANSFER_OK));
+    assertEq(_send, _senderFrozen ? Reasons.SENDER_FROZEN : (_senderLocked ? Reasons.LOCKED_UP : Reasons.TRANSFER_OK));
     assertEq(_receive, _receiverFrozen ? Reasons.RECEIVER_FROZEN : Reasons.TRANSFER_OK);
 
     bytes32 _expected = _send != Reasons.TRANSFER_OK ? _send : _receive;
@@ -507,7 +519,7 @@ contract HolderRestrictionRuleUnit_ForcedMint is HolderRestrictionRuleUnitTest {
   function test_WhenAnEnforcementMintReachesALockedReceiver_ItIsOk() external {
     vm.prank(_agent);
     _rule.setLockup(_token, _to, _NOW + 365 days);
-    IPolicyHook.TransferContext memory _context = _ctx(IPolicyHook.TransferKind.FORCED);
+    IERC8473Policy.TransferContext memory _context = _ctx(IERC8473Policy.TransferKind.FORCED);
     _context.from = address(0);
     assertEq(_rule.check(_context), Reasons.TRANSFER_OK);
   }

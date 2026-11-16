@@ -9,6 +9,7 @@ import {IERC20Metadata} from '@openzeppelin/contracts/token/ERC20/extensions/IER
 
 import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
@@ -56,6 +57,7 @@ contract ProxyDeployerUnitTest is Helpers {
     address _named
   ) internal {
     vm.mockCall(_target, abi.encodeCall(IComplianceHook.REGISTRY, ()), abi.encode(_named));
+    _mockPolicy(_target);
   }
 
   /// @dev What the hook reports as the token's rules, and the hook accepting the token's own `setRules`
@@ -142,7 +144,7 @@ contract ProxyDeployerUnit_Deploy is ProxyDeployerUnitTest {
 
     assertEq(_proxy, _predicted);
     assertEq(address(uint160(uint256(vm.load(_proxy, ERC1967Utils.IMPLEMENTATION_SLOT)))), address(_impl));
-    assertEq(IPolicyGated(_proxy).policyHook(), _hook);
+    assertEq(IPolicyGated(_proxy).policy(), _hook);
     assertTrue(IAccessControl(_proxy).hasRole(0x00, _admin));
     assertFalse(IAccessControl(_proxy).hasRole(0x00, address(_deployer)), 'the helper holds no role');
     assertTrue(_deployer.saltUsed(keccak256('INT')));
@@ -163,10 +165,11 @@ contract ProxyDeployerUnit_Deploy is ProxyDeployerUnitTest {
     _deployer.deploy('INT', address(_impl), _init('INT', _hook), _hook, _rules);
   }
 
-  /// @dev The token installs its initial rules on the hook itself, in the init call, as its own address
+  /// @dev The token hands its initial rules to the hook itself, in the init call: they are the data of the first
+  ///      installation, which the hook's `onInstall` accepts only from the token
   function test_WhenInitialising_TheTokenInstallsItsRulesOnTheHookAsItself() external {
     address _predicted = _deployer.predict('INT', address(_impl));
-    vm.expectCall(_hook, abi.encodeCall(IComplianceHook.setRules, (_predicted, _rules)));
+    vm.expectCall(_hook, abi.encodeCall(IERC8473Policy.onInstall, (_predicted, address(0), abi.encode(_rules))));
     _deploy('INT', _init('INT', _hook), _hook);
   }
 
@@ -258,7 +261,7 @@ contract ProxyDeployerUnit_Deploy is ProxyDeployerUnitTest {
 
     _setAttested(_hook, IPolicyRegistry.AttestKind.HOOK, true);
     assertEq(_deploy('INT', _init('INT', _hook), _hook), _predicted);
-    assertEq(IPolicyGated(_predicted).policyHook(), _hook);
+    assertEq(IPolicyGated(_predicted).policy(), _hook);
   }
 
   /// @dev After the hand-over the deployer EOA cannot place a token outside governance

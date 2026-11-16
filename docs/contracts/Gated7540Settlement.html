@@ -189,8 +189,8 @@
     <h2>What it costs</h2>
     <ul class="plain wrap-any">
       <li><b>Two contracts to read as one.</b> This is <code>delegatecall</code> inside a UUPS implementation, a pattern OpenZeppelin does not ship, though the call itself is theirs. <code>npm run validate:upgrades</code> passes because the hand-off, the immutable, the constructor and the missing initializer carry <code>@custom:oz-upgrades-unsafe-allow</code> annotations: the tool is told to allow them, and does not prove them safe.</li>
-      <li><b>An unreachable copy of the base.</b> Its runtime code is 18,118 bytes, against the vault's 22,022. Most of it is the base it inherits, and no vault can call that code's external functions.</li>
-      <li><b>A larger deployment.</b> The vault's creation code carries this contract's, for 40,525 bytes against the 49,152 that EIP-3860 allows (<code>test_WhenDeployed_TheVaultWithASecondContractFitsTheEip3860Limit</code>).</li>
+      <li><b>An unreachable copy of the base.</b> Its runtime code is 18,462 bytes, against the vault's 22,315. Most of it is the base it inherits, and no vault can call that code's external functions.</li>
+      <li><b>A larger deployment.</b> The vault's creation code carries this contract's, for 41,162 bytes against the 49,152 that EIP-3860 allows (<code>test_WhenDeployed_TheVaultsWithASecondContractFitTheEip3860Limit</code>).</li>
       <li><b>Some gas on each hand-off.</b> <code>PLAN.md</code> estimates about 3,000 to 3,700 more gas on a handed call, and at most 35 on an investor's call.</li>
       <li><b>No fix without an upgrade.</b> A bug here is fixed the way a bug in the vault is: through the timelock, to a newly attested implementation.</li>
       <li><b>Not reviewed.</b> No review has covered this contract, and nothing here has had an external audit.</li>
@@ -221,7 +221,7 @@
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>4a906cc</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>e728b81</code> on <code>erc8473-main</code>.</footer>
 </main>
 </body>
 </html>
