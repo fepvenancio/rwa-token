@@ -193,4 +193,4 @@ Together with the class tokens' own `Transfer` events, `HolderClassesUpdated` an
 
 ---
 
-Describes the contracts at commit `e728b81` on `erc8473-main`.
+Describes the contracts at commit `01024e9` on `main`.

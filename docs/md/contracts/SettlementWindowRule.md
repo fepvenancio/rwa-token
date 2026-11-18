@@ -121,4 +121,4 @@ One product lists it at this commit: the intent token of the demo deployment (`f
 
 ---
 
-Describes the contracts at commit `e728b81` on `erc8473-main`.
+Describes the contracts at commit `01024e9` on `main`.

@@ -238,4 +238,4 @@ Pausing the executor stops both entry points without touching the tokens. Both e
 
 ---
 
-Describes the contracts at commit `e728b81` on `erc8473-main`.
+Describes the contracts at commit `01024e9` on `main`.
