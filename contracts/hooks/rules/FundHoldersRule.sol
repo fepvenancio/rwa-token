@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
+import {ERC165Checker} from '@openzeppelin/contracts/utils/introspection/ERC165Checker.sol';
 
 import {Reasons} from 'interfaces/Errors.sol';
 
@@ -60,8 +61,9 @@ contract FundHoldersRule is BaseRule, IFundHoldersRule {
    * @inheritdoc IComplianceRule
    * @dev The fund's count is derived from the class's movements, and it is kept across installations on purpose, so
    *      here the rule confirms it is current: the class has no supply, so there is nothing to count, or the policy the
-   *      token consulted until now listed this rule for it, so no movement went unseen. Otherwise it refuses to go
-   *      live. It writes nothing, so anyone may call it
+   *      token consulted until now listed this rule or another rule of the same fund for it. Such a rule counted every
+   *      movement while the fund had it installed and refused every movement while it did not, so none went unseen.
+   *      Otherwise it refuses to go live. It writes nothing, so anyone may call it
    */
   function onInstall(
     address _token,
@@ -74,7 +76,13 @@ contract FundHoldersRule is BaseRule, IFundHoldersRule {
       IComplianceRule[] memory _listed = IComplianceHook(_previousPolicy).rules(_token);
       uint256 _length = _listed.length;
       for (uint256 _i; _i < _length; ++_i) {
-        if (address(_listed[_i]) == address(this)) return;
+        address _listedRule = address(_listed[_i]);
+        // The other rules of a list have no `FUND()`: only one that answers this rule's interface is asked.
+        if (
+          _listedRule == address(this)
+            || (ERC165Checker.supportsInterface(_listedRule, type(IFundHoldersRule).interfaceId)
+              && IFundHoldersRule(_listedRule).FUND() == FUND)
+        ) return;
       }
     }
     revert FundHoldersRule_CountNotCurrent(_token);

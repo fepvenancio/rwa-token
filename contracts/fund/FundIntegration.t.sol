@@ -11,6 +11,7 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IERC8473} from 'interfaces/IERC8473.sol';
 import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IFund} from 'interfaces/IFund.sol';
+import {IFundHoldersRule} from 'interfaces/IFundHoldersRule.sol';
 import {IGated7540Vault} from 'interfaces/IGated7540Vault.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
@@ -541,17 +542,19 @@ contract FundIntegration_Registration is FundIntegrationTest {
     assertEq(_fund.heldClasses(_alice), 8);
   }
 
-  function test_WhenAClassAlreadyHasSupply_ItCannotBeRegistered() external {
+  /// @dev The cold start: a class that got a supply without the fund rule. The rule refuses to be listed again, so the
+  ///      class never reaches the fund's own supply check, which `Fund.t.sol` covers on its own
+  function test_WhenAClassAlreadyHasSupply_TheRuleCannotBeListedAndItCannotBeRegistered() external {
     _deployUnregistered();
-    // Take the fund rule out of play to mint, which is exactly the cold start the supply check exists to refuse.
     IComplianceRule[] memory _without = new IComplianceRule[](1);
     _without[0] = _identityRule;
     _hook.setRules(address(_other), _without);
     vm.prank(_minter);
     _other.mint(_alice, 1 ether);
-    _hook.setRules(address(_other), _rules(_fundRule));
 
-    vm.expectRevert(abi.encodeWithSelector(IFund.Fund_ClassHasSupply.selector, address(_other), 1 ether));
+    vm.expectRevert(abi.encodeWithSelector(IFundHoldersRule.FundHoldersRule_CountNotCurrent.selector, address(_other)));
+    _hook.setRules(address(_other), _rules(_fundRule));
+    vm.expectRevert(abi.encodeWithSelector(IFund.Fund_RuleNotListed.selector, address(_other), address(_fundRule)));
     _fund.registerClass(address(_other));
   }
 
@@ -765,6 +768,21 @@ contract FundIntegration_Integrity is FundIntegrationTest {
     _hook.setRules(address(_vault4626), _rules(_fundRule));
     assertTrue(_fund.isClassIntact(address(_vault4626)));
     assertEq(_fund.firstBrokenClass(), address(0));
+  }
+
+  /// @dev With holders, the same two calls no longer bring the rule back: the movements in between were not counted
+  function test_WhenAClassWithHoldersDropsTheFundRule_ItCannotTakeItBack() external {
+    _mintToken(_alice, 1 ether);
+    IComplianceRule[] memory _without = new IComplianceRule[](2);
+    _without[0] = _identityRule;
+    _without[1] = _restrictionRule;
+    _hook.setRules(address(_token), _without);
+    _mintToken(_bob, 1 ether);
+    assertEq(_fund.holderCount(), 1, 'the uncounted movement');
+
+    vm.expectRevert(abi.encodeWithSelector(IFundHoldersRule.FundHoldersRule_CountNotCurrent.selector, address(_token)));
+    _hook.setRules(address(_token), _rules(_fundRule));
+    assertFalse(_fund.isClassIntact(address(_token)));
   }
 
   /// @dev A hook swap that keeps the rules keeps the class intact, and a swap to a hook without them breaks it
