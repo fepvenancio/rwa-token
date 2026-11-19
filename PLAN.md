@@ -4688,6 +4688,17 @@ The owner passed on the go-ahead for step 0 and the first pass on 2026-11-19. E3
 - **Gates.** `npx hardhat test`: 2251 passing (2050 solidity, 201 nodejs) before the test above was added, and that file then passed alone with 22. Format, lint and typecheck clean, Slither 0 results, Halmos 22 of 22, `validate:upgrades` 8 of 8, `verify:reproducible` 34 contracts identical.
 - **Not done.** No signed `setOperator`: a controller makes the contract its operator with a transaction of its own, as the plan decided. No Halmos property. The port to `paris`.
 
+### The second pass, as built on `main` (2026-11-19): E4, the cash profile
+
+The owner approved the second pass on 2026-11-19 ("Yes, start"). E8 is not built yet.
+
+- **A profile and no contract.** `cash` in `ignition/profiles.ts`: one `IntentToken` with six decimals, `CredentialRule` and `SupplyCapRule`, both executors. It does not list `ExecutedOnlyRule`, because a plain transfer is how every other part takes and pays it.
+- **The five uses, on real contracts.** `IntentTokenAsCash.t.sol`, seven tests: the cap bounds the minter; a 4626 takes it only once the vault holds a credential; an investor enters that vault through `SignedEntry` by the token's `permit`; a 7540 deals in it through a cash account that holds a credential; a distributor is funded and pays in it, passing over a holder that may not receive; and a security settles against it through `DvPExecutor`. They passed as written: nothing in the contracts had to change, which is the finding.
+- **What it shows that was not written down.** Every contract that holds the cash is a holder of a gated token: a vault, the signed entry, a distributor and a fund's cash account each need a credential on it. `SignedEntry` and the vault's own page said so for a gated asset; the distributor's did not.
+- **The profile.** A node test deploys it with `cashSupplyCap`, checks the decimals, the cap, both executors' role, a mint above the cap refused and a plain transfer allowed; the test that deploys every profile runs the post-deploy check on it.
+- **No benchmark row.** No contract changed, so no flow moved.
+- **Gates.** `npx hardhat test`: 2260 passing (2058 solidity, 202 nodejs). Format, lint and typecheck clean. Slither, upgrade safety and the reproducible build were not rerun locally: no contract changed.
+- **Not done.** ERC-3009 on the stack's own token, by decision: nothing here needs it. The port to `paris`.
 ### The first pass on `paris` (2026-11-19): step 0, E1 and E2
 
 Carried here by cherry-pick with no conflict; where the text above says "this line" it means `main`, and its numbers are `main`'s. The contracts, the tests and the pages are the same files. This is the line the target runs, so its own base is recorded. The guard here is in storage, which is the two more slots written on most rows.

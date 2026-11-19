@@ -290,6 +290,30 @@ describe("the rules a profile can list", async function () {
     ],
   };
 
+  it("the cash profile: an intent token with a credential rule and a supply cap, both executors, and the check passes", async function () {
+    const s = await deployProfile(connection, PROFILES.cash, { cashSupplyCap: 1_000n });
+    const cash = await viem.getContractAt("IntentToken", s.products.cash.address);
+    const alice = s.holders.alice;
+    await verify(s, alice);
+    assert.equal(await cash.read.decimals(), 6);
+    assert.equal(await s.rules.supplyCapRule!.read.supplyCap([cash.address]), 1_000n);
+    assert.equal(await cash.read.hasRole([await cash.read.EXECUTOR_ROLE(), s.executor!.address]), true);
+    assert.equal(await cash.read.hasRole([await cash.read.EXECUTOR_ROLE(), s.dvpExecutor!.address]), true);
+
+    await cash.write.mint([alice.account.address, 1_000n], { account: s.wallets.minter.account });
+    await viem.assertions.revertWithCustomErrorWithArgs(
+      cash.write.mint([alice.account.address, 1n], { account: s.wallets.minter.account }),
+      cash,
+      "ERC8473PolicyRejected",
+      [REASONS.ABOVE_SUPPLY_CAP],
+    );
+    // A plain transfer is allowed: the profile does not list `executedOnlyRule`, so the token can be a vault's asset.
+    const bob = s.holders.bob;
+    await verify(s, bob);
+    await cash.write.transfer([bob.account.address, 10n], { account: alice.account });
+    assert.equal(await cash.read.balanceOf([bob.account.address]), 10n);
+  });
+
   it("a supply cap set at launch, and a token that moves only by signed intent", async function () {
     const s = await networkHelpers.loadFixture(async function cappedStack() {
       return deployProfile(connection, capped, { noteSupplyCap: 100n });

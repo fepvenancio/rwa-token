@@ -158,7 +158,7 @@ two run the same code.
 One core per issuer, then one product at a time, so an issuer runs many products on one set of timelocks, one guardian, one
 hook and one credential registry, and a client is verified once. A core may instead read an existing credential registry,
 another issuer's (**Using an existing credential registry**, below). Someone who wants one product alone deploys the core and
-that product, with the same code. `ignition/profiles.ts` names the combinations: `token`, `nft` (one ERC-721, a certificate or a note per token), `multi` (one ERC-1155, several series of one instrument), `intent` (one intent token with both executors), `vault4626`, `vault7540` (a fund with one custodian and a desk),
+that product, with the same code. `ignition/profiles.ts` names the combinations: `token`, `nft` (one ERC-721, a certificate or a note per token), `multi` (one ERC-1155, several series of one instrument), `intent` (one intent token with both executors), `cash` (the money of a deployment: an intent token with six decimals, a credential rule and a supply cap), `vault4626`, `vault7540` (a fund with one custodian and a desk),
 `managed-fund` (custodians, a mandate and fees, no on-chain yield), `vault4626-invest` (an instant vault investing through a
 portfolio), and `full`, which keeps a plain settler account so that a test can price at will.
 `PROFILE` chooses one for `hardhat ignition deploy`, and `PRODUCT` one of its products; `full` and its first product are the

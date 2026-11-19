@@ -176,7 +176,7 @@
     <h2>Why it is built this way</h2>
     <ul class="plain">
       <li><b>The record is off-chain and the root on-chain.</b> The token needs no checkpoints, so it stays small and a transfer costs the same whether or not the token pays distributions. The price of that is that the record is a claim made by the people who approve it.</li>
-      <li><b>The approval pulls the funding.</b> Once a distribution can be claimed, the money for it is in the contract.</li>
+      <li><b>The approval pulls the funding.</b> Once a distribution can be claimed, the money for it is in the contract. When the asset is itself a gated token, the contract is a holder of it between the approval and the claims, so it needs a credential on that token, as the funder does (<code>IntentTokenAsCash.t.sol</code>).</li>
       <li><b>Each distribution keeps its own count.</b> Distributions in one asset share a balance, and <code>claimed</code> cannot pass <code>total</code>, so a list that sums too high cannot take another distribution's money.</li>
       <li><b>Anyone can submit a claim.</b> A relayer or the issuer can pay the gas for a holder, and the money still goes only to the holder.</li>
       <li><b>The token's policy decides who may be paid.</b> Asking <code>canReceive</code> means a frozen or unverified address is not paid while that holds, without this contract knowing any rule.</li>
