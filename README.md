@@ -42,6 +42,7 @@ PolicyRegistry (one per deployment, immutable)  codehash allowlist: HOOK / RULE 
 IntentExecutor (immutable)                       replaceable, role-gated submitter: execute + atomic executeBatch; refuses
                                                  an intent that states a consideration (it cannot enforce a payment)
 DvPExecutor (immutable)                          role-gated: settles a share trade against cash, both legs or neither
+OrderSettlement (immutable)                      role-gated: settles signed orders in parts and in batches, under allowances
 SignedEntry (immutable)                          enters a vault on one signature, a relayer paying the gas
 SignedExit (immutable)                           leaves a vault on signatures; delivers a 7540's settled claims
 Portfolio (one per vault, immutable)             where the vault's money may go: idle, or adapters within caps
@@ -64,7 +65,7 @@ Distributor (one per token, immutable)           pays holders from an approved, 
 | `contracts/portfolio/` | `Portfolio`, `ERC4626Adapter`, `GuardedAccount`, `ERC20CallValidator`, `ERC4626CallValidator`: where one vault's money may go |
 | `contracts/nav/` | `NavDesk`, `FeeModel`: a 7540's price and the fee on it |
 | `contracts/distribution/` | `Distributor`: dividends and coupons |
-| `contracts/intents/` | `IntentExecutor`, `DvPExecutor`, `SignedEntry`, `SignedExit` |
+| `contracts/intents/` | `IntentExecutor`, `DvPExecutor`, `OrderSettlement`, `SignedEntry`, `SignedExit` |
 | `contracts/vaults/` | `GatedVaultBase`, which both vaults inherit, `Gated4626Vault`, `Gated7540Vault`, and each vault's second contract, which its implementation creates: `Gated7540Settlement`, to which the 7540 hands its settlement and recovery functions, and `Gated4626Management`, to which the 4626 hands plugging a portfolio, the rate limit, the fee model and paying fees; with `Gated7540Common` and `Gated4626Common`, which each pair shares |
 | `contracts/test/` | Test helpers and mocks, interface-freeze and contract-size guards, Halmos properties |
 
@@ -179,6 +180,7 @@ exact sequence on the local network, playing the council and the KYC attester, a
      - each other listed rule: `MinPositionRule`, `HolderRestrictionRule`, `SettlementWindowRule`, `SupplyCapRule`, `ExecutedOnlyRule`;
      - one implementation per template, shared by every product of that template;
      - `IntentExecutor` and `DvPExecutor` (neither is attested);
+     - the one `OrderSettlement`, if the profile sets `orderSettlement` (not attested; no role on any token);
      - the one `SignedEntry`, if the profile sets `signedEntry` (not attested; no role and no money).
      - the one `SignedExit`, if the profile sets `signedExit` (not attested; no role and no money).
 

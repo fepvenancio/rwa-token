@@ -169,7 +169,7 @@
       <tbody>
         <tr><td>Each product</td><td><code>DEFAULT_ADMIN_ROLE</code> (from the end of <code>Product</code>), and <code>UPGRADER_ROLE</code></td><td>Grant and revoke the product's roles, <code>unpause</code>, <code>installPolicy</code>, upgrade to an attested implementation of the same template, change the token's rule list on the hook (<code>setRules</code>) and the settings that rules keep under the token's admin, such as <code>setPolicy</code>. On a 4626 vault, <code>setPortfolio</code> and <code>setFeeModel</code>.</td></tr>
         <tr><td>A vault's legos, through the vault's role</td><td>Nothing of their own: <code>Portfolio</code>, <code>GuardedAccount</code> and <code>NavDesk</code> ask the vault</td><td>Add or remove an adapter, raise caps, migrate a portfolio; set a permission on a guarded account; change a desk's settings and fee model, and <code>adopt</code> on a successor desk.</td></tr>
-        <tr><td><code>IntentExecutor</code>, <code>DvPExecutor</code></td><td><code>DEFAULT_ADMIN_ROLE</code></td><td>Grant and revoke <code>OPERATOR_ROLE</code> and <code>GUARDIAN_ROLE</code>, <code>unpause</code>.</td></tr>
+        <tr><td><code>IntentExecutor</code>, <code>DvPExecutor</code>, <code>OrderSettlement</code></td><td><code>DEFAULT_ADMIN_ROLE</code></td><td>Grant and revoke <code>OPERATOR_ROLE</code> and <code>GUARDIAN_ROLE</code>, <code>unpause</code>.</td></tr>
         <tr><td><code>PolicyRegistry</code></td><td><code>DEFAULT_ADMIN_ROLE</code>, from the constructor</td><td>Decide who holds <code>ATTESTER_ROLE</code>. Attesting itself is the council's.</td></tr>
         <tr><td><code>CredentialRegistry</code></td><td><code>DEFAULT_ADMIN_ROLE</code></td><td>Manage attesters and the guardian, kill or revive an attester, clear a guardian block.</td></tr>
         <tr><td>Each <code>Fund</code></td><td>Ownership, from the end of <code>FundOpen</code></td><td>Register a later class, set the fund's rule, investor cap and exemptions.</td></tr>
@@ -193,7 +193,7 @@
       <thead><tr><th>Where</th><th><code>RECOVERY_ROLE</code> allows</th><th>Granted by</th></tr></thead>
       <tbody>
         <tr><td>Each product</td><td><code>unpause()</code>, and <code>revokeRole(GUARDIAN_ROLE, account)</code></td><td><code>Product</code></td></tr>
-        <tr><td><code>IntentExecutor</code>, <code>DvPExecutor</code></td><td><code>unpause()</code>, and <code>revokeRole(GUARDIAN_ROLE, account)</code></td><td><code>CoreHandover</code></td></tr>
+        <tr><td><code>IntentExecutor</code>, <code>DvPExecutor</code>, <code>OrderSettlement</code></td><td><code>unpause()</code>, and <code>revokeRole(GUARDIAN_ROLE, account)</code></td><td><code>CoreHandover</code></td></tr>
         <tr><td><code>CredentialRegistry</code></td><td><code>revokeRole(GUARDIAN_ROLE, account)</code>, <code>clearGuardianBlock(subject)</code>, <code>reviveAttester(id)</code></td><td><code>CoreHandover</code></td></tr>
         <tr><td>Main timelock</td><td><code>revokeRole(CANCELLER_ROLE, account)</code></td><td>The constructor, from <code>Core</code></td></tr>
       </tbody>

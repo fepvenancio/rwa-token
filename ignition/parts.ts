@@ -38,6 +38,7 @@ export function deployParts(m: IgnitionModuleBuilder, parts: readonly string[]) 
     else if (TEMPLATE_OF[part] !== undefined) used[part] = m.contract(TEMPLATE_OF[part]);
     else if (part === "executor") used.executor = m.contract("IntentExecutor", [deployer, guardian]);
     else if (part === "dvpExecutor") used.dvpExecutor = m.contract("DvPExecutor", [deployer, guardian]);
+    else if (part === "orderSettlement") used.orderSettlement = m.contract("OrderSettlement", [deployer, guardian]);
     else if (part === "signedEntry") used.signedEntry = m.contract("SignedEntry");
     else if (part === "signedExit") used.signedExit = m.contract("SignedExit");
     else throw new Error(`${part} is not a part of a core`);
@@ -95,6 +96,12 @@ export function handOverParts(m: IgnitionModuleBuilder, parts: readonly string[]
     grant("dvp_operator", dvpExecutor, ROLES.OPERATOR, p("operator"));
     grant("dvp_recovery", dvpExecutor, ROLES.RECOVERY, recoveryTimelock);
     administered.push({ key: "dvpExecutor", contract: dvpExecutor });
+  }
+  if (parts.includes("orderSettlement")) {
+    const orderSettlement = m.contractAt("OrderSettlement", p("orderSettlement"));
+    grant("orders_operator", orderSettlement, ROLES.OPERATOR, p("operator"));
+    grant("orders_recovery", orderSettlement, ROLES.RECOVERY, recoveryTimelock);
+    administered.push({ key: "orderSettlement", contract: orderSettlement });
   }
 
   // Hand over, strictly after every call that needs the deployer's admin rights.

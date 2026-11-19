@@ -37,7 +37,7 @@
 <section id="in-one-minute">
   <div class="callout">
     <h3>In one minute</h3>
-    <p>Delivery versus payment (DvP) means the seller's shares are delivered only if the buyer pays, and the buyer pays only if the shares are delivered. The two parties agree a trade off-chain. The seller signs an intent (a signed transfer instruction) to send shares to the buyer, stating the cash token and the price it expects in return. The buyer signs the payment in one of two ways: an intent on a gated cash token, stating the shares it expects, or an ERC-3009 authorization (a signed permission to pull a payment) tied to the seller's intent. An operator submits both. The executor checks that they describe one trade, runs the cash leg first, then the shares, and if any part fails the whole transaction is undone. It does no matching, pricing, fees or partial fills.</p>
+    <p>Delivery versus payment (DvP) means the seller's shares are delivered only if the buyer pays, and the buyer pays only if the shares are delivered. The two parties agree a trade off-chain. The seller signs an intent (a signed transfer instruction) to send shares to the buyer, stating the cash token and the price it expects in return. The buyer signs the payment in one of two ways: an intent on a gated cash token, stating the shares it expects, or an ERC-3009 authorization (a signed permission to pull a payment) tied to the seller's intent. An operator submits both. The executor checks that they describe one trade, runs the cash leg first, then the shares, and if any part fails the whole transaction is undone. It does no matching, pricing, fees or partial fills. Orders that fill in parts, and tokens without signed intents, settle through the <a href="OrderSettlement.html">OrderSettlement</a>.</p>
   </div>
 </section>
 
@@ -362,7 +362,7 @@
   <div class="prose">
     <h2>What it does not do</h2>
     <ul class="plain">
-      <li><b>No matching, pricing, fees or partial fills.</b> Two parties agree a trade off-chain, and the executor settles exactly that trade, two legs and no more.</li>
+      <li><b>No matching, pricing, fees or partial fills.</b> Two parties agree a trade off-chain, and the executor settles exactly that trade, two legs and no more. The <a href="OrderSettlement.html">OrderSettlement</a> fills signed orders in parts and in batches, and moves each leg as a plain transfer under the maker's allowance, so it needs no signed intents and no role on the token.</li>
       <li><b>No list of tokens.</b> Nothing on-chain says which tokens are genuine. A party who signs a trade that names a counterfeit token loses to it.</li>
       <li><b>ERC-3009 is a Draft, and its token is outside the hook.</b> The executor calls the form of <code>receiveWithAuthorization</code> that takes the signature as <code>bytes</code>, and that form has to exist on the token and chain it is used with. A blocklisted executor, buyer or seller, or a paused cash token, fails the whole trade.</li>
       <li><b>It does not protect the parties' timing.</b> An operator can hold a signed trade back until the first deadline passes. The parties' controls are short deadlines and cancelling.</li>
@@ -379,6 +379,7 @@
     <a class="card" href="IntentSettledUpgradeable.html"><span class="name">IntentSettledUpgradeable</span><p>The token side of each leg: signature, nonce, executor binding and <code>canExecute</code>.</p></a>
     <a class="card" href="IntentToken.html"><span class="name">IntentToken</span><p>The security token, and the form a gated cash token takes.</p></a>
     <a class="card" href="IntentExecutor.html"><span class="name">IntentExecutor</span><p>The executor for intents without a payment.</p></a>
+    <a class="card" href="OrderSettlement.html"><span class="name">OrderSettlement</span><p>Settles signed orders in parts and in batches, for tokens with or without signed intents.</p></a>
     <a class="card" href="SignedEntry.html"><span class="name">SignedEntry</span><p>Uses the same form of ERC-3009 nonce to tie a payment to one entry into a vault.</p></a>
     <a class="card" href="FundHoldersRule.html"><span class="name">FundHoldersRule</span><p>The fund-wide investor cap that applies to the securities leg.</p></a>
     <a class="card" href="../money.html"><span class="name">Where the money sits</span><p>Where cash and shares are at each step.</p></a>

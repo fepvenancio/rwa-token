@@ -57,7 +57,7 @@
         <tr><td>Another function of the same shape, such as <code>increaseAllowance</code> or <code>mint</code></td><td class="c no">false</td><td><code>test_AnyOtherFunctionWithTheSameShapeIsRefused</code></td></tr>
         <tr><td>Any length but 68 bytes, including extra bytes after a valid call</td><td class="c no">false</td><td><code>testFuzz_AnyOtherLengthIsRefused</code>, <code>test_ExtraDataIsRefused</code></td></tr>
         <tr><td>Too short to hold a selector, or empty</td><td class="c no">false, with no revert</td><td><code>test_TooShortIsRefusedRatherThanReverting</code></td></tr>
-        <tr><td>68 bytes and the right selector, with non-zero bits in the unused upper part of the address word</td><td class="c no">reverts</td><td>None at this commit</td></tr>
+        <tr><td>68 bytes and the right selector, with non-zero bits in the unused upper part of the address word</td><td class="c no">reverts</td><td>None</td></tr>
       </tbody>
     </table>
   </div>

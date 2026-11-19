@@ -34,7 +34,7 @@ Turns off the plain transfer. On a token that lists it, a holder moves tokens to
 <a id="holder"></a>
 ## What it means for a holder
 
-- **The send button reverts.** `transfer` reverts with `ERC8473PolicyRejected(KIND_NOT_ALLOWED)`. So does `transferFrom`: `approve` and `permit` still set an allowance, but a spender cannot use it to move the tokens.
+- **The send button reverts.** `transfer` reverts with `ERC8473PolicyRejected(KIND_NOT_ALLOWED)`. So does `transferFrom`: `approve` and `permit` still set an allowance, but a spender cannot use it to move the tokens. That includes the [`OrderSettlement`](OrderSettlement.md), which moves each leg with `transferFrom`: a token that lists this rule cannot trade there.
 - **To move, the holder signs.** The holder signs a `TransferIntent` (EIP-712 typed data) and hands it to whoever runs the executor. An account holding the token's `EXECUTOR_ROLE` calls `executeTransfer`, in a deployment [`IntentExecutor`](IntentExecutor.md) or [`DvPExecutor`](DvPExecutor.md). The other rules on the list still apply to that movement.
 - **The holder depends on the executor.** The rule leaves no way for a holder to move tokens alone. An `IntentToken` has no holder burn either: `burn` needs `BURNER_ROLE`. If nobody submits the intent, nothing moves, and the intent lapses at its deadline.
 - **Each such movement leaves its reference on chain.** `executeTransfer` emits `IntentExecuted(intentHash, from, to, amount, executor, ref)`.
@@ -52,7 +52,7 @@ Turns off the plain transfer. On a token that lists it, a holder moves tokens to
 
 Nobody: there is nothing to set, no zero to read, and no state before or after. It refuses plain transfers from the moment it is on a token's list and stops when it is taken off, which is the hook's `setRules` under the token's `DEFAULT_ADMIN_ROLE`.
 
-The demo deployment does not list it, and neither does any other profile in `ignition/profiles.ts` at this commit, so it has no set position. A product asks for it by naming `executedOnlyRule` in its `rules`, and the `Core` module then deploys it. A test does this with an `IntentToken` listing `credentialRule` then `executedOnlyRule`, with an `IntentExecutor`.
+The demo deployment does not list it, and neither does any other profile in `ignition/profiles.ts`, so it has no set position. A product asks for it by naming `executedOnlyRule` in its `rules`, and the `Core` module then deploys it. A test does this with an `IntentToken` listing `credentialRule` then `executedOnlyRule`, with an `IntentExecutor`.
 
 <a id="intent-token"></a>
 ## Why it is for an `IntentToken`
@@ -88,7 +88,7 @@ The demo deployment does not list it, and neither does any other profile in `ign
 - **It does not check the reference.** The rule does not read `ref`, and the intent's own checks do not require it to be non-zero or to match anything. The holder's signature covers it, and that is all. Tying a reference to a real message is for the issuer's executor and its systems off chain.
 - **It does not cover every movement.** Forced moves, mints and burns pass and carry no reference. `IntentExecuted` is not emitted for them.
 - **It does not choose the executor.** Whoever holds `EXECUTOR_ROLE` on the token can submit intents that name no executor. Those grants are the token's admin's to make.
-- **It does not hold movements to hours.** That is [`SettlementWindowRule`](SettlementWindowRule.md), which judges `EXECUTED` alone. Together the two would put a holder's movements inside the window; no profile lists them together at this commit.
+- **It does not hold movements to hours.** That is [`SettlementWindowRule`](SettlementWindowRule.md), which judges `EXECUTED` alone. Together the two would put a holder's movements inside the window; no profile lists them together.
 
 <a id="connected"></a>
 ## Connected to

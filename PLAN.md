@@ -4781,6 +4781,25 @@ Rounding is always against the counterparty, so no sequence of small fills pays 
 
 **Steps.** Interface and brief; tests first against a stub, shown failing; the executor; `Core` and `CoreParts` part `orderSettlement` with the profile's executor list; benchmark rows; planted bugs; the Halmos property; pages; gates; the port to `paris`.
 
+**As built on `main` (2026-11-19).**
+
+- **The contract.** `OrderSettlement` with `IOrderSettlement` (a new interface, id `0xb48f6d63`, two event topics, pinned; the freeze test failed on the unpinned id). 9,279 bytes. As designed, with the four notes of the review below.
+- **Tests.** `OrderSettlement.t.sol`, 38 tests on real tokens behind the real credential registry, rule and hook; 36 of the first 37 failed against a stub. A fill in full and in parts; an order larger than its counterpart left open; a price between two limits and none outside them; rounding against the counterparty; all-or-nothing, a named taker, the window, a changed order; each degenerate fill; cancelling, two orders with one nonce, cancelling while paused; the roles, the pause and the recovery path; a maker the policy refuses, an amount above the balance in the pre-flight, a missing allowance, a token that keeps a fee, a token that calls back; a 4626's shares and a `Gated1155` series against cash; a batch and its failing index; a fuzz over sequences of fills of one order; amounts near 256 bits; the EIP-712 hash. Every refusal is asserted against `canFill` as well as `settle`.
+- **Planted bugs.** The limit rounded down; the limit not checked; what an order filled not recorded; an order filled past its amount; the signature not checked; a cancelled order still filling; the named taker ignored; the received amount not checked; the second leg sent to its own maker; ids not compared when orders cross; all-or-nothing ignored; the deadline not checked; `settle` open to anyone; `settle` not paused: 1, 2, 8, 4, 1, 2, 1, 1, 18, 1, 1, 1, 1 and 1 tests fail.
+- **Deployment.** Part and profile flag `orderSettlement`, built with the deployer as admin and handed over as the other two executors are: the operator gets `OPERATOR_ROLE`, the recovery timelock `RECOVERY_ROLE`, the timelock the admin. The post-deploy check covers its roles with the other executors', its code against the release, and a sample order's hash. A node test adds it to a running core and compares the hash of an order signed with viem.
+- **Against the benchmark, and one number missed.**
+
+| Flow | Calls | Slots written | Gas |
+|---|---|---|---|
+| dvp: gated cash, the bar | 22 | 6 | 185,367 |
+| orders: one fill, both orders new | 28 | 6 | 191,072 |
+| orders: 100 fills in one batch | 2,701 | 600 | 12,742,759 |
+
+  A fill in a batch of a hundred costs 127,428 gas, 31% less than a DvP trade, and no existing row moved. A single first fill costs 3% more than a DvP trade, so "no more gas than a `dvp: gated cash` trade" is not met. The difference is one thing, measured: the check that an ERC-20 receiver's balance rose by exactly the amount, two balance reads for each leg. Without it the same fill costs 185,245 gas in 20 calls, under the bar. The check is kept as built, because it is what refuses a token that keeps part of a transfer and nothing else here would. **Open for the owner (O7):** keep the check and accept the 3% on a lone fill, or drop it on a chain where every token is the operator's own.
+- **Gates.** `npx hardhat test`: 2300 passing (2097 solidity, 203 nodejs), before one test and one check were added and run on their own. Format, lint and typecheck clean, Slither 0 results, Halmos 25 of 25, `validate:upgrades` 8 of 8, `verify:reproducible` 35 contracts identical.
+- **Pages.** A page for `OrderSettlement` and ten pages changed. The same change removes nine "at this commit" phrases left on the pages and corrects two sentences the cash profile had made false: the hook's page and the supply cap's page said no profile lists `SupplyCapRule`.
+- **Not done.** The fuzzed property stands in for a Halmos one, as planned. A fill of a 7540's shares is not tested on its own; they are an ERC-20 as a 4626's are. The port to `paris`.
+
 **Review of this design (2026-11-19).** The owner passed on a review that answers O1 to O6 as proposed and adds four notes, each checked and right, and each now in the text above: 512-bit limit arithmetic; the degenerate fills refused up front; what a nonce cancels against what a hash fills; and the reasoned pre-flight for the stack's own tokens. It also points out why O1 is safe with O2 and O5 as they are: with no fee and no receiver but the makers, whatever lies between two limits goes to one of the two makers and never to the operator. On E7 the same review recommends the escrow; that choice is still the owner's.
 
 ### Decisions and review, 2026-11-19
@@ -4810,4 +4829,4 @@ That the stack then runs a market at any given rate. The benchmark compares the 
 6. Entities in the credential registry: built on 2026-11-19 without N10. Still open: whether a second live attester for one address is expected, which would change how an entity is scoped.
 7. A review of both plans (2026-11-19) recommends: build both; keep R3 as written, with no recount; leave N10 out; put off the second attester. These are a reviewer's recommendations and decide nothing; items 5 and 6 stay the owner's.
 8. The ecosystem plan (2026-11-19): step 0 and the first pass (E1, E2, E3 with E13) are approved. Open: for E7, a scoped enforcement lego or an escrow; and counsel's view on omnibus accounts (E9).
-9. `OrderSettlement` (E8): O1 to O6 answered as proposed by the review the owner passed on; being built. E7: the review recommends the escrow; the owner has not chosen.
+9. `OrderSettlement` (E8): built with O1 to O6 as proposed. Open: O7, whether to keep the received-amount check that puts a lone fill 3% above its bar. E7: the review recommends the escrow; the owner has not chosen.

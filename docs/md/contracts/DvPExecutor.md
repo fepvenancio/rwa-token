@@ -15,7 +15,7 @@ Settles a trade of a security token against cash in one transaction: the shares 
 
 > ### In one minute
 >
-> Delivery versus payment (DvP) means the seller's shares are delivered only if the buyer pays, and the buyer pays only if the shares are delivered. The two parties agree a trade off-chain. The seller signs an intent (a signed transfer instruction) to send shares to the buyer, stating the cash token and the price it expects in return. The buyer signs the payment in one of two ways: an intent on a gated cash token, stating the shares it expects, or an ERC-3009 authorization (a signed permission to pull a payment) tied to the seller's intent. An operator submits both. The executor checks that they describe one trade, runs the cash leg first, then the shares, and if any part fails the whole transaction is undone. It does no matching, pricing, fees or partial fills.
+> Delivery versus payment (DvP) means the seller's shares are delivered only if the buyer pays, and the buyer pays only if the shares are delivered. The two parties agree a trade off-chain. The seller signs an intent (a signed transfer instruction) to send shares to the buyer, stating the cash token and the price it expects in return. The buyer signs the payment in one of two ways: an intent on a gated cash token, stating the shares it expects, or an ERC-3009 authorization (a signed permission to pull a payment) tied to the seller's intent. An operator submits both. The executor checks that they describe one trade, runs the cash leg first, then the shares, and if any part fails the whole transaction is undone. It does no matching, pricing, fees or partial fills. Orders that fill in parts, and tokens without signed intents, settle through the [OrderSettlement](OrderSettlement.md).
 
 <a id="how"></a>
 ## How a trade settles
@@ -212,7 +212,7 @@ Pausing the executor stops both entry points without touching the tokens. Both e
 <a id="limits"></a>
 ## What it does not do
 
-- **No matching, pricing, fees or partial fills.** Two parties agree a trade off-chain, and the executor settles exactly that trade, two legs and no more.
+- **No matching, pricing, fees or partial fills.** Two parties agree a trade off-chain, and the executor settles exactly that trade, two legs and no more. The [OrderSettlement](OrderSettlement.md) fills signed orders in parts and in batches, and moves each leg as a plain transfer under the maker's allowance, so it needs no signed intents and no role on the token.
 - **No list of tokens.** Nothing on-chain says which tokens are genuine. A party who signs a trade that names a counterfeit token loses to it.
 - **ERC-3009 is a Draft, and its token is outside the hook.** The executor calls the form of `receiveWithAuthorization` that takes the signature as `bytes`, and that form has to exist on the token and chain it is used with. A blocklisted executor, buyer or seller, or a paused cash token, fails the whole trade.
 - **It does not protect the parties' timing.** An operator can hold a signed trade back until the first deadline passes. The parties' controls are short deadlines and cancelling.
@@ -226,6 +226,7 @@ Pausing the executor stops both entry points without touching the tokens. Both e
 - [IntentSettledUpgradeable](IntentSettledUpgradeable.md): The token side of each leg: signature, nonce, executor binding and `canExecute`.
 - [IntentToken](IntentToken.md): The security token, and the form a gated cash token takes.
 - [IntentExecutor](IntentExecutor.md): The executor for intents without a payment.
+- [OrderSettlement](OrderSettlement.md): Settles signed orders in parts and in batches, for tokens with or without signed intents.
 - [SignedEntry](SignedEntry.md): Uses the same form of ERC-3009 nonce to tie a payment to one entry into a vault.
 - [FundHoldersRule](FundHoldersRule.md): The fund-wide investor cap that applies to the securities leg.
 - [Where the money sits](../money.md): Where cash and shares are at each step.
