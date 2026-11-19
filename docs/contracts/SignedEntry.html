@@ -37,7 +37,7 @@
 <section id="in-one-minute">
   <div class="callout">
     <h3>In one minute</h3>
-    <p>Entering a vault normally takes the investor's own transactions, and the network fee (gas) that goes with them. With this contract the investor signs instead, and someone else, a relayer, submits what was signed and pays the gas. The short description is "one signature", because the investor sends no transaction. There are in fact two signed messages: the entry, which says where, how much, the least it accepts and when; and the cash, which lets this contract pull the money. In one transaction the contract checks the entry, pulls the cash and pays the vault. On a 4626 vault the shares go to the investor there and then. On a 7540 vault a request is filed with the investor as its controller. A relayer can delay what it holds, but it cannot change it. No vault has code for this: the contract is one more payer, it needs a credential on the vault's policy, it has no roles, and an entry whose flag matches a genuine vault leaves no money in it. Leaving a vault needs no such contract.</p>
+    <p>Entering a vault normally takes the investor's own transactions, and the network fee (gas) that goes with them. With this contract the investor signs instead, and someone else, a relayer, submits what was signed and pays the gas. The short description is "one signature", because the investor sends no transaction. There are in fact two signed messages: the entry, which says where, how much, the least it accepts and when; and the cash, which lets this contract pull the money. In one transaction the contract checks the entry, pulls the cash and pays the vault. On a 4626 vault the shares go to the investor there and then. On a 7540 vault a request is filed with the investor as its controller. A relayer can delay what it holds, but it cannot change it. No vault has code for this: the contract is one more payer, it needs a credential on the vault's policy, it has no roles, and an entry whose flag matches a genuine vault leaves no money in it. Leaving a vault has its own contract, <a href="SignedExit.html">SignedExit</a>.</p>
   </div>
 </section>
 
@@ -141,7 +141,7 @@
         <tr><td><code>assets</code></td><td>The amount to pay.</td></tr>
         <tr><td><code>minShares</code></td><td>The least the investor accepts on a 4626. On a 7540 it must be zero.</td></tr>
         <tr><td><code>asynchronous</code></td><td>True for a 7540, where the entry files a request. False for a 4626, where it deposits.</td></tr>
-        <tr><td><code>nonce</code></td><td>A random value the investor chooses, usable once per investor.</td></tr>
+        <tr><td><code>nonce</code></td><td>A value the investor chooses, usable once per investor. It is kept as one bit, bit <code>nonce &amp; 0xff</code> of word <code>nonce &gt;&gt; 8</code>, so nonces numbered one after the other share a storage slot, 256 to a slot.</td></tr>
         <tr><td><code>validAfter</code>, <code>deadline</code></td><td>The window, inclusive at both ends. A <code>validAfter</code> of zero means no lower bound.</td></tr>
       </tbody>
     </table>
@@ -182,7 +182,7 @@
       <h3>A 7540: a request</h3>
       <p>With <code>asynchronous</code> true, the contract calls <code>requestDeposit(assets, investor, itself)</code>: the investor is the controller, and this contract is the owner that pays. The call returns zero shares (<code>test_OnARequestItFilesUnderTheInvestorAsController</code>). The request joins the period open at that moment.</p>
       <p><b>A signed minimum is refused</b> with <code>SignedEntry_MinimumOnARequest</code>, before the signature is checked. A request has no price yet, so a minimum could not be honoured, and the contract will not appear to promise one. The investor's protection is the period's approved price.</p>
-      <p>The investor claims the shares once the period has settled, in a transaction of its own or through an operator it approved with <code>setOperator</code>. This contract does not claim. If the vault rejects the request, <code>rejectDepositRequest</code> pays the assets to the controller, the investor, and not to this contract.</p>
+      <p>The investor claims the shares once the period has settled, in a transaction of its own or through an operator it approved with <code>setOperator</code>. This contract does not claim. <a href="SignedExit.html"><code>SignedExit</code></a> does, for a controller that made it its operator: anyone can then deliver the shares to the investor with <code>claimFor</code>. If the vault rejects the request, <code>rejectDepositRequest</code> pays the assets to the controller, the investor, and not to this contract.</p>
     </div>
   </div>
   <div class="prose">
@@ -258,8 +258,8 @@
 
 <section id="exits">
   <div class="prose">
-    <h2>Exits need no such contract</h2>
-    <p>The vault's share token already has what a relayed exit takes: ERC-2612 <code>permit</code>, and <code>multicall</code>, which runs several of the token's own functions in one transaction with the sender preserved. A holder signs one message, the share token's <code>permit</code>, naming the relayer as spender for the shares. The relayer calls <code>multicall</code> on the vault with two calls:</p>
+    <h2>Exits with the share token alone</h2>
+    <p><a href="SignedExit.html"><code>SignedExit</code></a> is the contract for leaving on signed messages: the holder signs where the cash goes and the least it accepts, and a relayer can change neither. A relayed exit also works without it. The vault's share token already has what that takes: ERC-2612 <code>permit</code>, and <code>multicall</code>, which runs several of the token's own functions in one transaction with the sender preserved. A holder signs one message, the share token's <code>permit</code>, naming the relayer as spender for the shares. The relayer calls <code>multicall</code> on the vault with two calls:</p>
   </div>
   <pre>vault.multicall([
   permit(holder, relayer, shares, deadline, v, r, s),
@@ -274,7 +274,7 @@ vault.multicall([
     <p>The relayer needs no credential, because the vault judges the receiver of the cash or the controller and not the caller (<code>test_ARelayerRedeemsOnAHoldersSignatureAndTheCashGoesToTheHolder</code>, <code>test_ARelayerFilesARedemptionOnAHoldersSignature</code>). On a 7540 the holder later claims the cash with <code>redeem(shares, receiver, controller)</code>, which takes the controller or an operator it approved.</p>
     <p>If someone submits the permit first, the <code>multicall</code> reverts on the spent permit nonce. The relayer then sends the <code>redeem</code> or <code>requestRedeem</code> alone, because the allowance is in place.</p>
   </div>
-  <div class="note"><b>This route asks more trust than an entry.</b> A share <code>permit</code> is an allowance to the relayer. It says how many shares and the last moment it can be submitted, and it does not say what happens to them. Once submitted, the allowance has no end date: it stands until it is spent or the holder resets it. In the calls above it is the relayer who names the holder. It could name another account as receiver or controller, or use <code>transferFrom</code>, and the cash or the shares would go there, as long as that account passes the token's policy (a receiver or controller that does not reverts with <code>GatedVault_ThirdPartyNotEligible(account, reason)</code>). An exit through a relayer needs a relayer the holder trusts with those shares.</div>
+  <div class="note"><b>This route asks more trust than an entry.</b> A share <code>permit</code> is an allowance to the relayer. It says how many shares and the last moment it can be submitted, and it does not say what happens to them. Once submitted, the allowance has no end date: it stands until it is spent or the holder resets it. In the calls above it is the relayer who names the holder. It could name another account as receiver or controller, or use <code>transferFrom</code>, and the cash or the shares would go there, as long as that account passes the token's policy (a receiver or controller that does not reverts with <code>GatedVault_ThirdPartyNotEligible(account, reason)</code>). An exit by this route needs a relayer the holder trusts with those shares. Through <a href="SignedExit.html"><code>SignedExit</code></a> the allowance is to that contract and the holder signs the receiver, so the relayer is trusted with timing alone.</div>
 </section>
 
 <section id="functions">
@@ -334,7 +334,7 @@ vault.multicall([
       <li><b>A permit is not bound to one entry</b>, and permits run in order. An ERC-2612 permit carries the token's next sequential nonce, so a second permit does not work until the first is spent; its failure is ignored, and the entry then reverts for lack of allowance. An allowance, once set, stands until it is spent or the investor resets it on the cash token.</li>
       <li><b>A minimum protects on a 4626 only.</b> On a 7540 the investor files without knowing the price, and relies on the period's approved price.</li>
       <li><b>Cancelling takes a transaction</b>, so it needs gas, and it can lose the race with the relayer. It does not revoke an allowance.</li>
-      <li><b>No claims.</b> A 7540's shares take a later call by the investor or its operator.</li>
+      <li><b>No claims.</b> A 7540's shares take a later call by the investor or its operator, which can be <a href="SignedExit.html"><code>SignedExit</code></a>.</li>
       <li><b>No payment to the relayer</b>, and no way to name one.</li>
       <li><b>No credential from the modules.</b> <code>Core</code> deploys one when the profile sets <code>signedEntry</code>, and <code>CoreParts</code> adds one to a running core, but no module credentials it, and no shipped profile sets <code>signedEntry</code>. The KYC attester gives it a credential that each vault's policy accepts. The post-deploy check compares its code with the release's and checks that a sample entry hashes under its own EIP-712 domain.</li>
       <li><b>No sweep.</b> It has no function to move tokens sent to it by mistake. A gated token's agent can still take its own token out with <code>forcedTransfer</code>.</li>
@@ -351,6 +351,7 @@ vault.multicall([
     <a class="card" href="NavDesk.html"><span class="name">NavDesk</span><p>Approves the price that protects a 7540 request.</p></a>
     <a class="card" href="CredentialRule.html"><span class="name">CredentialRule</span><p>The usual reason a vault accepts or refuses this contract and the investor.</p></a>
     <a class="card" href="PolicyGatedERC20Upgradeable.html"><span class="name">PolicyGatedERC20Upgradeable</span><p>Gives a share token the <code>permit</code> and the <code>multicall</code> that a relayed exit uses.</p></a>
+    <a class="card" href="SignedExit.html"><span class="name">SignedExit</span><p>Its mirror: leaving a vault on signed messages, and delivering a 7540's settled claims.</p></a>
     <a class="card" href="DvPExecutor.html"><span class="name">DvPExecutor</span><p>Ties an ERC-3009 payment to one signed instruction in the same way.</p></a>
   </div>
 </section>

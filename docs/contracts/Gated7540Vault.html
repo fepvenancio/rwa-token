@@ -630,6 +630,7 @@ Alice    : owed = 10500e6 × 40,000.000000001904 / 42000e6    = 10,000.000000000
   </div>
   <div class="prose wrap-any">
     <p>Operators are full delegates, as ERC-7540 defines them. An operator of an owner can open a request under any controller, its own included, that takes the owner's assets or shares, subject to the third-party check. A test pins this, so that nobody narrows it by accident (<code>test_WhenAnOperatorRequestsUnderItsOwnController_ItIsAFullDelegatePerErc7540</code>). An account should approve only operators it would trust with its assets and shares. Without an approval a deposit request reverts with <code>Gated7540Vault_Unauthorized(caller)</code>, and a redemption request needs a share allowance, as with an ERC-20 <code>transferFrom</code>.</p>
+    <p><a href="SignedExit.html"><code>SignedExit</code></a> uses both. With a holder's signed exit and share <code>permit</code> it files <code>requestRedeem</code> with the holder as controller, on the allowance, while a relayer pays the gas. A controller that makes it an operator lets anyone call its <code>claimFor</code>, which claims that controller's settled shares and cash in full, with the controller as receiver. A claim this vault refuses is skipped there and stays here. That contract is immutable, and without the holder's signature it does nothing else with the approval.</p>
   </div>
 </section>
 
@@ -719,6 +720,7 @@ Alice    : owed = 10500e6 × 40,000.000000001904 / 42000e6    = 10,000.000000000
     <a class="card" href="FeeModel.html"><span class="name">FeeModel</span><p>The fee a desk passes to <code>settlePeriod</code>.</p></a>
     <a class="card" href="Portfolio.html"><span class="name">Portfolio</span><p>With one plugged into the desk, the cash account and the on-chain part of the value.</p></a>
     <a class="card" href="SignedEntry.html"><span class="name">SignedEntry</span><p>Files a deposit request from an investor's two signed messages, the entry and the cash, with a relayer paying the gas.</p></a>
+    <a class="card" href="SignedExit.html"><span class="name">SignedExit</span><p>Files a redemption request from a holder's signed exit and share permit, and delivers settled claims to a controller that made it an operator.</p></a>
     <a class="card" href="ComplianceHook.html"><span class="name">ComplianceHook</span><p>Runs the vault's rule list on every share movement and probe.</p></a>
     <a class="card" href="CredentialRule.html"><span class="name">CredentialRule</span><p>Who may become a controller, who may still collect, and why the escrow needs no credential.</p></a>
     <a class="card" href="FundHoldersRule.html"><span class="name">FundHoldersRule</span><p>The fund-wide investor cap that can strand a settled deposit.</p></a>

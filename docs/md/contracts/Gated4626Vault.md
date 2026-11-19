@@ -199,7 +199,7 @@ The previews are arithmetic only. They tell you what the formula gives, and the 
 | `MANAGEMENT_LOGIC()` | Anyone (read-only) | The second contract, [`Gated4626Management`](Gated4626Management.md), which four functions are handed to. An immutable of the implementation. |
 | `portfolio()`, `feeModel()`, `maxRate()`, `lastCounted()`, `feesOwed()`, `mark()`, `paidSinceMark()`, `exitOnly()` | Anyone (read-only) | The state described above. `portfolio()` and `feeModel()` read zero when none is plugged. |
 | `mint(address, uint256)`, `burn(address, uint256)` | Anyone, to no effect | The base token's issuer functions. They revert with `GatedVault_Unsupported`, even for a holder of `MINTER_ROLE` or `BURNER_ROLE` ([`GatedVaultBase`](GatedVaultBase.md)). |
-| `transfer`, `transferFrom`, `approve`, `permit` | `transfer`: a holder. `transferFrom`: a spender with the holder's allowance. `approve`: any account. `permit`: anyone with the owner's signature. | Ordinary share transfers and allowances. `transfer` and `transferFrom` are each a TRANSFER through the hook; `approve` and `permit` only set allowances. |
+| `transfer`, `transferFrom`, `approve`, `permit` | `transfer`: a holder. `transferFrom`: a spender with the holder's allowance. `approve`: any account. `permit`: anyone with the owner's signature. | Ordinary share transfers and allowances. `transfer` and `transferFrom` are each a TRANSFER through the hook; `approve` and `permit` only set allowances. With a holder's `permit` and signed exit, [`SignedExit`](SignedExit.md) redeems to the receiver the holder signed, while a relayer pays the gas. |
 | `forcedTransfer`, `setFrozenTokens` | `AGENT_ROLE` | The base token's enforcement tools, on shares: move shares from any holder, and freeze part of a balance. |
 | `pause()`, `unpause()` | `GUARDIAN_ROLE`; the main timelock or the recovery timelock | Stop and restart every share movement except a forced transfer. |
 | `initialize` | Once, in the transaction that creates the proxy | Takes the asset, name, symbol, admin, guardian, registry, hook and rules. Sets the asset and the base token, installs the hook and the vault's rule list. [`ProxyDeployer`](ProxyDeployer.md) makes this call. |
@@ -246,6 +246,7 @@ The previews are arithmetic only. They tell you what the formula gives, and the 
 - [FeeModel](FeeModel.md): The quote behind each fee.
 - [ComplianceHook](ComplianceHook.md): Runs the vault's rule list on every share movement and every probe.
 - [SignedEntry](SignedEntry.md): Enters a vault from an investor's two signed messages, the entry and the cash, with a relayer paying the gas.
+- [SignedExit](SignedExit.md): Redeems from a holder's signed exit and share permit, to the receiver the holder signed, with a relayer paying the gas.
 - [Gated7540Vault](Gated7540Vault.md): The vault that deals in periods, for values that come from a report.
 - [Where the money sits](../money.md): Every place an asset can be, across both vaults.
 

@@ -104,7 +104,7 @@ The contract adds no state, no event and no role. Everything else a vault inheri
 - **A FORCED probe of zero.** The question is who the account is, not whether a particular movement fits. FORCED skips the pause, the amount of zero skips the cap and the minimum, and neither touches a frozen balance. What is left is the policy on who may receive under an enforcement move. A forced transfer's recipient has to pass the same test, so one rule covers both.
 - **A holder paying itself is not judged.** A holder whose credential lapsed, or whose attester was killed, must still be able to leave (`test_WhenTheHolderHasLapsed_ItRedeemsToItselfAndNotToAStranger`, `test_WhenTheAttesterWasKilled_TheHolderStillRedeemsToItself`). A lapsed account cannot use that to pay anyone else: a lapsed payer for another account is refused with `CREDENTIAL_EXPIRED` (`test_WhenALapsedPayerDepositsForAClient_ItSaysItLapsed`).
 - **A receiver paying for itself is not asked twice.** The mint already judges it (`test_AReceiverPayingForItselfIsNotAskedAboutAgain`).
-- **A custodian can still act for clients, if it has a credential.** A credentialed account paying for a client is allowed, and the client gets the shares (`test_WhenACredentialedCustodianPaysForAClient_TheClientGetsTheShares`). [`SignedEntry`](SignedEntry.md) is one such payer, so it needs a credential as well.
+- **A custodian can still act for clients, if it has a credential.** A credentialed account paying for a client is allowed, and the client gets the shares (`test_WhenACredentialedCustodianPaysForAClient_TheClientGetsTheShares`). [`SignedEntry`](SignedEntry.md) is one such payer, so it needs a credential as well. [`SignedExit`](SignedExit.md) pays nothing and receives nothing, so it needs none; a receiver the holder signs there is judged like any other.
 - **Issuer mint and burn revert.** With them, an issuer role could change the share supply with no assets moving, and the price would stop meaning what it says.
 
 <a id="limits"></a>
@@ -124,6 +124,7 @@ The contract adds no state, no event and no role. Everything else a vault inheri
 - [Gated7540Vault](Gated7540Vault.md): The request and claim vault, dealt in periods.
 - [CredentialRule](CredentialRule.md): What decides most probes: who may hold, and why a lapsed holder can still leave.
 - [SignedEntry](SignedEntry.md): A third-party payer by design, judged like any other.
+- [SignedExit](SignedExit.md): Redeems to a receiver the holder signed, which this check still judges.
 - [One movement](../movement.md): The path every real share movement takes through the token and the hook.
 
 <a id="source"></a>

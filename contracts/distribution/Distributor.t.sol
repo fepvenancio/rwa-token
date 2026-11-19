@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {IAccessControl} from '@openzeppelin/contracts/access/IAccessControl.sol';
+import {ERC20} from '@openzeppelin/contracts/token/ERC20/ERC20.sol';
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {Hashes} from '@openzeppelin/contracts/utils/cryptography/Hashes.sol';
 
@@ -296,6 +297,243 @@ contract Distributor_Claim is DistributorTest {
     if (!_aliceFirst) _distributor.claim(_id, _alice, _ALICE_SHARE, _proof(_leaf(_bob, _BOB_SHARE)));
     assertEq(_distributor.distributionOf(_id).claimed, _TOTAL);
     assertEq(_asset.balanceOf(address(_distributor)), 0);
+  }
+}
+
+/// @notice An asset that refuses to pay the addresses it is told to, as a gated cash token refuses an account
+contract DistributorRefusingAsset is ERC20 {
+  mapping(address _account => bool _refused) public refused;
+
+  constructor() ERC20('Refusing', 'RFS') {}
+
+  function mint(
+    address _to,
+    uint256 _amount
+  ) external {
+    _mint(_to, _amount);
+  }
+
+  function refuse(
+    address _account,
+    bool _isRefused
+  ) external {
+    refused[_account] = _isRefused;
+  }
+
+  function _update(
+    address _from,
+    address _to,
+    uint256 _value
+  ) internal override {
+    require(!refused[_to], 'refused');
+    super._update(_from, _to, _value);
+  }
+}
+
+contract Distributor_ClaimBatch is DistributorTest {
+  uint256 internal _id;
+
+  function setUp() public virtual override {
+    super.setUp();
+    _id = _approved();
+  }
+
+  /// @dev The two holders of the fixture's tree, in order
+  function _rows()
+    internal
+    view
+    returns (address[] memory _holders, uint256[] memory _amounts, bytes32[][] memory _proofs)
+  {
+    _holders = new address[](2);
+    _amounts = new uint256[](2);
+    _proofs = new bytes32[][](2);
+    (_holders[0], _amounts[0], _proofs[0]) = (_alice, _ALICE_SHARE, _proof(_leaf(_bob, _BOB_SHARE)));
+    (_holders[1], _amounts[1], _proofs[1]) = (_bob, _BOB_SHARE, _proof(_leaf(_alice, _ALICE_SHARE)));
+  }
+
+  function _batch() internal returns (uint256 _paid) {
+    (address[] memory _holders, uint256[] memory _amounts, bytes32[][] memory _proofs) = _rows();
+    vm.prank(_stranger);
+    _paid = _distributor.claimBatch(_id, _holders, _amounts, _proofs);
+  }
+
+  function test_AnyoneSubmitsAndEachHolderIsPaid() external {
+    vm.expectEmit(address(_distributor));
+    emit IDistributor.DistributionClaimed(_id, _alice, _ALICE_SHARE);
+    vm.expectEmit(address(_distributor));
+    emit IDistributor.DistributionClaimed(_id, _bob, _BOB_SHARE);
+    assertEq(_batch(), 2);
+    assertEq(_asset.balanceOf(_alice), _ALICE_SHARE);
+    assertEq(_asset.balanceOf(_bob), _BOB_SHARE);
+    assertEq(_asset.balanceOf(_stranger), 0);
+    assertTrue(_distributor.hasClaimed(_id, _alice));
+    assertEq(_distributor.distributionOf(_id).claimed, _TOTAL);
+  }
+
+  function test_AHolderAlreadyPaidIsPassedOverAndTheOthersArePaid() external {
+    _distributor.claim(_id, _alice, _ALICE_SHARE, _proof(_leaf(_bob, _BOB_SHARE)));
+    vm.expectEmit(address(_distributor));
+    emit IDistributor.DistributionClaimSkipped(_id, _alice, IDistributor.ClaimSkip.ALREADY_CLAIMED);
+    assertEq(_batch(), 1);
+    assertEq(_asset.balanceOf(_alice), _ALICE_SHARE, 'paid once');
+    assertEq(_asset.balanceOf(_bob), _BOB_SHARE);
+  }
+
+  function test_AHolderWhoMayNotReceiveTheTokenIsPassedOverAndCanClaimLater() external {
+    _canReceive(_alice, false);
+    vm.expectEmit(address(_distributor));
+    emit IDistributor.DistributionClaimSkipped(_id, _alice, IDistributor.ClaimSkip.MAY_NOT_RECEIVE);
+    assertEq(_batch(), 1);
+    assertEq(_asset.balanceOf(_bob), _BOB_SHARE);
+    assertFalse(_distributor.hasClaimed(_id, _alice));
+
+    _canReceive(_alice, true);
+    assertEq(_batch(), 1);
+    assertEq(_asset.balanceOf(_alice), _ALICE_SHARE);
+  }
+
+  /// @dev The money is another token than the one asked about. When that token refuses one holder, the others are
+  ///      still paid, and the refused share stays unclaimed and in the funding
+  function test_AHolderTheAssetRefusesIsPassedOverAndCanClaimLater() external {
+    DistributorRefusingAsset _cash = new DistributorRefusingAsset();
+    _cash.mint(_funder, _TOTAL);
+    vm.prank(_funder);
+    _cash.approve(address(_distributor), _TOTAL);
+    vm.prank(_maker);
+    _id = _distributor.propose(_root, IERC20(address(_cash)), _TOTAL, _EXPIRY, _funder);
+    vm.prank(_checker);
+    _distributor.approve(_id);
+    _cash.refuse(_alice, true);
+
+    vm.expectEmit(address(_distributor));
+    emit IDistributor.DistributionClaimSkipped(_id, _alice, IDistributor.ClaimSkip.PAYMENT_FAILED);
+    assertEq(_batch(), 1);
+    assertEq(_cash.balanceOf(_bob), _BOB_SHARE);
+    assertFalse(_distributor.hasClaimed(_id, _alice));
+    assertEq(_distributor.distributionOf(_id).claimed, _BOB_SHARE);
+    assertEq(_cash.balanceOf(address(_distributor)), _ALICE_SHARE);
+
+    _cash.refuse(_alice, false);
+    assertEq(_batch(), 1);
+    assertEq(_cash.balanceOf(_alice), _ALICE_SHARE);
+  }
+
+  function test_AHolderNamedTwiceIsPaidOnce() external {
+    (address[] memory _holders, uint256[] memory _amounts, bytes32[][] memory _proofs) = _rows();
+    (_holders[1], _amounts[1], _proofs[1]) = (_holders[0], _amounts[0], _proofs[0]);
+    assertEq(_distributor.claimBatch(_id, _holders, _amounts, _proofs), 1);
+    assertEq(_asset.balanceOf(_alice), _ALICE_SHARE);
+  }
+
+  /// @dev The caller's own errors stop the whole batch
+  function test_ABadProofRevertsTheWholeBatch() external {
+    (address[] memory _holders, uint256[] memory _amounts, bytes32[][] memory _proofs) = _rows();
+    _amounts[1] = _BOB_SHARE + 1;
+    vm.expectRevert(IDistributor.Distributor_BadProof.selector);
+    _distributor.claimBatch(_id, _holders, _amounts, _proofs);
+    assertEq(_asset.balanceOf(_alice), 0);
+  }
+
+  function test_ArraysOfDifferentLengthsRevert() external {
+    (address[] memory _holders, uint256[] memory _amounts, bytes32[][] memory _proofs) = _rows();
+    vm.expectRevert(IDistributor.Distributor_InvalidValue.selector);
+    _distributor.claimBatch(_id, _holders, new uint256[](1), _proofs);
+    vm.expectRevert(IDistributor.Distributor_InvalidValue.selector);
+    _distributor.claimBatch(_id, _holders, _amounts, new bytes32[][](3));
+  }
+
+  function test_BeforeApprovalAndAfterTheExpiryItReverts() external {
+    uint256 _pending = _proposed();
+    (address[] memory _holders, uint256[] memory _amounts, bytes32[][] memory _proofs) = _rows();
+    vm.expectRevert(IDistributor.Distributor_NotApproved.selector);
+    _distributor.claimBatch(_pending, _holders, _amounts, _proofs);
+    vm.warp(uint256(_EXPIRY) + 1);
+    vm.expectRevert(IDistributor.Distributor_Expired.selector);
+    _distributor.claimBatch(_id, _holders, _amounts, _proofs);
+  }
+
+  /// @dev A root that promises more than the funding cannot pay past it, in a batch as in single claims
+  function test_ARowAboveWhatIsLeftRevertsTheBatch() external {
+    vm.prank(_maker);
+    uint256 _short = _distributor.propose(_root, IERC20(address(_asset)), _TOTAL - 1, _EXPIRY, _funder);
+    vm.prank(_checker);
+    _distributor.approve(_short);
+    (address[] memory _holders, uint256[] memory _amounts, bytes32[][] memory _proofs) = _rows();
+    vm.expectRevert(IDistributor.Distributor_OverFunding.selector);
+    _distributor.claimBatch(_short, _holders, _amounts, _proofs);
+  }
+
+  function test_AnEmptyBatchPaysNobody() external {
+    assertEq(_distributor.claimBatch(_id, new address[](0), new uint256[](0), new bytes32[][](0)), 0);
+  }
+}
+
+/// @notice A hundred holders paid in one transaction
+contract Distributor_ClaimBatchOfAHundred is DistributorTest {
+  uint256 internal constant _HOLDERS = 100;
+
+  function test_AHundredHoldersArePaidInOneTransaction() external {
+    address[] memory _holders = new address[](_HOLDERS);
+    uint256[] memory _amounts = new uint256[](_HOLDERS);
+    bytes32[] memory _leaves = new bytes32[](_HOLDERS);
+    uint256 _sum;
+    for (uint256 _i; _i < _HOLDERS; ++_i) {
+      _holders[_i] = address(uint160(0x1000 + _i));
+      _amounts[_i] = 10 + _i;
+      _sum += _amounts[_i];
+      _leaves[_i] = _leaf(_holders[_i], _amounts[_i]);
+      _canReceive(_holders[_i], true);
+    }
+    (bytes32 _bigRoot, bytes32[][] memory _proofs) = _tree(_leaves);
+    vm.prank(_maker);
+    uint256 _id = _distributor.propose(_bigRoot, IERC20(address(_asset)), _sum, _EXPIRY, _funder);
+    vm.prank(_checker);
+    _distributor.approve(_id);
+
+    vm.prank(_stranger);
+    assertEq(_distributor.claimBatch(_id, _holders, _amounts, _proofs), _HOLDERS);
+    for (uint256 _i; _i < _HOLDERS; ++_i) {
+      assertEq(_asset.balanceOf(_holders[_i]), _amounts[_i]);
+    }
+    assertEq(_distributor.distributionOf(_id).claimed, _sum);
+  }
+
+  /// @dev A Merkle tree over the leaves with sorted pairs, as `MerkleProof` reads it. A node with no sibling moves up
+  function _tree(
+    bytes32[] memory _leaves
+  ) internal pure returns (bytes32 _treeRoot, bytes32[][] memory _proofs) {
+    uint256 _count = _leaves.length;
+    _proofs = new bytes32[][](_count);
+    uint256[] memory _position = new uint256[](_count);
+    for (uint256 _i; _i < _count; ++_i) {
+      _position[_i] = _i;
+    }
+    bytes32[] memory _level = _leaves;
+    while (_level.length > 1) {
+      bytes32[] memory _next = new bytes32[]((_level.length + 1) / 2);
+      for (uint256 _i; _i < _count; ++_i) {
+        uint256 _sibling = _position[_i] ^ 1;
+        if (_sibling < _level.length) _proofs[_i] = _append(_proofs[_i], _level[_sibling]);
+        _position[_i] /= 2;
+      }
+      for (uint256 _j; _j < _next.length; ++_j) {
+        _next[_j] =
+          2 * _j + 1 < _level.length ? Hashes.commutativeKeccak256(_level[2 * _j], _level[2 * _j + 1]) : _level[2 * _j];
+      }
+      _level = _next;
+    }
+    _treeRoot = _level[0];
+  }
+
+  function _append(
+    bytes32[] memory _path,
+    bytes32 _node
+  ) internal pure returns (bytes32[] memory _longer) {
+    _longer = new bytes32[](_path.length + 1);
+    for (uint256 _i; _i < _path.length; ++_i) {
+      _longer[_i] = _path[_i];
+    }
+    _longer[_path.length] = _node;
   }
 }
 

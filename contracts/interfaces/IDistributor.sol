@@ -19,6 +19,18 @@ interface IDistributor {
   //////////////////////////////////////////////////////////////*/
 
   /**
+   * @notice Why `claimBatch` passed over a row
+   * @param ALREADY_CLAIMED The holder's share was paid before
+   * @param MAY_NOT_RECEIVE The token says the holder may not receive now
+   * @param PAYMENT_FAILED The asset refused the payment; the share stays unclaimed
+   */
+  enum ClaimSkip {
+    ALREADY_CLAIMED,
+    MAY_NOT_RECEIVE,
+    PAYMENT_FAILED
+  }
+
+  /**
    * @notice One distribution
    * @param root The Merkle root of `(holder, amount)`
    * @param asset What it pays
@@ -71,6 +83,15 @@ interface IDistributor {
    * @param _amount What it was paid
    */
   event DistributionClaimed(uint256 indexed _id, address indexed _holder, uint256 _amount);
+
+  /**
+   * @notice Emitted when `claimBatch` passes over a row. The holder's share stays as it was: unclaimed, unless the
+   *         reason is that it was already paid
+   * @param _id The distribution
+   * @param _holder The holder
+   * @param _reason Why
+   */
+  event DistributionClaimSkipped(uint256 indexed _id, address indexed _holder, ClaimSkip _reason);
 
   /**
    * @notice Emitted when what is unclaimed goes back to the funder
@@ -167,6 +188,26 @@ interface IDistributor {
     uint256 _amount,
     bytes32[] calldata _proof
   ) external;
+
+  /**
+   * @notice Pays many holders' shares in one transaction
+   * @dev Anyone, for the holders; the money goes only to each holder. A row is passed over, with
+   *      `DistributionClaimSkipped`, when its holder was already paid, may not receive the token now, or the asset
+   *      refuses the payment (a gated asset that does not accept the holder); a row passed over leaves the holder free
+   *      to claim later. The caller's own errors revert the whole batch: arrays of different lengths, a proof that
+   *      does not match, a row above what is left of the funding, a distribution not approved or expired
+   * @param _id The distribution
+   * @param _holders The holders
+   * @param _amounts Their shares, in the same order
+   * @param _proofs Their Merkle proofs, in the same order
+   * @return _paid How many rows were paid
+   */
+  function claimBatch(
+    uint256 _id,
+    address[] calldata _holders,
+    uint256[] calldata _amounts,
+    bytes32[][] calldata _proofs
+  ) external returns (uint256 _paid);
 
   /**
    * @notice Sends what is unclaimed back to the funder, after the expiry
