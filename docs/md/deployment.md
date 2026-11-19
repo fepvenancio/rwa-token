@@ -173,7 +173,7 @@ A product that lists the fund rule takes that rule as a parameter and does not t
 <a id="rule-order"></a>
 ## Each product's rules
 
-A product's profile states its ordered list, and the hook asks the rules in that order and stops at the first rejection. `RULE_ORDER` in `ignition/modules/roles.ts` holds the lists of the `full` profile. The other eight profiles list `CredentialRule` then `HolderRestrictionRule`. No shipped profile lists `SupplyCapRule` or `ExecutedOnlyRule`: a profile asks for them by name.
+A product's profile states its ordered list, and the hook asks the rules in that order and stops at the first rejection. `RULE_ORDER` in `ignition/modules/roles.ts` holds the lists of the `full` profile. The `cash` profile lists `CredentialRule` then `SupplyCapRule`, and the other eight list `CredentialRule` then `HolderRestrictionRule`. No shipped profile lists `ExecutedOnlyRule`: a profile asks for it by name.
 
 | Product in `full` | 1 | 2 | 3 | 4 | 5 |
 |---|---|---|---|---|---|
@@ -191,7 +191,7 @@ The hash of a token's symbol is its CREATE2 salt, so the symbol, with the implem
 <a id="profiles"></a>
 ## The profiles
 
-`ignition/profiles.ts` names nine combinations, and what `Core` deploys follows from the profile. Every profile deploys the two timelocks, the policy registry, the hook, `ProxyDeployer` and the credential registry (a profile of the issuer's own can [read an existing one](#external) instead), then the rules its products list and one implementation per template they use, and what the last column says.
+`ignition/profiles.ts` names ten combinations, and what `Core` deploys follows from the profile. Every profile deploys the two timelocks, the policy registry, the hook, `ProxyDeployer` and the credential registry (a profile of the issuer's own can [read an existing one](#external) instead), then the rules its products list and one implementation per template they use, and what the last column says.
 
 | Profile | Products | Rules | Legos and the rest |
 |---|---|---|---|
@@ -199,6 +199,7 @@ The hash of a token's symbol is its CREATE2 salt, so the symbol, with the implem
 | `nft` | One `Gated721`, `gNOTE` | The same two | No legos, no fund, no executor. |
 | `multi` | One `Gated1155`, `gSER` | The same two | No legos, no fund, no executor. |
 | `intent` | One `IntentToken`, `INT` | The same two | `IntentExecutor` and `DvPExecutor`, both with `EXECUTOR_ROLE` on the token. No legos, no fund. |
+| `cash` | One `IntentToken` with six decimals, `sCASH` | `CredentialRule`, `SupplyCapRule` | The money of a deployment. Both executors, with `EXECUTOR_ROLE` on the token, so it is the cash leg of a trade. The cap, the `cashSupplyCap` parameter, bounds what the minter can issue. It does not list `ExecutedOnlyRule`, so a plain transfer works: a vault, the signed entry, a distributor and a fund's cash account take and pay it, and each of them holds it and needs a credential (`IntentTokenAsCash.t.sol`). No legos, no fund. |
 | `vault4626` | One `Gated4626Vault`, `gFUND` | The same two | No legos. The vault keeps its own money. |
 | `vault7540` | One `Gated7540Vault`, `gASYNC` | The same two | A `NavDesk` with a daily period, a one-day cooldown and a report good for three days. Its cash account is the `custodianAccount` parameter: a fund with one custodian. |
 | `managed-fund` | One `Gated7540Vault`, `mFUND` | The same two | The same desk schedule. A `Portfolio` that accepts reported adapters. Two `GuardedAccount`s, each with an `ERC20CallValidator` and its own caps. A `FeeModel`: 1% management, 10% performance, a hard 3% hurdle. It sets `custodyOnly`, which refuses an outside vault at build time. |
