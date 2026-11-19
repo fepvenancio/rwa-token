@@ -4698,7 +4698,8 @@ The owner approved the second pass on 2026-11-19 ("Yes, start"). E8 is not built
 - **The profile.** A node test deploys it with `cashSupplyCap`, checks the decimals, the cap, both executors' role, a mint above the cap refused and a plain transfer allowed; the test that deploys every profile runs the post-deploy check on it.
 - **No benchmark row.** No contract changed, so no flow moved.
 - **Gates.** `npx hardhat test`: 2260 passing (2058 solidity, 202 nodejs). Format, lint and typecheck clean. Slither, upgrade safety and the reproducible build were not rerun locally: no contract changed.
-- **Not done.** ERC-3009 on the stack's own token, by decision: nothing here needs it. The port to `paris`.
+- **Not done.** ERC-3009 on the stack's own token, by decision: nothing here needs it.
+- **On `paris`.** Carried by cherry-pick; the brief keeps this line's deployment text. `npx hardhat test`: 2261 passing (2059 solidity, 202 nodejs); format and typecheck clean.
 ### The first pass on `paris` (2026-11-19): step 0, E1 and E2
 
 Carried here by cherry-pick with no conflict; where the text above says "this line" it means `main`, and its numbers are `main`'s. The contracts, the tests and the pages are the same files. This is the line the target runs, so its own base is recorded. The guard here is in storage, which is the two more slots written on most rows.
