@@ -8,6 +8,7 @@ import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+import {IERC8473} from 'interfaces/IERC8473.sol';
 import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 
@@ -54,6 +55,9 @@ contract ComplianceHookUnitTest is Helpers {
     _otherToken = _mockContract('otherToken');
     _hook = new ComplianceHook(IPolicyRegistry(_registry));
     _setAdmin(_token, _tokenAdmin, true);
+    // `setRules` tells an added rule which policy the token consults now.
+    vm.mockCall(_token, abi.encodeCall(IERC8473.policy, ()), abi.encode(address(_hook)));
+    vm.mockCall(_otherToken, abi.encodeCall(IERC8473.policy, ()), abi.encode(address(_hook)));
   }
 
   /// @dev Mocks the token's own answer to `hasRole(DEFAULT_ADMIN_ROLE, account)`
@@ -78,6 +82,7 @@ contract ComplianceHookUnitTest is Helpers {
     );
     vm.mockCall(address(_rule), abi.encodeCall(IComplianceRule.ruleId, ()), abi.encode(keccak256(bytes(_name))));
     vm.mockCall(address(_rule), abi.encodeCall(IComplianceRule.wantsAfter, ()), abi.encode(_wantsAfter));
+    vm.mockCall(address(_rule), abi.encodeWithSelector(IComplianceRule.onInstall.selector), '');
   }
 
   function _mockCheck(
@@ -312,6 +317,87 @@ contract ComplianceHookUnit_SetRules is ComplianceHookUnitTest {
     _hook.setRules(_otherToken, _one(_b));
     _install(_none());
     _assertAfterReaches(_otherToken, _b, 1);
+  }
+}
+
+contract ComplianceHookUnit_SetRulesTellsAddedRules is ComplianceHookUnitTest {
+  /// @dev An added rule is told, with the policy the token consults now as the previous policy
+  function test_WhenARuleIsAdded_ItIsToldWithTheTokensPolicy() external {
+    IComplianceRule _a = _newRule('a', false);
+    vm.expectCall(address(_a), abi.encodeCall(IComplianceRule.onInstall, (_token, address(_hook))), 1);
+    _install(_one(_a));
+  }
+
+  /// @dev A hook being prepared for a token that still consults another policy names that other policy
+  function test_WhenTheTokenConsultsAnotherPolicy_TheRuleIsToldThatOne() external {
+    address _current = makeAddr('currentPolicy');
+    vm.mockCall(_token, abi.encodeCall(IERC8473.policy, ()), abi.encode(_current));
+    IComplianceRule _a = _newRule('a', false);
+    vm.expectCall(address(_a), abi.encodeCall(IComplianceRule.onInstall, (_token, _current)), 1);
+    _install(_one(_a));
+  }
+
+  /// @dev A rule the replaced list already held has nothing new to confirm
+  function test_WhenARuleStays_ItIsNotToldAgain() external {
+    IComplianceRule _a = _newRule('a', false);
+    IComplianceRule _b = _newRule('b', false);
+    _install(_one(_a));
+    vm.expectCall(address(_a), abi.encodeWithSelector(IComplianceRule.onInstall.selector), 0);
+    vm.expectCall(address(_b), abi.encodeCall(IComplianceRule.onInstall, (_token, address(_hook))), 1);
+    _install(_two(_b, _a));
+  }
+
+  /// @dev A rule may ask the hook which rules it held: it must see the list that lacked it
+  function test_WhenARuleIsAdded_ItIsToldBeforeTheListIsStored() external {
+    IComplianceRule _a = _newRule('a', false);
+    _install(_one(_a));
+    InstallObservingRule _observer = new InstallObservingRule();
+    vm.mockCall(
+      _registry,
+      abi.encodeCall(IPolicyRegistry.isAttested, (address(_observer), IPolicyRegistry.AttestKind.RULE)),
+      abi.encode(true)
+    );
+    _install(_two(_a, IComplianceRule(address(_observer))));
+    assertEq(_observer.seen(), 1, 'the rule saw the new list');
+    assertEq(_hook.ruleCount(_token), 2);
+  }
+
+  /// @dev A rule that refuses to go live leaves the list as it was
+  function test_WhenAnAddedRuleRefuses_TheOldListStays() external {
+    IComplianceRule _a = _newRule('a', false);
+    IComplianceRule _b = _newRule('b', false);
+    _install(_one(_a));
+    vm.mockCallRevert(address(_b), abi.encodeWithSelector(IComplianceRule.onInstall.selector), 'stale');
+    vm.expectRevert('stale');
+    _install(_two(_a, _b));
+    IComplianceRule[] memory _kept = _hook.rules(_token);
+    assertEq(_kept.length, 1);
+    assertEq(address(_kept[0]), address(_a));
+  }
+
+  /// @dev The whole list is validated before any rule is called: here the first rule would refuse, and the error is the
+  ///      second rule's missing attestation
+  function test_WhenALaterRuleIsNotAttested_NoRuleIsCalled() external {
+    IComplianceRule _a = _newRule('a', false);
+    vm.mockCallRevert(address(_a), abi.encodeWithSelector(IComplianceRule.onInstall.selector), 'called');
+    IComplianceRule _rogue = IComplianceRule(_mockContract('rogue'));
+    vm.mockCall(
+      _registry,
+      abi.encodeCall(IPolicyRegistry.isAttested, (address(_rogue), IPolicyRegistry.AttestKind.RULE)),
+      abi.encode(false)
+    );
+    vm.expectRevert(abi.encodeWithSelector(IComplianceHook.ComplianceHook_NotAttested.selector, address(_rogue)));
+    _install(_two(_a, _rogue));
+  }
+
+  /// @dev The same for two rules of one type
+  function test_WhenTwoRulesShareAnId_NoRuleIsCalled() external {
+    IComplianceRule _a = _newRule('a', false);
+    IComplianceRule _twin = _newRule('twin', false);
+    vm.mockCall(address(_twin), abi.encodeCall(IComplianceRule.ruleId, ()), abi.encode(keccak256('a')));
+    vm.mockCallRevert(address(_a), abi.encodeWithSelector(IComplianceRule.onInstall.selector), 'called');
+    vm.expectRevert(abi.encodeWithSelector(IComplianceHook.ComplianceHook_DuplicateRule.selector, address(_twin)));
+    _install(_two(_a, _twin));
   }
 }
 

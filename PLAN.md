@@ -4412,7 +4412,7 @@ The owner passed on a review of both pull requests the day they were opened. Eac
 - **Comments.** The core's NatSpec now names this template. `IERC8473Policy`'s comment on `tokenId` still names only the ERC-721: the file is frozen (rule 4) and waits for the owner's word.
 - **Sizes.** After the fix the token is 17,461 bytes on `main` and 17,861 on `paris`.
 - **Tests.** `Gated1155.t.sol` has 98 tests on both lines.
-## `setRules` tells the rules it adds (plan, 2026-11-19, nothing built)
+## `setRules` tells the rules it adds (planned and built on `main` 2026-11-19; the port to `paris` and the pages are not done)
 
 Source: an outside assessment the owner passed on 2026-11-19, which named this gap again, and the owner's "Yes, both" to planning it. Derived from the code at `38fdbc1`. It reopens the owner decision of 2026-11-13 recorded under "ERC-8473 conformance": "`setRules` calls no rule's `onInstall`: left as it is".
 
@@ -4442,7 +4442,19 @@ The decision of 2026-11-13 gave three reasons. Each needs an answer before this 
 
 A rule's `onInstall` is not `view` in the interface, so `setRules` makes a call that may write before it stores the list. The rule is attested before it is called, `setRules` accepts only the token or its admin, and the hook's own `onInstall` already has this shape and its Slither note. The call from `setRules` gets the same note.
 
-### Steps
+### As built on `main` (2026-11-19)
+
+The owner passed on the review's go-ahead for this plan on 2026-11-19, with R3 as written. Entities are not started.
+
+- **One change to R1, found in the tests.** The previous policy a rule is given is not always the hook: it is the policy the token consults at that moment, `token.policy()`, asked live. They are the same when the hook is the token's policy. They differ when a new hook is prepared with `setRules` for a token that still consults the old one, which is how a hook is replaced (`FundIntegration.t.sol`, the twin hook): the rule then asks the old hook, which lists it, and is asked again by `installPolicy`. With the hook itself as the previous policy that preparation would have been refused for every class with holders.
+- **The hook.** `setRules` is `_validate`, `_tellAdded`, `_store`; `_setRules`, which the hook's own `onInstall` uses, is `_validate` then `_store`, unchanged in what it does. No interface changed, and `IComplianceHook`'s NatSpec for `setRules` does not mention the call yet: the file is frozen.
+- **The rule.** `FundHoldersRule.onInstall` accepts itself or, through ERC-165, another rule whose `FUND()` is its fund.
+- **Tests.** Eleven new: seven on the hook, three on the rule, and one on the fund with real contracts, a class with holders that drops the rule and cannot take it back. Seven failed before the change. One existing test changed with the behaviour: `test_WhenAClassAlreadyHasSupply_ItCannotBeRegistered` set its scene by taking the rule back on a class with a supply, which is now refused one step earlier; it asserts that refusal and that registration then fails for the unlisted rule. `Fund.t.sol` still covers the fund's own supply check.
+- **Planted bugs.** The rules told after the list is stored; every rule told, not only the added ones; the fund rule accepting a rule of any fund: 7, 1 and 1 tests fail.
+- **Gates.** `npx hardhat test`: 2151 passing (1952 solidity, 199 nodejs). Format, lint and typecheck clean, Slither 0 results, `validate:upgrades` 8 of 8, `verify:reproducible` 33 contracts identical.
+- **Not done.** The port to `paris` and the pages.
+
+### Steps, as planned
 
 1. Tests first, shown failing: `setRules` adding a rule calls its `onInstall` with the hook as the previous policy, before the list is stored; a rule that stays is not called; a rule that reverts leaves the old list; dropping the fund rule from a class with holders and taking it back reverts with `FundHoldersRule_CountNotCurrent`; replacing the fund's rule by a successor on a class with holders passes; a rule of another fund in the previous list does not count.
 2. `ComplianceHook.setRules` and `FundHoldersRule.onInstall`.
@@ -4518,6 +4530,6 @@ The way that works today costs nothing: the attester of record takes the second 
 2. Credential layer: none left. On 2026-10-30 the owner confirmed decisions 11, 12, 13, 15, 16 and 17 as built (17 at the measured +8,179 gas on a transfer). Decision 14 is moot, since `IdentityRule` was removed in the cleanup. Decisions 8 and 9 are recorded in the credential section's table.
 3. Redemption gate and the second contract: built and landed in #24 and #25. Open from its review: dust in a fund everyone has left ends the performance fee. Fixed in #27; the pages at `bfb424e` describe it. What it leaves, dust left on purpose and the 4626's management fee on a small or low-decimal fund, is in `SECURITY.md`.
 4. The NFT template: answered 2026-11-05, A, and built (the core split and `Gated721`); its pages landed in #36.
-5. `setRules` tells the rules it adds (plan of 2026-11-19): whether to build it, which reverses the decision of 2026-11-13, and R3, whether a class that ran without the fund rule gets a timelock recount or waits until it is empty.
+5. `setRules` tells the rules it adds: built on 2026-11-19 with R3 as written, no recount. Open: one sentence in `IComplianceHook`'s NatSpec for `setRules`, a frozen file.
 6. Entities in the credential registry (plan of 2026-11-19): whether to build it and reopen the three interfaces; N10, a block by entity at about 4,200 gas a transfer; and whether a second live attester for one address is expected.
 7. A review of both plans (2026-11-19) recommends: build both; keep R3 as written, with no recount; leave N10 out; put off the second attester. These are a reviewer's recommendations and decide nothing; items 5 and 6 stay the owner's.

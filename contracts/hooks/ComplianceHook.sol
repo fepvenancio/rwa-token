@@ -9,6 +9,7 @@ import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+import {IERC8473} from 'interfaces/IERC8473.sol';
 import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 
@@ -122,7 +123,13 @@ contract ComplianceHook is ERC165, IComplianceHook {
     ) {
       revert ComplianceHook_NotTokenAdmin(_token, msg.sender);
     }
-    _setRules(_token, _newRules);
+    // The whole list is validated before any rule is called, and every added rule is told before the list is stored:
+    // a rule may ask the policy the token consults which rules it held, and that policy can be this hook.
+    bytes32[] memory _ruleIds = _validate(_newRules);
+    _tellAdded(_token, _newRules);
+    // A rule is attested and cannot come back in: this function accepts only the token or its admin.
+    // slither-disable-next-line reentrancy-no-eth,reentrancy-events
+    _store(_token, _newRules, _ruleIds);
   }
 
   /// @inheritdoc IERC8473Policy
@@ -210,9 +217,48 @@ contract ComplianceHook is ERC165, IComplianceHook {
     address _token,
     IComplianceRule[] memory _newRules
   ) internal {
-    uint256 _length = _newRules.length;
-    if (_length > MAX_RULES) revert ComplianceHook_TooManyRules(_length);
+    _store(_token, _newRules, _validate(_newRules));
+  }
 
+  /**
+   * @notice Tells every rule of a new list that the token's current list does not hold that it is going live
+   * @dev The previous policy a rule is given is the one the token consults now, asked live: this hook when it is the
+   *      token's policy, and another one while this hook is being prepared for a token that has not installed it yet.
+   *      A rule that refuses reverts, and the list stays as it was
+   * @param _token The token
+   * @param _newRules The validated new rules
+   */
+  function _tellAdded(
+    address _token,
+    IComplianceRule[] calldata _newRules
+  ) internal {
+    RuleSet storage _set = _ruleSets[_token];
+    uint256 _oldCount = _set.count;
+    address _current = IERC8473(_token).policy();
+    uint256 _length = _newRules.length;
+    // At most MAX_RULES (16) iterations of each loop; a rule that refuses must revert the change (fail closed).
+    // aderyn-ignore-next-line(costly-loop, require-revert-in-loop)
+    for (uint256 _i; _i < _length; ++_i) {
+      IComplianceRule _rule = _newRules[_i];
+      bool _held = false;
+      for (uint256 _old; _old < _oldCount && !_held; ++_old) {
+        _held = _set.rule[_old] == _rule;
+      }
+      if (!_held) _rule.onInstall(_token, _current);
+    }
+  }
+
+  /**
+   * @notice Stores a validated rule set for a token, replacing its current one
+   * @param _token The token
+   * @param _newRules The new rules, in evaluation order
+   * @param _ruleIds Their rule ids, in the same order
+   */
+  function _store(
+    address _token,
+    IComplianceRule[] memory _newRules,
+    bytes32[] memory _ruleIds
+  ) internal {
     RuleSet storage _set = _ruleSets[_token];
     uint256 _oldCount = _set.count;
     // At most MAX_RULES (16) iterations.
@@ -224,8 +270,33 @@ contract ComplianceHook is ERC165, IComplianceHook {
     // Starts at zero by design; bits are set below.
     // slither-disable-next-line uninitialized-local
     uint256 _mask;
-    bytes32[] memory _ruleIds = new bytes32[](_length);
+    uint256 _length = _newRules.length;
+    // At most MAX_RULES (16) iterations.
+    // aderyn-ignore-next-line(costly-loop)
+    for (uint256 _i; _i < _length; ++_i) {
+      IComplianceRule _rule = _newRules[_i];
+      _set.rule[_i] = _rule;
+      if (_rule.wantsAfter()) _mask |= 1 << _i;
+    }
+    // `_length` is at most 16 and the mask has at most 16 bits, so both narrowings are exact.
+    // aderyn-ignore-next-line(unsafe-casting)
+    _set.count = uint8(_length);
+    // aderyn-ignore-next-line(unsafe-casting)
+    _set.afterMask = uint16(_mask);
+    emit RuleSetChanged(_token, _ruleIds);
+  }
 
+  /**
+   * @notice Checks a rule list: at most `MAX_RULES`, every rule attested, no two rules of one type
+   * @param _newRules The rules
+   * @return _ruleIds Their rule ids, in the same order
+   */
+  function _validate(
+    IComplianceRule[] memory _newRules
+  ) internal view returns (bytes32[] memory _ruleIds) {
+    uint256 _length = _newRules.length;
+    if (_length > MAX_RULES) revert ComplianceHook_TooManyRules(_length);
+    _ruleIds = new bytes32[](_length);
     // At most MAX_RULES (16) iterations; an invalid rule must revert the whole set (fail closed).
     // aderyn-ignore-next-line(costly-loop, require-revert-in-loop)
     for (uint256 _i; _i < _length; ++_i) {
@@ -240,16 +311,8 @@ contract ComplianceHook is ERC165, IComplianceHook {
       for (uint256 _j; _j < _i; ++_j) {
         if (_ruleIds[_j] == _ruleId) revert ComplianceHook_DuplicateRule(address(_rule));
       }
-      _set.rule[_i] = _rule;
       _ruleIds[_i] = _ruleId;
-      if (_rule.wantsAfter()) _mask |= 1 << _i;
     }
-    // `_length` is at most 16 and the mask has at most 16 bits, so both narrowings are exact.
-    // aderyn-ignore-next-line(unsafe-casting)
-    _set.count = uint8(_length);
-    // aderyn-ignore-next-line(unsafe-casting)
-    _set.afterMask = uint16(_mask);
-    emit RuleSetChanged(_token, _ruleIds);
   }
 
   /**
