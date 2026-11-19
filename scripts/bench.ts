@@ -10,6 +10,7 @@ const FLOWS = [
   "transfer: between holders, 4 rules, fund class",
   "transfer: to a new holder, 4 rules, fund class",
   "intent: executeTransfer through IntentExecutor",
+  "intent: executeTransfer, the nonce next to a used one",
   "dvp: gated cash",
   "dvp: erc-3009 cash",
   "4626: deposit",

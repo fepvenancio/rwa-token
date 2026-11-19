@@ -172,6 +172,28 @@ contract Bench_Intent is RuleSetIntegrationTest, BenchReport {
     _gas -= gasleft();
     _report('intent: executeTransfer through IntentExecutor', _gas);
   }
+
+  /// @dev The same intent after the signer spent the nonce next to it, as a signer that numbers its nonces does
+  function test_ExecuteTransferWithTheNextNonce() external {
+    IntentExecutor _intentExecutor = new IntentExecutor(_admin, _guardian);
+    address _operator = makeAddr('operator');
+    vm.startPrank(_admin);
+    _intentExecutor.grantRole(_intentExecutor.OPERATOR_ROLE(), _operator);
+    _token.grantRole(_token.EXECUTOR_ROLE(), address(_intentExecutor));
+    vm.stopPrank();
+    bytes32 _nonce = bytes32(uint256(0x4200));
+    vm.prank(_alice);
+    _token.cancelIntent(bytes32(uint256(_nonce) + 1));
+    (ITransferIntent.TransferIntent memory _intent, bytes memory _sig) = _signedIntent(_bob, 50 ether, _nonce);
+    address _security = address(_token);
+
+    vm.startStateDiffRecording();
+    vm.prank(_operator);
+    uint256 _gas = gasleft();
+    _intentExecutor.execute(_security, _intent, _sig);
+    _gas -= gasleft();
+    _report('intent: executeTransfer, the nonce next to a used one', _gas);
+  }
 }
 
 /// @notice The security of `Bench_Intent` against a gated cash token (identity only) and an ERC-3009 mock

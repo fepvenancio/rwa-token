@@ -4625,6 +4625,7 @@ No change is kept on an argument alone. Step 0 of this plan is a benchmark every
 | transfer: between holders, 4 rules, fund class | 15 | 2 | 39,329 |
 | transfer: to a new holder, 4 rules, fund class | 19 | 4 | 88,575 |
 | intent: executeTransfer through IntentExecutor | 13 | 3 | 102,004 |
+| intent: executeTransfer, the nonce next to a used one | 13 | 3 | 102,004 |
 | dvp: gated cash | 22 | 6 | 185,329 |
 | dvp: erc-3009 cash | 22 | 8 | 196,503 |
 | 4626: deposit | 14 | 4 | 62,140 |
