@@ -165,7 +165,7 @@ These have no role table of their own, and none is a proxy. Each names its vault
 |  | The timelock itself | `updateDelay`, `grantRole`, `revokeRole`, through its own operations. |
 |  | `RECOVERY_ROLE` | `revokeRole(CANCELLER_ROLE, account)`, for any holder, and nothing else. |
 | Recovery timelock | Governance | Proposer and executor. Nobody holds `CANCELLER_ROLE` or `RECOVERY_ROLE` on it. It administers itself, through its own operations. |
-| No roles | Any account | [`FeeModel`](contracts/FeeModel.md), [`ERC20CallValidator`](contracts/ERC20CallValidator.md) and [`ERC4626CallValidator`](contracts/ERC4626CallValidator.md) are views with no gate. [`SignedEntry`](contracts/SignedEntry.md) has no roles: anyone can submit an entry the investor signed, and `cancelEntry` covers the caller's own nonces. [`TokenProxy`](contracts/TokenProxy.md) forwards to its implementation. |
+| No roles | Any account | [`FeeModel`](contracts/FeeModel.md), [`ERC20CallValidator`](contracts/ERC20CallValidator.md) and [`ERC4626CallValidator`](contracts/ERC4626CallValidator.md) are views with no gate. [`SignedEntry`](contracts/SignedEntry.md) has no roles: anyone can submit an entry the investor signed, and `cancelEntry` covers the caller's own nonces. [`SignedExit`](contracts/SignedExit.md) has no roles either: anyone can submit an exit the holder signed with `exitWithPermit`, anyone can call `claimFor`, which delivers a 7540's settled claims to each controller that made it its operator, and `cancelExit` covers the caller's own nonces. [`TokenProxy`](contracts/TokenProxy.md) forwards to its implementation. |
 
 Some words mean several things in this code. `OPERATOR_ROLE` on an executor is the key that submits signed intents; `ctx.operator` in a movement's context is whoever called the token, such as the holder, a spender, the agent, the minter or an executor; and `setOperator` on the 7540 vault approves a full delegate of a controller. `EXECUTOR_ROLE` on a timelock runs its operations, and on an `IntentToken` it runs signed intents.
 
@@ -264,6 +264,8 @@ A product's pause is one check at the start of every balance movement, before th
 | `Distributor`, its token paused | `claim` | reverts `Distributor_HolderMayNotReceive`, because `canReceive` is false |
 |  | `propose`, `approve`, `sweep` | works: none checks the pause |
 | `SignedEntry`, the vault paused | `enterWithPermit`, `enterWith3009` | reverts with the vault's error for a deposit or a request |
+| `SignedExit`, the vault paused | `exitWithPermit` | reverts with the vault's error for a redemption or a request |
+|  | `claimFor` | does not revert and delivers nothing: the vault refuses each claim, which is skipped with `ClaimSkipped` and stays with the vault |
 | An executor paused | `IntentExecutor.execute`, `executeBatch` | reverts `EnforcedPause()` |
 |  | `DvPExecutor.executeDvPGated`, `executeDvP3009` | reverts `EnforcedPause()`; the two pre-flights answer `PAUSED` |
 | A token paused, its executor not | `IntentExecutor.execute`, `executeBatch` | `execute` passes the token's `ERC8473PolicyRejected(PAUSED)` through unchanged; `executeBatch` wraps it in `IntentExecutor_BatchItemFailed(index, reason)` |

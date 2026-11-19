@@ -11,6 +11,7 @@ import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IDvPExecutor} from 'interfaces/IDvPExecutor.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {ISignedEntry} from 'interfaces/ISignedEntry.sol';
+import {ISignedExit} from 'interfaces/ISignedExit.sol';
 import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
 
 import {Distributor} from 'contracts/distribution/Distributor.sol';
@@ -22,6 +23,7 @@ import {DvPExecutor} from 'contracts/intents/DvPExecutor.sol';
 import {DvPExecutorIntegrationTest} from 'contracts/intents/DvPExecutor.t.sol';
 import {IntentExecutor} from 'contracts/intents/IntentExecutor.sol';
 import {SignedEntryTest} from 'contracts/intents/SignedEntry.t.sol';
+import {SignedExitTest} from 'contracts/intents/SignedExit.t.sol';
 import {MockAsset} from 'contracts/test/MockAsset.sol';
 import {MockPermitAsset} from 'contracts/test/MockPermitAsset.sol';
 import {IntentToken} from 'contracts/tokens/IntentToken.sol';
@@ -445,5 +447,42 @@ contract Bench_SignedEntry is SignedEntryTest, BenchReport {
     _target.enterWithPermit(_e, _sig, _v, _r, _s);
     _gas -= gasleft();
     _report('signed entry: 4626 with permit', _gas);
+  }
+}
+
+contract Bench_SignedExit is SignedExitTest, BenchReport {
+  /// @dev The investor's whole position in a 4626 vault, redeemed to itself by a relayer
+  function test_SignedExit4626() external {
+    (Gated4626Vault _vault, uint256 _shares) = _held4626();
+    ISignedExit.Exit memory _e = _exit(address(_vault), _shares, false);
+    bytes memory _sig = _signExit(_e);
+    (uint8 _v, bytes32 _r, bytes32 _s) = _signShares(_e.vault, _e.shares, _e.deadline);
+    address _submitter = _relayer;
+
+    vm.startStateDiffRecording();
+    vm.prank(_submitter);
+    uint256 _gas = gasleft();
+    _exits.exitWithPermit(_e, _sig, _v, _r, _s);
+    _gas -= gasleft();
+    _report('signed exit: 4626 with permit', _gas);
+  }
+
+  /// @dev Ten controllers with a settled deposit each, every one having made the contract its operator
+  function test_ClaimForTen() external {
+    Gated7540Vault _vault = _async();
+    address[] memory _controllers = new address[](10);
+    for (uint256 _i; _i < 10; ++_i) {
+      _controllers[_i] = address(uint160(0x7000 + _i));
+      _requestDeposit(_vault, _controllers[_i], _ASSETS);
+      _makeOperator(_vault, _controllers[_i]);
+    }
+    _settle(_vault, 0);
+    address _target = address(_vault);
+
+    vm.startStateDiffRecording();
+    uint256 _gas = gasleft();
+    _exits.claimFor(_target, _controllers);
+    _gas -= gasleft();
+    _report('7540: claimFor, 10 controllers', _gas);
   }
 }

@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SignedExit · Gated Token Stack</title>
+<meta name="description" content="How SignedExit lets a holder leave a vault on signed messages while a relayer pays the gas, how it delivers a 7540 vault's settled claims to a controller that allowed it, and what a relayer can and cannot do.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="../index.html">Gated Token Stack</a>
+  <a href="../index.html">Overview</a>
+  <a href="../index.html#contracts">Contracts</a>
+  <a href="../roles.html">Who can do what</a>
+  <a href="../movement.html">One movement</a>
+  <a href="../deployment.html">Deployment and governance</a>
+  <a href="../money.html">Where the money sits</a>
+</nav>
+<main class="page">
+
+<header class="top">
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Settlement and distribution</div>
+  <h1>SignedExit</h1>
+  <p class="lede">Lets a holder with its own wallet leave a vault without sending a transaction: the holder signs, and a relayer submits and pays the gas. It also lets anyone deliver what a 7540 vault owes a controller that allowed it, to that controller and to nobody else.</p>
+  <div class="facts">
+    <span class="fact"><b>contracts/intents/SignedExit.sol</b></span>
+    <span class="fact">immutable, <b>not a proxy</b></span>
+    <span class="fact"><b>no roles</b>, no owner: anyone can submit an exit or deliver a claim</span>
+    <span class="fact">not attested; one per issuer, from <b>Core</b> or <b>CoreParts</b></span>
+  </div>
+</header>
+
+<section id="in-one-minute">
+  <div class="callout">
+    <h3>In one minute</h3>
+    <p>Leaving a vault normally takes the holder's own transactions, and the network fee (gas) that goes with them. With this contract the holder signs instead, and someone else, a relayer, submits what was signed and pays the gas. There are two signed messages: the exit, which says which vault, how many shares, where the cash goes, the least it accepts and when; and the share token's own <code>permit</code>, which lets this contract take the shares. In one transaction the contract checks the exit and calls the vault. On a 4626 vault the shares are redeemed and the vault pays the signed receiver there and then. On a 7540 vault a redemption request is filed with the holder as its controller. A relayer can delay what it holds, but it cannot change it. The contract does one thing without a signature: <code>claimFor</code>, which anyone can call, claims a settled deposit's shares and a settled redemption's cash from a 7540 vault for a controller that made this contract its operator, and the controller is always the receiver. It is the mirror of <a href="SignedEntry.html">SignedEntry</a>. No vault has code for it, it has no roles, and neither shares nor cash stay in it.</p>
+  </div>
+</section>
+
+<section id="how">
+  <div class="prose">
+    <h2>How an exit runs</h2>
+    <p>The holder signs off-chain and hands both signatures to a relayer. The relayer needs no role, no credential, no share and no asset. It calls <code>exitWithPermit</code>.</p>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 780 610" role="img" aria-label="The holder signs two messages off-chain, the exit and the share token's permit, and gives them to a relayer. The relayer calls exitWithPermit on SignedExit. SignedExit checks the deadline, validAfter, the nonce, that a request names no minimum and no other receiver, and the holder's signature, otherwise it reverts, and then spends the nonce. It calls permit on the vault, which is the share token, with the holder as owner and itself as spender, and ignores a failure. It calls redeem with the signed receiver and the holder as owner, or requestRedeem with the holder as controller and owner. The vault judges the holder, and a receiver that is not the holder, or reverts. On a 4626 the vault pays the cash to the signed receiver, and SignedExit reverts if it is less than minAssets. On a 7540 there is no cash yet: the shares wait in escrow under the holder as controller. SignedExit then emits ExitExecuted.">
+        <defs>
+          <marker id="sx-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+        </defs>
+        <rect class="b" x="6" y="14" width="104" height="44" rx="8"/>
+        <text x="16" y="33" class="bold">Holder</text>
+        <text x="16" y="50" class="sm m">signs twice</text>
+        <rect class="b" x="150" y="14" width="104" height="44" rx="8"/>
+        <text x="160" y="33" class="bold">Relayer</text>
+        <text x="160" y="50" class="sm m">pays the gas</text>
+        <rect class="act" x="320" y="14" width="130" height="44" rx="8"/>
+        <text x="332" y="33" class="bold">SignedExit</text>
+        <text x="332" y="50" class="sm m">this contract</text>
+        <rect class="b" x="590" y="14" width="180" height="44" rx="8"/>
+        <text x="602" y="33" class="bold">Vault</text>
+        <text x="602" y="50" class="sm m">a 4626 or a 7540; its shares</text>
+        <line class="life" x1="58" y1="58" x2="58" y2="596"/>
+        <line class="life" x1="202" y1="58" x2="202" y2="596"/>
+        <line class="life" x1="385" y1="58" x2="385" y2="596"/>
+        <line class="life" x1="680" y1="58" x2="680" y2="596"/>
+
+        <line class="ln dash" x1="58" y1="90" x2="198" y2="90" marker-end="url(#sx-arrow)"/>
+        <text x="62" y="82" class="sm">the exit signature</text>
+        <text x="62" y="104" class="sm">the share permit</text>
+
+        <line class="ln" x1="202" y1="140" x2="381" y2="140" marker-end="url(#sx-arrow)"/>
+        <text x="208" y="132" class="mono sm">exitWithPermit</text>
+
+        <rect class="b2" x="290" y="166" width="190" height="126" rx="6"/>
+        <text x="300" y="184" class="sm bold">Checks the exit, in order:</text>
+        <text x="300" y="200" class="sm">deadline, validAfter, nonce</text>
+        <text x="300" y="216" class="sm">a request: no minimum and</text>
+        <text x="300" y="232" class="sm">no other receiver</text>
+        <text x="300" y="248" class="sm">the holder's signature</text>
+        <text x="300" y="264" class="sm rej">else it reverts</text>
+        <text x="300" y="282" class="sm bold">then: nonce spent</text>
+
+        <line class="ln" x1="385" y1="324" x2="676" y2="324" marker-end="url(#sx-arrow)"/>
+        <text x="392" y="316" class="mono sm">permit(holder, itself, shares)</text>
+        <text x="392" y="338" class="sm m">a failure is ignored</text>
+
+        <line class="ln" x1="385" y1="382" x2="676" y2="382" marker-end="url(#sx-arrow)"/>
+        <text x="392" y="374" class="mono sm">redeem(shares, receiver, holder)</text>
+        <text x="392" y="398" class="mono sm">or requestRedeem(shares, holder, holder)</text>
+
+        <rect class="b2" x="572" y="410" width="204" height="76" rx="6"/>
+        <text x="582" y="428" class="sm bold">The vault judges:</text>
+        <text x="582" y="444" class="sm">the holder, and a receiver</text>
+        <text x="582" y="460" class="sm">that is not the holder</text>
+        <text x="582" y="476" class="sm rej">else it reverts</text>
+
+        <line class="ln" x1="680" y1="512" x2="62" y2="512" marker-end="url(#sx-arrow)"/>
+        <text x="80" y="504" class="sm bold">On a 4626: the cash, from the vault to the signed receiver</text>
+        <text x="80" y="528" class="sm m">On a 7540: no cash yet, the shares wait in escrow under the holder as controller</text>
+
+        <rect class="act" x="290" y="546" width="300" height="46" rx="6"/>
+        <text x="300" y="564" class="sm">On a 4626: at least minAssets, else it reverts</text>
+        <text x="300" y="582" class="mono sm">emit ExitExecuted</text>
+      </svg>
+    </div>
+    <figcaption><b>One transaction, in this order.</b> A revert at any step undoes all of it, the spent nonce included, so a refused exit can be submitted again until its deadline (<code>test_FewerAssetsThanAcceptedIsRefusedAndNothingMoves</code>). One failure is tolerated on purpose: a <code>permit</code> that fails is ignored, and the call that follows then needs an allowance already in place. The drawing shows the cash reaching the holder, which is the case when the holder names itself as receiver. The vault pays the receiver itself, so nothing passes through this contract: after an exit it holds no share and no asset, and neither does the relayer (<code>test_ARelayerSubmitsAndTheCashGoesToTheSignedReceiver</code>).</figcaption>
+  </figure>
+</section>
+
+<section id="signatures">
+  <div class="prose">
+    <h2>The two signatures</h2>
+    <p>The exit and the permit are separate messages because they are addressed to separate contracts. The exit states what the holder wants, and this contract reads it. The share token does not read an exit: to let this contract take the holder's shares, it needs a message in its own format.</p>
+    <h3>First: the exit</h3>
+    <p>An EIP-712 typed message, shown to the holder field by field. Its domain is name <code>SignedExit</code>, version <code>1</code>, the chain id and this contract's address, so a signature for one deployment or chain does not work on another (<code>test_TheHashIsTheEip712DigestOfTheExit</code>). <code>exitHash(exit)</code> returns the hash that is signed. The signature is checked with OpenZeppelin's <code>SignatureChecker</code>, which accepts a plain key's signature, and a contract wallet's through ERC-1271.</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Field</th><th>What it says</th></tr></thead>
+      <tbody>
+        <tr><td><code>holder</code></td><td>Who owns the shares and signs. On a 7540 it is also the controller of the request.</td></tr>
+        <tr><td><code>vault</code></td><td>The vault, which is also the share token the permit is for.</td></tr>
+        <tr><td><code>shares</code></td><td>The shares to redeem, or to put into a request.</td></tr>
+        <tr><td><code>receiver</code></td><td>Where the cash goes on a 4626. On a 7540 it must be the holder: a request pays nobody, and the cash comes at the claim.</td></tr>
+        <tr><td><code>minAssets</code></td><td>The least the holder accepts on a 4626. On a 7540 it must be zero.</td></tr>
+        <tr><td><code>asynchronous</code></td><td>True for a 7540, where the exit files a request. False for a 4626, where it redeems.</td></tr>
+        <tr><td><code>nonce</code></td><td>A value the holder chooses, usable once per holder. It is kept as one bit, bit <code>nonce &amp; 0xff</code> of word <code>nonce &gt;&gt; 8</code>, so nonces numbered one after the other share a storage slot, 256 to a slot (<code>test_WhenAHolderUsesTheNoncesOfOneWord_TheyShareOneStorageSlot</code>).</td></tr>
+        <tr><td><code>validAfter</code>, <code>deadline</code></td><td>The window, inclusive at both ends. A <code>validAfter</code> of zero means no lower bound.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <h3>Second: the share permit</h3>
+    <p>The vault's share token has ERC-2612 <code>permit</code>, signed on the share token's own domain. The holder signs itself as owner, this contract as spender, the exit's <code>shares</code> as value, the exit's <code>deadline</code>, and the token's next permit nonce. The contract passes those values and the relayer's <code>v</code>, <code>r</code>, <code>s</code> to <code>permit</code>, then calls the vault, which spends the allowance.</p>
+    <ul class="plain">
+      <li><b>A permit that fails is ignored.</b> Anyone can submit a signed permit to the token first. The exit still runs, on the allowance that permit set (<code>test_APermitSubmittedFirstDoesNotStopTheExit</code>). With no permit and no allowance the vault's call reverts with the share token's own error.</li>
+      <li><b>A permit is not bound to one exit.</b> It sets an allowance to this contract, and this contract spends an allowance only on an exit the holder signed.</li>
+      <li><b>Contract wallets.</b> The share token's <code>permit</code> accepts a plain key's signature alone, so a contract wallet approves this contract beforehand, which is a transaction, and the failed <code>permit</code> is ignored.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="vaults">
+  <div class="prose"><h2>On a 4626 and on a 7540</h2></div>
+  <div class="two">
+    <div class="prose">
+      <h3>A 4626: a redemption</h3>
+      <p>With <code>asynchronous</code> false, the contract calls <code>redeem(shares, receiver, holder)</code>. The shares are burnt at the vault's price in that block, the vault pays the signed receiver, and the call returns how much.</p>
+      <p>Then it compares: less than <code>minAssets</code> reverts with <code>SignedExit_TooFewAssets(minAssets, assets)</code>, nothing moves and the nonce stays unused (<code>test_FewerAssetsThanAcceptedIsRefusedAndNothingMoves</code>). Exactly <code>minAssets</code> passes (<code>test_ExactlyTheMinimumPasses</code>). A <code>minAssets</code> of zero is allowed and sets no floor.</p>
+      <p>The holder can name another receiver (<code>test_TheHolderCanNameAnotherEligibleReceiver</code>). The vault then applies the check it applies to every receiver of redemption cash that is not the owner of the shares: the receiver must pass the vault's policy, or the call reverts with <code>GatedVault_ThirdPartyNotEligible(account, reason)</code> (<code>test_AReceiverThePolicyRefusesIsRefusedByTheVault</code>, <a href="GatedVaultBase.html">GatedVaultBase</a>).</p>
+    </div>
+    <div class="prose">
+      <h3>A 7540: a request</h3>
+      <p>With <code>asynchronous</code> true, the contract calls <code>requestRedeem(shares, holder, holder)</code>: the holder is the controller and the owner. The shares move into the vault's escrow, the call returns zero assets, and neither this contract nor the relayer has a request (<code>test_ARelayerFilesTheRequestWithTheHolderAsController</code>). The request joins the period open at that moment.</p>
+      <p><b>A signed minimum is refused</b> with <code>SignedExit_MinimumOnARequest</code> (<code>test_ARequestNamingAMinimumIsRefused</code>), and <b>a receiver other than the holder</b> with <code>SignedExit_ReceiverOnARequest</code> (<code>test_ARequestNamingAnotherReceiverIsRefused</code>), both before the signature is checked. A request has no price yet and pays nobody, so the contract will not appear to promise either. The holder's protection is the period's approved price.</p>
+      <p>The cash comes at the claim, once the period has settled: the holder claims in a transaction of its own, or makes this contract its operator and anyone delivers it with <a href="#claims"><code>claimFor</code></a>.</p>
+    </div>
+  </div>
+  <div class="prose">
+    <p>The <code>asynchronous</code> flag has to match the vault. True on a 4626 reverts, because a 4626 has no <code>requestRedeem</code>. False on a 7540 calls the three-argument <code>redeem</code>, which there is a claim of settled redemption cash with the holder as controller. The vault allows that call only from the controller or its operator, and a share allowance does not open it, so it reverts with <code>Gated7540Vault_Unauthorized</code> and nothing moves. If the holder has made this contract its operator, the vault allows the call, and it is a claim the holder signed: the signed shares of the holder's settled redemption, paid to the signed receiver, under the vault's own checks and the signed <code>minAssets</code>.</p>
+  </div>
+</section>
+
+<section id="claims">
+  <div class="prose">
+    <h2><code>claimFor</code>: delivering a 7540's settled claims</h2>
+    <p>On a 7540 vault the shares of a settled deposit and the cash of a settled redemption wait at the vault until someone claims them. The vault lets the controller claim, or an operator the controller approved with <code>setOperator</code>. A controller that makes this contract its operator lets anyone deliver its claims, and pay the gas for it. <code>claimFor(vault, controllers)</code> needs no signature and takes a list, so one transaction can serve many controllers.</p>
+  </div>
+  <ol class="steps">
+    <li><div><b>The deposit side.</b> For each controller the contract reads <code>claimableDepositRequest(0, controller)</code>. If it is not zero, it calls <code>deposit(assets, controller, controller)</code> for the whole amount: the shares are minted to the controller (<code>test_AnyoneDeliversTheSharesOfASettledDepositToItsController</code>).</div></li>
+    <li><div><b>The redemption side.</b> It reads <code>claimableRedeemRequest(0, controller)</code>. If it is not zero, it calls <code>redeem(shares, controller, controller)</code> for the whole amount: the vault pays the cash to the controller (<code>test_AnyoneDeliversTheCashOfASettledRedemptionToItsController</code>).</div></li>
+    <li><div><b>A claim that went through</b> emits <code>ClaimDelivered(vault, controller, isDeposit, amount)</code>, where <code>amount</code> is the shares minted or the assets paid, and counts one towards the number the function returns.</div></li>
+    <li><div><b>A claim the vault refuses is skipped.</b> Each call to the vault is in a <code>try</code>. A revert emits <code>ClaimSkipped(vault, controller, isDeposit, reason)</code>, with the vault's revert data as <code>reason</code>, the claim stays with the vault, and the loop goes on to the next.</div></li>
+  </ol>
+  <div class="prose">
+    <ul class="plain">
+      <li><b>A controller that gave no leave is skipped.</b> The vault reverts with <code>Gated7540Vault_Unauthorized</code> for a controller that did not make this contract its operator. That controller keeps its claim and the others are served (<code>test_AControllerThatDidNotAllowItIsPassedOverAndTheOthersAreServed</code>).</li>
+      <li><b>A controller the policy refuses is skipped.</b> The vault re-runs its policy checks at every claim. A controller that may not receive at that moment keeps its claim with the vault and does not hold back the others. Once it may receive again, a later <code>claimFor</code> delivers it (<code>test_AControllerThePolicyRefusesIsPassedOverAndTheOthersAreServed</code>). If it stays blocked, the agent's <code>recoverClaimable</code> on the vault is the path.</li>
+      <li><b>The receiver is always the controller.</b> The function takes no receiver. The caller gets nothing, and nothing stays in this contract.</li>
+      <li><b>It files no request and touches no pending one.</b> A request that has not settled is left alone (<code>test_ItLeavesAPendingRequestAloneAndFilesNone</code>). With nothing to claim, nothing happens and no event is emitted (<code>test_WithNothingToClaimNothingHappens</code>).</li>
+      <li><b>The vault is the caller's choice.</b> The contract keeps no list of vaults. It holds nothing of its own and keeps no state for a claim, so a counterfeit vault gains nothing from it.</li>
+    </ul>
+  </div>
+  <div class="note"><b>Making this contract an operator is a grant of trust in its code.</b> Under ERC-7540 an operator is a full delegate: the vault would let it file requests for the controller and name any receiver for its claims. This contract is immutable, and the one thing it does without the holder's signature is <code>claimFor</code>, which claims in full to the controller itself. A holder that does not want to rely on that does not make it an operator, and claims for itself.</div>
+</section>
+
+<section id="relayer">
+  <div class="prose">
+    <h2>What a relayer can and cannot do with a signature it holds</h2>
+    <p>The relayer is trusted with nothing but timing. An exit does not name its relayer, so all of this also holds for anyone who sees the signatures, for instance in the queue of pending transactions.</p>
+  </div>
+  <div class="prose"><h3>Delay it: yes</h3></div>
+  <div class="table-wrap">
+    <table class="fixed">
+      <thead><tr><th>It tries to</th><th>What happens</th></tr></thead>
+      <tbody>
+        <tr><td>Hold the exit back</td><td><b>It can.</b> Nothing forces it to submit, and the exit stays valid until <code>deadline</code>. On a 4626 the price in the block it lands is what counts, down to <code>minAssets</code>. On a 7540 the request joins whichever period is open then.</td></tr>
+        <tr><td>Not submit at all</td><td><b>It can.</b> The exit lapses at its deadline, and nothing has moved.</td></tr>
+        <tr><td>Beat a cancellation</td><td><b>It can.</b> <code>cancelExit</code> is an ordinary transaction from the holder. An exit that lands first executes.</td></tr>
+        <tr><td>Submit outside the window</td><td><b>Refused.</b> <code>SignedExit_Expired</code> after the deadline, <code>SignedExit_NotYetValid</code> before <code>validAfter</code> (<code>test_BeforeItsWindowAndAfterItsDeadlineItIsRefused</code>).</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose"><h3>Front-run it: harmless to the exit</h3><p>Front-running means seeing a transaction before it is included and getting another one in ahead of it.</p></div>
+  <div class="table-wrap">
+    <table class="fixed">
+      <thead><tr><th>Someone tries to</th><th>What happens</th></tr></thead>
+      <tbody>
+        <tr><td>Copy the signatures and submit first</td><td>The exit runs exactly as signed and the receiver the holder named gets the cash. The slower transaction reverts with <code>SignedExit_NonceUsed</code> and its sender loses the gas (<code>test_AReplayIsRefused</code>).</td></tr>
+        <tr><td>Submit the <code>permit</code> directly to the share token first</td><td>The exit still runs, on the allowance the permit set (<code>test_APermitSubmittedFirstDoesNotStopTheExit</code>).</td></tr>
+        <tr><td>Spend the nonce to block the exit</td><td><b>Refused.</b> The nonce is written after the holder's signature passes, and a later failure undoes the write (<code>test_FewerAssetsThanAcceptedIsRefusedAndNothingMoves</code>). <code>cancelExit</code> writes under its caller's address, so someone else cancelling does nothing to the holder's nonce (<code>test_ACancelledExitIsRefusedAndOnlyItsHolderCancels</code>).</td></tr>
+        <tr><td>Move a 4626's price just ahead of the exit</td><td><code>minAssets</code> is the protection: below it, <code>SignedExit_TooFewAssets</code> and nothing moves. With <code>minAssets</code> at zero there is no protection. A failed exit costs the holder nothing, but a price moved on purpose can keep it from landing.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose"><h3>Change it: no</h3></div>
+  <div class="table-wrap">
+    <table class="fixed">
+      <thead><tr><th>It tries to</th><th>What happens</th></tr></thead>
+      <tbody>
+        <tr><td>Change a field: the receiver, the minimum, the shares, the vault, the window, the flag</td><td><b>Refused.</b> The hash differs, so the signature does not match: <code>SignedExit_BadSignature</code> (<code>test_ARelayerCannotChangeTheReceiverTheMinimumOrTheShares</code>), unless the changed field trips an earlier check first (a deadline already past, a <code>validAfter</code> still to come, a minimum or another receiver on a request).</td></tr>
+        <tr><td>Send the cash or the request elsewhere</td><td><b>No way to.</b> On a 4626 the cash goes to the signed <code>receiver</code>. On a 7540 the controller is the signed <code>holder</code>.</td></tr>
+        <tr><td>Submit it twice</td><td><b>Refused.</b> <code>SignedExit_NonceUsed</code> (<code>test_AReplayIsRefused</code>).</td></tr>
+        <tr><td>Take the holder's shares with no exit</td><td><b>No way to.</b> The allowance is to this contract, not to the relayer, and the contract calls the vault only after an exit's checks, for the signed shares, even when the holder has given it a larger allowance.</td></tr>
+        <tr><td>Take a cut</td><td><b>No way to.</b> The contract pays its caller nothing, and the vault pays the receiver directly. How a relayer is paid is outside this contract.</td></tr>
+        <tr><td>Use <code>claimFor</code> to take a claim</td><td><b>No way to.</b> The receiver of a claim is its controller.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <p>What a relayer does choose is the permit's <code>v</code>, <code>r</code>, <code>s</code>, because the exit does not cover them. With different values the failed permit is ignored, and the exit then needs an allowance already in place or it reverts.</p>
+  </div>
+  <div class="note">A relayer can hold an exit back, so a short <code>deadline</code> is the holder's control, and on a 4626 so is a <code>minAssets</code> above zero.</div>
+</section>
+
+<section id="without">
+  <div class="prose">
+    <h2>An exit without this contract</h2>
+    <p>A relayed exit also works with the share token alone: the holder signs a <code>permit</code> that names the relayer as spender, and the relayer submits it with <code>redeem</code> or <code>requestRedeem</code> through the token's <code>multicall</code> (<a href="SignedEntry.html#exits">shown on the SignedEntry page</a>). That route asks more trust. The permit is an allowance to the relayer and says nothing about where the cash goes, so the relayer picks the receiver or the controller. Here the allowance is to this contract, and the holder signs the receiver and the least it accepts.</p>
+  </div>
+</section>
+
+<section id="functions">
+  <div class="prose"><h2>What it can do</h2></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>exitWithPermit(exit, exitSig, v, r, s)</code></td><td>Anyone</td><td>Checks the exit, tries the share token's permit (a failure is ignored), then redeems to the signed receiver on a 4626 or files a redemption request under the holder on a 7540. Returns the assets paid, zero for a request.</td></tr>
+        <tr><td><code>claimFor(vault, controllers)</code></td><td>Anyone</td><td>For each controller, claims the shares of a settled deposit and the cash of a settled redemption on a 7540 vault, in full, to that controller. A claim the vault refuses is skipped. Returns how many claims were delivered.</td></tr>
+        <tr><td><code>cancelExit(nonce)</code></td><td>Anyone, for their own nonces</td><td>Marks the nonce used under the caller's address, so an exit signed with it cannot execute. It reverts with <code>SignedExit_NonceUsed</code> if the nonce was already used, by an exit that ran or an earlier cancel (<code>test_ACancelledExitIsRefusedAndOnlyItsHolderCancels</code>). It does not touch an allowance on the share token.</td></tr>
+        <tr><td><code>exitHash(exit)</code></td><td>Anyone (read-only)</td><td>The EIP-712 hash the holder signs.</td></tr>
+        <tr><td><code>nonceUsed(holder, nonce)</code></td><td>Anyone (read-only)</td><td>Whether a nonce was used or cancelled.</td></tr>
+        <tr><td><code>eip712Domain()</code></td><td>Anyone (read-only)</td><td>OpenZeppelin <code>EIP712</code>: the domain fields, for a wallet to read. The domain does not change, so <code>EIP712DomainChanged</code> does not fire.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Error or event</th><th>When</th></tr></thead>
+      <tbody>
+        <tr><td><code>ExitExecuted(exitHash, holder, vault, shares, assets)</code></td><td>An exit ran. <code>assets</code> is zero for a request.</td></tr>
+        <tr><td><code>ExitCancelled(holder, nonce)</code></td><td>Someone called <code>cancelExit</code>, under their own address.</td></tr>
+        <tr><td><code>ClaimDelivered(vault, controller, isDeposit, amount)</code></td><td><code>claimFor</code> delivered a claim: the shares of a settled deposit, or the assets of a settled redemption.</td></tr>
+        <tr><td><code>ClaimSkipped(vault, controller, isDeposit, reason)</code></td><td>The vault refused a claim. <code>reason</code> is what the vault reverted with, and the claim stays with the vault.</td></tr>
+        <tr><td><code>SignedExit_Expired()</code></td><td>After the deadline.</td></tr>
+        <tr><td><code>SignedExit_NotYetValid()</code></td><td>Before <code>validAfter</code>.</td></tr>
+        <tr><td><code>SignedExit_NonceUsed()</code></td><td>The nonce was used or cancelled.</td></tr>
+        <tr><td><code>SignedExit_MinimumOnARequest()</code></td><td>A request names a minimum.</td></tr>
+        <tr><td><code>SignedExit_ReceiverOnARequest()</code></td><td>A request names a receiver other than the holder.</td></tr>
+        <tr><td><code>SignedExit_BadSignature()</code></td><td>The exit's signature is not the holder's.</td></tr>
+        <tr><td><code>SignedExit_TooFewAssets(minAssets, assets)</code></td><td>A redemption paid less than the holder accepted.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small">The checks run in the order of the table, from <code>SignedExit_Expired</code> to <code>SignedExit_BadSignature</code>, before any call to the vault. In <code>exitWithPermit</code> the errors of the vault arrive unwrapped, apart from a failed <code>permit</code>, which is ignored. In <code>claimFor</code> they arrive as the <code>reason</code> of <code>ClaimSkipped</code>.</p>
+</section>
+
+<section id="why">
+  <div class="prose">
+    <h2>Why it is built this way</h2>
+    <ul class="plain">
+      <li><b>No vault changes.</b> The contract uses what a vault already has: the share token's <code>permit</code>, <code>redeem</code>, <code>requestRedeem</code> and ERC-7540 operators. Every policy decision stays in the vault's own rule list.</li>
+      <li><b>No roles.</b> The holder's signature carries all the authority for an exit, and a controller's own <code>setOperator</code> for a claim, so there is nothing for an owner or an operator of this contract to do. The relayer is whoever submits.</li>
+      <li><b>The holder signs where the cash goes.</b> A permit alone is an allowance, and whoever holds it decides the rest. The signed exit fixes the receiver and the least the holder accepts, so the relayer is left with timing.</li>
+      <li><b>The vault pays the receiver.</b> Neither shares nor cash pass through this contract, so there is nothing in it to take and nothing to sweep.</li>
+      <li><b>A failed permit is tolerated.</b> A signed permit sits in public while it waits, and anyone can submit it directly. If that made the exit fail, anyone could stop an exit for the price of one transaction.</li>
+      <li><b>The nonce is spent before any call to the vault.</b> A vault that calls back into this contract during the exit cannot repeat it, and a claim keeps no state here, so the contract has no reentrancy guard.</li>
+      <li><b>It refuses a minimum and a receiver on a request</b> rather than accept what it could not honour.</li>
+      <li><b>A refused claim is skipped, not fatal.</b> One controller that gave no leave, or that the policy blocks, would otherwise stop the delivery to every other controller in the list.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="prose">
+    <h2>What it does not do</h2>
+    <ul class="plain">
+      <li><b>No list of vaults.</b> The holder signs a vault address, and the contract calls that address and no other, for the permit and for the redemption or the request. An exit signed for a counterfeit vault moves nothing in a genuine one.</li>
+      <li><b>A minimum protects on a 4626 only.</b> On a 7540 the holder files without knowing the price, and relies on the period's approved price.</li>
+      <li><b>The receiver still passes the vault's check.</b> The contract is no way around the policy: a receiver that is not the holder must be one the vault's policy accepts, and the holder's own shares are judged as on any redemption or request, with the vault's pause, freezes and lockups.</li>
+      <li><b>An operator is a full delegate.</b> A controller that makes this contract its operator trusts its immutable code to do nothing with that but <code>claimFor</code> and what the holder signs.</li>
+      <li><b><code>claimFor</code> skips what the vault refuses.</b> The claim waits at the vault, until the controller allows this contract, the policy lets the controller receive, the controller claims for itself, or the agent's <code>recoverClaimable</code> delivers it. A caller learns of a skip from the returned count and the <code>ClaimSkipped</code> events.</li>
+      <li><b>Claims go to the controller only.</b> A controller that wants its cash paid elsewhere claims for itself and names the receiver.</li>
+      <li><b>Cancelling takes a transaction</b>, so it needs gas, and it can lose the race with the relayer. It does not revoke an allowance on the share token.</li>
+      <li><b>A permit takes a plain key.</b> A contract wallet can sign the exit, and has to approve this contract with a transaction.</li>
+      <li><b>No payment to the relayer</b>, and no way to name one.</li>
+      <li><b>It does not replace the plain route.</b> An exit by a share <code>permit</code> and <code>multicall</code> still works without this contract, and then the relayer is trusted with where the cash goes.</li>
+      <li><b>Nothing from the modules but the deployment.</b> <code>Core</code> deploys one when the profile sets <code>signedExit</code>, and <code>CoreParts</code> adds one to a running core. It is not attested and gets no role, and no shipped profile sets <code>signedExit</code>. The post-deploy check compares its code with the release's and checks that a sample exit hashes under its own EIP-712 domain.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="connected">
+  <div class="prose"><h2>Connected to</h2></div>
+  <div class="cards">
+    <a class="card" href="SignedEntry.html"><span class="name">SignedEntry</span><p>Its mirror: entering a vault on signed messages.</p></a>
+    <a class="card" href="Gated4626Vault.html"><span class="name">Gated4626Vault</span><p>Where an exit is a redemption, and <code>minAssets</code> applies.</p></a>
+    <a class="card" href="Gated7540Vault.html"><span class="name">Gated7540Vault</span><p>Where an exit is a request under the holder, and where operators and claims are defined.</p></a>
+    <a class="card" href="GatedVaultBase.html"><span class="name">GatedVaultBase</span><p>The third-party check a receiver other than the holder has to pass.</p></a>
+    <a class="card" href="NavDesk.html"><span class="name">NavDesk</span><p>Approves the price that protects a 7540 request.</p></a>
+    <a class="card" href="PolicyGatedERC20Upgradeable.html"><span class="name">PolicyGatedERC20Upgradeable</span><p>Gives a share token the <code>permit</code> this contract uses.</p></a>
+    <a class="card" href="CredentialRule.html"><span class="name">CredentialRule</span><p>The usual reason a vault accepts or refuses a receiver or a claim.</p></a>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose">
+    <h2>Source and tests</h2>
+    <ul class="plain">
+      <li>Contract: <code>contracts/intents/SignedExit.sol</code>, interface <code>ISignedExit.sol</code></li>
+      <li>Tests: <code>SignedExit.t.sol</code> (a redemption and a request on real vaults, the receiver and the vault's check on it, the minimum, the window, replay, cancelling, a permit submitted first, the nonce bitmap, claims delivered and skipped, and the hash) and <code>test/nodejs/products.test.ts</code> (one added to a running core, a wallet signs both messages and a relayer submits them on a deployed vault, and the check refusing a stack that lost it)</li>
+      <li>Deployment: <code>ignition/parts.ts</code>, used by <code>Core.ts</code> and <code>CoreParts.ts</code>; the check in <code>assertHandedOver</code>, <code>test/nodejs/fixtures.ts</code></li>
+    </ul>
+  </div>
+</section>
+
+</main>
+</body>
+</html>

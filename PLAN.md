@@ -4656,7 +4656,7 @@ E12 needs E8, E13 needs E3, E11 needs step 0 and a Besu run. Each change is its 
 
 ### The first pass, as built on `main` (2026-11-19): E1 and E2
 
-The owner passed on the go-ahead for step 0 and the first pass on 2026-11-19. E3 with E13 is not built yet.
+The owner passed on the go-ahead for step 0 and the first pass on 2026-11-19. E3 with E13 followed the same day and has its own section below.
 
 - **E1, nonces in a bitmap.** `IntentSettledUpgradeable` and `SignedEntry` keep a nonce as bit `nonce & 0xff` of word `nonce >> 8`. No interface changed; `nonceUsed` and the `bytes32` nonce are as they were. Five tests: 256 nonces of one word share one slot, in the mixin and in the signed entry, which failed before the change; a used nonce spends no other, fuzzed over the nonce, its neighbours in the word, the next word and another signer; two nonces of a word are each spent once.
 - **E2, `claimBatch`.** As in the row above, with the row logic in one function so the batch and the stack both fit. `IDistributor` reopened: `claimBatch`, the `ClaimSkip` enum and `DistributionClaimSkipped`; the freeze test failed on the id before the re-pin. Eleven tests, ten failing against a stub: each of the three reasons to pass a row over, a holder named twice, the four reverts of the whole batch, an empty batch, and a hundred holders in one transaction.
@@ -4674,6 +4674,19 @@ The owner passed on the go-ahead for step 0 and the first pass on 2026-11-19. E3
   E1's number was 12,000 gas less on a used word: it is 19,881 less here, where the word was written in the same transaction and is warm. In a later transaction the schedule gives about 17,100 less (a write to a slot that already holds a value, against a write to an empty one). In state, 256 numbered nonces take one slot where they took 256. E2's number was less gas than 100 claims: 24% less in the calls themselves, before the 100 transactions' own base cost.
 - **Gates.** `npx hardhat test`: 2227 passing (2027 solidity, 200 nodejs). Format, lint and typecheck clean, Slither 0 results, Halmos 22 of 22 on this branch, `validate:upgrades` 8 of 8, `verify:reproducible` 33 contracts identical.
 - **Not done.** No node test drives `claimBatch` through the deployed stack. The signing helpers still draw random nonces; numbering them is the client's choice. The port to `paris`.
+
+### The first pass, as built on `main` (2026-11-19): E3 with E13
+
+- **The contract.** `SignedExit`, immutable, no roles, with `ISignedExit` (a new interface, id `0x5ef9720f`, and four event topics, pinned). An exit is the holder's signed `Exit` and the share token's `permit`; a 4626 pays the signed receiver from the vault, and a 7540 gets a request with the holder as controller. `claimFor(vault, controllers)` is E13: open to anyone, it claims a settled deposit's shares and a settled redemption's cash to each controller itself, and passes over a claim the vault refuses with the vault's own error in the event. Its nonces are one bit each, as in E1.
+- **What the review asked for, and where it is pinned.** One refused controller does not hold back the others: `test_AControllerThatDidNotAllowItIsPassedOverAndTheOthersAreServed`, `test_AControllerThePolicyRefusesIsPassedOverAndTheOthersAreServed`. The entry point with no signature can only claim, and only to the controller: `test_ItLeavesAPendingRequestAloneAndFilesNone`, and the two delivery tests check that the caller and the contract end with nothing.
+- **Tests.** `SignedExit.t.sol`, 22 tests on real vaults behind the real credential registry, rule and hook; 19 of the first 21 failed against a stub. The freeze test failed on the unpinned id. One node test: the part joins a running core alone, a holder leaves a 4626 through it by a relayer, and the post-deploy check refuses a stack that lost it.
+- **Planted bugs.** A deposit claim sent to the caller; a redemption's cash sent to the caller; the minimum not checked; the signature not checked; a request allowed to name another receiver; the nonce not spent; the cash sent to the holder whatever was signed; the deadline not checked: 3, 1, 1, 1, 1, 2, 2 and 1 tests fail.
+- **Deployment.** Part `signedExit`, profile flag `signedExit`, in `Core` and `CoreParts`; the post-deploy check compares its code with the release and a sample exit's hash with the one a holder signs for the chain and the address.
+- **Against the benchmark.** Two rows added, and no existing row moved by a single gas: a signed exit from a 4626 makes 17 calls, writes 8 slots and costs 122,177 gas; `claimFor` for ten controllers with a settled deposit each makes 141 calls, writes 50 slots and costs 657,340 gas. The exit is a function that did not exist, so its number is a base for later, not a gain; what it buys is in the tests, a relayer that cannot change the receiver or the minimum.
+- **Found while writing the page.** On a 7540 the three-argument `redeem` is a claim, so an exit signed as synchronous for a 7540 is a signed claim of settled cash to the signed receiver, for a holder that made the contract its operator. It needs the holder's signature and the vault judges the receiver, so nothing is opened; it was unstated and untested. It is now in the interface's NatSpec, the brief and `SECURITY.md`, and pinned by `test_OnA7540ASynchronousExitIsASignedClaimThatNeedsTheHoldersLeave`.
+- **Pages.** A page for `SignedExit` and nine pages changed, with the Markdown copies (46 pages). The new page's figure was looked at in a browser; the overview drawing has no room for another box and names the contract in its caption.
+- **Gates.** `npx hardhat test`: 2251 passing (2050 solidity, 201 nodejs) before the test above was added, and that file then passed alone with 22. Format, lint and typecheck clean, Slither 0 results, Halmos 22 of 22, `validate:upgrades` 8 of 8, `verify:reproducible` 34 contracts identical.
+- **Not done.** No signed `setOperator`: a controller makes the contract its operator with a transaction of its own, as the plan decided. No Halmos property. The port to `paris`.
 
 ### The first pass on `paris` (2026-11-19): step 0, E1 and E2
 
@@ -4697,6 +4710,8 @@ Carried here by cherry-pick with no conflict; where the text above says "this li
 | distribution: claim | 11 | 4 | 82,708 |
 
 After E1 and E2, on this line: an executed intent next to a used nonce costs 86,184 gas, from 106,075; a `claimBatch` of 100 holders costs 4,973,956 against 6,516,678 for 100 claims; no other row moved by more than 153 gas or by a call. `npx hardhat test`: 2228 passing (2028 solidity, 200 nodejs). Format, lint and typecheck clean, Slither 0 results, Halmos 22 of 22, `validate:upgrades` 8 of 8, `verify:reproducible` 33 contracts identical.
+
+E3 with E13 followed, carried the same way; the brief keeps this line's deployment text. On this line a signed exit from a 4626 costs E3EXIT gas and `claimFor` for ten controllers E3CLAIM, and no existing row moved. E3GATES
 
 ### Decisions and review, 2026-11-19
 
