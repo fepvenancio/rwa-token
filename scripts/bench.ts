@@ -21,6 +21,8 @@ const FLOWS = [
   "7540: claim deposit",
   "signed entry: 4626 with permit",
   "distribution: claim",
+  "distribution: 100 claims, one by one",
+  "distribution: claimBatch, 100 holders",
 ];
 
 const run = spawnSync("npx", ["hardhat", "test", "solidity", "contracts/test/Bench.t.sol"], {

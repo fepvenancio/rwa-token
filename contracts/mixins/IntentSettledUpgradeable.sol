@@ -14,7 +14,7 @@ import {PolicyGatedERC20Upgradeable} from 'contracts/base/PolicyGatedERC20Upgrad
  * @title IntentSettledUpgradeable
  * @notice Mixin: the holder signs an EIP-712 `TransferIntent`, EXECUTOR_ROLE executes it
  * @dev Shares the EIP-712 domain with ERC-2612 permit. Signatures are checked with OZ `SignatureChecker`, so EOAs
- *      (ECDSA, low-s only) and ERC-1271 smart accounts are supported. Nonces are random and tracked per signer.
+ *      (ECDSA, low-s only) and ERC-1271 smart accounts are supported. A nonce is chosen by its signer and tracked per signer, one bit each.
  *      Besides the deadline and the nonce, the mixin checks the intent's own fields against each other and the caller:
  *      `executor` (zero means any EXECUTOR_ROLE holder), `validAfter`, and that a stated consideration comes with an
  *      executor. It never enforces the consideration itself: only the executor an intent names can do that
@@ -22,11 +22,13 @@ import {PolicyGatedERC20Upgradeable} from 'contracts/base/PolicyGatedERC20Upgrad
 abstract contract IntentSettledUpgradeable is PolicyGatedERC20Upgradeable, ITransferIntent {
   /**
    * @notice ERC-7201 namespaced storage of the mixin
-   * @param nonces Whether each signer's nonce was used or cancelled
+   * @param nonces Each signer's used and cancelled nonces, one bit each: bit `nonce & 0xff` of word `nonce >> 8`. A
+   *        signer that numbers its nonces one after the other spends one storage slot for 256 of them; a random nonce
+   *        works as well and takes a slot of its own
    * @custom:storage-location erc7201:gated.storage.IntentSettled
    */
   struct IntentSettledStorage {
-    mapping(address _signer => mapping(bytes32 _nonce => bool _used)) nonces;
+    mapping(address _signer => mapping(uint256 _word => uint256 _bits)) nonces;
   }
 
   /// @notice Role allowed to execute signed intents
@@ -54,7 +56,7 @@ abstract contract IntentSettledUpgradeable is PolicyGatedERC20Upgradeable, ITran
       revert ERC8473PolicyRejected(Reasons.BAD_SIGNATURE);
     }
 
-    _getIntentSettledStorage().nonces[_intent.from][_intent.nonce] = true;
+    _useNonce(_intent.from, _intent.nonce);
     _moveAs(
       _intent.from, _intent.to, _intent.amount, IERC8473Policy.TransferKind.EXECUTED, _intent.ref, _intent.deadline
     );
@@ -68,9 +70,8 @@ abstract contract IntentSettledUpgradeable is PolicyGatedERC20Upgradeable, ITran
   function cancelIntent(
     bytes32 _nonce
   ) external {
-    IntentSettledStorage storage $ = _getIntentSettledStorage();
-    if ($.nonces[_msgSender()][_nonce]) revert ERC8473PolicyRejected(Reasons.NONCE_USED);
-    $.nonces[_msgSender()][_nonce] = true;
+    if (_nonceUsed(_msgSender(), _nonce)) revert ERC8473PolicyRejected(Reasons.NONCE_USED);
+    _useNonce(_msgSender(), _nonce);
     emit IntentCancelled(_msgSender(), _nonce);
   }
 
@@ -108,7 +109,7 @@ abstract contract IntentSettledUpgradeable is PolicyGatedERC20Upgradeable, ITran
     address _signer,
     bytes32 _nonce
   ) external view returns (bool _used) {
-    _used = _getIntentSettledStorage().nonces[_signer][_nonce];
+    _used = _nonceUsed(_signer, _nonce);
   }
 
   /// @inheritdoc ITransferIntent
@@ -133,6 +134,18 @@ abstract contract IntentSettledUpgradeable is PolicyGatedERC20Upgradeable, ITran
   function __IntentSettled_init() internal onlyInitializing {} // aderyn-ignore(empty-block)
 
   /**
+   * @notice Marks a signer's nonce as used
+   * @param _signer The signer
+   * @param _nonce The nonce
+   */
+  function _useNonce(
+    address _signer,
+    bytes32 _nonce
+  ) private {
+    _getIntentSettledStorage().nonces[_signer][uint256(_nonce) >> 8] |= 1 << (uint256(_nonce) & 0xff);
+  }
+
+  /**
    * @notice Checks that do not depend on the signature, in this order: the deadline (inclusive), the nonce, that a
    *         stated consideration has an executor, that `_executor` is the named executor, `validAfter` (inclusive), and
    *         that the intent pays someone
@@ -145,7 +158,7 @@ abstract contract IntentSettledUpgradeable is PolicyGatedERC20Upgradeable, ITran
     address _executor
   ) private view returns (bytes32 _reason) {
     if (block.timestamp > _intent.deadline) return Reasons.INTENT_EXPIRED;
-    if (_getIntentSettledStorage().nonces[_intent.from][_intent.nonce]) return Reasons.NONCE_USED;
+    if (_nonceUsed(_intent.from, _intent.nonce)) return Reasons.NONCE_USED;
     if (_intent.executor == address(0)) {
       if (_intent.considerationToken != address(0) || _intent.considerationAmount != 0) {
         return Reasons.CONSIDERATION_NEEDS_EXECUTOR;
@@ -156,6 +169,19 @@ abstract contract IntentSettledUpgradeable is PolicyGatedERC20Upgradeable, ITran
     if (block.timestamp < _intent.validAfter) return Reasons.INTENT_NOT_YET_VALID;
     if (_intent.to == address(0)) return Reasons.ZERO_RECEIVER;
     _reason = Reasons.TRANSFER_OK;
+  }
+
+  /**
+   * @notice Whether a signer's nonce was used or cancelled
+   * @param _signer The signer
+   * @param _nonce The nonce
+   * @return _used True if used
+   */
+  function _nonceUsed(
+    address _signer,
+    bytes32 _nonce
+  ) private view returns (bool _used) {
+    _used = _getIntentSettledStorage().nonces[_signer][uint256(_nonce) >> 8] & (1 << (uint256(_nonce) & 0xff)) != 0;
   }
 
   /**

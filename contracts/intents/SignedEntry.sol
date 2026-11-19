@@ -25,8 +25,9 @@ contract SignedEntry is EIP712, ISignedEntry {
     'Entry(address investor,address vault,uint256 assets,uint256 minShares,bool asynchronous,bytes32 nonce,uint256 validAfter,uint256 deadline)'
   );
 
-  /// @notice Used and cancelled nonces, per investor
-  mapping(address _investor => mapping(bytes32 _nonce => bool _used)) internal _nonces;
+  /// @notice Used and cancelled nonces of each investor, one bit each: bit `nonce & 0xff` of word `nonce >> 8`, so 256
+  ///         nonces numbered one after the other take one storage slot
+  mapping(address _investor => mapping(uint256 _word => uint256 _bits)) internal _nonces;
 
   /// @notice Deploys it, with its EIP-712 domain
   constructor() EIP712('SignedEntry', '1') {}
@@ -79,8 +80,8 @@ contract SignedEntry is EIP712, ISignedEntry {
   function cancelEntry(
     bytes32 _nonce
   ) external {
-    if (_nonces[msg.sender][_nonce]) revert SignedEntry_NonceUsed();
-    _nonces[msg.sender][_nonce] = true;
+    if (_nonceUsed(msg.sender, _nonce)) revert SignedEntry_NonceUsed();
+    _useNonce(msg.sender, _nonce);
     emit EntryCancelled(msg.sender, _nonce);
   }
 
@@ -96,7 +97,7 @@ contract SignedEntry is EIP712, ISignedEntry {
     address _investor,
     bytes32 _nonce
   ) external view returns (bool _used) {
-    _used = _nonces[_investor][_nonce];
+    _used = _nonceUsed(_investor, _nonce);
   }
 
   /// @inheritdoc ISignedEntry
@@ -118,11 +119,11 @@ contract SignedEntry is EIP712, ISignedEntry {
   ) private returns (bytes32 _hash) {
     if (block.timestamp > _entry.deadline) revert SignedEntry_Expired();
     if (block.timestamp < _entry.validAfter) revert SignedEntry_NotYetValid();
-    if (_nonces[_entry.investor][_entry.nonce]) revert SignedEntry_NonceUsed();
+    if (_nonceUsed(_entry.investor, _entry.nonce)) revert SignedEntry_NonceUsed();
     if (_entry.asynchronous && _entry.minShares != 0) revert SignedEntry_MinimumOnARequest();
     _hash = entryHash(_entry);
     if (!SignatureChecker.isValidSignatureNow(_entry.investor, _hash, _sig)) revert SignedEntry_BadSignature();
-    _nonces[_entry.investor][_entry.nonce] = true;
+    _useNonce(_entry.investor, _entry.nonce);
   }
 
   /**
@@ -151,5 +152,31 @@ contract SignedEntry is EIP712, ISignedEntry {
     if (_left != 0) revert SignedEntry_CashNotTaken(_left);
     emit EntryExecuted(_hash, _entry.investor, _entry.vault, _entry.assets, _shares);
   }
+
   // slither-disable-end reentrancy-events
+
+  /**
+   * @notice Marks an investor's nonce as used
+   * @param _investor The investor
+   * @param _nonce The nonce
+   */
+  function _useNonce(
+    address _investor,
+    bytes32 _nonce
+  ) private {
+    _nonces[_investor][uint256(_nonce) >> 8] |= 1 << (uint256(_nonce) & 0xff);
+  }
+
+  /**
+   * @notice Whether an investor's nonce was used or cancelled
+   * @param _investor The investor
+   * @param _nonce The nonce
+   * @return _used True if used
+   */
+  function _nonceUsed(
+    address _investor,
+    bytes32 _nonce
+  ) private view returns (bool _used) {
+    _used = _nonces[_investor][uint256(_nonce) >> 8] & (1 << (uint256(_nonce) & 0xff)) != 0;
+  }
 }

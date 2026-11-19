@@ -4654,6 +4654,27 @@ Step 0, the benchmark, comes first and is small. Then, in the order proposed:
 
 E12 needs E8, E13 needs E3, E11 needs step 0 and a Besu run. Each change is its own pull request on `main` with its port to `paris`, tests first, and its row in the benchmark table. Settings of the chain itself (block time, the storage format, which nodes validate and which serve) are the operator's and are not in this repository.
 
+### The first pass, as built on `main` (2026-11-19): E1 and E2
+
+The owner passed on the go-ahead for step 0 and the first pass on 2026-11-19. E3 with E13 is not built yet.
+
+- **E1, nonces in a bitmap.** `IntentSettledUpgradeable` and `SignedEntry` keep a nonce as bit `nonce & 0xff` of word `nonce >> 8`. No interface changed; `nonceUsed` and the `bytes32` nonce are as they were. Five tests: 256 nonces of one word share one slot, in the mixin and in the signed entry, which failed before the change; a used nonce spends no other, fuzzed over the nonce, its neighbours in the word, the next word and another signer; two nonces of a word are each spent once.
+- **E2, `claimBatch`.** As in the row above, with the row logic in one function so the batch and the stack both fit. `IDistributor` reopened: `claimBatch`, the `ClaimSkip` enum and `DistributionClaimSkipped`; the freeze test failed on the id before the re-pin. Eleven tests, ten failing against a stub: each of the three reasons to pass a row over, a holder named twice, the four reverts of the whole batch, an empty batch, and a hundred holders in one transaction.
+- **Planted bugs.** A whole word spent by one nonce, in the mixin and in the signed entry; the word ignored; the nonce never marked; a refused payment left as claimed; a holder already paid paid again; a bad proof passed over; the token's refusal ignored: 3 and 2, 11, 11, 1, 4, 1 and 1 tests fail.
+- **Against the benchmark.** Three rows were added for these two changes. Every other row moved by at most 154 gas (0.19%) and by no call.
+
+| Flow | Before | After |
+|---|---|---|
+| intent: executeTransfer, the nonce next to a used one | 13 calls, 3 slots, 102,004 gas | 13, 3, 82,123 |
+| intent: executeTransfer through IntentExecutor (a nonce in a fresh word) | 13, 3, 102,004 | 13, 3, 102,023 |
+| distribution: claim | 11, 4, 82,403 | 11, 4, 82,557 |
+| distribution: 100 claims, one by one | 1,100 calls, 400 slots, 6,487,454 gas (after the change; `claim` is as it was) | the same |
+| distribution: claimBatch, 100 holders | no such function | 1,001 calls, 400 slots, 4,938,738 gas |
+
+  E1's number was 12,000 gas less on a used word: it is 19,881 less here, where the word was written in the same transaction and is warm. In a later transaction the schedule gives about 17,100 less (a write to a slot that already holds a value, against a write to an empty one). In state, 256 numbered nonces take one slot where they took 256. E2's number was less gas than 100 claims: 24% less in the calls themselves, before the 100 transactions' own base cost.
+- **Gates.** `npx hardhat test`: 2227 passing (2027 solidity, 200 nodejs). Format, lint and typecheck clean, Slither 0 results, Halmos 22 of 22 on this branch, `validate:upgrades` 8 of 8, `verify:reproducible` 33 contracts identical.
+- **Not done.** No node test drives `claimBatch` through the deployed stack. The signing helpers still draw random nonces; numbering them is the client's choice. The port to `paris`.
+
 ### Decisions and review, 2026-11-19
 
 The owner passed on a reviewer's answers and four notes the same day. The answers settle three questions; the notes were each checked against the code and are right, and the rows above carry them.

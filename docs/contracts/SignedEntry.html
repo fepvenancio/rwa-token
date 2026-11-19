@@ -141,7 +141,7 @@
         <tr><td><code>assets</code></td><td>The amount to pay.</td></tr>
         <tr><td><code>minShares</code></td><td>The least the investor accepts on a 4626. On a 7540 it must be zero.</td></tr>
         <tr><td><code>asynchronous</code></td><td>True for a 7540, where the entry files a request. False for a 4626, where it deposits.</td></tr>
-        <tr><td><code>nonce</code></td><td>A random value the investor chooses, usable once per investor.</td></tr>
+        <tr><td><code>nonce</code></td><td>A value the investor chooses, usable once per investor. It is kept as one bit, bit <code>nonce &amp; 0xff</code> of word <code>nonce &gt;&gt; 8</code>, so nonces numbered one after the other share a storage slot, 256 to a slot.</td></tr>
         <tr><td><code>validAfter</code>, <code>deadline</code></td><td>The window, inclusive at both ends. A <code>validAfter</code> of zero means no lower bound.</td></tr>
       </tbody>
     </table>
