@@ -79,7 +79,7 @@ contract ContractSizesTest is Test {
     _assertFits('CredentialRegistry', address(new CredentialRegistry(address(this), address(this))));
     _assertFits('CredentialRule', address(new CredentialRule(ICredentialRegistry(address(this)))));
     _assertFits('ProxyDeployer', address(new ProxyDeployer(address(this), IPolicyRegistry(_registry))));
-    Fund _fund = new Fund(address(this), IPolicyRegistry(_registry));
+    Fund _fund = new Fund(address(this), IPolicyRegistry(_registry), address(0));
     _assertFits('Fund', address(_fund));
     _assertFits('FundHoldersRule', address(new FundHoldersRule(IFund(address(_fund)))));
     MockAsset _asset = new MockAsset(6);

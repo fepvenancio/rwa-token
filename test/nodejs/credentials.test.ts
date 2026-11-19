@@ -20,7 +20,7 @@ import {
 import { ROLES } from "../../ignition/modules/roles.js";
 import { DEMO_VALIDITY, deployStack, QUALS, REASONS, revertOf, STATUS, verify, type Stack } from "./fixtures.js";
 
-const ICREDENTIAL_REGISTRY_ID = "0xd224eb70";
+const ICREDENTIAL_REGISTRY_ID = "0x5f51feac";
 const IIDENTITY_REGISTRY_ID = "0xb9209e33";
 
 /** The EIP-712 type the attester signs: `ICredentialRegistry.Credential`. */
@@ -31,6 +31,7 @@ const CREDENTIAL_TYPES = {
     { name: "quals", type: "uint32" },
     { name: "issuedAt", type: "uint64" },
     { name: "attester", type: "uint8" },
+    { name: "entity", type: "uint48" },
   ],
 } as const;
 
@@ -113,7 +114,7 @@ describe("credentials: the registry and the rule through the real deployment", a
     const eve = s.holders.eve.account.address;
     const stranger = s.holders.bob.account;
     const now = (await s.publicClient.getBlock()).timestamp;
-    const credential = { subject: eve, validUntil: now + DEMO_VALIDITY, quals: QUALS.KYC, issuedAt: now, attester: 0 };
+    const credential = { subject: eve, validUntil: now + DEMO_VALIDITY, quals: QUALS.KYC, issuedAt: now, attester: 0, entity: 0 };
     const [, name, version, chainId, verifyingContract] = await s.credentials.read.eip712Domain();
     const domain = { name, version, chainId, verifyingContract };
     const message = { ...credential };
@@ -193,7 +194,7 @@ describe("credentials: the registry and the rule through the real deployment", a
     assert.equal(await s.token.read.canSend([alice]), true);
     assert.equal(await s.token.read.canReceive([alice]), false);
     const writes = await revertOf(
-      s.credentials.simulate.set([s.holders.eve.account.address, 1n << 40n, QUALS.KYC], { account: s.wallets.kyc.account.address }),
+      s.credentials.simulate.set([s.holders.eve.account.address, 1n << 40n, QUALS.KYC, 0], { account: s.wallets.kyc.account.address }),
       s.credentials.abi,
     );
     assert.deepEqual(writes, { errorName: "CredentialRegistry_AttesterKilled", args: [0] });

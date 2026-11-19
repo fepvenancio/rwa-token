@@ -88,7 +88,7 @@ contract FundHalmos is Test {
   address internal _accountB = address(0xA2);
 
   function setUp() public {
-    _fund = new Fund(address(this), IPolicyRegistry(address(new FundHalmosRegistry())));
+    _fund = new Fund(address(this), IPolicyRegistry(address(new FundHalmosRegistry())), address(0));
     _rule = address(new FundHalmosRule(address(_fund)));
     _fund.setRule(_rule);
     _fund.setHolderCap(10);

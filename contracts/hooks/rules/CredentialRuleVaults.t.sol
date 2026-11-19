@@ -65,7 +65,7 @@ abstract contract CredentialVaultsTest is Test {
     uint32 _quals,
     uint256 _validFor
   ) internal {
-    _creds.set(_who, uint64(block.timestamp + _validFor), _quals);
+    _creds.set(_who, uint64(block.timestamp + _validFor), _quals, 0);
   }
 
   function _fund(

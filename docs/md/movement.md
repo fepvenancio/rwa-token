@@ -162,7 +162,7 @@ Judges EXECUTED only. Outside the token's daily UTC window, or on a weekday the 
 
 ### [FundHoldersRule](contracts/FundHoldersRule.md)
 
-Returns `NOT_FUND_CLASS` for every movement of a token that is not a registered class of its fund, or when it is not the fund's installed rule. Otherwise a new investor (a receiver that holds no class of the fund, is not exempt and is not the class itself) passes while the count is below the cap, or at the cap when the sender empties its only class. Anything else gets `MAX_HOLDERS`. Zero amounts, burns, forced moves and receivers who already hold a class are not capped. The fund's owner sets the cap with `setHolderCap`.
+Returns `NOT_FUND_CLASS` for every movement of a token that is not a registered class of its fund, or when it is not the fund's installed rule. Otherwise a new investor (a receiver that holds no class of the fund, is not exempt, is not the class itself, and whose entity in the credential registry is not already counted through another address) passes while the count is below the cap, or at the cap when the sender empties its only class and is its investor's last counted address. Anything else gets `MAX_HOLDERS`. Zero amounts, burns, forced moves, receivers who already hold a class and receivers whose investor is already counted are not capped. The fund's owner sets the cap with `setHolderCap`.
 
 ### [SupplyCapRule](contracts/SupplyCapRule.md)
 

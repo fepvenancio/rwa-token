@@ -108,6 +108,8 @@ contract FundHoldersRule is BaseRule, IFundHoldersRule {
         || _ctx.kind == IERC8473Policy.TransferKind.FORCED || _ctx.to == _ctx.token || _exempt || _held != 0
     ) return Reasons.TRANSFER_OK;
 
+    // The receiver holds nothing, but its investor may already be counted through another address.
+    if (FUND.countedWith(_ctx.to) != 0) return Reasons.TRANSFER_OK;
     if (_cap == 0) return Reasons.MAX_HOLDERS;
     if (_count < _cap) return Reasons.TRANSFER_OK;
     // At the cap a new investor needs a free slot. Above a lowered cap there is none, net zero or not.
@@ -191,7 +193,10 @@ contract FundHoldersRule is BaseRule, IFundHoldersRule {
     if (_fromExempt || _fromHeld != 1 << (_index - 1)) return false;
     // The exact equality is the definition of "sender leaves" (balance == amount); see after_.
     (uint256 _fromBalance,) = abi.decode(_ctx.data, (uint256, uint256));
+    if (_fromBalance != _ctx.amount) return false;
+    // The address leaves; its investor leaves only if this is its last counted address. Asked about the key the sender
+    // was counted under, which `leave` lowers, never the registry's current one.
     // slither-disable-next-line incorrect-equality
-    _leaves = _fromBalance == _ctx.amount;
+    _leaves = FUND.countedWith(_ctx.from) == 1;
   }
 }

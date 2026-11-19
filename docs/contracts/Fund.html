@@ -25,7 +25,7 @@
 <header class="top">
   <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Identity and fund</div>
   <h1>Fund</h1>
-  <p class="lede">One fund, several share classes. <code>Fund</code> keeps what no single class can know: which tokens are its classes, how many distinct investors hold any of them, and which classes each investor holds.</p>
+  <p class="lede">One fund, several share classes. <code>Fund</code> keeps what no single class can know: which tokens are its classes, how many distinct investors hold any of them, and which classes each address holds.</p>
   <div class="facts">
     <span class="fact"><b>contracts/fund/Fund.sol</b></span>
     <span class="fact">immutable, <b>not a proxy</b>, one per fund</span>
@@ -38,14 +38,14 @@
   <div class="callout">
     <h3>In one minute</h3>
     <p>A fund can issue several classes of shares, and here each class is its own token with its own balances. In the demo deployment the three classes are a token settled through signed intents, an instant vault and a request-and-claim vault. A fund may be allowed only so many investors in total, counted across its classes. No class token can count that alone, because it sees its own holders and no others.</p>
-    <p><code>Fund</code> is the shared record. It knows the fund's classes, which of them each address holds, and how many distinct investors that makes. An investor in three classes counts once. It decides nothing itself: <a href="FundHoldersRule.html">FundHoldersRule</a>, a rule listed on each class, reads it to apply the cap and tells it when someone starts or stops holding a class.</p>
+    <p><code>Fund</code> is the shared record. It knows the fund's classes, which of them each address holds, and how many distinct investors that makes. An investor in three classes counts once. So does an investor that holds through several addresses, when the credential registry the fund reads gives those addresses one entity. It decides nothing itself: <a href="FundHoldersRule.html">FundHoldersRule</a>, a rule listed on each class, reads it to apply the cap and tells it when someone starts or stops holding a class.</p>
   </div>
 </section>
 
 <section id="how">
   <div class="prose">
-    <h2>How it works: one word per investor, one count for the fund</h2>
-    <p>Classes are numbered from 1 in the order they were registered, and class <code>n</code> owns bit <code>n&nbsp;-&nbsp;1</code> of an account's class mask. Each account's state is one storage word: the class bits at the bottom and an "exempt" flag at the top. The fund's installed rule, the investor count and the cap share another word.</p>
+    <h2>How it works: one word per address, one count for the fund</h2>
+    <p>Classes are numbered from 1 in the order they were registered, and class <code>n</code> owns bit <code>n&nbsp;-&nbsp;1</code> of an account's class mask. Each account's state is one storage word: the class bits at the bottom, above them the key the account is counted under (see <a href="#entities">Investors, not addresses</a>), and an "exempt" flag at the top. The fund's installed rule, the investor count and the cap share another word.</p>
   </div>
   <figure>
     <div class="fig-scroll">
@@ -124,14 +124,35 @@
         <text x="574" y="381" class="sm m">48 bits, set by the owner</text>
       </svg>
     </div>
-    <figcaption><b>Many classes per investor, one count per fund.</b> An example state. Alice's mask is 7 (bits 0, 1 and 2), and she is one investor. The treasury's class bit is recorded but its exempt flag keeps it out of the count. The vault's own address gets no bit, so shares waiting in its escrow are not an investor.</figcaption>
+    <figcaption><b>Many classes per investor, one count per fund.</b> An example state. Alice's mask is 7 (bits 0, 1 and 2), and she is one investor. The treasury's class bit is recorded but its exempt flag keeps it out of the count. The vault's own address gets no bit, so shares waiting in its escrow are not an investor. No address here names an entity, so each counted address is one investor.</figcaption>
   </figure>
   <ol class="steps">
-    <li><div><b>An investor</b> is an account that holds at least one class and is not exempt. It counts once, however many classes it holds.</div></li>
+    <li><div><b>A counted address</b> is an account that holds at least one class and is not exempt. <b>An investor</b> is a counted address on its own, or all the counted addresses of one entity together. It counts once, however many classes and addresses it holds through.</div></li>
     <li><div><b>A class does not count itself.</b> <a href="Gated7540Vault.html"><code>Gated7540Vault</code></a> holds the shares of pending redemptions at its own address. <code>join</code> ignores a class token joining itself, so the escrow is not recorded and needs no exemption.</div></li>
-    <li><div><b>The count moves at the edges.</b> It rises when an account gets its first class bit while not exempt, and falls when a non-exempt account loses its last one. A second class, or an extra unit of one already held, writes nothing to the count.</div></li>
+    <li><div><b>The count moves at the edges.</b> It rises when an investor's first address gets its first class bit while not exempt, and falls when its last counted address loses its last one. A second class, an extra unit of one already held, or another address of an entity that is already counted, writes nothing to the count.</div></li>
     <li><div><b>The shared word.</b> The installed rule, the count and the cap sit in one storage slot, so the rule reads all three at once, and the first count write is not a write to an empty slot.</div></li>
   </ol>
+</section>
+
+<section id="entities">
+  <div class="prose wrap-any">
+    <h2>Investors, not addresses</h2>
+    <p>A cap on investors counts people and institutions, and one of them can hold through several addresses. The fund is built with the address of a <a href="CredentialRegistry.html"><code>CredentialRegistry</code></a>, <code>CREDENTIALS()</code>, and asks it for each address's entity key, <code>entityKeyOf(account)</code>: the attester's id and the attester's number for the investor, or zero when the address stands alone. A fund built with the zero address asks nobody, and every key is zero.</p>
+    <ul class="plain">
+      <li><b>The key is read when counting starts.</b> When an address starts being counted, on its first class or when its exemption ends, the fund reads its key from the registry and stores it in the address's state word. <code>countedKeyOf(account)</code> returns it; it is zero for an address on its own and for one that is not counted.</li>
+      <li><b>What the count is.</b> <code>holderCount()</code> is the number of counted addresses with key zero, plus the number of keys that have at least one counted address. For each key the fund keeps how many counted addresses it has. Two addresses of one entity count once (<code>test_WhenTwoAddressesOfOneEntityHold_TheyCountOnce</code>), also when they hold different classes (<code>test_WhenOneEntityHoldsTwoClassesThroughTwoAddresses_ItCountsOnce</code>). Addresses with no entity each count on their own (<code>test_WhenAddressesNameNoEntity_EachCountsOnItsOwn</code>), and the same number from two attesters is two investors (<code>test_WhenTwoAttestersUseTheSameEntityNumber_TheyAreTwoInvestors</code>).</li>
+      <li><b>An address leaves the key it was counted under.</b> When it loses its last class or is exempted, the fund lowers the stored key, whatever the registry says by then, and clears it. The investor leaves the count when its last counted address does (<code>test_WhenOneAddressOfAnEntityLeaves_TheInvestorStaysUntilTheLastOneLeaves</code>).</li>
+      <li><b>A standing does not move the count.</b> The registry answers the key from the stored record, so a holder whose credential lapsed keeps its key, and can still leave (<code>test_WhenACredentialLapses_TheCountStaysAndTheHolderCanLeave</code>).</li>
+      <li><b>An exempt address has no place in its entity.</b> It is not counted, so the next address of that entity to hold starts the investor (<code>test_WhenAnExemptAddressOfAnEntityHolds_TheNextAddressOfThatEntityIsCounted</code>).</li>
+    </ul>
+    <h3>When the registry changes under a holder: rekey</h3>
+    <p>An attester can link or unlink an address while it holds a class. The fund does not hear of it: the address stays counted under the key it has. <code>rekey(account)</code> brings the fund into line. Anyone may call it, because it only makes the fund agree with the registry. It moves a counted address from the key it was counted under to the key the registry gives it at that moment, and the count moves if that ends one investor or starts another, and stays when it does both or neither (<code>test_WhenAnAddressMovesBetweenTwoEntitiesThatBothHold_TheCountStays</code>). It does nothing for an address that holds no class, for an exempt one, and for one whose key has not changed (<code>test_WhenNothingChanged_RekeyDoesNothing</code>, <code>test_WhenTheAddressIsExempt_RekeyDoesNothing</code>).</p>
+    <ul class="plain">
+      <li><b>Linked and not rekeyed: counted apart.</b> Two holding addresses that the attester links afterwards are still two investors until each is rekeyed, so the count errs on the strict side (<code>test_WhenTwoHoldingAddressesAreLinked_RekeyCountsThemOnce</code>).</li>
+      <li><b>Unlinked and not rekeyed: counted together.</b> A holding address the attester unlinks is still counted with its former entity until it is rekeyed. The rekey can put the count above the cap, where nobody new is admitted (<code>test_WhenAHoldingAddressIsUnlinked_RekeyCountsItApartEvenAboveTheCap</code>). A monitor on the registry's <code>CredentialSet</code> event sees the change and calls <code>rekey</code>.</li>
+    </ul>
+    <p><code>countedWith(account)</code> is the question <a href="FundHoldersRule.html"><code>FundHoldersRule</code></a> asks. For a counted address it is the number of counted addresses under the key it was counted under, itself included: one for an address on its own. For an address that is not counted it is the number of counted addresses under the key the registry gives it at that moment: zero for an address on its own. So a receiver that holds nothing is a new investor exactly when the answer is zero, and a sender is its investor's last address exactly when the answer is one.</p>
+  </div>
 </section>
 
 <section id="journey">
@@ -184,7 +205,7 @@
       <li><b>From the installed rule.</b> <code>join</code> and <code>leave</code> revert for any other caller (<code>Fund_OnlyRule</code>). The rule in turn accepts <code>after_</code> from whichever hook the token named in the call has installed.</li>
       <li><b>For a registered class.</b> <code>join</code> and <code>leave</code> revert for a token that is not a class (<code>Fund_NotAClass</code>). A fake token with its own fake hook can get past the rule's hook check, and is stopped here.</li>
     </ul>
-    <p>The owner's <code>setExempt</code> is the one other path that moves the count, and by one, for an account that holds a class. No function lets the owner set a class mask or the count directly.</p>
+    <p>Two other paths move the count, each by at most one: the owner's <code>setExempt</code>, for an account that holds a class, and <code>rekey</code>, which anyone may call and which only moves a counted address to the key the credential registry gives it. No function lets the owner set a class mask, a key or the count directly.</p>
   </div>
 </section>
 
@@ -193,8 +214,8 @@
     <h2>The cap and the exemptions</h2>
     <ul class="plain">
       <li><b>The cap.</b> <code>setHolderCap</code> stores it and leaves the count alone. Lowering it below the current count does not remove anyone: existing investors keep their classes, can trade among themselves and can leave, and while the count is above the cap the rule admits nobody new. A cap of 0 admits no new investor. The count and the cap are 48-bit numbers. The fund holds the numbers and <a href="FundHoldersRule.html"><code>FundHoldersRule</code></a> applies them.</li>
-      <li><b>Exemptions.</b> An exempt account, such as a treasury, does not count and does not trigger the cap. Its class bits are still recorded, so if the owner ends the exemption while it holds a class, it enters the count at once, and the reverse when an exemption starts. Exempting an account that holds nothing changes only the flag.</li>
-      <li><b>Not checked by the fund.</b> Neither change looks at the classes or the rule, and ending an exemption can put the count above the cap.</li>
+      <li><b>Exemptions.</b> An exempt account, such as a treasury, does not count and does not trigger the cap. Its class bits are still recorded, so if the owner ends the exemption while it holds a class, it is counted at once, under the key the registry gives it then. When an exemption starts on an account that holds a class, the account leaves the key it was counted under, and the count falls if that was the investor's last counted address (<code>test_WhenOneAddressOfAnEntityIsExempted_TheInvestorStaysWhileAnotherHolds</code>). Exempting an account that holds nothing changes only the flag.</li>
+      <li><b>Not checked by the fund.</b> Neither change looks at the classes or the rule, and ending an exemption can put the count above the cap. So can a <code>rekey</code>.</li>
     </ul>
   </div>
 </section>
@@ -236,7 +257,7 @@
     <table>
       <thead><tr><th>Stage</th><th>Owner</th><th>What happens</th></tr></thead>
       <tbody>
-        <tr><td><code>Fund</code> module</td><td>The operations account, named in the constructor</td><td>Deploys the fund and the <code>FundHoldersRule</code> that points at it. The council reads the fund's code and owner, then attests the rule.</td></tr>
+        <tr><td><code>Fund</code> module</td><td>The operations account, named in the constructor</td><td>Deploys the fund and the <code>FundHoldersRule</code> that points at it. The module's <code>credentials</code> parameter is the credential registry the fund reads, or the zero address. The council reads the fund's code and owner, then attests the rule.</td></tr>
         <tr><td><code>Product</code> module, per class</td><td>The operations account</td><td>Places the class with the rule in its list. It does not touch the fund, so a launch cannot fail on one. The fund's rule refuses each movement of the class (<code>NOT_FUND_CLASS</code>).</td></tr>
         <tr><td><code>FundOpen</code> module</td><td>The operations account, then the main timelock</td><td><code>setRule</code>, <code>setHolderCap</code>, <code>registerClass</code> for each first class in the order given, and last <code>transferOwnership</code> to the main timelock.</td></tr>
         <tr><td>After that</td><td>The main timelock</td><td>A later class, a rule change, a cap or an exemption is a timelock operation, because each can change the room existing investors have under the cap. A later class launches through <code>Product</code> like any other, and the fund's rule refuses its movements until <code>registerClass</code> runs.</td></tr>
@@ -244,7 +265,7 @@
     </table>
   </div>
   <div class="prose">
-    <p>The post-deploy check asserts that each fund's owner is the timelock, its rule is the attested one and names it, its cap is the intended one, and its classes are the ones it opened with, in order.</p>
+    <p>The post-deploy check asserts that each fund's owner is the timelock, its rule is the attested one and names it, its cap is the intended one, its <code>CREDENTIALS()</code> is the credential registry of its core, or the zero address when the core has none, and its classes are the ones it opened with, in order.</p>
   </div>
 </section>
 
@@ -257,22 +278,25 @@
         <tr><td><code>registerClass(token)</code></td><td>The owner</td><td>Adds a class under the next number, permanently. Emits <code>ClassRegistered(token, index)</code>. See <a href="#register">Registering a class</a>.</td></tr>
         <tr><td><code>setRule(rule)</code></td><td>The owner</td><td>Installs the rule that may write. Emits <code>RuleSet(previous, rule)</code>. See <a href="#rule-change">Installing and changing the rule</a>.</td></tr>
         <tr><td><code>setHolderCap(cap)</code></td><td>The owner</td><td>Sets the investor cap. Does not touch the count. Emits <code>HolderCapSet(previous, cap)</code>. Reverts with OpenZeppelin's <code>SafeCastOverflowedUintDowncast</code> above <code>type(uint48).max</code>.</td></tr>
-        <tr><td><code>setExempt(account, exempt)</code></td><td>The owner</td><td>Sets or clears the exempt flag. For an account that holds a class, the count moves by one with it. Emits <code>ExemptSet</code> when the flag changes. Reverts with <code>Fund_ZeroAddress</code> for the zero address.</td></tr>
-        <tr><td><code>join(token, account)</code></td><td>The installed rule</td><td>Records that the account holds the class. Does nothing for the class itself or a class already held. Raises the count for a non-exempt account with no class yet. Reverts with <code>Fund_OnlyRule</code> or <code>Fund_NotAClass</code>.</td></tr>
-        <tr><td><code>leave(token, account)</code></td><td>The installed rule</td><td>Records that the account has stopped holding the class. Does nothing if it did not hold it. Lowers the count when a non-exempt account loses its last class. Reverts with <code>Fund_OnlyRule</code> or <code>Fund_NotAClass</code>.</td></tr>
+        <tr><td><code>setExempt(account, exempt)</code></td><td>The owner</td><td>Sets or clears the exempt flag. An account that holds a class stops being counted, under the key it was counted under, or starts being counted, under the key the registry gives it then, and the count follows. Emits <code>ExemptSet</code> when the flag changes. Reverts with <code>Fund_ZeroAddress</code> for the zero address.</td></tr>
+        <tr><td><code>join(token, account)</code></td><td>The installed rule</td><td>Records that the account holds the class. Does nothing for the class itself or a class already held. A non-exempt account with no class yet starts being counted, under the key the registry gives it then, and the count rises if that starts an investor. Reverts with <code>Fund_OnlyRule</code> or <code>Fund_NotAClass</code>.</td></tr>
+        <tr><td><code>leave(token, account)</code></td><td>The installed rule</td><td>Records that the account has stopped holding the class. Does nothing if it did not hold it. A non-exempt account that loses its last class stops being counted and its key is cleared, and the count falls if that was the last counted address of its investor. Reverts with <code>Fund_OnlyRule</code> or <code>Fund_NotAClass</code>.</td></tr>
+        <tr><td><code>rekey(account)</code></td><td>Anyone</td><td>Moves a counted account from the key it was counted under to the key the credential registry gives it at that moment, and moves the count if that ends one investor or starts another. Does nothing for an account that is not counted or whose key has not changed. Can put the count above the cap. Emits <code>HolderKeyUpdated</code>.</td></tr>
         <tr><td><code>admission(token, account)</code></td><td>Anyone (read-only)</td><td>What the rule needs in one call: the class number (0 if not a class), the account's mask, its exempt flag, the count, the cap and the installed rule.</td></tr>
         <tr><td><code>isClassIntact(token)</code>, <code>firstBrokenClass()</code></td><td>Anyone (read-only)</td><td>The monitor, above.</td></tr>
         <tr><td><code>positionsOf(account)</code></td><td>Anyone (read-only)</td><td>The classes the account holds and its balance in each. It calls each held class token, so it is meant for off-chain reads.</td></tr>
         <tr><td><code>heldClasses(account)</code>, <code>isExempt(account)</code></td><td>Anyone (read-only)</td><td>The account's mask, without the exempt flag; the flag.</td></tr>
-        <tr><td><code>holderCount()</code>, <code>holderCap()</code>, <code>rule()</code></td><td>Anyone (read-only)</td><td>The count, the cap, the installed rule.</td></tr>
+        <tr><td><code>countedWith(account)</code></td><td>Anyone (read-only)</td><td>How many counted addresses share the account's investor. For a counted account, under the key it was counted under, itself included. For any other account, under the key the registry gives it at that moment; zero for an address on its own.</td></tr>
+        <tr><td><code>countedKeyOf(account)</code></td><td>Anyone (read-only)</td><td>The key the account is counted under; zero when it stands alone or is not counted.</td></tr>
+        <tr><td><code>holderCount()</code>, <code>holderCap()</code>, <code>rule()</code></td><td>Anyone (read-only)</td><td>The investor count (counted addresses on their own, plus the entity keys with at least one counted address), the cap, the installed rule.</td></tr>
         <tr><td><code>classCount()</code>, <code>classAt(index)</code>, <code>classIndexOf(token)</code></td><td>Anyone (read-only)</td><td>How many classes; the token of a class number (<code>Fund_ClassOutOfRange</code> outside 1 to <code>classCount()</code>); the number of a token, 0 when it is not a class.</td></tr>
-        <tr><td><code>MAX_CLASSES()</code>, <code>REGISTRY()</code>, <code>supportsInterface(id)</code></td><td>Anyone (read-only)</td><td>32; the policy registry that must attest the rule, fixed at construction; ERC-165 for <code>IFund</code>.</td></tr>
+        <tr><td><code>MAX_CLASSES()</code>, <code>REGISTRY()</code>, <code>CREDENTIALS()</code>, <code>supportsInterface(id)</code></td><td>Anyone (read-only)</td><td>32; the policy registry that must attest the rule, fixed at construction; the credential registry asked for each address's entity, or the zero address, fixed at construction; ERC-165 for <code>IFund</code>.</td></tr>
         <tr><td><code>owner()</code></td><td>Anyone (read-only)</td><td>The account that configures the fund.</td></tr>
         <tr><td><code>transferOwnership(newOwner)</code>, <code>renounceOwnership()</code></td><td>The owner</td><td>OpenZeppelin <code>Ownable</code>, in one step. Emits <code>OwnershipTransferred</code>. Renouncing would freeze the configuration for good: no later class, rule, cap or exemption.</td></tr>
       </tbody>
     </table>
   </div>
-  <p class="small">The constructor takes the owner and the registry and refuses a zero registry (<code>Fund_ZeroAddress</code>).</p>
+  <p class="small">The constructor takes the owner, the policy registry and the credential registry. It refuses a zero policy registry (<code>Fund_ZeroAddress</code>). The credential registry may be the zero address, and the fund then counts every address on its own. Any other must answer the <code>ICredentialRegistry</code> interface id through ERC-165, or the constructor reverts with <code>Fund_NotACredentialRegistry</code> (<code>test_WhenTheRegistryDoesNotAnswerTheInterface_ItReverts</code>, <code>test_WhenTheRegistryHasNoCode_ItReverts</code>).</p>
   <div class="table-wrap">
     <table>
       <thead><tr><th>Event</th><th>Emitted when</th></tr></thead>
@@ -282,11 +306,12 @@
         <tr><td><code>HolderCapSet(previous, cap)</code></td><td>The cap is set</td></tr>
         <tr><td><code>ExemptSet(account, exempt)</code></td><td>An account's exempt flag changes</td></tr>
         <tr><td><code>HolderClassesUpdated(account, classes)</code></td><td>The set of classes an account holds changes; carries the mask after the change</td></tr>
+        <tr><td><code>HolderKeyUpdated(account, key)</code></td><td>The key an account is counted under changes: it starts being counted under a key that is not zero, it stops being counted under one (the event then carries zero), or <code>rekey</code> moves it</td></tr>
         <tr><td><code>HolderCountUpdated(count)</code></td><td>The investor count changes; carries the count after the change</td></tr>
       </tbody>
     </table>
   </div>
-  <p class="small">Together with the class tokens' own <code>Transfer</code> events, <code>HolderClassesUpdated</code> and <code>HolderCountUpdated</code> are the register of investors, so the fund keeps no list of holders on chain.</p>
+  <p class="small">Together with the class tokens' own <code>Transfer</code> events, <code>HolderClassesUpdated</code>, <code>HolderKeyUpdated</code> and <code>HolderCountUpdated</code> are the register of investors, so the fund keeps no list of holders on chain.</p>
 </section>
 
 <section id="why">
@@ -294,12 +319,14 @@
     <h2>Why it is built this way</h2>
     <ul class="plain">
       <li><b>State in the fund, policy in the rule.</b> The fund records and the rule decides. Replacing the rule keeps the count and the masks, because they do not live in the rule.</li>
-      <li><b>One word per account, one for the fund.</b> A class mask and the exempt flag fit one storage word, and the rule, the count and the cap share another, so the rule's usual question costs one call (<code>admission</code>).</li>
+      <li><b>One word per account, one for the fund.</b> A class mask, the key and the exempt flag fit one storage word, and the rule, the count and the cap share another, so the rule's first question costs one call (<code>admission</code>). It asks <code>countedWith</code> as well only for a receiver that holds no class and is not exempt.</li>
+      <li><b>The key is remembered, not read again.</b> An address leaves the key it was counted under, so a change in the registry cannot make the fund lower a key it did not raise. For the same reason the rule judges a sender by the stored key, and its pre-flight agrees with the write while a registry change waits for a <code>rekey</code> (<code>test_WhenTheRegistryUnlinksASenderAndNobodyRekeys_TheDecisionStillFollowsTheCount</code>).</li>
+      <li><b>Key zero is an address on its own.</b> It does not use a counter, so addresses with no entity are not one shared investor.</li>
       <li><b>Supply must be zero at registration.</b> The fund cannot discover holders it did not see, so a class joins before anyone holds it, and the count is right from the first unit.</li>
       <li><b>Balances are not added up.</b> <code>positionsOf</code> returns each class's balance separately, because units of different classes are not comparable.</li>
       <li><b>Owned, with one-step transfer.</b> Like <a href="ProxyDeployer.html"><code>ProxyDeployer</code></a>, the fund is <code>Ownable</code>. A fixed admin would force a timelock operation, and its delay, onto the first deployment, and a two-step transfer would make the timelock schedule an accept for each fund. The post-deploy check pins the owner.</li>
       <li><b>Not attested itself.</b> The council attests <code>FundHoldersRule</code>, whose code hash covers the fund's address as an immutable but not the fund's code. So the council reads the fund's code and owner before attesting the rule.</li>
-      <li><b>Tested as a whole.</b> An invariant test drives random holder and enforcement actions across the three templates: <code>invariant_ClassBitsMatchBalances</code>, <code>invariant_CountIsTheNumberOfNonExemptInvestors</code> and <code>invariant_NoOneElseIsRecorded</code>.</li>
+      <li><b>Tested as a whole.</b> An invariant test drives random holder and enforcement actions across the three templates: <code>invariant_ClassBitsMatchBalances</code>, <code>invariant_CountIsTheNumberOfNonExemptInvestors</code> and <code>invariant_NoOneElseIsRecorded</code>. A second one adds entity links, exemptions and rekeys over a real credential registry: <code>invariant_TheCountIsTheInvestorsAmongTheCountedAddresses</code> and <code>invariant_TheClassBitsFollowTheBalances</code>.</li>
     </ul>
   </div>
 </section>
@@ -310,10 +337,14 @@
     <ul class="plain">
       <li><b>It does not stop a class dropping the rule.</b> The hook accepts a list without <code>FundHoldersRule</code>, and then the class stops counting investors and stops enforcing the cap. The monitor detects it, and nothing prevents it (<code>test_WhenAClassDropsTheFundRule_ItIsUncappedAndTheMonitorNamesIt</code>). The same is true of a swap to a hook whose list for the class lacks the rule. A swap to a hook that lists the rule is refused by the rule's <code>onInstall</code> with <code>FundHoldersRule_CountNotCurrent</code> when the class has a supply and the hook it leaves lists no rule of the fund. A <code>setRules</code> that names the rule again on such a class is refused the same way, so a class that dropped the rule gets it back only when it is empty, and there is no recount (<code>test_WhenAClassWithHoldersDropsTheFundRule_ItCannotTakeItBack</code>).</li>
       <li><b>It does not repair a gap.</b> While a class's list lacks the rule its movements are not recorded, and no function sets a mask directly. A seller in the gap stays counted until a later full exit, or until the fund's owner exempts it with <code>setExempt</code>, which takes it out of the count. A buyer with no other class stays uncounted, with the cap treating it as new, until it takes up another class, or its balance reaches zero and it receives again.</li>
-      <li><b>The cap is not an absolute ceiling on the count.</b> A forced move is exempt from the cap and still counted, so the agent's recovery of a stranded position can put the count above the cap, where it stays until investors leave. Ending an exemption can do the same. A monitor should alert when <code>holderCount()</code> is above <code>holderCap()</code>.</li>
+      <li><b>The cap is not an absolute ceiling on the count.</b> A forced move is exempt from the cap and still counted, so the agent's recovery of a stranded position can put the count above the cap, where it stays until investors leave. Ending an exemption can do the same, and so can a <code>rekey</code> of an address the attester unlinked. A monitor should alert when <code>holderCount()</code> is above <code>holderCap()</code>.</li>
       <li><b>It holds no place for an open request.</b> A full <code>requestRedeem</code> on a 7540 class takes the investor out of the count while the shares wait in the escrow, and <code>requestDeposit</code> reserves nothing. If the fund fills up meanwhile, a reject that returns the shares, or a deposit claim, is refused with <code>MAX_HOLDERS</code> (<code>test_WhenARejectedRedemptionReturnsSharesToAnInvestorWhoWasReplaced_TheFundCapAppliesAndRecoveryIsCounted</code>). The agent's recovery path still works. Whether a redeeming investor still counts as a holder is for counsel.</li>
       <li><b>It does not judge the size of a position.</b> One unit of a class is a holder. Without a minimum position on the class, 1 wei to an empty, credentialed account takes an investor slot. <a href="MinPositionRule.html"><code>MinPositionRule</code></a> closes that where it is listed with a non-zero minimum.</li>
-      <li><b>It does not know people.</b> An investor is an address. Two wallets of one client count twice, and the count is only as meaningful as the credentials behind it.</li>
+      <li><b>It does not know people.</b> It knows addresses and the entity an attester gave each. Two addresses of one client count once only when their records carry the same entity from the same attester; otherwise they count twice. An omnibus address counts once. The count is only as meaningful as the credentials behind it.</li>
+      <li><b>It does not follow the registry by itself.</b> Until someone calls <code>rekey</code>, a holding address the attester has since linked is still counted apart, and one it has since unlinked is still counted with its former entity. A monitor on <code>CredentialSet</code> catches both.</li>
+      <li><b>Linking is public and optional.</b> An entity number shows on chain that two addresses are one investor. An investor that keeps entity zero takes one place per address.</li>
+      <li><b>A fund with no registry counts addresses.</b> So does a fund over a registry that does not answer this version's <code>ICredentialRegistry</code> id: the constructor refuses that registry, so such a fund is built with the zero address (<code>test_WhenTheFundReadsNoRegistry_TwoAddressesOfOneEntityAreTwoInvestors</code>). The registry is fixed at construction.</li>
+      <li><b>Only the count is by entity.</b> <a href="MinPositionRule.html"><code>MinPositionRule</code></a> and every other rule judge an address. Nothing adds up an entity's positions.</li>
       <li><b>It does not re-check a class after registration.</b> The rule, the class's hook and its list can all change later. The views report the result; they change nothing.</li>
       <li><b>The monitor views assume well-formed answers.</b> <code>isClassIntact</code> and <code>firstBrokenClass</code> answer false or name the class when a call to the token or hook reverts, or when either has no code. A token or a hook that answers malformed data makes them revert, as no <code>catch</code> reaches a failure to decode an answer. Such a hook would have to be attested first.</li>
       <li><b>It has no list of holders.</b> The register is rebuilt off-chain from events. <code>positionsOf</code> answers for one account at a time.</li>
@@ -325,6 +356,7 @@
   <div class="prose"><h2>Connected to</h2></div>
   <div class="cards">
     <a class="card" href="FundHoldersRule.html"><span class="name">FundHoldersRule</span><p>The rule that reads the fund to apply the cap, and the one allowed to write it once installed.</p></a>
+    <a class="card" href="CredentialRegistry.html"><span class="name">CredentialRegistry</span><p>Gives each address its entity key, which the fund counts investors by.</p></a>
     <a class="card" href="ComplianceHook.html"><span class="name">ComplianceHook</span><p>Holds each class's rule list, which the monitor reads.</p></a>
     <a class="card" href="Gated7540Vault.html"><span class="name">Gated7540Vault</span><p>The class whose escrow is its own address, not counted as an investor.</p></a>
     <a class="card" href="PolicyRegistry.html"><span class="name">PolicyRegistry</span><p>Must attest the rule before the fund installs it.</p></a>
@@ -339,7 +371,7 @@
     <ul class="plain">
       <li>Contract: <code>contracts/fund/Fund.sol</code>, interface <code>IFund.sol</code></li>
       <li>Deployment: <code>ignition/modules/Fund.ts</code> and <code>FundOpen.ts</code></li>
-      <li>Tests: <code>Fund.t.sol</code> (each function, the shared slot, a fuzz model of the count, the monitor), <code>FundIntegration.t.sol</code> (one fund with the three templates as classes: counting, the cap, registration, the vault escrow, rule and hook replacement, the monitor), <code>FundInvariant.t.sol</code> (the three invariants above), <code>test/nodejs/fund.test.ts</code> (through the real deployment, including the timelock batch that replaces the rule) and <code>products.test.ts</code> (an issuer with two funds)</li>
+      <li>Tests: <code>Fund.t.sol</code> (each function, the shared slot, a fuzz model of the count, the monitor), <code>FundIntegration.t.sol</code> (one fund with the three templates as classes: counting, the cap, registration, the vault escrow, rule and hook replacement, the monitor), <code>FundInvariant.t.sol</code> (the three invariants above), <code>FundEntities.t.sol</code> (a fund over a real credential registry: the constructor, counting by entity, the cap, <code>rekey</code>, exemptions, a fund with no registry, and the two invariants above), <code>test/nodejs/fund.test.ts</code> (through the real deployment, including two addresses of one entity, a later link followed by <code>rekey</code>, and the timelock batch that replaces the rule) and <code>products.test.ts</code> (an issuer with two funds)</li>
     </ul>
   </div>
 </section>

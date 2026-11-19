@@ -4465,7 +4465,7 @@ The owner passed on the review's go-ahead for this plan on 2026-11-19, with R3 a
 
 Carried here by cherry-pick; where the text above says "this line" it means `main`. The contracts and the tests are the same files. The brief keeps this line's sentence on the reentrancy guard, with the new sentence on `setRules` added to it. `npx hardhat test`: 2152 passing (1953 solidity, 199 nodejs). Format, lint and typecheck clean, Slither 0 results, `validate:upgrades` 8 of 8, `verify:reproducible` 33 contracts identical. Not done: the pages.
 
-## Entities in the credential registry (plan, 2026-11-19, nothing built)
+## Entities in the credential registry (planned and built on `main` 2026-11-19; the port to `paris` is not done)
 
 Source: the same assessment, and the owner's "Yes, both". Derived from the code at `38fdbc1`. It reopens `ICredentialRegistry` and `IFund`, which rule 4 freezes: nothing here is built until the owner says so. `IFundHoldersRule` gains nothing, so its id does not move.
 
@@ -4511,6 +4511,26 @@ A review of this plan on 2026-11-19 named four cases the decisions above left un
 - **Interfaces.** `ICredentialRegistry` (the record, `set`, the credential, the event, the new view), `IFund` (constructor, `admission`, `rekey`, a new event) and the pinned ids and topics of each. `CredentialRule` reads `profileOf` and does not change.
 - **An external registry** must be this version for a fund to count entities over it. Over an older one the fund is built with no registry.
 
+### As built on `main` (2026-11-19)
+
+The owner approved the plan on 2026-11-19 ("Merge both when CI is green, then build entities"), with N10 left out and the second live attester put off.
+
+- **Gas base, step 1.** One fund class behind the credential rule and the fund rule, two transfers in one transaction: 83,548 gas to an address that holds nothing and 32,362 between two holders.
+- **Interfaces.** `ICredentialRegistry` (`0x5f51feac`): `entity` in `Record` and in `Credential`, a fourth argument to `set`, a sixth to `CredentialSet`, and `entityKeyOf`. `IFund` (`0xa7306593`): `CREDENTIALS`, `rekey`, `countedWith`, `countedKeyOf`, `HolderKeyUpdated` and `Fund_NotACredentialRegistry`. `IFundHoldersRule` is unchanged. The freeze test failed on both ids and on the event's topic before they were pinned.
+- **One change to the plan.** `admission` is as it was. The rule asks a new view, `Fund.countedWith(account)`, and only when it needs to: for a receiver that holds nothing and is not exempt, and for a sender at a full cap. It answers for a counted account from the key it was counted under, and for any other from the registry's key now, which is N16 in one function. Folding it into `admission` would have cost every transfer to an existing holder a cold read.
+- **The registry.** The entity is stored with the record and signed with the credential; `entityKeyOf` is the attester's id above the entity number, and zero for no entity. Fourteen tests, eight failing against a stub that ignored the entity.
+- **The fund and the rule.** As N5 to N9 and N13 to N18. The key sits in the 56 bits above the class bits of an account's word; a counter for each key that is not zero. `FundEntities.t.sol`: 26 tests on the real registry, credential rule, fund rule and hook, 15 failing against a stub, and two invariants over random movements, links, rekeys and exemptions. Three more unit tests on the rule.
+- **Planted bugs.** Every address counted on its own; the key kept when the last class goes; a sender judged by its address alone; an exemption moving the count without the key; `rekey` always moving the count; the sender's side reading the registry; the receiver's investor ignored; the key without the attester; the entity kept when the attester writes zero: 13, 4, 3, 2, 3, 3, 5, 6 and 3 tests fail.
+- **Gas after.** The same two transfers: 87,632 to an address that holds nothing and names no entity (+4,084, the two questions to the registry), 32,395 between two holders (+33), and 111,884 to an address that holds nothing and names an entity nobody held under yet (+28,336, most of it the first write of that entity's counter and the event).
+- **Deployment.** The `Fund` module takes `credentials`; the fixtures pass the core's registry, or zero for a core with none; the post-deploy check compares `CREDENTIALS()`. One node test through the real deployment: two addresses of one entity count once, and a later link is followed by `rekey`.
+- **Pages.** Eight pages changed for entities, with their Markdown copies; none carries a commit id.
+- **Gates.** `npx hardhat test`: 2197 passing (1997 solidity, 200 nodejs). Format, lint and typecheck clean, Slither 0 results, `validate:upgrades` 8 of 8, `verify:reproducible` 33 contracts identical.
+- **Not done.** No Halmos property for the count by key: the existing fund harness still proves its properties on a fund with no registry. The port to `paris`.
+
+### The port to `paris` (2026-11-19)
+
+Carried here by cherry-pick; where the text above says "this line" it means `main`, and the gas figures were measured there. The contracts, the tests and the pages are the same files; the brief keeps this line's Phase 7 text. `npx hardhat test`: 2198 passing (1998 solidity, 200 nodejs). Format, lint and typecheck clean, Slither 0 results, `validate:upgrades` 8 of 8, `verify:reproducible` 33 contracts identical. Not done: a Halmos property for the count by key.
+
 ### A second live attester for one address: not in this plan
 
 The assessment also asks that an investor hold records from two attesters at once. Today a second attester writes only after the first is killed. The two ways to lift that, and why neither is planned yet:
@@ -4545,5 +4565,5 @@ Step 7 of the multi-token plan and the last step of the `setRules` plan. Written
 3. Redemption gate and the second contract: built and landed in #24 and #25. Open from its review: dust in a fund everyone has left ends the performance fee. Fixed in #27; the pages at `bfb424e` describe it. What it leaves, dust left on purpose and the 4626's management fee on a small or low-decimal fund, is in `SECURITY.md`.
 4. The NFT template: answered 2026-11-05, A, and built (the core split and `Gated721`); its pages landed in #36.
 5. `setRules` tells the rules it adds: built on 2026-11-19 with R3 as written, no recount. Open: one sentence in `IComplianceHook`'s NatSpec for `setRules`, a frozen file.
-6. Entities in the credential registry (plan of 2026-11-19): whether to build it and reopen the two interfaces; N10, a block by entity at about 4,200 gas a transfer; and whether a second live attester for one address is expected.
+6. Entities in the credential registry: built on 2026-11-19 without N10. Still open: whether a second live attester for one address is expected, which would change how an entity is scoped.
 7. A review of both plans (2026-11-19) recommends: build both; keep R3 as written, with no recount; leave N10 out; put off the second attester. These are a reviewer's recommendations and decide nothing; items 5 and 6 stay the owner's.

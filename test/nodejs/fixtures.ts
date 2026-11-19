@@ -175,7 +175,7 @@ export async function deployUntilProducts(connection: NetworkConnection) {
     const validUntil = (await s.publicClient.getBlock()).timestamp + DEMO_VALIDITY;
     // The KYC attester vouches for the holders used by the tests and the recovery account.
     for (const w of [alice, bob, carol, dave, s.wallets.recovery]) {
-      await s.credentials!.write.set([w.account.address, validUntil, QUALS.KYC], { account: s.wallets.kyc.account });
+      await s.credentials!.write.set([w.account.address, validUntil, QUALS.KYC, 0], { account: s.wallets.kyc.account });
     }
     return {
       ...s,
@@ -370,7 +370,10 @@ async function stages(connection: NetworkConnection, profile: Profile) {
     for (const key of fundsOf(profile)) {
       const module = fundModule(key);
       const pair = await ignition.deploy(module, {
-        parameters: { [module.id]: { operations: address(operations), registry: registry.address } },
+        // A fund counts investors by the entity the credential registry gives each address, when the core has one.
+        parameters: {
+          [module.id]: { operations: address(operations), registry: registry.address, credentials: credentials?.address ?? zeroAddress },
+        },
         defaultSender: address(operations),
       });
       await attest(pair.rule.address, ATTEST.RULE, `ipfs://rule-review/${pair.rule.address}`);
@@ -454,7 +457,7 @@ async function stages(connection: NetworkConnection, profile: Profile) {
       // credentials it. Its own shares need no credential: `CredentialRule` does not judge a token's own address.
       if (product.template === "Gated7540Vault" && product.assetProduct !== undefined && credentials !== undefined) {
         const validUntil = (await publicClient.getBlock()).timestamp + DEMO_VALIDITY;
-        await credentials.write.set([contract.address, validUntil, QUALS.KYC | QUALS.INFRA], { account: kyc.account });
+        await credentials.write.set([contract.address, validUntil, QUALS.KYC | QUALS.INFRA, 0], { account: kyc.account });
       }
       placed[product.key] = contract;
       return contract;
@@ -555,7 +558,8 @@ async function stages(connection: NetworkConnection, profile: Profile) {
  *   hours; on each, no known account but governance proposes or executes, and the zero address, which would open the role
  *   to anyone, holds no proposer, executor or canceller role;
  * - `ProxyDeployer` is owned by the operations account, so products launch without waiting;
- * - each fund is owned by the timelock, runs the attested rule that points back at it, has the intended cap, and holds the
+ * - each fund is owned by the timelock, runs the attested rule that points back at it, has the intended cap, counts its
+ *   investors over the core's credential registry (or over none, when the core has none), and holds the
  *   classes it opened with, in order, each intact (its hook lists the fund's rule: `firstBrokenClass()` is the zero
  *   address);
  * - a 7540's second contract is the code the release says, as an implementation's attestation pins only its address;
@@ -730,6 +734,10 @@ export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
     assert.ok(isAddressEqual(await rule.read.FUND(), fund.address), "the fund rule points at another fund");
     assert.equal(await s.registry.read.isAttested([rule.address, ATTEST.RULE]), true, "the fund rule is not attested");
     assert.equal(await fund.read.holderCap(), cap, "fund cap");
+    assert.ok(
+      isAddressEqual(await fund.read.CREDENTIALS(), s.credentials?.address ?? zeroAddress),
+      "the fund counts investors over another credential registry",
+    );
     assert.equal(await fund.read.classCount(), BigInt(classes.length), "class count");
     for (const [i, name] of classes.entries()) {
       const t = s.deployed.find(({ product }) => product.key === name)!.contract;
@@ -1217,11 +1225,16 @@ const addressOf = (who: Who) => (typeof who === "string" ? who : who.account.add
 
 /**
  * The demo KYC attester vouches for `who`: a credential from now, valid for `validFor` seconds (far past any test by
- * default) with `quals`. Writes over an earlier credential of the same attester.
+ * default) with `quals`, naming `entity` in the attester's numbering (none by default). Writes over an earlier credential
+ * of the same attester.
  */
-export async function verify(s: Pick<ProfileStack, "publicClient" | "credentials" | "wallets">, who: Who, opts: { quals?: number; validFor?: bigint } = {}) {
+export async function verify(
+  s: Pick<ProfileStack, "publicClient" | "credentials" | "wallets">,
+  who: Who,
+  opts: { quals?: number; validFor?: bigint; entity?: number } = {},
+) {
   const now = (await s.publicClient.getBlock()).timestamp;
-  await s.credentials!.write.set([addressOf(who), now + (opts.validFor ?? DEMO_VALIDITY), opts.quals ?? QUALS.KYC], {
+  await s.credentials!.write.set([addressOf(who), now + (opts.validFor ?? DEMO_VALIDITY), opts.quals ?? QUALS.KYC, opts.entity ?? 0], {
     account: s.wallets.kyc.account,
   });
 }

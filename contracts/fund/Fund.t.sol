@@ -31,7 +31,7 @@ contract FundUnitTest is Helpers {
 
   function setUp() public virtual {
     _registry = _mockContract('registry');
-    _fund = new Fund(_owner, IPolicyRegistry(_registry));
+    _fund = new Fund(_owner, IPolicyRegistry(_registry), address(0));
     _attest(_rule, true);
   }
 
@@ -153,7 +153,7 @@ contract FundUnit_Constructor is FundUnitTest {
 
   function test_WhenTheRegistryIsZero_Reverts() external {
     vm.expectRevert(IFund.Fund_ZeroAddress.selector);
-    new Fund(_owner, IPolicyRegistry(address(0)));
+    new Fund(_owner, IPolicyRegistry(address(0)), address(0));
   }
 
   function test_WhenAskedForInterfaces_FundAndErc165AreSupported() external view {
@@ -208,7 +208,7 @@ contract FundUnit_SetRule is FundUnitTest {
   }
 
   function test_WhenARealRuleOfAnotherFundIsInstalled_Reverts() external {
-    Fund _other = new Fund(_owner, IPolicyRegistry(_registry));
+    Fund _other = new Fund(_owner, IPolicyRegistry(_registry), address(0));
     FundHoldersRule _theirs = new FundHoldersRule(_other);
     _attest(address(_theirs), true); // attested, as it would be: the same code as this fund's rule
     _namesFund(address(_theirs), address(_other)); // undo the helper's mock: the real answer is the other fund
@@ -883,7 +883,7 @@ contract FundUnit_CallsAreStatic is FundUnitTest {
 
   function test_WhenTheRegistryReadWrites_SetRuleReverts() external {
     FundStatefulRegistry _stateful = new FundStatefulRegistry();
-    Fund _own = new Fund(_owner, IPolicyRegistry(address(_stateful)));
+    Fund _own = new Fund(_owner, IPolicyRegistry(address(_stateful)), address(0));
     vm.expectRevert(bytes('')); // a write inside a STATICCALL reverts with empty data, bubbled by the fund
     vm.prank(_owner);
     _own.setRule(_rule);
