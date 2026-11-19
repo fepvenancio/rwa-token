@@ -145,7 +145,3 @@ ERC-7943's freeze for NFTs is a yes or no for one account and one token id. The 
 - Contract: `contracts/tokens/Gated721.sol`; interfaces `IGated721.sol`, `IERC7943NonFungible.sol`, `IPolicyGatedCore.sol`; the reason `NOT_TOKEN_OWNER` in `Errors.sol`
 - Deployment: `ignition/profiles.ts` (the `nft` profile, `assertUsable`), `ignition/modules/Product.ts`
 - Tests: `Gated721.t.sol` (unit tests with a mocked hook, the invariant, and an integration on the real hook, `CredentialRule` and `HolderRestrictionRule` through `ProxyDeployer`), `test/nodejs/products.test.ts` (the deployed `nft` profile, a client verified once holding a token and an NFT, the refused rules)
-
----
-
-Describes the contracts at commit `5670fa8` on `paris`.

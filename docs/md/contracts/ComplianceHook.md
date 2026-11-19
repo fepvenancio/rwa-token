@@ -132,7 +132,3 @@ The constructor takes the registry and refuses the zero address (`ComplianceHook
 
 - Contract: `contracts/hooks/ComplianceHook.sol`, interfaces `IComplianceHook.sol` and `IERC8473Policy.sol`, reason codes in `Errors.sol`
 - Tests: `ComplianceHook.t.sol` (unit tests with mocked rules and registry: who may set a list, the cap, attestation, duplicates, the rules a new list adds being told in `ComplianceHookUnit_SetRulesTellsAddedRules`, first refusal, the after mask, installation through `onInstall` in `ComplianceHookUnit_OnInstall`, isolation between tokens), `RuleSetIntegration.t.sol` (MinPositionRule, HolderRestrictionRule and SettlementWindowRule behind a test identity rule, on a real hook and a real IntentToken, with pre-flight parity), `IntentToken.t.sol` (a rule that tries to re-enter the token makes the movement revert), `test/nodejs/governance.test.ts` (list and hook changes through the timelock) and `test/nodejs/deployment.test.ts` (the deployed lists, and a second hook on the same registry refused by the hand-over check)
-
----
-
-Describes the contracts at commit `5670fa8` on `paris`.

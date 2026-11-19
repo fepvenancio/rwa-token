@@ -190,7 +190,3 @@ Together with the class tokens' own `Transfer` events, `HolderClassesUpdated` an
 - Contract: `contracts/fund/Fund.sol`, interface `IFund.sol`
 - Deployment: `ignition/modules/Fund.ts` and `FundOpen.ts`
 - Tests: `Fund.t.sol` (each function, the shared slot, a fuzz model of the count, the monitor), `FundIntegration.t.sol` (one fund with the three templates as classes: counting, the cap, registration, the vault escrow, rule and hook replacement, the monitor), `FundInvariant.t.sol` (the three invariants above), `test/nodejs/fund.test.ts` (through the real deployment, including the timelock batch that replaces the rule) and `products.test.ts` (an issuer with two funds)
-
----
-
-Describes the contracts at commit `5670fa8` on `paris`.

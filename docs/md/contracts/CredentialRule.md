@@ -164,7 +164,3 @@ The `Core` module deploys one `CredentialRegistry` and one rule reading it, if a
 
 - Contract: `contracts/hooks/rules/CredentialRule.sol`, interface `ICredentialRule.sol`, reason codes in `Errors.sol`
 - Tests: `CredentialRule.t.sol` (each leg, each kind, the enforcement burn, the policy tests, the token's own address, a fuzz model of the whole table, the account questions against `check`), `CredentialRuleIntegration.t.sol` (on a real token, with pre-flight parity, lapses, blocks and signed intents), `CredentialRuleVaults.t.sol` (both vaults), and `test/nodejs/credentials.test.ts` (through the real deployment)
-
----
-
-Describes the contracts at commit `5670fa8` on `paris`.

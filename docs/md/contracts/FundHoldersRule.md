@@ -164,7 +164,3 @@ A class is set up with no supply, so its first installation passes. A class that
 
 - Contract: `contracts/hooks/rules/FundHoldersRule.sol`, interface `IFundHoldersRule.sol`, reason codes in `Errors.sol`
 - Tests: `FundHoldersRule.t.sol` (every step of the check, the net-zero cases, `after_`, the gate against fake tokens and fake hooks, the account questions, the check on installation), `FundIntegration.t.sol` (three real classes: the cap with pre-flight parity, no event showing the count above the cap, forced transfers, the 7540 escrow, a blocked claim, rule replacement, a class with holders that drops the rule and cannot take it back), `FundInvariant.t.sol`, `FundHalmos.t.sol`, and `test/nodejs/fund.test.ts` (through the real deployment)
-
----
-
-Describes the contracts at commit `5670fa8` on `paris`.

@@ -118,7 +118,3 @@ Nothing changes this contract alone. An upgrade moves the proxy to a new impleme
 - Contract: `contracts/vaults/Gated7540Settlement.sol`, specified in `IGated7540Vault.sol`
 - Tests: `Gated7540Settlement.t.sol` (the wiring, direct calls, the hand-off, upgrades, part fills, the walk and rounding), `Gated7540Vault.t.sol` (settlement and recovery through the vault), `ContractSizes.t.sol` (the runtime and creation-code limits)
 - Checks: `scripts/verify-reproducible.ts`, `assertHandedOver` in `test/nodejs/fixtures.ts`
-
----
-
-Describes the contracts at commit `5670fa8` on `paris`.

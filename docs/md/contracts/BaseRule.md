@@ -116,7 +116,3 @@ The interface sets the terms between the hook and a rule. `BaseRule` cannot enfo
 
 - Contract: `contracts/hooks/BaseRule.sol`, interfaces `IComplianceRule.sol` and `IERC8473Policy.sol` (the context and the kinds), reason codes in `Errors.sol`
 - Tests: `BaseRule` has no test file of its own, being abstract; it is tested through the rules built on it. `FundHoldersRule.t.sol` covers `onlyHook` (`FundHoldersRuleGate`: an attacker naming the real class, and a fake token naming itself and its hook) and a rule's own `onInstall` (`FundHoldersRuleUnit_OnInstall`). `SupplyCapRule.t.sol` and `ExecutedOnlyRule.t.sol` pin the account-question defaults. The test files of `CredentialRule`, `MinPositionRule`, `HolderRestrictionRule` and `SettlementWindowRule` each have a test that a fake token changes only its own records.
-
----
-
-Describes the contracts at commit `5670fa8` on `paris`.

@@ -118,7 +118,3 @@ Nothing changes this contract alone. An upgrade moves the proxy to a new impleme
 - Contract: `contracts/vaults/Gated4626Management.sol`, specified in `IGated4626Vault.sol`
 - Tests: `Gated4626Management.t.sol` (the wiring, direct calls, the hand-off and upgrades), `Gated4626VaultPortfolio.t.sol` (plugging, the rate and fees through the vault), `ContractSizes.t.sol` (the runtime and creation-code limits)
 - Checks: `scripts/verify-reproducible.ts`, `assertHandedOver` in `test/nodejs/fixtures.ts`
-
----
-
-Describes the contracts at commit `5670fa8` on `paris`.

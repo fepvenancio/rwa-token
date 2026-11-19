@@ -126,7 +126,3 @@ Every product in every profile of `ignition/profiles.ts` lists it. In the demo d
 
 - Contract: `contracts/hooks/rules/HolderRestrictionRule.sol`, interface `IHolderRestrictionRule.sol`
 - Tests: `HolderRestrictionRule.t.sol` (setters, each kind under a lockup and a freeze, the unlock second, the account questions and a fuzz test that they agree with `check`), `RuleSetIntegration.t.sol` (on a real token, including the forced transfer to a quarantine account and the enforcement burn from a frozen holder) and `test/nodejs/time.test.ts` (a lockup holds until its unlock second)
-
----
-
-Describes the contracts at commit `5670fa8` on `paris`.

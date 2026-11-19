@@ -433,7 +433,7 @@ Inline suppressions (each carries its reason on the line above, in the source):
 
 Aderyn 0.6.8 (Cyfrin) was a second CI gate from 2026-10-17 to 2026-11-14, when it was removed: Aderyn was retired
 upstream on 2026-11-13 and its release binaries were deleted, so the pinned binary can no longer be fetched. Its last
-run, on commit `259d82b` with a binary installed before the retirement, had 0 findings. Nothing checks the tables
+run, with a binary installed before the retirement, had 0 findings. Nothing checks the tables
 below any longer; they record what was accepted while the gate ran, and the inline `aderyn-ignore` comments and
 `aderyn.toml` are kept as that record. Slither is the static-analysis gate. First run: 5 high and 13 low
 detector types. One real fix: `ProxyDeployer`'s constructor parameter shadowed `Ownable._owner` and was renamed. Every

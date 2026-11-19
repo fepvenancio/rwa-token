@@ -105,7 +105,3 @@ The demo deployment does not list it, and neither does any other profile in `ign
 
 - Contract: `contracts/hooks/rules/ExecutedOnlyRule.sol`, interface `IExecutedOnlyRule.sol`, reason codes in `Errors.sol`
 - Tests: `ExecutedOnlyRule.t.sol` (a plain transfer refused at any amount, every other kind passing, and on a real hook and `IntentToken`: the pre-flight agreeing, a signed intent moving, a forced move passing) and `test/nodejs/legos.test.ts` (the rule through the modules, and the module refusing it on a plain token)
-
----
-
-Describes the contracts at commit `5670fa8` on `paris`.

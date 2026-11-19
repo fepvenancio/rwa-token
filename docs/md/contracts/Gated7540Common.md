@@ -62,7 +62,3 @@ while the request has a period, and that period is settled:
 
 - Contract: `contracts/vaults/Gated7540Common.sol`
 - Tests: it has no test file of its own, being abstract. It is tested through `Gated7540Vault.t.sol` and `Gated7540Settlement.t.sol`.
-
----
-
-Describes the contracts at commit `5670fa8` on `paris`.

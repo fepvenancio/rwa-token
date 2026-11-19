@@ -383,7 +383,3 @@ A holder who is address-frozen can be emptied either way. `forcedTransfer` and t
 - Profiles: `ignition/profiles.ts`
 - Council step and post-deploy check: `stages` and `assertHandedOver` in `test/nodejs/fixtures.ts`; procedure in the README runbook; the CI job in `.github/workflows/ci.yml`
 - Tests: `deployment.test.ts` (rule order, a twin hook, an unattested rule or implementation stopping a product), `products.test.ts` (one core and many products, an intent token alone, funds, a later class, adding parts to a running core, a signed entry, a distribution, an issuer on another issuer's credential registry), `legos.test.ts` (the legos by profile, what the hand-over check refuses, products that do not build), `governance.test.ts` (upgrades, hook and rule changes, pause and recovery)
-
----
-
-Describes the contracts at commit `5670fa8` on `paris`.

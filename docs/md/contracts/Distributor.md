@@ -119,7 +119,3 @@ A caller without the role gets `Distributor_Unauthorized(_caller)`.
 - Contract: `contracts/distribution/Distributor.sol`, interface `IDistributor.sol`
 - Tests: `Distributor.t.sol` (unit tests with a real asset and a mocked token) and `test/nodejs/products.test.ts` (on a deployed token: a maker proposes, a different checker approves and funds it, a holder claims; the check refusing a distributor that names another token, a maker who is also the checker, and a stray maker)
 - Deployment: `ignition/modules/Legos.ts` (deploys it), `Product.ts` (grants its roles)
-
----
-
-Describes the contracts at commit `5670fa8` on `paris`.

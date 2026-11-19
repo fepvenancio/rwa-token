@@ -153,7 +153,3 @@ Each token is a UUPS proxy. `_authorizeUpgrade` checks, in order: the caller hol
 
 - Contract: `contracts/base/PolicyGatedCoreUpgradeable.sol`; interfaces `IPolicyGatedCore.sol`, `IERC8473.sol`, `ITemplated.sol`
 - Tests: through each template, in `PolicyGatedERC20Upgradeable.t.sol` (role gates, the guardian and recovery, the hook checks, upgrades, multicall, and in `PolicyGatedUnit_Erc8473` the installation and the hook that cannot be asked) `Gated721.t.sol` (the same for the NFT) and `Gated1155.t.sol` (the pause and recovery, the installation and upgrades for the multi-token); the ids are pinned in `InterfaceFreeze.t.sol`
-
----
-
-Describes the contracts at commit `5670fa8` on `paris`.

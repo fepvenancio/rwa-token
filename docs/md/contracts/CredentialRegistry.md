@@ -245,7 +245,3 @@ The calls that do nothing (blocking twice, clearing a block that is not there, k
 - Contract: `contracts/identity/CredentialRegistry.sol`, interfaces `ICredentialRegistry.sol` and `IIdentityRegistry.sol`, bits in `Quals.sol`
 - Deployment: `ignition/modules/Core.ts` and `CoreHandover.ts`
 - Tests: `CredentialRegistry.t.sol` (each function, the resolution order, signing by a key and by an ERC-1271 contract, and the three invariants above), and `test/nodejs/credentials.test.ts` (through the real deployment: a credential signed with viem and submitted by a stranger, a lapse on the real clock, a block lifted by the recovery timelock, an attester killed and revived)
-
----
-
-Describes the contracts at commit `5670fa8` on `paris`.

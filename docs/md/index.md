@@ -190,7 +190,3 @@ One page per contract: what it is for, how it works, what it can do, and its tes
 - Repository: `README.md` (setup and commands) and `SECURITY.md` (audit preparation)
 - Contracts: `contracts/`, interfaces in `contracts/interfaces/`
 - Deployment: `ignition/modules/` (`Core.ts`, `CoreHandover.ts`, `CoreParts.ts`, `PartsHandover.ts`, `Fund.ts`, `Legos.ts`, `Product.ts`, `FundOpen.ts` and `roles.ts`), the parts of a core in `ignition/parts.ts`, and the combinations in `ignition/profiles.ts`
-
----
-
-Describes the contracts at commit `5670fa8` on `paris`.

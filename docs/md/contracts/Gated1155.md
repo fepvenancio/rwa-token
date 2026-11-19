@@ -189,7 +189,3 @@ A hook that answers `INSUFFICIENT_UNFROZEN` when the token finds no shortfall is
 - Contract: `contracts/tokens/Gated1155.sol`; interfaces `IGated1155.sol`, `IERC7943MultiToken.sol`, `IPolicyGatedCore.sol`
 - Deployment: `ignition/profiles.ts` (the `multi` profile, `assertUsable`), `ignition/modules/Product.ts`
 - Tests: `Gated1155.t.sol` (unit tests with a mocked hook or a recording policy, the two invariants, and an integration on the real hook, `CredentialRule` and `HolderRestrictionRule` through `ProxyDeployer`), `InterfaceFreeze.t.sol` (the two interface ids and the three event topics), `test/nodejs/products.test.ts` (the deployed `multi` profile with a batch across two ids, the refused rules, and `minPositionRule` accepted)
-
----
-
-Describes the contracts at commit `5670fa8` on `paris`.
