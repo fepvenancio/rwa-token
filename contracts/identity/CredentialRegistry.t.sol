@@ -54,7 +54,7 @@ contract CredentialRegistryUnitTest is Helpers {
     uint32 _quals
   ) internal {
     vm.prank(_by);
-    _registry.set(_who, _until, _quals);
+    _registry.set(_who, _until, _quals, 0);
   }
 
   function _active(
@@ -72,7 +72,7 @@ contract CredentialRegistryUnitTest is Helpers {
     uint8 _attester
   ) internal pure returns (ICredentialRegistry.Credential memory _c) {
     _c = ICredentialRegistry.Credential({
-      subject: _who, validUntil: _until, quals: _quals, issuedAt: _issuedAt, attester: _attester
+      subject: _who, validUntil: _until, quals: _quals, issuedAt: _issuedAt, attester: _attester, entity: 0
     });
   }
 
@@ -144,7 +144,9 @@ contract CredentialRegistryUnit_Constructor is CredentialRegistryUnitTest {
   function test_WhenReadingTheTypehash_ItMatchesTheCredentialType() external view {
     assertEq(
       _registry.CREDENTIAL_TYPEHASH(),
-      keccak256('Credential(address subject,uint64 validUntil,uint32 quals,uint64 issuedAt,uint8 attester)')
+      keccak256(
+        'Credential(address subject,uint64 validUntil,uint32 quals,uint64 issuedAt,uint8 attester,uint48 entity)'
+      )
     );
   }
 }
@@ -253,7 +255,7 @@ contract CredentialRegistryUnit_AttesterAdmin is CredentialRegistryUnitTest {
 
     vm.expectRevert(abi.encodeWithSelector(ICredentialRegistry.CredentialRegistry_NotAnAttester.selector, _kyc));
     vm.prank(_kyc);
-    _registry.set(_subject, uint64(_NOW + 1 days), Quals.KYC);
+    _registry.set(_subject, uint64(_NOW + 1 days), Quals.KYC, 0);
     _active(_new, _subject);
     assertEq(uint8(_status(_subject)), uint8(ICredentialRegistry.Status.ACTIVE));
   }
@@ -287,7 +289,7 @@ contract CredentialRegistryUnit_AttesterAdmin is CredentialRegistryUnitTest {
       )
     );
     vm.prank(_kyc);
-    _registry.set(_other, uint64(_NOW + 1 days), Quals.PROFESSIONAL);
+    _registry.set(_other, uint64(_NOW + 1 days), Quals.PROFESSIONAL, 0);
   }
 }
 
@@ -295,13 +297,13 @@ contract CredentialRegistryUnit_Set is CredentialRegistryUnitTest {
   function test_WhenTheCallerIsNotAnAttester_ItReverts() external {
     vm.expectRevert(abi.encodeWithSelector(ICredentialRegistry.CredentialRegistry_NotAnAttester.selector, _stranger));
     vm.prank(_stranger);
-    _registry.set(_subject, uint64(_NOW + 1 days), Quals.KYC);
+    _registry.set(_subject, uint64(_NOW + 1 days), Quals.KYC, 0);
   }
 
   function test_WhenTheSubjectIsZero_ItReverts() external {
     _expect(ICredentialRegistry.CredentialRegistry_ZeroAddress.selector);
     vm.prank(_kyc);
-    _registry.set(address(0), uint64(_NOW + 1 days), Quals.KYC);
+    _registry.set(address(0), uint64(_NOW + 1 days), Quals.KYC, 0);
   }
 
   function test_WhenTheAttesterIsKilled_ItReverts() external {
@@ -309,7 +311,7 @@ contract CredentialRegistryUnit_Set is CredentialRegistryUnitTest {
     _registry.killAttester(0);
     vm.expectRevert(abi.encodeWithSelector(ICredentialRegistry.CredentialRegistry_AttesterKilled.selector, 0));
     vm.prank(_kyc);
-    _registry.set(_subject, uint64(_NOW + 1 days), Quals.KYC);
+    _registry.set(_subject, uint64(_NOW + 1 days), Quals.KYC, 0);
   }
 
   function test_WhenTheQualsAreOutsideTheAllowedMask_ItReverts(
@@ -320,7 +322,7 @@ contract CredentialRegistryUnit_Set is CredentialRegistryUnitTest {
       abi.encodeWithSelector(ICredentialRegistry.CredentialRegistry_QualsNotAllowed.selector, 0, _quals, _KYC_MASK)
     );
     vm.prank(_kyc);
-    _registry.set(_subject, uint64(_NOW + 1 days), _quals);
+    _registry.set(_subject, uint64(_NOW + 1 days), _quals, 0);
   }
 
   function test_WhenTheValidityIsNotInTheFuture_ItReverts(
@@ -329,7 +331,7 @@ contract CredentialRegistryUnit_Set is CredentialRegistryUnitTest {
     _until = uint64(bound(_until, 0, _NOW));
     vm.expectRevert(abi.encodeWithSelector(ICredentialRegistry.CredentialRegistry_ValidityInPast.selector, _until));
     vm.prank(_kyc);
-    _registry.set(_subject, _until, Quals.KYC);
+    _registry.set(_subject, _until, Quals.KYC, 0);
   }
 
   function test_WhenTheValidityIsOneSecondAhead_ItIsAccepted() external {
@@ -344,9 +346,9 @@ contract CredentialRegistryUnit_Set is CredentialRegistryUnitTest {
     _until = uint64(bound(_until, _NOW + 1, type(uint64).max));
     _quals = _quals & _KYC_MASK;
     vm.expectEmit(address(_registry));
-    emit ICredentialRegistry.CredentialSet(_subject, 0, _until, _quals, uint64(_NOW));
+    emit ICredentialRegistry.CredentialSet(_subject, 0, _until, _quals, uint64(_NOW), 0);
     vm.prank(_kyc);
-    _registry.set(_subject, _until, _quals);
+    _registry.set(_subject, _until, _quals, 0);
 
     ICredentialRegistry.Record memory _r = _registry.recordOf(_subject);
     assertEq(_r.validUntil, _until);
@@ -373,7 +375,7 @@ contract CredentialRegistryUnit_Set is CredentialRegistryUnitTest {
       abi.encodeWithSelector(ICredentialRegistry.CredentialRegistry_RecordOwnedByAnotherAttester.selector, _subject, 0)
     );
     vm.prank(_attester1);
-    _registry.set(_subject, uint64(_NOW + 1 days), Quals.KYC);
+    _registry.set(_subject, uint64(_NOW + 1 days), Quals.KYC, 0);
   }
 
   function test_WhenAnotherActiveAttesterBlockedTheRecord_ItStillReverts() external {
@@ -384,7 +386,7 @@ contract CredentialRegistryUnit_Set is CredentialRegistryUnitTest {
       abi.encodeWithSelector(ICredentialRegistry.CredentialRegistry_RecordOwnedByAnotherAttester.selector, _subject, 0)
     );
     vm.prank(_attester1);
-    _registry.set(_subject, uint64(_NOW + 1 days), Quals.KYC);
+    _registry.set(_subject, uint64(_NOW + 1 days), Quals.KYC, 0);
   }
 
   function test_WhenTheOwningAttesterIsKilled_AnotherMayTakeTheRecordOver() external {
@@ -410,7 +412,7 @@ contract CredentialRegistryUnit_Register is CredentialRegistryUnitTest {
   function test_WhenSignedByAnEoaAttester_AnyoneCanSubmitIt() external {
     (ICredentialRegistry.Credential memory _c, bytes memory _sig) = _signedByAttester2(_subject, uint64(_NOW));
     vm.expectEmit(address(_registry));
-    emit ICredentialRegistry.CredentialSet(_subject, 2, _c.validUntil, _c.quals, _c.issuedAt);
+    emit ICredentialRegistry.CredentialSet(_subject, 2, _c.validUntil, _c.quals, _c.issuedAt, 0);
     vm.prank(_stranger);
     _registry.register(_c, _sig);
 
@@ -983,11 +985,165 @@ contract CredentialRegistryUnit_Roles is CredentialRegistryUnitTest {
   }
 }
 
+/// @notice The entity: the investor an address belongs to, as its attester numbers its investors
+contract CredentialRegistryUnit_Entity is CredentialRegistryUnitTest {
+  uint48 internal constant _ENTITY = 7;
+
+  function _setWithEntity(
+    address _by,
+    address _who,
+    uint48 _entity
+  ) internal {
+    vm.prank(_by);
+    _registry.set(_who, uint64(_NOW + 365 days), Quals.KYC, _entity);
+  }
+
+  function _key(
+    uint8 _attester,
+    uint48 _entity
+  ) internal pure returns (uint56 _expected) {
+    _expected = (uint56(_attester) << 48) | _entity;
+  }
+
+  function test_WhenAnAddressHasNoRecord_ItsKeyIsZero() external view {
+    assertEq(_registry.entityKeyOf(_subject), 0);
+  }
+
+  function test_WhenARecordNamesNoEntity_ItsKeyIsZero() external {
+    _setWithEntity(_attester1, _subject, 0);
+    assertEq(_registry.entityKeyOf(_subject), 0);
+    assertEq(_registry.recordOf(_subject).entity, 0);
+  }
+
+  function test_WhenAnAttesterSetsAnEntity_ItIsStoredEmittedAndKeyedByTheAttester() external {
+    vm.expectEmit(address(_registry));
+    emit ICredentialRegistry.CredentialSet(_subject, 1, uint64(_NOW + 365 days), Quals.KYC, uint64(_NOW), _ENTITY);
+    _setWithEntity(_attester1, _subject, _ENTITY);
+    assertEq(_registry.recordOf(_subject).entity, _ENTITY);
+    assertEq(_registry.entityKeyOf(_subject), _key(1, _ENTITY));
+  }
+
+  /// @dev Attester 0's entities fill only the low bits, and a non-zero entity never gives the zero key
+  function test_WhenAttesterZeroSetsAnEntity_TheKeyIsTheEntityNumber() external {
+    _setWithEntity(_kyc, _subject, _ENTITY);
+    assertEq(_registry.entityKeyOf(_subject), _ENTITY);
+  }
+
+  function test_WhenTwoAttestersUseTheSameNumber_TheKeysDiffer() external {
+    _setWithEntity(_kyc, _subject, _ENTITY);
+    _setWithEntity(_attester1, _other, _ENTITY);
+    assertTrue(_registry.entityKeyOf(_subject) != _registry.entityKeyOf(_other));
+  }
+
+  function test_WhenTwoAddressesShareAnAttesterAndAnEntity_TheyShareAKey() external {
+    _setWithEntity(_attester1, _subject, _ENTITY);
+    _setWithEntity(_attester1, _other, _ENTITY);
+    assertEq(_registry.entityKeyOf(_subject), _registry.entityKeyOf(_other));
+  }
+
+  function test_WhenTheAttesterWritesZeroLater_TheAddressIsUnlinked() external {
+    _setWithEntity(_attester1, _subject, _ENTITY);
+    _setWithEntity(_attester1, _subject, 0);
+    assertEq(_registry.entityKeyOf(_subject), 0);
+  }
+
+  /// @dev The entity is in the signed credential, so whoever submits it cannot choose it
+  function test_WhenACredentialIsRegistered_ItsSignedEntityIsStored() external {
+    ICredentialRegistry.Credential memory _c =
+      _credential(_subject, uint64(_NOW + 365 days), Quals.KYC, uint64(_NOW), 2);
+    _c.entity = _ENTITY;
+    bytes memory _sig = _sign(_signerPk, _c);
+    vm.prank(_stranger);
+    _registry.register(_c, _sig);
+    assertEq(_registry.entityKeyOf(_subject), _key(2, _ENTITY));
+  }
+
+  function test_WhenTheSubmitterChangesTheEntity_TheSignatureFails() external {
+    ICredentialRegistry.Credential memory _c =
+      _credential(_subject, uint64(_NOW + 365 days), Quals.KYC, uint64(_NOW), 2);
+    _c.entity = _ENTITY;
+    bytes memory _sig = _sign(_signerPk, _c);
+    _c.entity = _ENTITY + 1;
+    vm.expectRevert(ICredentialRegistry.CredentialRegistry_BadSignature.selector);
+    vm.prank(_stranger);
+    _registry.register(_c, _sig);
+  }
+
+  /// @dev A count kept by key must not move because a standing changed
+  function test_WhenTheStandingChanges_TheKeyStays() external {
+    _setWithEntity(_attester1, _subject, _ENTITY);
+    uint56 _expected = _key(1, _ENTITY);
+
+    vm.prank(_attester1);
+    _registry.setStatus(_subject, ICredentialRegistry.Status.EXIT_ONLY);
+    assertEq(_registry.entityKeyOf(_subject), _expected, 'exit only');
+
+    vm.prank(_attester1);
+    _registry.setStatus(_subject, ICredentialRegistry.Status.BLOCKED);
+    assertEq(_registry.entityKeyOf(_subject), _expected, 'blocked by the attester');
+
+    vm.prank(_guardian);
+    _registry.blockSubject(_subject);
+    assertEq(_registry.entityKeyOf(_subject), _expected, 'blocked by the guardian');
+
+    vm.prank(_admin);
+    _registry.clearGuardianBlock(_subject);
+    assertEq(_registry.entityKeyOf(_subject), _expected, 'unblocked');
+
+    vm.prank(_guardian);
+    _registry.killAttester(1);
+    assertEq(_registry.entityKeyOf(_subject), _expected, 'attester killed');
+
+    vm.warp(_NOW + 400 days);
+    assertEq(_registry.entityKeyOf(_subject), _expected, 'lapsed');
+  }
+
+  /// @dev A guardian block on an address nobody attested creates a record with no entity
+  function test_WhenTheGuardianBlocksAnUnknownAddress_ItsKeyIsZero() external {
+    vm.prank(_guardian);
+    _registry.blockSubject(_subject);
+    assertEq(_registry.entityKeyOf(_subject), 0);
+  }
+
+  /// @dev A second attester writes only after the first is killed, and the key then follows the new attester
+  function test_WhenAnotherAttesterTakesOverAKilledAttestersRecord_TheKeyFollowsTheNewAttester() external {
+    _setWithEntity(_attester1, _subject, _ENTITY);
+    vm.prank(_guardian);
+    _registry.killAttester(1);
+    _setWithEntity(_kyc, _subject, 3);
+    assertEq(_registry.entityKeyOf(_subject), _key(0, 3));
+  }
+
+  function testFuzz_TheKeyIsTheAttesterAndTheEntity(
+    uint48 _entity
+  ) external {
+    _entity = uint48(bound(_entity, 1, type(uint48).max));
+    _setWithEntity(_attester1, _subject, _entity);
+    assertEq(_registry.entityKeyOf(_subject), _key(1, _entity));
+    assertEq(uint48(_registry.entityKeyOf(_subject)), _entity);
+    assertEq(uint8(_registry.entityKeyOf(_subject) >> 48), 1);
+  }
+
+  /// @dev The record still fits one storage slot: the key is read from that slot and no other
+  function test_WhenTheKeyIsRead_TheRecordIsOneSlot() external {
+    _setWithEntity(_attester1, _subject, _ENTITY);
+    vm.record();
+    _registry.entityKeyOf(_subject);
+    (bytes32[] memory _reads,) = vm.accesses(address(_registry));
+    assertGt(_reads.length, 0);
+    for (uint256 _i = 1; _i < _reads.length; ++_i) {
+      assertEq(_reads[_i], _reads[0]);
+    }
+  }
+}
+
 contract CredentialRegistryUnit_CredentialHash is CredentialRegistryUnitTest {
   function test_WhenHashing_ItIsTheEip712DigestOfTheTypedData() external view {
     ICredentialRegistry.Credential memory _c = _credential(_subject, uint64(_NOW + 1 days), Quals.KYC, uint64(_NOW), 2);
     bytes32 _structHash = keccak256(
-      abi.encode(_registry.CREDENTIAL_TYPEHASH(), _c.subject, _c.validUntil, _c.quals, _c.issuedAt, _c.attester)
+      abi.encode(
+        _registry.CREDENTIAL_TYPEHASH(), _c.subject, _c.validUntil, _c.quals, _c.issuedAt, _c.attester, _c.entity
+      )
     );
     bytes32 _domain = keccak256(
       abi.encode(
@@ -1057,7 +1213,7 @@ contract CredentialRegistryHandler is Helpers {
     uint64 _before = _registry.recordOf(_subject).issuedAt;
     _until = uint64(bound(_until, 0, block.timestamp + 400 days));
     vm.prank(_attesters[_by % 3]);
-    try _registry.set(_subject, _until, _quals) {
+    try _registry.set(_subject, _until, _quals, 0) {
       ++writes;
     } catch {
       ++rejections;
@@ -1075,7 +1231,7 @@ contract CredentialRegistryHandler is Helpers {
     _until = uint64(bound(_until, 0, block.timestamp + 400 days));
     _issuedAt = uint64(bound(_issuedAt, 0, block.timestamp + 1 days));
     ICredentialRegistry.Credential memory _c = ICredentialRegistry.Credential({
-      subject: _subject, validUntil: _until, quals: Quals.KYC, issuedAt: _issuedAt, attester: 2
+      subject: _subject, validUntil: _until, quals: Quals.KYC, issuedAt: _issuedAt, attester: 2, entity: 0
     });
     (uint8 _v, bytes32 _r, bytes32 _s) = vm.sign(_signerPk, _registry.credentialHash(_c));
     try _registry.register(_c, abi.encodePacked(_r, _s, _v)) {

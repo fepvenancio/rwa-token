@@ -27,4 +27,14 @@ contract MockStatefulFund {
     ++writes;
     (_index, _held, _exempt, _count, _cap, _rule) = (1, 0, false, 0, 1, msg.sender);
   }
+
+  /**
+   * @notice `countedWith` that does not write: no account shares its investor
+   * @return _addresses Zero
+   */
+  function countedWith(
+    address
+  ) external pure returns (uint256 _addresses) {
+    _addresses = 0;
+  }
 }

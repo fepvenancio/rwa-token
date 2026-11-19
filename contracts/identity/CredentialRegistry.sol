@@ -37,8 +37,9 @@ contract CredentialRegistry is AccessControl, EIP712, ICredentialRegistry, IIden
   bytes32 public constant RECOVERY_ROLE = keccak256('RECOVERY_ROLE');
 
   /// @inheritdoc ICredentialRegistry
-  bytes32 public constant CREDENTIAL_TYPEHASH =
-    keccak256('Credential(address subject,uint64 validUntil,uint32 quals,uint64 issuedAt,uint8 attester)');
+  bytes32 public constant CREDENTIAL_TYPEHASH = keccak256(
+    'Credential(address subject,uint64 validUntil,uint32 quals,uint64 issuedAt,uint8 attester,uint48 entity)'
+  );
 
   /// @inheritdoc ICredentialRegistry
   uint256 public constant MAX_ATTESTERS = 64;
@@ -142,7 +143,9 @@ contract CredentialRegistry is AccessControl, EIP712, ICredentialRegistry, IIden
     uint64 _stored = _records[_credential.subject].issuedAt;
     if (_credential.issuedAt <= _stored) revert CredentialRegistry_StaleCredential(_credential.issuedAt, _stored);
 
-    _write(_id, _credential.subject, _credential.validUntil, _credential.quals, _credential.issuedAt);
+    _write(
+      _id, _credential.subject, _credential.validUntil, _credential.quals, _credential.issuedAt, _credential.entity
+    );
   }
 
   /// @inheritdoc ICredentialRegistry
@@ -161,11 +164,12 @@ contract CredentialRegistry is AccessControl, EIP712, ICredentialRegistry, IIden
   function set(
     address _subject,
     uint64 _validUntil,
-    uint32 _quals
+    uint32 _quals,
+    uint48 _entity
   ) external {
     uint256 _slot = _attesterSlot[_msgSender()];
     if (_slot == 0) revert CredentialRegistry_NotAnAttester(_msgSender());
-    _write(uint8(_slot - 1), _subject, _validUntil, _quals, block.timestamp.toUint64());
+    _write(uint8(_slot - 1), _subject, _validUntil, _quals, block.timestamp.toUint64(), _entity);
   }
 
   /// @inheritdoc ICredentialRegistry
@@ -252,6 +256,16 @@ contract CredentialRegistry is AccessControl, EIP712, ICredentialRegistry, IIden
   }
 
   /// @inheritdoc ICredentialRegistry
+  function entityKeyOf(
+    address _subject
+  ) external view returns (uint56 _key) {
+    Record storage _record = _records[_subject];
+    uint48 _entity = _record.entity;
+    // Zero stays zero: an address with no entity stands alone, whichever attester wrote its record.
+    if (_entity != 0) _key = (uint56(_record.attester) << 48) | _entity;
+  }
+
+  /// @inheritdoc ICredentialRegistry
   function recordOf(
     address _subject
   ) external view returns (Record memory _record) {
@@ -287,7 +301,8 @@ contract CredentialRegistry is AccessControl, EIP712, ICredentialRegistry, IIden
           _credential.validUntil,
           _credential.quals,
           _credential.issuedAt,
-          _credential.attester
+          _credential.attester,
+          _credential.entity
         )
       )
     );
@@ -335,13 +350,15 @@ contract CredentialRegistry is AccessControl, EIP712, ICredentialRegistry, IIden
    * @param _validUntil Unix seconds
    * @param _quals The qualification bits
    * @param _issuedAt When the record was issued
+   * @param _entity The investor the address belongs to, in the attester's numbering; zero for none
    */
   function _write(
     uint8 _id,
     address _subject,
     uint64 _validUntil,
     uint32 _quals,
-    uint64 _issuedAt
+    uint64 _issuedAt,
+    uint48 _entity
   ) internal {
     if (_subject == address(0)) revert CredentialRegistry_ZeroAddress();
     if (_isKilled(_id)) revert CredentialRegistry_AttesterKilled(_id);
@@ -360,9 +377,10 @@ contract CredentialRegistry is AccessControl, EIP712, ICredentialRegistry, IIden
       quals: _quals,
       attester: _id,
       issuedAt: _issuedAt,
-      guardianBlock: _existing.guardianBlock
+      guardianBlock: _existing.guardianBlock,
+      entity: _entity
     });
-    emit CredentialSet(_subject, _id, _validUntil, _quals, _issuedAt);
+    emit CredentialSet(_subject, _id, _validUntil, _quals, _issuedAt, _entity);
   }
 
   /**

@@ -20,7 +20,7 @@ import {
 } from "viem";
 
 import { RULE_ORDER } from "../../ignition/modules/roles.js";
-import { deployStack, FUND_HOLDER_CAP, PAR, QUALS, REASONS, revertOf, settlePeriod, signIntent, type Stack } from "./fixtures.js";
+import { deployStack, FUND_HOLDER_CAP, PAR, QUALS, REASONS, revertOf, settlePeriod, signIntent, verify, type Stack } from "./fixtures.js";
 
 const ATTEST = { HOOK: 1, RULE: 2 } as const;
 const usd = (amount: string) => parseUnits(amount, 6);
@@ -126,6 +126,38 @@ describe("fund: investors counted across classes", async function () {
 
     await mintToken(s, bob);
     assert.equal(await s.fund.read.holderCount(), 2n);
+  });
+
+  it("two addresses the attester gives one entity count as one investor, and a later link is followed by rekey", async function () {
+    const s = await networkHelpers.loadFixture(funded);
+    const { alice, bob, carol } = s.holders;
+    const key = 7n; // attester 0, entity 7
+    assert.ok(isAddressEqual(await s.fund.read.CREDENTIALS(), s.credentials.address));
+
+    await verify(s, alice, { entity: 7 });
+    await verify(s, bob, { entity: 7 });
+    const first = await s.publicClient.waitForTransactionReceipt({ hash: await mintToken(s, alice) });
+    const events = parseEventLogs({ abi: s.fund.abi, logs: first.logs });
+    assert.deepEqual(
+      events.map((e) => [e.eventName, e.args]),
+      [
+        ["HolderClassesUpdated", { _account: getAddress(alice.account.address), _classes: 1n }],
+        ["HolderKeyUpdated", { _account: getAddress(alice.account.address), _key: key }],
+        ["HolderCountUpdated", { _count: 1n }],
+      ],
+    );
+    await mintToken(s, bob);
+    assert.equal(await s.fund.read.holderCount(), 1n);
+    assert.equal(await s.fund.read.countedWith([alice.account.address]), 2n);
+
+    // Carol holds on her own; the attester links her afterwards, and anyone can bring the fund into line.
+    await mintToken(s, carol);
+    assert.equal(await s.fund.read.holderCount(), 2n);
+    await verify(s, carol, { entity: 7 });
+    assert.equal(await s.fund.read.holderCount(), 2n);
+    await s.fund.write.rekey([carol.account.address], { account: bob.account });
+    assert.equal(await s.fund.read.holderCount(), 1n);
+    assert.equal(await s.fund.read.countedKeyOf([carol.account.address]), key);
   });
 
   it("the fund cap holds across classes, and pre-flight agrees with the write in each", async function () {

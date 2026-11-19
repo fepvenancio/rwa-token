@@ -15,7 +15,7 @@ The record of who vouched for each address: which attester, what the address is,
 
 > ### In one minute
 >
-> Before an address can receive a token, someone the issuer trusts has to vouch for it. That someone is an **attester**: for example the issuer's own KYC function or an outside KYC provider. The registry keeps one short record per address: which attester vouched, a set of qualification flags (identity checked, professional investor, fund, licensed institution, a jurisdiction group and so on), an expiry date and a standing. It stores no names, no documents and no country.
+> Before an address can receive a token, someone the issuer trusts has to vouch for it. That someone is an **attester**: for example the issuer's own KYC function or an outside KYC provider. The registry keeps one short record per address: which attester vouched, a set of qualification flags (identity checked, professional investor, fund, licensed institution, a jurisdiction group and so on), an expiry date and a standing. It stores no names, no documents and no country. An attester can also give an address an entity number, which says that the address and every other address with that number are one investor, and not who that investor is.
 >
 > The main design choice is that a holder can get out unless someone deliberately blocks them. When a record expires, or its attester is shut down, the holder can still sell or redeem but cannot receive more. An explicit block is what stops a holder from sending. The guardian can block an address or shut down an attester at once; undoing either takes a timelock, a contract that runs governance decisions after a public delay.
 
@@ -55,7 +55,7 @@ What each standing allows is decided by [`CredentialRule`](CredentialRule.md), t
 <a id="record"></a>
 ## The record
 
-One record per address, in one storage slot. It holds flags: no names, no evidence, no hashes of personal data, and no country. The link from an address to a person stays with the attester.
+One record per address, in one storage slot. It holds flags and one opaque number: no names, no evidence, no hashes of personal data, and no country. The link from an address to a person stays with the attester.
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -65,6 +65,7 @@ One record per address, in one storage slot. It holds flags: no names, no eviden
 | `attester` | `uint8` | The id of the attester that wrote the record. |
 | `issuedAt` | `uint64` | When the record was issued. It does not go down for one address. |
 | `guardianBlock` | `bool` | Set by the guardian. `clearGuardianBlock` clears it, and writes by attesters keep it. |
+| `entity` | `uint48` | The investor the address belongs to, as the attester numbers its investors. Zero when the address stands alone. See [Entities](#entity). |
 
 ### Qualification bits
 
@@ -87,6 +88,17 @@ The bits are named in `Quals.sol`. The registry does not interpret them: an atte
 
 A bit has to be within the attester's allowed bits to be written. `CoreHandover` adds the first attester with `kycAllowedQuals`, which is 1023 by default: the ten named bits, 0 to 9. A write that asserts any other bit reverts with `CredentialRegistry_QualsNotAllowed` until the deployment passes a wider value or the main timelock calls `setAttesterQuals`.
 
+<a id="entity"></a>
+## Entities: several addresses, one investor
+
+An investor can hold through more than one address: a custody account, a trading account, a key it rotated to. The attester that verified the investor is the one that knows this, so it writes an `entity` number with the record. Two addresses that carry the same number from the same attester are one investor. The number is opaque: it says that two addresses belong together and nothing about who they belong to. Zero means none, and the address stands alone.
+
+- **Written with the record.** `set(subject, validUntil, quals, entity)` stores it, and a signed credential carries it, so whoever submits the credential cannot choose it (`test_WhenACredentialIsRegistered_ItsSignedEntityIsStored`, `test_WhenTheSubmitterChangesTheEntity_TheSignatureFails`). Each write stores the entity it is given, so a write with zero unlinks the address (`test_WhenTheAttesterWritesZeroLater_TheAddressIsUnlinked`). The registry does not check the number.
+- **The key.** `entityKeyOf(subject)` returns a `uint56`: the attester's id in the top 8 bits and the entity number in the low 48. Two attesters number their investors independently, and the id keeps their numbers apart (`test_WhenTwoAttestersUseTheSameNumber_TheKeysDiffer`). The key is zero for an address with no record, and for a record whose entity is zero, whichever attester wrote it.
+- **The key does not follow the standing.** It is read from the stored record. A lapsed, exit-only or blocked record keeps its key, and so does a record whose attester was killed. `setStatus`, `blockSubject` and `clearGuardianBlock` leave the entity as it is (`test_WhenTheStandingChanges_TheKeyStays`). A count kept by key therefore does not move because a credential expired.
+- **The key follows the record's attester.** When another attester writes over a killed attester's record, the key is that attester's id with the entity it wrote (`test_WhenAnotherAttesterTakesOverAKilledAttestersRecord_TheKeyFollowsTheNewAttester`).
+- **Who reads it.** A [`Fund`](Fund.md) built over this registry counts investors by this key, so the addresses of one entity take one place under the fund's cap. [`CredentialRule`](CredentialRule.md) does not read it: it judges each address by its own record.
+
 <a id="attesters"></a>
 ## Attesters
 
@@ -105,7 +117,7 @@ An attester is an account allowed to write records, within a set of qualificatio
 An attester does not have to send a transaction for each holder. It can sign a credential off chain, as EIP-712 typed data, and anyone can submit it with `register(credential, signature)`: the holder, the issuer's back office or a relayer. Whoever submits pays the gas, and the attester's key stays off the hot path.
 
 - **Domain**: name `CredentialRegistry`, version `1`, the chain id and the registry's address
-- **Type**: `Credential(address subject,uint64 validUntil,uint32 quals,uint64 issuedAt,uint8 attester)`
+- **Type**: `Credential(address subject,uint64 validUntil,uint32 quals,uint64 issuedAt,uint8 attester,uint48 entity)`
 - **Signature**: checked against the attester's current account: ECDSA for a key, ERC-1271 for a contract account. The credential names its attester id, so the registry knows which account to ask.
 
 `register` runs these checks in order:
@@ -114,7 +126,7 @@ An attester does not have to send a transaction for each holder. It can sign a c
 2. `issuedAt` is not in the future (`CredentialRegistry_IssuedInFuture`).
 3. The signature is valid for the attester's account (`CredentialRegistry_BadSignature`).
 4. `issuedAt` is strictly above the `issuedAt` stored for the address (`CredentialRegistry_StaleCredential`).
-5. The same checks as `set`: the address is not zero (`CredentialRegistry_ZeroAddress`), the bits are allowed, `validUntil` is in the future, and no other attester that is not killed owns the record. The record is then written as `ACTIVE` with the credential's `issuedAt`.
+5. The same checks as `set`: the address is not zero (`CredentialRegistry_ZeroAddress`), the bits are allowed, `validUntil` is in the future, and no other attester that is not killed owns the record. The record is then written as `ACTIVE` with the credential's `issuedAt` and its `entity`.
 
 The `issuedAt` rule is what makes the signed path safe. A credential can be submitted once, because a replay is not newer than itself. An older credential does not undo a later direct write or status change, because `set` and `setStatus` both set `issuedAt` to the block's time. An attester that wants to withdraw a credential nobody has submitted yet writes the address directly, which makes each credential issued up to that moment stale, and can then block the address with `setStatus`. A newer credential from the same attester can lift that attester's own block (`test_WhenTheAttesterIssuesANewerCredentialAfterItsOwnBlock_ItLiftsIt`). It does not lift a guardian block.
 
@@ -155,6 +167,7 @@ The registry trusts an attester's call or signature. Whoever controls an atteste
 ### What it can write
 
 - `ACTIVE` records, directly or as signed credentials anyone can submit, for an address that has no record, whose record it wrote itself, or whose attester is killed. It chooses the expiry.
+- The entity of each such record. It can give an address the number of an investor a fund already counts, and the fund's rule then admits that address without a place under the cap. It can also unlink an address, or link two that are not one investor.
 - Only bits within its own `allowedQuals`.
 - A different status on the records it wrote: `EXIT_ONLY` or `BLOCKED`, which stops those holders receiving or, for `BLOCKED`, sending; or `ACTIVE` again while the record is valid.
 
@@ -162,7 +175,7 @@ The registry trusts an attester's call or signature. Whoever controls an atteste
 
 - **The bits it may assert.** Set by the main timelock; another bit reverts with `CredentialRegistry_QualsNotAllowed`.
 - **Each token's trusted-attester bitmap.** A token whose policy does not list the attester's id admits none of its records as a receiver.
-- **Other attesters' records.** It cannot overwrite or change a record another attester wrote while that attester is not killed.
+- **Other attesters' records.** It cannot overwrite or change a record another attester wrote while that attester is not killed. Its entity numbers are keyed by its own id, so it cannot place an address in another attester's entity.
 - **The guardian.** `killAttester` stops it at once, and `blockSubject` stops an address it vouched for. It cannot clear a guardian block.
 
 After a kill, the holders it vouched for read `EXIT_ONLY`: they can leave, and cannot receive. Holders it had set to `BLOCKED` read `BLOCKED`, because a stored block beats a kill. Another attester can write over its records, and that write makes such a holder read `ACTIVE` unless the guardian has blocked it too. The agent's `forcedTransfer` and the burner's `burn` still work on a blocked holder. Then the main timelock rotates the attester's account with `setAttesterAccount`, which makes signatures by the previous key fail. `reviveAttester` changes nothing but the kill flag, so the account is rotated before the attester is revived.
@@ -172,9 +185,9 @@ After a kill, the holders it vouched for read `EXIT_ONLY`: they can leave, and c
 
 | Function | Who can call | What it does |
 |---|---|---|
-| `set(subject, validUntil, quals)` | An attester that is not killed | Writes the record as `ACTIVE`, with `issuedAt` set to the block's time. Keeps a guardian block. Emits `CredentialSet`. Reverts with `CredentialRegistry_NotAnAttester`, `CredentialRegistry_ZeroAddress`, `CredentialRegistry_AttesterKilled`, `CredentialRegistry_QualsNotAllowed`, `CredentialRegistry_ValidityInPast` or `CredentialRegistry_RecordOwnedByAnotherAttester`. |
-| `register(credential, signature)` | Anyone | Writes a record an attester signed off chain, with the credential's `issuedAt`. Emits `CredentialSet`. Reverts as in [the signed path](#signed). |
-| `setStatus(subject, status)` | The attester that wrote the record, while not killed | Sets the stored status to `ACTIVE`, `EXIT_ONLY` or `BLOCKED`, and `issuedAt` to the block's time. Does not clear a guardian block. Emits `StatusSet`. Reverts with `CredentialRegistry_NotAnAttester`, `CredentialRegistry_InvalidStatus`, `CredentialRegistry_AttesterKilled`, `CredentialRegistry_NoRecord`, `CredentialRegistry_NotRecordAttester`, or `CredentialRegistry_ValidityInPast` for `ACTIVE`. |
+| `set(subject, validUntil, quals, entity)` | An attester that is not killed | Writes the record as `ACTIVE`, with `issuedAt` set to the block's time and the entity as given, zero for none. Keeps a guardian block. Emits `CredentialSet`. Reverts with `CredentialRegistry_NotAnAttester`, `CredentialRegistry_ZeroAddress`, `CredentialRegistry_AttesterKilled`, `CredentialRegistry_QualsNotAllowed`, `CredentialRegistry_ValidityInPast` or `CredentialRegistry_RecordOwnedByAnotherAttester`. |
+| `register(credential, signature)` | Anyone | Writes a record an attester signed off chain, with the credential's `issuedAt` and `entity`. Emits `CredentialSet`. Reverts as in [the signed path](#signed). |
+| `setStatus(subject, status)` | The attester that wrote the record, while not killed | Sets the stored status to `ACTIVE`, `EXIT_ONLY` or `BLOCKED`, and `issuedAt` to the block's time. Does not clear a guardian block and does not change the entity. Emits `StatusSet`. Reverts with `CredentialRegistry_NotAnAttester`, `CredentialRegistry_InvalidStatus`, `CredentialRegistry_AttesterKilled`, `CredentialRegistry_NoRecord`, `CredentialRegistry_NotRecordAttester`, or `CredentialRegistry_ValidityInPast` for `ACTIVE`. |
 | `blockSubject(subject)` | `GUARDIAN_ROLE` | Sets the guardian block, with no delay. Does nothing if already set. Emits `SubjectBlocked`. |
 | `clearGuardianBlock(subject)` | `DEFAULT_ADMIN_ROLE` or `RECOVERY_ROLE` | Clears the guardian block. Does nothing if not set. Emits `SubjectUnblocked`. |
 | `addAttester(account, allowedQuals)` | `DEFAULT_ADMIN_ROLE` | Adds an attester under the next id and returns the id. Emits `AttesterAdded`. Reverts with `CredentialRegistry_ZeroAddress`, `CredentialRegistry_AttesterExists` or `CredentialRegistry_TooManyAttesters`. |
@@ -187,6 +200,7 @@ After a kill, the holders it vouched for read `EXIT_ONLY`: they can leave, and c
 | `profileOf(subject)` | Anyone (read-only) | The standing at this moment, with the stored bits and attester id. |
 | `isVerified(user)` | Anyone (read-only) | True only when the standing is `ACTIVE`. |
 | `recordOf(subject)` | Anyone (read-only) | The stored record as written, not resolved. |
+| `entityKeyOf(subject)` | Anyone (read-only) | The key of the investor the address belongs to, from the stored record whatever its standing: the attester's id in the top 8 bits and the entity number in the low 48. Zero when the address has no record or its record names no entity. |
 | `attesterAt(id)`, `attesterCount()`, `attesterIdOf(account)` | Anyone (read-only) | An attester's account, allowed bits and kill flag (`CredentialRegistry_UnknownAttester` for an id that does not exist); how many exist; the id of an account. |
 | `credentialHash(credential)`, `eip712Domain()` | Anyone (read-only) | The digest an attester signs, and the signing domain, so a client needs to derive neither. |
 | `GUARDIAN_ROLE()`, `RECOVERY_ROLE()`, `DEFAULT_ADMIN_ROLE()`, `CREDENTIAL_TYPEHASH()`, `MAX_ATTESTERS()`, `hasRole`, `getRoleAdmin`, `supportsInterface` | Anyone (read-only) | The constants, the role table, and ERC-165 for `ICredentialRegistry`, `IIdentityRegistry` and the `AccessControl` interfaces. |
@@ -195,7 +209,7 @@ Role checks revert with OpenZeppelin's `AccessControlUnauthorizedAccount`.
 
 | Event | Emitted when |
 |---|---|
-| `CredentialSet(subject, attester, validUntil, quals, issuedAt)` | A record is written as `ACTIVE`, by `set` or `register` |
+| `CredentialSet(subject, attester, validUntil, quals, issuedAt, entity)` | A record is written as `ACTIVE`, by `set` or `register` |
 | `StatusSet(subject, attester, status)` | An attester changes the status of its record |
 | `SubjectBlocked(subject, guardian)` | The guardian blocks an address that was not blocked |
 | `SubjectUnblocked(subject, by)` | A timelock clears a block that was set |
@@ -224,7 +238,10 @@ The calls that do nothing (blocking twice, clearing a block that is not there, k
 - **It verifies no KYC.** It records what an attester says, and holds no proof that the checks behind a record took place. A compromised attester key can credential an address for each token whose policy trusts that attester, with each bit the attester may assert.
 - **A lapse does not stop funds already held.** A holder whose credential lapsed, or whose attester was killed, can still send, burn and redeem. That is deliberate. The controls for that are a block, [`HolderRestrictionRule`](HolderRestrictionRule.md)'s freeze and lockup, and `forcedTransfer`.
 - **The bitmap is about receivers.** The sender check in `CredentialRule` reads the standing and not which attester wrote the record, so an existing holder can leave whichever attester vouched.
-- **It does not model entities.** One address is one holder. Nothing links two wallets of one client.
+- **An entity number is public.** It shows on chain that two addresses belong to one investor, although not which. An investor that does not want its addresses linked keeps entity zero, and then takes one place per address under a fund's cap.
+- **It does not check an entity.** The number is whatever the attester writes. It belongs to that attester's numbering, and one live attester writes an address's record, so two addresses vouched for by different attesters cannot share an entity.
+- **It has no block by entity.** The guardian blocks addresses, one at a time. Every rule but the fund's count still judges an address, not an entity.
+- **It does not tell a fund that an entity changed.** A [`Fund`](Fund.md) reads the key when it starts counting an address. When an attester links or unlinks an address that already holds, the fund's count follows only when someone calls the fund's `rekey(account)`. Each write emits `CredentialSet` with the entity, which is what a monitor watches.
 - **It does not interpret a bit.** It stores what the attester asserts, within the allowed bits, and whether that is right in law is off-chain.
 - **It does not keep things private.** No field and no event carries a name or evidence, but the flags are public on chain, and a jurisdiction or a qualification bit can still say something about a customer. Whether an address with a credential is still personal data is for counsel.
 - **It does not remove attesters.** A kill stops one, and its entry stays. After 64 entries `addAttester` reverts with `CredentialRegistry_TooManyAttesters`.
@@ -235,6 +252,7 @@ The calls that do nothing (blocking twice, clearing a block that is not there, k
 ## Connected to
 
 - [CredentialRule](CredentialRule.md): The rule that reads the registry and applies each token's policy to the receiver.
+- [Fund](Fund.md): Counts a fund's investors by the entity key this registry gives each address.
 - [GovernanceTimelock](GovernanceTimelock.md): The main timelock is the registry's admin after hand-over, and the recovery timelock undoes the guardian here.
 - [Who can do what](../roles.md): The guardian, the two timelocks and the attester across the whole system.
 - [Deployment and governance](../deployment.md): Where the registry is created, given its attester and handed to the timelock.
@@ -244,4 +262,4 @@ The calls that do nothing (blocking twice, clearing a block that is not there, k
 
 - Contract: `contracts/identity/CredentialRegistry.sol`, interfaces `ICredentialRegistry.sol` and `IIdentityRegistry.sol`, bits in `Quals.sol`
 - Deployment: `ignition/modules/Core.ts` and `CoreHandover.ts`
-- Tests: `CredentialRegistry.t.sol` (each function, the resolution order, signing by a key and by an ERC-1271 contract, and the three invariants above), and `test/nodejs/credentials.test.ts` (through the real deployment: a credential signed with viem and submitted by a stranger, a lapse on the real clock, a block lifted by the recovery timelock, an attester killed and revived)
+- Tests: `CredentialRegistry.t.sol` (each function, the resolution order, signing by a key and by an ERC-1271 contract, the entity and its key in `CredentialRegistryUnit_Entity`, and the three invariants above), and `test/nodejs/credentials.test.ts` (through the real deployment: a credential signed with viem and submitted by a stranger, a lapse on the real clock, a block lifted by the recovery timelock, an attester killed and revived)

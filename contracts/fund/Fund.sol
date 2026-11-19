@@ -9,6 +9,7 @@ import {SafeCast} from '@openzeppelin/contracts/utils/math/SafeCast.sol';
 
 import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+import {ICredentialRegistry} from 'interfaces/ICredentialRegistry.sol';
 import {IFund} from 'interfaces/IFund.sol';
 import {IFundHoldersRule} from 'interfaces/IFundHoldersRule.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
@@ -21,7 +22,8 @@ import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
  * @dev `Ownable` like `ProxyDeployer`: the operations account owns it from deployment while its first classes are
  *      registered, and `FundOpen` hands ownership to the timelock. An immutable admin would force a timelock operation, and
  *      its delay, onto every first deployment.
- *      An account's state is one slot: bit `n - 1` for class `n`, and the top bit for "exempt". The installed rule, the
+ *      An account's state is one slot: bit `n - 1` for class `n`, the 56 bits above the classes for the key it is
+ *      counted under, and the top bit for "exempt". The installed rule, the
  *      investor count and the cap share one slot. The first count write is then never a write to an empty slot, and the
  *      rule, which the rule checks on every movement, is read together with the count and the cap at no extra cost
  */
@@ -29,7 +31,7 @@ contract Fund is Ownable, ERC165, IFund {
   /**
    * @notice The installed rule, the investor count and the cap, packed into one slot
    * @param rule The rule allowed to call `join` and `leave`; the zero address until set
-   * @param count The number of distinct non-exempt accounts that hold at least one class
+   * @param count The number of investors: counted accounts on their own plus the keys that have a counted account
    * @param cap The most investors the rule admits
    */
   struct Investors {
@@ -44,11 +46,20 @@ contract Fund is Ownable, ERC165, IFund {
   /// @notice The exemption flag in an account's state
   uint256 private constant _EXEMPT = 1 << 255;
 
+  /// @notice Where the key an account is counted under sits in its state: above the 32 class bits
+  uint256 private constant _KEY_SHIFT = 32;
+
+  /// @notice The 56 bits of that key, in place
+  uint256 private constant _KEY_BITS = uint256(type(uint56).max) << _KEY_SHIFT;
+
   /// @notice The class bits in an account's state
   uint256 private constant _CLASS_BITS = (1 << MAX_CLASSES) - 1;
 
   /// @inheritdoc IFund
   IPolicyRegistry public immutable REGISTRY;
+
+  /// @inheritdoc IFund
+  address public immutable CREDENTIALS;
 
   /// @notice The installed rule, the investor count and the cap
   Investors internal _investors;
@@ -59,8 +70,12 @@ contract Fund is Ownable, ERC165, IFund {
   /// @notice The class number of each token; 0 when it is not a class
   mapping(address _token => uint256 _index) internal _classIndex;
 
-  /// @notice Each account's class bits and exemption flag
+  /// @notice Each account's class bits, the key it is counted under and its exemption flag. An account is counted
+  ///         when it holds a class and is not exempt, and only then has a key
   mapping(address _account => uint256 _state) internal _holder;
+
+  /// @notice How many counted accounts each key has. Never used for key zero, which is an account on its own
+  mapping(uint256 _key => uint256 _accounts) internal _keyAccounts;
 
   /**
    * @notice Restricts a function to the installed rule
@@ -76,13 +91,43 @@ contract Fund is Ownable, ERC165, IFund {
    * @notice Deploys the fund
    * @param _initialOwner The account that configures the fund until ownership moves to the timelock
    * @param _registry The registry that must attest the rule
+   * @param _credentials The credential registry asked for each address's entity, or the zero address to count every
+   *        address on its own
    */
   constructor(
     address _initialOwner,
-    IPolicyRegistry _registry
+    IPolicyRegistry _registry,
+    address _credentials
   ) Ownable(_initialOwner) {
     if (address(_registry) == address(0)) revert Fund_ZeroAddress();
+    // A registry that does not answer this version's id could not be asked for an address's entity.
+    if (
+      _credentials != address(0)
+        && !ERC165Checker.supportsInterface(_credentials, type(ICredentialRegistry).interfaceId)
+    ) revert Fund_NotACredentialRegistry(_credentials);
     REGISTRY = _registry;
+    CREDENTIALS = _credentials;
+  }
+
+  /// @inheritdoc IFund
+  function rekey(
+    address _account
+  ) external {
+    uint256 _state = _holder[_account];
+    if (!_isCounted(_state)) return;
+    uint256 _oldKey = (_state & _KEY_BITS) >> _KEY_SHIFT;
+    uint256 _newKey = _keyNow(_account);
+    if (_newKey == _oldKey) return;
+
+    // The account leaves the old key before it joins the new one. The count moves only by the difference, so an
+    // account that empties one investor and starts another leaves it where it was.
+    bool _emptied = _leaveKey(_oldKey);
+    bool _started = _joinKey(_newKey);
+    _holder[_account] = (_state & ~_KEY_BITS) | (_newKey << _KEY_SHIFT);
+    // `_newKey` came from a uint56.
+    // aderyn-ignore-next-line(unsafe-casting)
+    emit HolderKeyUpdated(_account, uint56(_newKey));
+    if (_emptied != _started) _moveCount(_started);
   }
 
   /// @inheritdoc IFund
@@ -145,10 +190,17 @@ contract Fund is Ownable, ERC165, IFund {
     if (_account == address(0)) revert Fund_ZeroAddress();
     uint256 _state = _holder[_account];
     if ((_state & _EXEMPT != 0) == _exempt) return;
-    _holder[_account] = _exempt ? _state | _EXEMPT : _state & ~_EXEMPT;
     emit ExemptSet(_account, _exempt);
     // An account that holds a class enters or leaves the count with its exemption.
-    if (_state & _CLASS_BITS != 0) _moveCount(!_exempt);
+    if (_state & _CLASS_BITS == 0) {
+      _holder[_account] = _exempt ? _state | _EXEMPT : _state & ~_EXEMPT;
+    } else if (_exempt) {
+      // It leaves the key it was counted under.
+      _holder[_account] = _stopCounting(_account, _state) | _EXEMPT;
+    } else {
+      // It is counted under the key the registry gives it now.
+      _holder[_account] = _startCounting(_account, _state & ~_EXEMPT);
+    }
   }
 
   /// @inheritdoc IFund
@@ -165,10 +217,10 @@ contract Fund is Ownable, ERC165, IFund {
     if (_state & _bit != 0) return;
 
     uint256 _newState = _state | _bit;
-    _holder[_account] = _newState;
     emit HolderClassesUpdated(_account, _newState & _CLASS_BITS);
-    // No class bit and not exempt: the account is a new investor.
-    if (_state == 0) _moveCount(true);
+    // No class bit and not exempt: the account is counted from here.
+    if (_state & _CLASS_BITS == 0 && _state & _EXEMPT == 0) _newState = _startCounting(_account, _newState);
+    _holder[_account] = _newState;
   }
 
   /// @inheritdoc IFund
@@ -184,10 +236,10 @@ contract Fund is Ownable, ERC165, IFund {
     if (_state & _bit == 0) return;
 
     uint256 _newState = _state & ~_bit;
-    _holder[_account] = _newState;
     emit HolderClassesUpdated(_account, _newState & _CLASS_BITS);
-    // No class bit left and not exempt: the account stops being an investor.
-    if (_newState == 0) _moveCount(false);
+    // No class bit left and not exempt: the account stops being counted, and its key is cleared.
+    if (_newState & _CLASS_BITS == 0 && _newState & _EXEMPT == 0) _newState = _stopCounting(_account, _newState);
+    _holder[_account] = _newState;
   }
 
   /// @inheritdoc IFund
@@ -256,6 +308,28 @@ contract Fund is Ownable, ERC165, IFund {
   }
 
   /// @inheritdoc IFund
+  function countedWith(
+    address _account
+  ) external view returns (uint256 _addresses) {
+    uint256 _state = _holder[_account];
+    if (_isCounted(_state)) {
+      uint256 _key = (_state & _KEY_BITS) >> _KEY_SHIFT;
+      return _key == 0 ? 1 : _keyAccounts[_key];
+    }
+    uint256 _now = _keyNow(_account);
+    if (_now != 0) _addresses = _keyAccounts[_now];
+  }
+
+  /// @inheritdoc IFund
+  function countedKeyOf(
+    address _account
+  ) external view returns (uint56 _key) {
+    // The mask leaves 56 bits.
+    // aderyn-ignore-next-line(unsafe-casting)
+    _key = uint56((_holder[_account] & _KEY_BITS) >> _KEY_SHIFT);
+  }
+
+  /// @inheritdoc IFund
   function admission(
     address _token,
     address _account
@@ -305,9 +379,77 @@ contract Fund is Ownable, ERC165, IFund {
   }
 
   /**
+   * @notice Starts counting an account, under the key the credential registry gives it now
+   * @param _account The account
+   * @param _state Its state, with no key
+   * @return _newState The state with the key it is counted under
+   */
+  function _startCounting(
+    address _account,
+    uint256 _state
+  ) internal returns (uint256 _newState) {
+    uint256 _key = _keyNow(_account);
+    _newState = _state | (_key << _KEY_SHIFT);
+    if (_key != 0) {
+      // `_key` came from a uint56.
+      // aderyn-ignore-next-line(unsafe-casting)
+      emit HolderKeyUpdated(_account, uint56(_key));
+    }
+    if (_joinKey(_key)) _moveCount(true);
+  }
+
+  /**
+   * @notice Stops counting an account: it leaves the key it was counted under, whatever the registry says now
+   * @param _account The account
+   * @param _state Its state, with the key it was counted under
+   * @return _newState The state with no key
+   */
+  function _stopCounting(
+    address _account,
+    uint256 _state
+  ) internal returns (uint256 _newState) {
+    uint256 _key = (_state & _KEY_BITS) >> _KEY_SHIFT;
+    _newState = _state & ~_KEY_BITS;
+    if (_key != 0) emit HolderKeyUpdated(_account, 0);
+    if (_leaveKey(_key)) _moveCount(false);
+  }
+
+  /**
+   * @notice Adds one counted account to a key
+   * @param _key The key; zero is an account on its own
+   * @return _started True when this starts an investor: key zero, or the key's first account
+   */
+  function _joinKey(
+    uint256 _key
+  ) internal returns (bool _started) {
+    if (_key == 0) return true;
+    uint256 _accounts = _keyAccounts[_key];
+    _keyAccounts[_key] = _accounts + 1;
+    // Compares a count of accounts with zero, not a balance.
+    // slither-disable-next-line incorrect-equality
+    _started = _accounts == 0;
+  }
+
+  /**
+   * @notice Takes one counted account from a key
+   * @param _key The key; zero is an account on its own
+   * @return _emptied True when this ends an investor: key zero, or the key's last account
+   */
+  function _leaveKey(
+    uint256 _key
+  ) internal returns (bool _emptied) {
+    if (_key == 0) return true;
+    uint256 _accounts = _keyAccounts[_key] - 1;
+    _keyAccounts[_key] = _accounts;
+    // Compares a count of accounts with zero, not a balance.
+    // slither-disable-next-line incorrect-equality
+    _emptied = _accounts == 0;
+  }
+
+  /**
    * @notice Raises or lowers the investor count by one
-   * @dev Checked arithmetic. The count cannot underflow: it rises with every account that gets its first class bit or
-   *      loses its exemption while holding a class, and falls only for the reverse
+   * @dev Checked arithmetic. The count cannot underflow: it rises when an investor starts, an account on its own or the
+   *      first counted account of a key, and falls only when that investor ends
    * @param _up True to raise the count
    */
   function _moveCount(
@@ -363,5 +505,27 @@ contract Fund is Ownable, ERC165, IFund {
         }
       } catch {}
     } catch {}
+  }
+
+  /**
+   * @notice The key the credential registry gives an account now; zero when the fund reads no registry
+   * @param _account The account
+   * @return _key The key
+   */
+  function _keyNow(
+    address _account
+  ) internal view returns (uint256 _key) {
+    if (CREDENTIALS != address(0)) _key = ICredentialRegistry(CREDENTIALS).entityKeyOf(_account);
+  }
+
+  /**
+   * @notice Whether a state is a counted account's: it holds a class and is not exempt
+   * @param _state The state
+   * @return _counted True if counted
+   */
+  function _isCounted(
+    uint256 _state
+  ) internal pure returns (bool _counted) {
+    _counted = _state & _CLASS_BITS != 0 && _state & _EXEMPT == 0;
   }
 }

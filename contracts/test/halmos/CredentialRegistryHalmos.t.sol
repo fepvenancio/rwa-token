@@ -43,7 +43,7 @@ contract CredentialRegistryHalmos is Test {
     uint256 _later
   ) external {
     vm.assume(_validUntil > block.timestamp);
-    _registry.set(_subject, _validUntil, Quals.KYC);
+    _registry.set(_subject, _validUntil, Quals.KYC, 0);
     vm.assume(_later >= block.timestamp && _later <= type(uint64).max);
     vm.warp(_later);
 
@@ -60,7 +60,7 @@ contract CredentialRegistryHalmos is Test {
   ) external {
     _registry.blockSubject(_subject);
     vm.assume(_validUntil > block.timestamp);
-    _registry.set(_subject, _validUntil, _quals);
+    _registry.set(_subject, _validUntil, _quals, 0);
     (ICredentialRegistry.Status _afterSet,,) = _registry.profileOf(_subject);
     assert(_afterSet == ICredentialRegistry.Status.BLOCKED);
 
@@ -110,7 +110,7 @@ contract CredentialRegistryHalmos is Test {
     uint64 _issuedAt
   ) internal view returns (ICredentialRegistry.Credential memory _c) {
     _c = ICredentialRegistry.Credential({
-      subject: _subject, validUntil: _validUntil, quals: Quals.KYC, issuedAt: _issuedAt, attester: 1
+      subject: _subject, validUntil: _validUntil, quals: Quals.KYC, issuedAt: _issuedAt, attester: 1, entity: 0
     });
   }
 
@@ -120,7 +120,7 @@ contract CredentialRegistryHalmos is Test {
     uint8 _status
   ) external {
     vm.assume(_validUntil > block.timestamp);
-    _registry.set(_subject, _validUntil, Quals.KYC);
+    _registry.set(_subject, _validUntil, Quals.KYC, 0);
     uint64 _first = _registry.recordOf(_subject).issuedAt;
     vm.warp(block.timestamp + 1 hours);
 

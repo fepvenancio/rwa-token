@@ -1103,8 +1103,8 @@ contract Gated721IntegrationTest is Test {
     _nft.grantRole(_nft.AGENT_ROLE(), _agent);
 
     vm.startPrank(_kyc);
-    _creds.set(_alice, uint64(block.timestamp + 365 days), Quals.KYC);
-    _creds.set(_bob, uint64(block.timestamp + 365 days), Quals.KYC);
+    _creds.set(_alice, uint64(block.timestamp + 365 days), Quals.KYC, 0);
+    _creds.set(_bob, uint64(block.timestamp + 365 days), Quals.KYC, 0);
     vm.stopPrank();
     vm.prank(_minter);
     _nft.mint(_alice, _ID, 'ipfs://note-1');

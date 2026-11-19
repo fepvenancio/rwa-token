@@ -13,6 +13,11 @@ import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
  *      shares at its own address. Only the installed rule records which classes an account holds, and only for a
  *      registered class: the fund's state is shared by every class, so a token that merely names itself in a movement
  *      must not reach it. The owner's `setExempt` also moves the count, for an account that holds a class.
+ *      An account is counted when it holds a class and is not exempt. It is counted under a key: the one the credential
+ *      registry gave it when it started being counted, or zero, an account on its own, when the registry names no entity
+ *      for it or the fund reads no registry. Accounts counted under one key are one investor. The fund remembers the key
+ *      an account was counted under and lowers that one when the account leaves, whatever the registry says by then;
+ *      `rekey` moves an account to the key the registry gives it now.
  *      The fund does not check which hooks list the installed rule after registration. A rule that is no longer the
  *      installed one rejects every movement of the classes whose hook still lists it (`NOT_FUND_CLASS`), so changing the
  *      rule needs the same timelock batch to change every class's rule list
@@ -63,6 +68,14 @@ interface IFund {
    * @param _classes The class bitmask after the change, without the exemption flag
    */
   event HolderClassesUpdated(address indexed _account, uint256 _classes);
+
+  /**
+   * @notice Emitted when the key an account is counted under changes: when it is first counted under a key that is
+   *         not zero, when it stops being counted under one, and when `rekey` moves it
+   * @param _account The account
+   * @param _key The key it is counted under now; zero when it stands alone or is not counted
+   */
+  event HolderKeyUpdated(address indexed _account, uint56 _key);
 
   /*///////////////////////////////////////////////////////////////
                             ERRORS
@@ -117,6 +130,13 @@ interface IFund {
    * @param _supply The token's total supply
    */
   error Fund_ClassHasSupply(address _token, uint256 _supply);
+
+  /**
+   * @notice Thrown when the credential registry a fund is built over does not answer this version's
+   *         `ICredentialRegistry` id through ERC-165, so it could not be asked for an address's entity
+   * @param _credentials The registry
+   */
+  error Fund_NotACredentialRegistry(address _credentials);
 
   /**
    * @notice Thrown when a rule is not attested as RULE in the registry
@@ -208,6 +228,18 @@ interface IFund {
     address _account
   ) external;
 
+  /**
+   * @notice Brings an account's place in the count into line with the credential registry
+   * @dev Anyone may call. Does nothing for an account that is not counted (it holds no class, or it is exempt) and
+   *      for one whose key has not changed. Otherwise the account leaves the key it was counted under and joins the
+   *      key the registry gives it now, and the count moves if that empties one investor or starts another. It can
+   *      put the count above the cap, where nobody new is admitted
+   * @param _account The account
+   */
+  function rekey(
+    address _account
+  ) external;
+
   /*///////////////////////////////////////////////////////////////
                             VIEWS
   //////////////////////////////////////////////////////////////*/
@@ -274,7 +306,8 @@ interface IFund {
   function firstBrokenClass() external view returns (address _token);
 
   /**
-   * @notice The number of distinct non-exempt accounts that hold at least one class
+   * @notice The number of investors: the accounts that hold at least one class and are not exempt, with every
+   *         account the credential registry gives the same entity counted once
    * @return _count The count
    */
   function holderCount() external view returns (uint256 _count);
@@ -308,6 +341,38 @@ interface IFund {
   function isExempt(
     address _account
   ) external view returns (bool _exempt);
+
+  /**
+   * @notice The credential registry the fund asks for each address's entity; the zero address when the fund counts
+   *         every address on its own
+   * @return _credentials The registry, or zero
+   */
+  // getter of an UPPER_SNAKE immutable
+  // solhint-disable-next-line style-guide-casing
+  function CREDENTIALS() external view returns (address _credentials);
+
+  /**
+   * @notice How many counted addresses share an account's investor, the account included when it is counted
+   * @dev For a counted account the answer is about the key it was counted under, never the registry's current one:
+   *      one for an address on its own, and the number of counted addresses of its entity otherwise. For an account
+   *      that is not counted it is about the key the registry gives it now: zero for an address on its own, and the
+   *      number of counted addresses of its entity otherwise. So a receiver that holds nothing is a new investor
+   *      exactly when this is zero, and a sender is its investor's last address exactly when this is one
+   * @param _account The account
+   * @return _addresses The number of counted addresses
+   */
+  function countedWith(
+    address _account
+  ) external view returns (uint256 _addresses);
+
+  /**
+   * @notice The key an account is counted under
+   * @param _account The account
+   * @return _key The key; zero when the account stands alone or is not counted
+   */
+  function countedKeyOf(
+    address _account
+  ) external view returns (uint56 _key);
 
   /**
    * @notice Everything the rule needs to decide on a receiver, in one call
