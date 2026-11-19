@@ -4572,7 +4572,7 @@ Step 7 of the multi-token plan and the last step of the `setRules` plan, on `mai
 
 - **New page.** `docs/contracts/Gated1155.html`, on the model of the `Gated721` page, with three sections of its own: the batch, the receiver callback and the errors of a refused movement.
 - **Changed pages.** Twenty: the five root pages and fifteen contract pages. `Gated1155` and the `multi` profile appear wherever the templates and the profiles are listed, the overview's drawing has the sixth template, and every page that described `setRules`, the hook's `onInstall` or the fund rule's install check states the behaviour as it is now.
-- **How they were checked.** A subagent drafted them against the source; I read the new page whole and checked the claims it flagged as unsure against the contracts. Every test named on the pages exists. `md_check.py`: 45 pages, 0 problems. The footers name `75aa171`, the squash of #53, which is the code they describe.
+- **How they were checked.** A subagent drafted them against the source; I read the new page whole and checked the claims it flagged as unsure against the contracts. Every test named on the pages exists. `md_check.py`: 45 pages, 0 problems. The pages carry no commit id: the owner had the footers that named one removed on 2026-11-19, with the one id in `SECURITY.md`.
 - **Left as found.** The pause table on the roles page lists `transfer` and `transferFrom` under "every product", which the two non-fungible templates do not have. Older than this work.
 - **Also here.** Two corrections to the entities plan above, from its second review: the registry check in `Fund`'s constructor (N5), and two reopened interfaces, not three.
 

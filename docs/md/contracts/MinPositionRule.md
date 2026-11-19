@@ -125,7 +125,3 @@ The demo deployment (`full`, through `RULE_ORDER`) lists it second on all three 
 
 - Contract: `contracts/hooks/rules/MinPositionRule.sol`, interface `IMinPositionRule.sol`
 - Tests: `MinPositionRule.t.sol` (each side, each kind, every exemption, a fuzz test of the whole decision, extreme numbers), `MinPositionRuleHalmos.t.sol` (symbolic checks that a transfer is refused exactly when it leaves dust, that a forced movement is not refused, and that the rule answers every input without reverting), `RuleSetIntegration.t.sol` (on a real token, with pre-flight parity) and `test/nodejs/deployment.test.ts` (the minimum off unless the deployment sets one)
-
----
-
-Describes the contracts at commit `75aa171` on `main`.

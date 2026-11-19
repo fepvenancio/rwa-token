@@ -131,7 +131,3 @@ The contract adds no state, no event and no role. Everything else a vault inheri
 
 - Contract: `contracts/vaults/GatedVaultBase.sol`, interface `IGatedVaultBase.sol`
 - Tests: `GatedVaultBase.t.sol` (both vaults behind the real `CredentialRule` and `HolderRestrictionRule`, and a 7540 over a gated asset)
-
----
-
-Describes the contracts at commit `75aa171` on `main`.

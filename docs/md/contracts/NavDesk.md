@@ -242,7 +242,3 @@ In a deployment, `Legos` builds the desk against the vault's predicted address. 
 
 - Contract: `contracts/nav/NavDesk.sol`, interface `INavDesk.sol`
 - Tests: `NavDesk.t.sol` (a real vault behind a real hook, with a desk holding `SETTLER_ROLE`), and `test/nodejs/legos.test.ts` (a deployed desk through whole cycles, and the post-deploy check)
-
----
-
-Describes the contracts at commit `75aa171` on `main`.

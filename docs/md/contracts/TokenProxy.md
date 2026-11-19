@@ -99,7 +99,3 @@ The proxy has a constructor and a forwarding fallback, nothing else. The upgrade
 
 - Contract: `contracts/deploy/TokenProxy.sol`. It has no interface of its own.
 - Tests: `TokenProxy.t.sol` (empty and non-empty setup data), `ProxyDeployer.t.sol`, the upgrade tests in `PolicyGatedERC20Upgradeable.t.sol`, `Gated721.t.sol`, `Gated1155.t.sol` and `IntentToken.t.sol` (template refusal, state kept, ether refused), `test/nodejs/governance.test.ts` (upgrades through the real timelock) and `deployment.test.ts` (each token at the address computed off-chain)
-
----
-
-Describes the contracts at commit `75aa171` on `main`.

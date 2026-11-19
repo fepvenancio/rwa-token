@@ -330,7 +330,3 @@ Some entry points check things of their own before the movement path, so the err
 - The path: `PolicyGatedERC20Upgradeable.sol` (`_move`, `_check`, `_context`, `_releaseFrozen`), `ComplianceHook.sol`, the rules in `contracts/hooks/rules/`, the intent checks in `IntentSettledUpgradeable.sol`
 - Reason codes: `contracts/interfaces/Errors.sol`; the context: `IERC8473Policy.sol`; the rule lists: `ignition/modules/roles.ts` and `ignition/profiles.ts`
 - Tests: `PolicyGatedERC20Upgradeable.t.sol` (pause, frozen amounts, kinds), `ComplianceHook.t.sol` (order, first rejection, empty list), `RuleSetIntegration.t.sol` (pre-flight against write through a rule set), one `.t.sol` next to each rule, `IntentToken.t.sol` (a rule that re-enters, for example `test_WhenARuleReentersTheToken_TheTransferReverts`), `test/nodejs/parity.test.ts` and `time.test.ts` (pre-flights from TypeScript, time boundaries)
-
----
-
-Describes the contracts at commit `75aa171` on `main`.

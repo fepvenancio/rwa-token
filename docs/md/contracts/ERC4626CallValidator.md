@@ -67,7 +67,3 @@ The last row is the one case that does not return false. The call reaches the de
 
 - Contract: `contracts/portfolio/ERC4626CallValidator.sol`, interface `ICallValidator.sol`
 - Tests: `ERC4626CallValidator.t.sol`, and through an account in `GuardedAccount.t.sol`
-
----
-
-Describes the contracts at commit `75aa171` on `main`.

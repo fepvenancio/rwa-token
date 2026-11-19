@@ -110,7 +110,3 @@ The token takes no ether. It has no `receive` function and no payable function o
 - Contract: `contracts/tokens/GatedToken.sol`, interface `ITemplated.sol`
 - Deployment: `ignition/profiles.ts` (`assertUsable`, the `token` profile), `ignition/modules/Product.ts`
 - Tests: `GatedToken.t.sol` (the token with a real registry, hook and `ProxyDeployer` and a mock identity rule: setup, decimals, no intent entry point, enforcement, upgrades, no ether), `test/nodejs/products.test.ts` (the deployed `token` profile, a later product, a cash token behind a vault, fund classes), `test/nodejs/legos.test.ts` (a supply cap at launch, unusable rule lists)
-
----
-
-Describes the contracts at commit `75aa171` on `main`.

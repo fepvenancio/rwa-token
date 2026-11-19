@@ -313,7 +313,3 @@ The registries, the hook, the rules, the funds and `ProxyDeployer` have no pause
 - Hand-over check: `assertHandedOver` in `test/nodejs/fixtures.ts`
 - Role gates in code: `PolicyGatedCoreUpgradeable.sol`, `PolicyGatedERC20Upgradeable.sol`, `IntentSettledUpgradeable.sol`, `Gated721.sol`, `Gated1155.sol`, `Gated4626Vault.sol`, `Gated4626Management.sol`, `Gated7540Vault.sol`, `Gated7540Settlement.sol`, `PolicyRegistry.sol`, `GovernanceTimelock.sol`, `CredentialRegistry.sol`, `IntentExecutor.sol`, `DvPExecutor.sol`, `Portfolio.sol`, `GuardedAccount.sol`, `NavDesk.sol`, `Distributor.sol`, `ComplianceHook.sol`, and the rules' setters, which ask the token's roles
 - Tests: `test/nodejs/governance.test.ts` (the delay, the guardian's veto and the recovery batch), `test/nodejs/legos.test.ts` (what the hand-over check refuses), `GovernanceTimelock.t.sol`, and behaviour while paused in `Gated7540Vault.t.sol`, `Gated4626Vault.t.sol`, `NavDesk.t.sol`, `Portfolio.t.sol` and `GuardedAccount.t.sol`
-
----
-
-Describes the contracts at commit `75aa171` on `main`.

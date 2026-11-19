@@ -406,7 +406,3 @@ The list is a claim, like a NAV report: the root proves which list two people ap
 - Pricing and money's destinations: `NavDesk.sol`, `FeeModel.sol`, `Portfolio.sol`, `ERC4626Adapter.sol`, `GuardedAccount.sol`, `ERC20CallValidator.sol`, `ERC4626CallValidator.sol`
 - Settlement and distribution: `DvPExecutor.sol`, `IntentExecutor.sol`, `SignedEntry.sol`, `Distributor.sol`, `IntentSettledUpgradeable.sol`
 - Tests: `Gated4626Vault.t.sol`, `Gated4626VaultPortfolio.t.sol`, `Gated4626Management.t.sol`, `Gated7540Vault.t.sol`, `Gated7540Settlement.t.sol`, `NavDesk.t.sol`, `FeeModel.t.sol`, `Portfolio.t.sol`, `GuardedAccount.t.sol`, `DvPExecutor.t.sol`, `SignedEntry.t.sol`, `Distributor.t.sol`, `test/nodejs/vaults.test.ts`, `test/nodejs/dvp.test.ts`, `test/nodejs/legos.test.ts`
-
----
-
-Describes the contracts at commit `75aa171` on `main`.

@@ -118,7 +118,3 @@ One product lists it at this commit: the intent token of the demo deployment (`f
 
 - Contract: `contracts/hooks/rules/SettlementWindowRule.sol`, interface `ISettlementWindowRule.sol`
 - Tests: `SettlementWindowRule.t.sol` (validation, every kind, an unconfigured token, same-day and overnight windows with their edges, `isOpen` agreeing with `check`), `RuleSetIntegration.t.sol` (intents refused outside the window while plain transfers pass, and the rule taken out of the list) and `test/nodejs/time.test.ts` (the window is open from open to close on weekdays only)
-
----
-
-Describes the contracts at commit `75aa171` on `main`.

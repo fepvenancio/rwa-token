@@ -70,7 +70,3 @@ The last row is the one case that does not return false. The call has the right 
 
 - Contract: `contracts/portfolio/ERC20CallValidator.sol`, interfaces `IERC20CallValidator.sol` and `ICallValidator.sol`
 - Tests: `ERC20CallValidator.t.sol`, and through an account in `GuardedAccount.t.sol`
-
----
-
-Describes the contracts at commit `75aa171` on `main`.

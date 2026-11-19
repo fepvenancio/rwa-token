@@ -111,7 +111,3 @@ Both vault templates decide whether a receiver is allowed in by asking the rules
 
 - Contract: `contracts/hooks/rules/SupplyCapRule.sol`, interface `ISupplyCapRule.sol`, reason codes in `Errors.sol`
 - Tests: `SupplyCapRule.t.sol` (who sets it, up to the cap and one above, a fuzz test of the supply already there, a lowered cap, no cap set, every other kind, on a real hook and token with a stolen minter key stopping at the cap) and `test/nodejs/legos.test.ts` (a cap set at launch through the modules, and the module refusing the rule on a vault)
-
----
-
-Describes the contracts at commit `75aa171` on `main`.

@@ -98,7 +98,3 @@ The constructor takes the owner and the registry. It refuses a zero registry (`P
 - Contract: `contracts/deploy/ProxyDeployer.sol`, interface `IProxyDeployer.sol`
 - Deployment: `ignition/modules/Core.ts` (creates it), `CoreHandover.ts` (moves it to the operations account) and `Product.ts` (calls `deploy`)
 - Tests: `ProxyDeployer.t.sol` (unit tests with a mocked registry, and integration tests with the real `PolicyRegistry`), `test/nodejs/deployment.test.ts` (an unattested implementation or rule stopping the product, each token at the address computed off-chain), `governance.test.ts` (the operations account placing a token at once) and `products.test.ts` (nobody but the operations account can place a product)
-
----
-
-Describes the contracts at commit `75aa171` on `main`.

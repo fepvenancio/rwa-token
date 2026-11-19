@@ -265,7 +265,3 @@ OpenZeppelin then checks that the target is a UUPS implementation (`UUPSUnsuppor
 - Interfaces: `IPolicyGated.sol`, `IPolicyGatedCore.sol`, `IERC8473.sol`, `IERC7943Fungible.sol`, `ITemplated.sol`, `IERC8473Policy.sol` (the context and the kinds), `Errors.sol` (the reason codes)
 - Unit tests: `PolicyGatedERC20Upgradeable.t.sol` (the role gates, frozen maths, pre-flight answers, recovery, upgrades, multicall, the context per kind, the installation and the hook that cannot be asked in `PolicyGatedUnit_Erc8473`, and the invariants `invariant_SumOfBalancesEqualsTotalSupply` and `invariant_TheUnfrozenBalanceIsExactlyWhatCanBeSent`)
 - Integration: `GatedToken.t.sol` and `IntentToken.t.sol` (real registry and hook), `RuleSetIntegration.t.sol` (the shipped rules together), `test/nodejs/erc7943.test.ts` and `test/nodejs/parity.test.ts` (the deployed stack), and the Halmos properties `check_frozenBalanceInvariants` and `check_enforcementCanTakeFrozenTokens` in `IntentTokenHalmos.t.sol`
-
----
-
-Describes the contracts at commit `75aa171` on `main`.
