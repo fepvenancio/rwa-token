@@ -95,7 +95,3 @@ with a fee model:
 
 - Contract: `contracts/vaults/Gated4626Common.sol`
 - Tests: it has no test file of its own, being abstract. It is tested through `Gated4626Vault.t.sol`, `Gated4626VaultPortfolio.t.sol` and `Gated4626Management.t.sol`.
-
----
-
-Describes the contracts at commit `18e60b3` on `paris`.

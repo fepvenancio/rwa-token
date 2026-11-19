@@ -141,7 +141,3 @@ The post-deploy check pins the operator and the guardian on the executor. On an 
 - Contract: `contracts/intents/IntentExecutor.sol`, interfaces `IIntentExecutor.sol` and `IIntentExecutorBatch.sol`
 - Tests: `IntentExecutor.t.sol` (unit tests with a mocked token, recovery included, and integration tests on a real `IntentToken`: the consideration refusal in `test_WhenTheIntentNamesTheIntentExecutorAndStatesAPayment_ItIsRefusedAndNothingMoves`, batches in `test_WhenTheFailingIntentIsDroppedAndResubmitted_TheRestSettles`, the pause in `test_WhenTheExecutorIsPaused_TheTokenStillSettlesThroughOtherExecutors`) and `test/nodejs/intents.test.ts` (wallet signatures, the executor binding from each address, the token's pre-flight beside the executor's refusal, a failed batch decoded)
 - The signing helper `signIntent` is in `test/nodejs/fixtures.ts`.
-
----
-
-Describes the contracts at commit `18e60b3` on `paris`.

@@ -134,7 +134,3 @@ The token takes no ether. Its one payable function is `upgradeToAndCall`, and th
 - Contract: `contracts/tokens/IntentToken.sol`, interface `ITemplated.sol`
 - Deployment: `ignition/modules/roles.ts` (`TOKENS`, `RULE_ORDER`), `ignition/profiles.ts`, `ignition/modules/Core.ts`, `ignition/modules/Product.ts`
 - Tests: `IntentToken.t.sol` (the token with a real registry, hook and `ProxyDeployer` and a mock identity rule: the policy installed at deploy, decimals, enforcement, intents, reentrancy, upgrades refused across templates, no ether), `test/nodejs/deployment.test.ts` (the full deployment: each token's rule list in order, the minimum off) and `test/nodejs/legos.test.ts` (a token that moves by signed intent alone)
-
----
-
-Describes the contracts at commit `18e60b3` on `paris`.

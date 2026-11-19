@@ -24,7 +24,7 @@ Every privileged power in the system is a named role on a named contract, the ow
 
 Two kinds of power. Above the line, everything goes through a timelock: governance proposes, waits out the delay, then executes, and the target contract sees the timelock as the caller. Below the line, each account acts directly and at once, but only within its narrow job.
 
-> **Diagram.** Authority map. Above the line: the governance multisig schedules and executes on the recovery timelock and on the main timelock. The recovery timelock can unpause products and executors, revoke GUARDIAN_ROLE on those and on the credential registry, clear a guardian block, revive an attester, and revoke CANCELLER_ROLE on the main timelock. The main timelock is admin of each product, the executors, both registries and itself, the only upgrader of products, owner of each fund once it has opened, and the admin that the hook, the rules, a portfolio, a desk and a guarded account ask for. The guardian can cancel pending operations on the main timelock. Below the line, acting at once: the guardian pauses and blocks and can bring money back and lower limits; the security council attests and revokes code; the KYC attester writes credentials; the operations account deploys products; the agent forces transfers, freezes amounts, sets lockups and address freezes; the minter and burner mint and burn on token templates, the NFT included; the operator submits through the executors; the settler, a desk, closes and settles periods; the reporter and checker propose, accept and cancel a price; the allocator allocates and makes guarded calls; the distribution maker and checker propose and approve distributions.
+> **Diagram.** Authority map. Above the line: the governance multisig schedules and executes on the recovery timelock and on the main timelock. The recovery timelock can unpause products and executors, revoke GUARDIAN_ROLE on those and on the credential registry, clear a guardian block, revive an attester, and revoke CANCELLER_ROLE on the main timelock. The main timelock is admin of each product, the executors, both registries and itself, the only upgrader of products, owner of each fund once it has opened, and the admin that the hook, the rules, a portfolio, a desk and a guarded account ask for. The guardian can cancel pending operations on the main timelock. Below the line, acting at once: the guardian pauses and blocks and can bring money back and lower limits; the security council attests and revokes code; the KYC attester writes credentials; the operations account deploys products; the agent forces transfers, freezes amounts, sets lockups and address freezes; the minter and burner mint and burn on token templates, the NFT and the multi-token included; the operator submits through the executors; the settler, a desk, closes and settles periods; the reporter and checker propose, accept and cancel a price; the allocator allocates and makes guarded calls; the distribution maker and checker propose and approve distributions.
 >
 > **Above the line power waits. Below it power acts at once but is narrow.** The red dashed line is the guardian's one power over the main timelock: it can cancel any operation that has not run yet. Holders act on their own balances directly and are not drawn.
 
@@ -53,7 +53,7 @@ These are the holders that the Ignition modules set up. "Multisig" here says wha
 | KYC provider | `CredentialRegistry` | attester 0: an entry in the registry's attester list, not an `AccessControl` role | `CoreHandover` calls `addAttester`. It may assert the ten named qualification bits unless the `kycAllowedQuals` parameter says otherwise. |
 | Operations account | `ProxyDeployer` | owner | `CoreHandover`. It also owns a fund until `FundOpen` and administers a product until the end of its `Product`, and afterwards holds nothing on either. |
 | Agent (the issuer's compliance desk) | each product | `AGENT_ROLE` | `Product` |
-| Minter, burner (the issuer) | each `GatedToken`, `IntentToken` and `Gated721` | `MINTER_ROLE`, `BURNER_ROLE` | `Product`. No module grants them on a vault. |
+| Minter, burner (the issuer) | each `GatedToken`, `IntentToken`, `Gated721` and `Gated1155` | `MINTER_ROLE`, `BURNER_ROLE` | `Product`. No module grants them on a vault. |
 | `IntentExecutor`, `DvPExecutor` | each `IntentToken` that names them | `EXECUTOR_ROLE` | `Product` |
 | Operator (an issuer or relayer key) | each executor | `OPERATOR_ROLE` | `CoreHandover` |
 | A `NavDesk`, or the `settler` account where there is none | each `Gated7540Vault` | `SETTLER_ROLE` | `Product`. With no desk the account sets any price alone, which only the `full` test profile does. |
@@ -70,7 +70,7 @@ The post-deploy check `assertHandedOver` refuses `MINTER_ROLE`, `BURNER_ROLE`, `
 <a id="tokens"></a>
 ## On tokens and vaults
 
-All five templates, [`GatedToken`](contracts/GatedToken.md), [`IntentToken`](contracts/IntentToken.md), [`Gated721`](contracts/Gated721.md), [`Gated4626Vault`](contracts/Gated4626Vault.md) and [`Gated7540Vault`](contracts/Gated7540Vault.md), share these roles through the core [`PolicyGatedCoreUpgradeable`](contracts/PolicyGatedCoreUpgradeable.md). The table gives the fungible functions; `Gated721`'s take a token id instead of an amount, as the next table shows.
+All six templates, [`GatedToken`](contracts/GatedToken.md), [`IntentToken`](contracts/IntentToken.md), [`Gated721`](contracts/Gated721.md), [`Gated1155`](contracts/Gated1155.md), [`Gated4626Vault`](contracts/Gated4626Vault.md) and [`Gated7540Vault`](contracts/Gated7540Vault.md), share these roles through the core [`PolicyGatedCoreUpgradeable`](contracts/PolicyGatedCoreUpgradeable.md). The table gives the fungible functions; `Gated721`'s take a token id instead of an amount, and `Gated1155`'s a token id and an amount, as the next table shows.
 
 | Role and holder | Can | Cannot, or only with limits |
 |---|---|---|
@@ -92,6 +92,11 @@ All five templates, [`GatedToken`](contracts/GatedToken.md), [`IntentToken`](con
 |  | `AGENT_ROLE` | `forcedTransfer(from, to, tokenId)`, `setFrozenTokens(account, tokenId, frozenStatus)`, a freeze of one item for one account, and `setTokenURI(tokenId, uri)`. |
 |  | The owner, or an approved operator | `transferFrom` and `safeTransferFrom`, judged as TRANSFER. |
 |  | Any account | `setApprovalForAll` for itself, and `approve` of an item it owns or is approved for all of. There is no `permit`. |
+| `Gated1155` | `MINTER_ROLE` | `mint(to, tokenId, amount)`, a MINT of an amount of one token id. A receiver that is a contract gets ERC-1155's callback and must accept. |
+|  | `BURNER_ROLE` | `burn(from, tokenId, amount)`, with no approval, a FORCED move with no receiver that works while paused. It may take frozen tokens of that id and lowers the frozen amount by the part it takes. |
+|  | `AGENT_ROLE` | `forcedTransfer(from, to, tokenId, amount)`, `setFrozenTokens(account, tokenId, amount)`, a frozen amount of one token id for one account, and `setURI(tokenId, uri)`. |
+|  | The holder, or an operator approved for all | `safeTransferFrom` and `safeBatchTransferFrom`, judged as TRANSFER, one item at a time. |
+|  | Any account | `setApprovalForAll` for itself. There is no approval for one token id and no `permit`. |
 | `IntentToken` | `EXECUTOR_ROLE`<br>the executor contracts it names | `executeTransfer(intent, sig)` runs a holder-signed intent as an EXECUTED move. Only an intent that names this executor, or names none and states no consideration (`WRONG_EXECUTOR`, `CONSIDERATION_NEEDS_EXECUTOR`). The token checks the signature, so the executor cannot change any field. |
 |  | Any account | `cancelIntent(nonce)` for its own nonces. |
 | `Gated4626Vault` | `DEFAULT_ADMIN_ROLE` | `setPortfolio(portfolio, rate)`, `setFeeModel`, and `setMaxRate` in either direction. A portfolio or fee model must be attested (`Gated4626Vault_NotAttested`). |
@@ -227,6 +232,9 @@ A product's pause is one check at the start of every balance movement, before th
 | `Gated721` | `mint`, `safeTransferFrom` | reverts `ERC8473PolicyRejected(PAUSED)` |
 |  | `burn` | works: FORCED |
 |  | `setTokenURI`, `setApprovalForAll` | works: nothing moves |
+| `Gated1155` | `mint`, `safeTransferFrom`, `safeBatchTransferFrom` with at least one item | reverts `ERC8473PolicyRejected(PAUSED)` |
+|  | `burn` | works: FORCED |
+|  | `setURI`, `setApprovalForAll` | works: nothing moves |
 | `GatedToken`, `IntentToken` | `mint` | reverts `ERC8473PolicyRejected(PAUSED)` |
 |  | `burn` | works: FORCED |
 |  | `executeTransfer`, on `IntentToken` | an intent that passes its own checks reverts `ERC8473PolicyRejected(PAUSED)`; `canExecute` says `PAUSED` |
@@ -280,7 +288,7 @@ The registries, the hook, the rules, the funds and `ProxyDeployer` have no pause
 - **Nothing on chain makes an account a multisig.** Governance, the guardian, the council and the operations account are addresses given to the modules. The post-deploy check asks for a threshold on four roles only, on the accounts it is told about.
 - **There is no list of holders on chain.** The contracts do not enumerate a role's holders, so a complete list comes from `RoleGranted` and `RoleRevoked` events, and the check sees only the accounts it is given.
 - **The agent's power is large and immediate.** A stolen agent key can force any holder's tokens to an account the policy accepts, and set frozen amounts, lockups and freezes, with no delay, until the timelock revokes the role. On a 7540 it can also pay a controller's claimable redemption cash, and deliver its claimable shares, to any account the policy accepts (`recoverClaimable`). The guardian's pause does not stop a forced move or this.
-- **The burner's power is not stopped by a pause.** A stolen burner key can destroy any holder's balance on a token, or any item on a `Gated721`, with no delay. `burn` is a FORCED move, so the guardian's pause does not stop it, and neither does a lockup, an address freeze or a frozen amount. The remedy is for the timelock to revoke `BURNER_ROLE`.
+- **The burner's power is not stopped by a pause.** A stolen burner key can destroy any holder's balance on a token, any item on a `Gated721` or any amount of any token id on a `Gated1155`, with no delay. `burn` is a FORCED move, so the guardian's pause does not stop it, and neither does a lockup, an address freeze or a frozen amount. The remedy is for the timelock to revoke `BURNER_ROLE`.
 - **The minter's power is bounded only by the rules.** A stolen minter key can mint to any eligible account. `SupplyCapRule` limits that where a product lists it, and no shipped profile does.
 - **Who holds `SETTLER_ROLE` sets the price and the redemption limit.** The vault takes whatever `settlePeriod` is given and does not check the holder. The role belongs with a desk, and the timelock can grant it to anyone: that is delayed and visible, not prevented.
 - **An attester decides who may hold.** A stolen attester key can credential any address that no other live attester has a record for, with any bit it may assert, for every token whose policy trusts it, until the guardian kills it.
@@ -303,9 +311,5 @@ The registries, the hook, the rules, the funds and `ProxyDeployer` have no pause
 
 - Role grants: `Core.ts`, `CoreHandover.ts`, `PartsHandover.ts` and `handOverParts` in `ignition/parts.ts`, `Product.ts`, `FundOpen.ts`; role ids in `roles.ts`; exceptions in `profiles.ts`
 - Hand-over check: `assertHandedOver` in `test/nodejs/fixtures.ts`
-- Role gates in code: `PolicyGatedCoreUpgradeable.sol`, `PolicyGatedERC20Upgradeable.sol`, `IntentSettledUpgradeable.sol`, `Gated721.sol`, `Gated4626Vault.sol`, `Gated4626Management.sol`, `Gated7540Vault.sol`, `Gated7540Settlement.sol`, `PolicyRegistry.sol`, `GovernanceTimelock.sol`, `CredentialRegistry.sol`, `IntentExecutor.sol`, `DvPExecutor.sol`, `Portfolio.sol`, `GuardedAccount.sol`, `NavDesk.sol`, `Distributor.sol`, `ComplianceHook.sol`, and the rules' setters, which ask the token's roles
+- Role gates in code: `PolicyGatedCoreUpgradeable.sol`, `PolicyGatedERC20Upgradeable.sol`, `IntentSettledUpgradeable.sol`, `Gated721.sol`, `Gated1155.sol`, `Gated4626Vault.sol`, `Gated4626Management.sol`, `Gated7540Vault.sol`, `Gated7540Settlement.sol`, `PolicyRegistry.sol`, `GovernanceTimelock.sol`, `CredentialRegistry.sol`, `IntentExecutor.sol`, `DvPExecutor.sol`, `Portfolio.sol`, `GuardedAccount.sol`, `NavDesk.sol`, `Distributor.sol`, `ComplianceHook.sol`, and the rules' setters, which ask the token's roles
 - Tests: `test/nodejs/governance.test.ts` (the delay, the guardian's veto and the recovery batch), `test/nodejs/legos.test.ts` (what the hand-over check refuses), `GovernanceTimelock.t.sol`, and behaviour while paused in `Gated7540Vault.t.sol`, `Gated4626Vault.t.sol`, `NavDesk.t.sol`, `Portfolio.t.sol` and `GuardedAccount.t.sol`
-
----
-
-Describes the contracts at commit `18e60b3` on `paris`.

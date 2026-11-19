@@ -79,7 +79,3 @@ It emits no events of its own. The portfolio's `Allocated` and `Deallocated` rec
 
 - Contract: `contracts/portfolio/ERC4626Adapter.sol`, interfaces `IERC4626Adapter.sol` and `IAdapter.sol`
 - Tests: `ERC4626Adapter.t.sol`, `Portfolio.t.sol` (`PortfolioIntegrationTest`, with a real target), `Gated4626VaultPortfolio.t.sol`, and `test/nodejs/legos.test.ts`
-
----
-
-Describes the contracts at commit `18e60b3` on `paris`.

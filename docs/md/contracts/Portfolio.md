@@ -232,7 +232,3 @@ The hand-over check pins the allocator to one named account, different from the 
 - Contract: `contracts/portfolio/Portfolio.sol`, interfaces `IPortfolio.sol` and `IAdapter.sol`
 - Tests: `Portfolio.t.sol` (unit tests with a mock vault and mock adapters, and integration tests against a real 4626 and a real target, among them `test_NothingLeavesExceptAlongTheListedPaths`), `Gated4626VaultPortfolio.t.sol` (the 4626 with a portfolio plugged), `NavDesk.t.sol` (`NavDesk_WithAPortfolio`), `test/nodejs/legos.test.ts` (the deployed profiles)
 - Symbolic: `PortfolioHalmos.t.sol` (`check_anAllocationNeverPassesACap`)
-
----
-
-Describes the contracts at commit `18e60b3` on `paris`.

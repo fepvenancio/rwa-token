@@ -37,7 +37,7 @@
 <section id="in-one-minute">
   <div class="callout wrap-any">
     <h3>In one minute</h3>
-    <p><code>GatedToken</code>, <code>IntentToken</code> and both vaults share this code. It extends <a href="PolicyGatedCoreUpgradeable.html"><code>PolicyGatedCoreUpgradeable</code></a>, which holds the roles, the guardian and recovery, the pause, the hook pointer and the upgrade checks, and which the NFT template, <a href="Gated721.html"><code>Gated721</code></a>, shares too. This page describes them as they apply to a fungible token. It does the bookkeeping of an ordinary ERC-20 token, plus what a regulated issuer needs: create and destroy tokens, move tokens without the holder's consent (a forced transfer), freeze part of a holder's balance, and pause the token in an emergency.</p>
+    <p><code>GatedToken</code>, <code>IntentToken</code> and both vaults share this code. It extends <a href="PolicyGatedCoreUpgradeable.html"><code>PolicyGatedCoreUpgradeable</code></a>, which holds the roles, the guardian and recovery, the pause, the hook pointer and the upgrade checks, and which the NFT template, <a href="Gated721.html"><code>Gated721</code></a>, and the multi-token template, <a href="Gated1155.html"><code>Gated1155</code></a>, share too. This page describes them as they apply to a fungible token. It does the bookkeeping of an ordinary ERC-20 token, plus what a regulated issuer needs: create and destroy tokens, move tokens without the holder's consent (a forced transfer), freeze part of a holder's balance, and pause the token in an emergency.</p>
     <p>It does not decide who may hold the token, where or when. For every movement it asks a separate contract, the <b>policy hook</b>, which runs a list of small checks called <b>rules</b> (identity, lockups, settlement hours, a fund's investor cap). The hook and its rules can be changed through governance without touching the token. Changing this base takes an upgrade to code the security council has reviewed and recorded in the registry (code that is <b>attested</b>).</p>
   </div>
 </section>
@@ -487,7 +487,6 @@
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>18e60b3</code> on <code>paris</code>.</footer>
 </main>
 </body>
 </html>

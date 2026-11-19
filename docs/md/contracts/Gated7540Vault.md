@@ -386,7 +386,3 @@ Operators are full delegates, as ERC-7540 defines them. An operator of an owner 
 
 - Contract: `contracts/vaults/Gated7540Vault.sol`, with `Gated7540Settlement.sol` and `Gated7540Common.sol`, interface `IGated7540Vault.sol`, and the standard's interfaces `IERC7540Deposit.sol`, `IERC7540Redeem.sol`, `IERC7540Operator.sol` and `IERC7575.sol`
 - Tests: `Gated7540Vault.t.sol` (periods, netting, the price, claims and rounding, the escrow, rejects and recoveries with a mocked hook; integration with the real holder-restriction and fund rules and a minimum position; invariants on what the vault holds and owes), `Gated7540Settlement.t.sol` (the hand-off, part fills, the walk and rounding), `GatedVaultBase.t.sol` (third parties, and the escrow behind the real `CredentialRule`), `CredentialRuleVaults.t.sol` (lapsed and blocked controllers), `FundIntegration.t.sol` (the escrow and the fund's investor count, a deposit stranded by a full fund), `NavDesk.t.sol` (the desk driving a real vault), and `test/nodejs/vaults.test.ts` (request, settle and claim from TypeScript, the cost of a walk, and the price history rebuilt from `PeriodSettled` events)
-
----
-
-Describes the contracts at commit `18e60b3` on `paris`.

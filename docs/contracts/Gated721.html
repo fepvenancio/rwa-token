@@ -95,7 +95,7 @@
         <tr><td><a href="CredentialRule.html"><code>CredentialRule</code></a></td><td>Works as on any token: who may receive an item, and that a sender may leave. The <code>nft</code> profile lists it.</td></tr>
         <tr><td><a href="HolderRestrictionRule.html"><code>HolderRestrictionRule</code></a></td><td>Works as on any token: a holder's lockup and an address freeze. The <code>nft</code> profile lists it.</td></tr>
         <tr><td><a href="MinPositionRule.html"><code>MinPositionRule</code></a></td><td>Refused by the profile check. On chain it would count items, which means nothing for unique ones.</td></tr>
-        <tr><td><a href="FundHoldersRule.html"><code>FundHoldersRule</code></a></td><td>Refused by the profile check. A <code>Fund</code> registers only a token that reports <code>IPolicyGated</code>, which the NFT does not, so on chain the rule would refuse every movement with <code>NOT_FUND_CLASS</code>.</td></tr>
+        <tr><td><a href="FundHoldersRule.html"><code>FundHoldersRule</code></a></td><td>Refused by the profile check. A <code>Fund</code> registers only a token that reports <code>IPolicyGated</code>, which the NFT does not. On chain the hook cannot list it for an NFT: when a list adds the rule, the rule reads an ERC-20 <code>totalSupply</code>, which the NFT does not have, and the call reverts.</td></tr>
         <tr><td><a href="SupplyCapRule.html"><code>SupplyCapRule</code></a></td><td>Refused by the profile check. It reads an ERC-20 <code>totalSupply</code>, which the NFT does not have, so on chain the rule's check of a mint would revert: every mint would revert with <code>ERC8473PolicyRejected(CHECK_UNAVAILABLE)</code>, and the pre-flight of one would read false with that reason.</td></tr>
         <tr><td><a href="SettlementWindowRule.html"><code>SettlementWindowRule</code></a>, <a href="ExecutedOnlyRule.html"><code>ExecutedOnlyRule</code></a></td><td>Refused, as on every template without signed intents.</td></tr>
       </tbody>
@@ -184,7 +184,7 @@
       <li><b>No signed transfers and no delivery versus payment.</b> An item moves by a transaction of its owner or an approved operator, or by the agent.</li>
       <li><b>No holder burn.</b> <code>burn</code> needs <code>BURNER_ROLE</code>.</li>
       <li><b>No enumeration, no supply, no royalties, no <code>permit</code>.</b> A list of items is read from the <code>Transfer</code> events.</li>
-      <li><b>The refusal of an unusable rule is off-chain.</b> <code>assertUsable</code> in <code>ignition/profiles.ts</code> stops it when the module is built. <code>ComplianceHook.setRules</code> accepts any attested rule, so a timelock operation could still list one, with the effects in <a href="#rules">the table above</a>.</li>
+      <li><b>The refusal of an unusable rule is off-chain.</b> <code>assertUsable</code> in <code>ignition/profiles.ts</code> stops it when the module is built. <code>ComplianceHook.setRules</code> judges no combination of attested rules, so a timelock operation could still try to list one, with the effects in <a href="#rules">the table above</a>.</li>
       <li><b>It cannot be a fund class.</b> <code>Fund</code> registers fungible gated tokens only.</li>
       <li><b>The metadata is off-chain.</b> The token stores a URI and checks nothing about what it points to.</li>
     </ul>
@@ -199,6 +199,7 @@
     <a class="card" href="ComplianceHook.html"><span class="name">ComplianceHook</span><p>Runs this token's rules on every movement.</p></a>
     <a class="card" href="CredentialRule.html"><span class="name">CredentialRule</span><p>Who may hold an item.</p></a>
     <a class="card" href="HolderRestrictionRule.html"><span class="name">HolderRestrictionRule</span><p>Each holder's lockup and address freeze.</p></a>
+    <a class="card" href="Gated1155.html"><span class="name">Gated1155</span><p>The multi-token template on the same core.</p></a>
     <a class="card" href="ProxyDeployer.html"><span class="name">ProxyDeployer</span><p>Places the NFT and checks it came up as expected.</p></a>
     <a class="card" href="../deployment.html"><span class="name">Deployment and governance</span><p>The <code>nft</code> profile, and how a product is handed over.</p></a>
   </div>
@@ -215,7 +216,6 @@
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>18e60b3</code> on <code>paris</code>.</footer>
 </main>
 </body>
 </html>

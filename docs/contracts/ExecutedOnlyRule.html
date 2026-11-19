@@ -97,7 +97,7 @@
       <li><b>It is the template with <code>EXECUTED</code>.</b> <code>executeTransfer</code> comes from <a href="IntentSettledUpgradeable.html"><code>IntentSettledUpgradeable</code></a>, which <code>IntentToken</code> inherits. On a <a href="GatedToken.html"><code>GatedToken</code></a>, nothing can make an <code>EXECUTED</code> movement, so holders could not move tokens to each other at all.</li>
       <li><b>A vault's escrow is a plain transfer.</b> <a href="Gated7540Vault.html"><code>Gated7540Vault</code></a> moves shares into its escrow in <code>requestRedeem</code>, and back in <code>rejectRedeemRequest</code>, as a <code>TRANSFER</code>. On a vault's list this rule would refuse both, so no redemption could be requested.</li>
     </ul>
-    <p><code>assertUsable</code> in <code>ignition/profiles.ts</code> throws when a module is built that lists it on anything but an <code>IntentToken</code>. That check is in the deployment tooling. On chain, the hook accepts any attested rule on any token.</p>
+    <p><code>assertUsable</code> in <code>ignition/profiles.ts</code> throws when a module is built that lists it on anything but an <code>IntentToken</code>. That check is in the deployment tooling. On chain, the hook accepts any attested rule on any token, unless the rule itself refuses to go live.</p>
   </div>
 </section>
 
@@ -110,7 +110,7 @@
         <tr><td><code>check(ctx)</code></td><td>Anyone (read-only); the hook in practice</td><td><code>KIND_NOT_ALLOWED</code> for a <code>TRANSFER</code>, otherwise <code>TRANSFER_OK</code>.</td></tr>
         <tr><td><code>checkSend</code>, <code>checkReceive</code></td><td>Anyone (read-only)</td><td><code>TRANSFER_OK</code> for every account.</td></tr>
         <tr><td><code>after_(ctx)</code></td><td>The hook of <code>ctx.token</code></td><td>The empty default. The hook does not call it, because <code>wantsAfter()</code> is false.</td></tr>
-        <tr><td><code>onInstall(token, previousPolicy)</code></td><td>Anyone; the hook when a token installs it</td><td>The empty default: the rule keeps no state derived from movements.</td></tr>
+        <tr><td><code>onInstall(token, previousPolicy)</code></td><td>Anyone; the hook when a token installs it, or when a <code>setRules</code> adds the rule to the token's list</td><td>The empty default: the rule keeps no state derived from movements.</td></tr>
         <tr><td><code>ruleId()</code>, <code>wantsAfter()</code>, <code>supportsInterface(id)</code></td><td>Anyone (read-only)</td><td><code>keccak256('ExecutedOnlyRule.v1')</code>; false; ERC-165 for <code>IComplianceRule</code> and <code>IERC165</code>, the <code>BaseRule</code> answer.</td></tr>
       </tbody>
     </table>
@@ -163,7 +163,6 @@
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>18e60b3</code> on <code>paris</code>.</footer>
 </main>
 </body>
 </html>

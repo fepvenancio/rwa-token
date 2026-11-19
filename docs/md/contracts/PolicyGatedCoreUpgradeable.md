@@ -4,38 +4,38 @@
 
 # PolicyGatedCoreUpgradeable
 
-The part of every template that does not depend on what the token counts. It holds the roles, the guardian and the recovery path, the pause, the hook pointer and the upgrade checks, so the fungible templates and the NFT run the same code for them.
+The part of every template that does not depend on what the token counts. It holds the roles, the guardian and the recovery path, the pause, the hook pointer and the upgrade checks, so the fungible templates, the NFT and the multi-token run the same code for them.
 
 - **contracts/base/PolicyGatedCoreUpgradeable.sol**
 - abstract: **runs inside each token**, behind its proxy
-- extended by **PolicyGatedERC20Upgradeable** and **Gated721**
+- extended by **PolicyGatedERC20Upgradeable**, **Gated721** and **Gated1155**
 - attested as part of **each template implementation**
 
 <a id="in-one-minute"></a>
 
 > ### In one minute
 >
-> Every token in the stack has the same governance: a timelock that administers the roles, a guardian that can only stop things, a recovery timelock the guardian cannot block, one attested hook, and upgrades only to reviewed code of the same template. That code lives here, once. [`PolicyGatedERC20Upgradeable`](PolicyGatedERC20Upgradeable.md), the base of the four fungible templates, extends it with balances and frozen amounts. [`Gated721`](Gated721.md) extends it with tokens and a freeze per token.
+> Every token in the stack has the same governance: a timelock that administers the roles, a guardian that can only stop things, a recovery timelock the guardian cannot block, one attested hook, and upgrades only to reviewed code of the same template. That code lives here, once. [`PolicyGatedERC20Upgradeable`](PolicyGatedERC20Upgradeable.md), the base of the four fungible templates, extends it with balances and frozen amounts. [`Gated721`](Gated721.md) extends it with tokens and a freeze per token. [`Gated1155`](Gated1155.md) extends it with balances of many token ids and a frozen amount per account and id.
 >
 > The core moves nothing itself. Each template has its own movement path, which reads the hook from here and asks it about every movement. A fix to the core reaches each template through that template's own attested upgrade.
 
 <a id="split"></a>
 ## What is in the core, and what each template adds
 
-|  | The core | `PolicyGatedERC20Upgradeable` | `Gated721` |
-|---|---|---|---|
-| What is counted | Nothing | Balances and a supply (ERC-20, with `permit`) | Tokens, each with an owner and a metadata URI (ERC-721) |
-| Roles | The six role ids, `revokeRole` with the recovery exception, and OpenZeppelin `AccessControl` | The core's |  |
-| Pause | `pause` by the guardian, `unpause` by either timelock | The core's; each template's own path decides what a pause refuses |  |
-| Hook and registry | The hook pointer, `installPolicy` with its checks, the call that asks the hook, and the registry fixed at setup | The core's |  |
-| Upgrades | `_authorizeUpgrade`: the role, the attestation and the template id | The core's; each template names its own `templateId()` |  |
-| Account answers | The logic behind `canSend` and `canReceive` | Each declares the two functions, as both ERC-7943 interfaces do, and calls the core |  |
-| Freezes | None | An amount per account | A yes or no per account and token |
-| Movement path and pre-flights | None | `_move`, `canTransfer`, `canTransferWithReason` | Its own `_move` and pre-flights |
-| Issuance and enforcement | None | `mint(to, amount)`, `burn(from, amount)`, `forcedTransfer`, `setFrozenTokens` | `mint(to, tokenId, uri)`, `burn(tokenId)`, `forcedTransfer`, `setFrozenTokens`, `setTokenURI` |
-| Interfaces it reports | `IPolicyGatedCore` (`0x4116c4d8`), `IERC8473` (`0x0505c8c9`), `IAccessControl`, `IERC165` | Adds `IPolicyGated`, `IERC7943Fungible` (`0x3edbb4c4`), `IERC20`, `IERC20Permit` | Adds `IGated721`, `IERC7943NonFungible` (`0xbf1ef5fe`), ERC-721, its metadata extension, and ERC-4906 |
+|  | The core | `PolicyGatedERC20Upgradeable` | `Gated721` | `Gated1155` |
+|---|---|---|---|---|
+| What is counted | Nothing | Balances and a supply (ERC-20, with `permit`) | Tokens, each with an owner and a metadata URI (ERC-721) | Balances of many token ids, each id with its own supply and metadata URI (ERC-1155) |
+| Roles | The six role ids, `revokeRole` with the recovery exception, and OpenZeppelin `AccessControl` | The core's |  |  |
+| Pause | `pause` by the guardian, `unpause` by either timelock | The core's; each template's own path decides what a pause refuses |  |  |
+| Hook and registry | The hook pointer, `installPolicy` with its checks, the call that asks the hook, and the registry fixed at setup | The core's |  |  |
+| Upgrades | `_authorizeUpgrade`: the role, the attestation and the template id | The core's; each template names its own `templateId()` |  |  |
+| Account answers | The logic behind `canSend` and `canReceive` | Each declares the two functions, as the three ERC-7943 interfaces do, and calls the core |  |  |
+| Freezes | None | An amount per account | A yes or no per account and token | An amount per account and token id |
+| Movement path and pre-flights | None | `_move`, `canTransfer`, `canTransferWithReason` | Its own `_move` and pre-flights | Its own `_move`, which takes one item of a batch at a time, and pre-flights |
+| Issuance and enforcement | None | `mint(to, amount)`, `burn(from, amount)`, `forcedTransfer`, `setFrozenTokens` | `mint(to, tokenId, uri)`, `burn(tokenId)`, `forcedTransfer`, `setFrozenTokens`, `setTokenURI` | `mint(to, tokenId, amount)`, `burn(from, tokenId, amount)`, `forcedTransfer`, `setFrozenTokens`, `setURI` |
+| Interfaces it reports | `IPolicyGatedCore` (`0x4116c4d8`), `IERC8473` (`0x0505c8c9`), `IAccessControl`, `IERC165` | Adds `IPolicyGated`, `IERC7943Fungible` (`0x3edbb4c4`), `IERC20`, `IERC20Permit` | Adds `IGated721`, `IERC7943NonFungible` (`0xbf1ef5fe`), ERC-721, its metadata extension, and ERC-4906 | Adds `IGated1155` (`0xc12446d8`), `IERC7943MultiToken` (`0x41c4fbad`), ERC-1155 and its metadata URI extension |
 
-`IPolicyGated` and `IGated721` both inherit `IPolicyGatedCore`. So `PolicyChanged` and the errors `PolicyGated_NotAttested`, `PolicyGated_HookRegistryMismatch`, `PolicyGated_NotAPolicy`, `ERC8473PolicyRejected` and `PolicyGated_ZeroAddress` have the same topic and selectors on every template, and an integrator decodes them the same way.
+`IPolicyGated`, `IGated721` and `IGated1155` all inherit `IPolicyGatedCore`. So `PolicyChanged` and the errors `PolicyGated_NotAttested`, `PolicyGated_HookRegistryMismatch`, `PolicyGated_NotAPolicy`, `ERC8473PolicyRejected` and `PolicyGated_ZeroAddress` have the same topic and selectors on every template, and an integrator decodes them the same way.
 
 <a id="setup"></a>
 ## Setup
@@ -61,7 +61,7 @@ No role has an admin of its own, so `DEFAULT_ADMIN_ROLE` grants and revokes ever
 | `GUARDIAN_ROLE` | `pause`, at once, and nothing else here | `Gated4626Vault` also lets it lower the rate limit |
 | `RECOVERY_ROLE` | Exactly `unpause` and `revokeRole(GUARDIAN_ROLE, account)` | Nothing more |
 | `UPGRADER_ROLE` | Upgrades, to attested code of the same template | Nothing more |
-| `AGENT_ROLE`, `MINTER_ROLE`, `BURNER_ROLE` | Defined here, gate nothing here | Forced transfers and freezes, mint, burn, and on `Gated721` the metadata URI. On `Gated7540Vault` the agent also rejects and recovers requests. [Who can do what](../roles.md#tokens) lists every function |
+| `AGENT_ROLE`, `MINTER_ROLE`, `BURNER_ROLE` | Defined here, gate nothing here | Forced transfers and freezes, mint, burn, and on `Gated721` and `Gated1155` the metadata URI. On `Gated7540Vault` the agent also rejects and recovers requests. [Who can do what](../roles.md#tokens) lists every function |
 
 **The guardian can only stop things.** It cannot unpause, change the hook, grant a role or upgrade. **The recovery timelock** exists because a guardian that cancels governance operations could cancel its own removal: `revokeRole` lets a `RECOVERY_ROLE` holder revoke `GUARDIAN_ROLE`, passes every other revocation to the role's admin, and `unpause` accepts it beside the admin. The tests pin it on both families: `test_WhenRecoveryRevokesAnyOtherRole_ItReverts` on the ERC-20 base and `test_WhenTheRecoveryTimelockRevokesTheGuardian_ItCanRevokeNothingElse` on `Gated721`. See [Who can do what](../roles.md).
 
@@ -93,7 +93,7 @@ Every check is made through one static call, `_ask`, which copies one word of th
 <a id="upgrades"></a>
 ## Upgrades
 
-Each token is a UUPS proxy. `_authorizeUpgrade` checks, in order: the caller holds `UPGRADER_ROLE`; the target's code hash is attested as `IMPLEMENTATION` (`PolicyGated_NotAttested`); and the target reports the same `templateId()` (`Templated_WrongTemplate`). So a `Gated721` cannot be moved onto a fungible template's code even when that code is attested (`test_WhenTheImplementationIsAnotherTemplate_TheUpgradeIsRefused`), and the reverse holds too. OpenZeppelin then checks that the target is a UUPS implementation and emits `Upgraded`.
+Each token is a UUPS proxy. `_authorizeUpgrade` checks, in order: the caller holds `UPGRADER_ROLE`; the target's code hash is attested as `IMPLEMENTATION` (`PolicyGated_NotAttested`); and the target reports the same `templateId()` (`Templated_WrongTemplate`). So a `Gated721` cannot be moved onto a fungible template's code even when that code is attested (`test_WhenTheImplementationIsAnotherTemplate_TheUpgradeIsRefused`), and the reverse holds too. A `Gated1155` is refused a `GatedToken` implementation the same way, by its test of the same name. OpenZeppelin then checks that the target is a UUPS implementation and emits `Upgraded`.
 
 <a id="functions"></a>
 ## What it can do
@@ -126,8 +126,8 @@ Each token is a UUPS proxy. `_authorizeUpgrade` checks, in order: the caller hol
 ## Why it is built this way
 
 - **One copy of the governance code.** The paths that let the guardian stop things and the recovery timelock undo it are the ones an attacker would aim at. Keeping them in one contract means one review, and a fix that every template takes.
-- **The movement path stays in the template.** What a movement is differs: an amount with a frozen part, or one token with a yes or no freeze. Each template builds its own context and checks, and asks the one hook the core points to.
-- **Namespaced storage.** The registry and the hook pointer live in the core's ERC-7201 namespace, `gated.storage.PolicyGatedCore`. The frozen amounts live in `gated.storage.PolicyGatedERC20`, and the NFT's freezes in `gated.storage.Gated721`.
+- **The movement path stays in the template.** What a movement is differs: an amount with a frozen part, one token with a yes or no freeze, or an amount of one token id with a frozen part. Each template builds its own context and checks, and asks the one hook the core points to.
+- **Namespaced storage.** The registry and the hook pointer live in the core's ERC-7201 namespace, `gated.storage.PolicyGatedCore`. The frozen amounts live in `gated.storage.PolicyGatedERC20`, the NFT's freezes in `gated.storage.Gated721`, and the multi-token's name, symbol and frozen amounts in `gated.storage.Gated1155`.
 - **The registry is asked at install time.** A hook is checked when it is installed, an implementation when it is upgraded to. A later withdrawal of an attestation does not change a running token: governance removes the component, and the guardian can pause meanwhile.
 
 <a id="limits"></a>
@@ -142,6 +142,7 @@ Each token is a UUPS proxy. `_authorizeUpgrade` checks, in order: the caller hol
 
 - [PolicyGatedERC20Upgradeable](PolicyGatedERC20Upgradeable.md): The fungible base built on the core.
 - [Gated721](Gated721.md): The NFT template built on the core.
+- [Gated1155](Gated1155.md): The multi-token template built on the core.
 - [ComplianceHook](ComplianceHook.md): The hook the core points to.
 - [PolicyRegistry](PolicyRegistry.md): Asked when a hook or an implementation is installed.
 - [GovernanceTimelock](GovernanceTimelock.md): Both timelocks that administer the roles.
@@ -151,8 +152,4 @@ Each token is a UUPS proxy. `_authorizeUpgrade` checks, in order: the caller hol
 ## Source and tests
 
 - Contract: `contracts/base/PolicyGatedCoreUpgradeable.sol`; interfaces `IPolicyGatedCore.sol`, `IERC8473.sol`, `ITemplated.sol`
-- Tests: through each template, in `PolicyGatedERC20Upgradeable.t.sol` (role gates, the guardian and recovery, the hook checks, upgrades, multicall, and in `PolicyGatedUnit_Erc8473` the installation and the hook that cannot be asked) and `Gated721.t.sol` (the same for the NFT); the ids are pinned in `InterfaceFreeze.t.sol`
-
----
-
-Describes the contracts at commit `18e60b3` on `paris`.
+- Tests: through each template, in `PolicyGatedERC20Upgradeable.t.sol` (role gates, the guardian and recovery, the hook checks, upgrades, multicall, and in `PolicyGatedUnit_Erc8473` the installation and the hook that cannot be asked) `Gated721.t.sol` (the same for the NFT) and `Gated1155.t.sol` (the pause and recovery, the installation and upgrades for the multi-token); the ids are pinned in `InterfaceFreeze.t.sol`

@@ -181,7 +181,3 @@ Among the shipped rules, [`SettlementWindowRule`](SettlementWindowRule.md) judge
 - Contract: `contracts/mixins/IntentSettledUpgradeable.sol`, interface `ITransferIntent.sol`
 - Unit tests: `IntentSettledUpgradeable.t.sol` (replay, expiry, wrong chain or token, high-`s` malleability, ERC-1271 wallets, executor binding, start time, consideration, the check order, cancelling, and `canExecute` parity)
 - Integration: `IntentToken.t.sol` (real registry and hook), `test/nodejs/intents.test.ts` (a real wallet's `signTypedData` settling through the executor), `test/nodejs/time.test.ts` (inclusive times), and the Halmos properties in `IntentTokenHalmos.t.sol`: `check_executedIntentCannotReplay`, `check_cancelledNonceNeverExecutes`, `check_intentNamingAnotherExecutorNeverExecutes`, `check_considerationWithoutExecutorNeverExecutes`
-
----
-
-Describes the contracts at commit `18e60b3` on `paris`.
