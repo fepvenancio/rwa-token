@@ -4711,7 +4711,7 @@ Carried here by cherry-pick with no conflict; where the text above says "this li
 
 After E1 and E2, on this line: an executed intent next to a used nonce costs 86,184 gas, from 106,075; a `claimBatch` of 100 holders costs 4,973,956 against 6,516,678 for 100 claims; no other row moved by more than 153 gas or by a call. `npx hardhat test`: 2228 passing (2028 solidity, 200 nodejs). Format, lint and typecheck clean, Slither 0 results, Halmos 22 of 22, `validate:upgrades` 8 of 8, `verify:reproducible` 33 contracts identical.
 
-E3 with E13 followed, carried the same way; the brief keeps this line's deployment text. On this line a signed exit from a 4626 costs E3EXIT gas and `claimFor` for ten controllers E3CLAIM, and no existing row moved. E3GATES
+E3 with E13 followed, carried the same way; the brief keeps this line's deployment text. On this line a signed exit from a 4626 costs 123,620 gas and `claimFor` for ten controllers 664,720, and no existing row moved. `npx hardhat test`: 2253 passing (2052 solidity, 201 nodejs). Format, lint and typecheck clean, Slither 0 results, Halmos 22 of 22, `validate:upgrades` 8 of 8, `verify:reproducible` 34 contracts identical.
 
 ### Decisions and review, 2026-11-19
 

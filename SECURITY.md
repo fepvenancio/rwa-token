@@ -215,7 +215,9 @@ Further limits recorded during review:
   still has to pass the vault's own third-party check. A request names no minimum, as with a signed entry: the
   period's approved price is the protection. `claimFor` passes over a claim the vault refuses, so a controller the
   policy blocks keeps its claim with the vault until it is unblocked or the agent's `recoverClaimable` delivers it.
-  Pinned by `SignedExit.t.sol`.
+  A holder that already made the contract its operator on a 7540 needs no permit for a request: the vault spends no
+  allowance for an operator, so the permit passed with such an exit goes unused. Nothing on the contract moves shares
+  without a fresh signed `Exit`. Pinned by `SignedExit.t.sol`.
 - **A nonce is one bit, and a signer's client chooses how they pack.** An intent's nonce, a signed entry's and a signed exit's are kept
   as bit `nonce & 0xff` of word `nonce >> 8`. Numbered one after the other, 256 nonces share a storage slot; chosen at
   random, each takes its own, as before. Nothing forces a client to number them, so the saving in state is the
