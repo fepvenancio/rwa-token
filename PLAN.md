@@ -4461,6 +4461,10 @@ The owner passed on the review's go-ahead for this plan on 2026-11-19, with R3 a
 3. `SECURITY.md`, the brief (§6, dispatcher rule 4 and the fund rule's paragraph) and this file: the gap becomes a closed item, and R3's limit is stated.
 4. Gates, then the port to `paris`, then the pages on each line.
 
+### The port to `paris` (2026-11-19)
+
+Carried here by cherry-pick; where the text above says "this line" it means `main`. The contracts and the tests are the same files. The brief keeps this line's sentence on the reentrancy guard, with the new sentence on `setRules` added to it. `npx hardhat test`: 2152 passing (1953 solidity, 199 nodejs). Format, lint and typecheck clean, Slither 0 results, `validate:upgrades` 8 of 8, `verify:reproducible` 33 contracts identical. Not done: the pages.
+
 ## Entities in the credential registry (plan, 2026-11-19, nothing built)
 
 Source: the same assessment, and the owner's "Yes, both". Derived from the code at `38fdbc1`. It reopens `ICredentialRegistry`, `IFund` and `IFundHoldersRule`, which rule 4 freezes: nothing here is built until the owner says so.
