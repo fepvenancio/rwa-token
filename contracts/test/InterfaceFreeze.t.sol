@@ -162,7 +162,7 @@ contract InterfaceFreezeTest is Test {
     assertEq(type(INavDesk).interfaceId, bytes4(0x17066f0f), 'INavDesk');
     assertEq(type(ISignedEntry).interfaceId, bytes4(0x05cc4f78), 'ISignedEntry');
     assertEq(type(ISupplyCapRule).interfaceId, bytes4(0x52c89ff1), 'ISupplyCapRule');
-    assertEq(type(IDistributor).interfaceId, bytes4(0xd75218de), 'IDistributor');
+    assertEq(type(IDistributor).interfaceId, bytes4(0xda4dcb2a), 'IDistributor');
     assertEq(type(IGuardedAccount).interfaceId, bytes4(0x30444861), 'IGuardedAccount');
     assertEq(type(ICallValidator).interfaceId, bytes4(0x9e8d53da), 'ICallValidator');
     assertEq(type(IERC20CallValidator).interfaceId, bytes4(0x4095b410), 'IERC20CallValidator');
@@ -255,6 +255,9 @@ contract InterfaceFreezeTest is Test {
     );
     assertEq(
       IDistributor.DistributionClaimed.selector, 0x64bdb55782b54d32d4886f2dc4f69cf7344fd99862caaa6703164c8fc13f2ea8
+    );
+    assertEq(
+      IDistributor.DistributionClaimSkipped.selector, 0xc5f61a3c122d3686e3c8a9bf03bc4ec72e08c9771a1ad22f0299d9639651dc83
     );
     assertEq(
       IDistributor.DistributionProposed.selector, 0xdecb52003d63f8fec877496be8045b66e1945cc76a8fb743c948fe181ead3feb

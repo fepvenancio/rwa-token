@@ -336,7 +336,7 @@
         <tr><td>Any account</td><td><code>closePeriod</code>, once <code>periodLength</code> has passed. <code>execute</code>, after acceptance and the <code>cooldown</code>, with a report no older than <code>maxReportAge</code>. The desk acts on the vault through its own <code>SETTLER_ROLE</code>, which <code>isWired()</code> reports.</td></tr>
         <tr><td rowspan="3"><a href="contracts/Distributor.html"><code>Distributor</code></a><br><span class="small">asks its token; <code>Distributor_Unauthorized</code></span></td><td><code>DISTRIBUTION_MAKER_ROLE</code></td><td><code>propose</code></td></tr>
         <tr><td><code>CHECKER_ROLE</code></td><td><code>approve</code>, but not a distribution the same account proposed (<code>Distributor_SelfApproval</code>). Approving pulls the funding.</td></tr>
-        <tr><td>Any account</td><td><code>claim</code>, which pays the holder a proof names, if the token's <code>canReceive</code> says yes. <code>sweep</code>, after the expiry, which returns what is left to the funder.</td></tr>
+        <tr><td>Any account</td><td><code>claim</code>, which pays the holder a proof names, if the token's <code>canReceive</code> says yes. <code>claimBatch</code>, the same for many holders at once, passing over a holder that cannot be paid now. <code>sweep</code>, after the expiry, which returns what is left to the funder.</td></tr>
       </tbody>
     </table>
   </div>

@@ -42,7 +42,7 @@ An EIP-712 typed message, shown to the investor field by field. Its domain is na
 | `assets` | The amount to pay. |
 | `minShares` | The least the investor accepts on a 4626. On a 7540 it must be zero. |
 | `asynchronous` | True for a 7540, where the entry files a request. False for a 4626, where it deposits. |
-| `nonce` | A random value the investor chooses, usable once per investor. |
+| `nonce` | A value the investor chooses, usable once per investor. It is kept as one bit, bit `nonce & 0xff` of word `nonce >> 8`, so nonces numbered one after the other share a storage slot, 256 to a slot. |
 | `validAfter`, `deadline` | The window, inclusive at both ends. A `validAfter` of zero means no lower bound. |
 
 ### Second: the cash

@@ -200,6 +200,16 @@ Further limits recorded during review:
   stack unless they hold those roles and neither the core's named accounts nor its timelocks hold another role there; it
   does not stop the admin granting a role later. Eligibility is an address's: the rule judges each address on its own record. Pinned by `CredentialRegistry.t.sol`,
   `CredentialRule.t.sol`, `test/nodejs/credentials.test.ts` and, for an external registry, `test/nodejs/products.test.ts`.
+- **`claimBatch` pays what it can and says what it could not.** Anyone may submit many holders' lines at once. A holder
+  already paid, one the token says may not receive, and one the asset refuses, as a gated cash token refuses an account it
+  does not accept, are passed over with an event and the last two stay unclaimed; a wrong proof or a line above the
+  funding reverts the batch. The payment is tried, and taken back in the books if the asset refuses it. An asset that
+  burns all the gas it is given still fails the whole transaction, and the asset is whatever the maker and the checker
+  agreed on. Pinned by `Distributor.t.sol::Distributor_ClaimBatch`.
+- **A nonce is one bit, and a signer's client chooses how they pack.** An intent's nonce and a signed entry's are kept
+  as bit `nonce & 0xff` of word `nonce >> 8`. Numbered one after the other, 256 nonces share a storage slot; chosen at
+  random, each takes its own, as before. Nothing forces a client to number them, so the saving in state is the
+  operator's to take. A cancelled nonce and a used one are the same bit.
 - **A fund counts investors by the entity an attester names, and only as well as the attester names it.** A record may
   carry an entity, an opaque number in its attester's numbering, and a fund built over the registry counts every holding
   address with the same attester and number as one investor. Four limits follow. The number is public, so it shows that
@@ -564,6 +574,7 @@ Each row is a bug deliberately planted, the tests that caught it, then the file 
 | `setRules` tells the rules it adds (2026-11-19) | the rules told after the list is stored; every rule told, not only the added ones; the fund rule accepting a rule of any fund | 7, 1 and 1 failing |
 | Entities (2026-11-19) | every address counted on its own; the key kept when the last class goes; a sender judged by its address alone; an exemption moving the count without the key; `rekey` always moving the count; the sender's side reading the registry; the receiver's investor ignored; the key without the attester; the entity kept when the attester writes zero | 13, 4, 3, 2, 3, 3, 5, 6 and 3 failing |
 | Halmos, the fund's count by key (2026-11-19) | `rekey` always moving the count; the key kept when an address stops being counted; an exemption moving the count without the key | 2 of the 3 symbolic properties fail on each |
+| Bitmap nonces and `claimBatch` (2026-11-19) | a whole word spent by one nonce, in the mixin and in the signed entry; the word ignored; the nonce never marked; a refused payment left as claimed; a holder already paid paid again; a bad proof passed over; the token's refusal ignored | 3 and 2, 11, 11, 1, 4, 1 and 1 failing |
 | `Gated721` (2026-11-05) | the burner's freeze exemption dropped; approval checked after the hook instead of before; `canTransfer` counting ownership; and, before the fix of the outside review's first point, a burn's pre-flight taking the holder as its operator | 1, 2, 1 and 3 failing |
 | Every product deployable alone or as a whole (2026-11-06) | a part already in the core not refused; an executor left with the deployer; no operator on an executor; the signed entry or the DvP executor left out of the parts; the distribution maker's grant missing or given to the checker; no checker without a desk; the distributor naming another address; `CoreHandover` skipping the parts | 10 planted, all caught |
 | Input checks in the deploy scripts (2026-11-07) | `CORE_HAS` naming nothing accepted, its entries not trimmed, an unknown key accepted, the credential registry or the implementation keys not known; executors allowed on any template or refused on a plain token only; decimals allowed on any template or refused on an intent token | 9 planted, all caught |

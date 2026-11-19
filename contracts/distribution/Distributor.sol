@@ -115,6 +115,25 @@ contract Distributor is IDistributor {
   }
 
   /// @inheritdoc IDistributor
+  function claimBatch(
+    uint256 _id,
+    address[] calldata _holders,
+    uint256[] calldata _amounts,
+    bytes32[][] calldata _proofs
+  ) external returns (uint256 _paid) {
+    uint256 _rows = _holders.length;
+    if (_amounts.length != _rows || _proofs.length != _rows) revert Distributor_InvalidValue();
+    Distribution storage _d = _distributions[_id];
+    if (!_d.approved) revert Distributor_NotApproved();
+    if (block.timestamp > _d.expiry) revert Distributor_Expired();
+    // One row cannot stop the others: a holder already paid, one the token refuses and one the asset refuses are
+    // passed over. The caller's own errors, a bad proof or a row above the funding, revert the batch.
+    for (uint256 _i; _i < _rows; ++_i) {
+      if (_claimRow(_d, _id, _holders[_i], _amounts[_i], _proofs[_i])) ++_paid;
+    }
+  }
+
+  /// @inheritdoc IDistributor
   function sweep(
     uint256 _id
   ) external {
@@ -132,6 +151,48 @@ contract Distributor is IDistributor {
     uint256 _id
   ) external view returns (Distribution memory _distribution) {
     _distribution = _distributions[_id];
+  }
+
+  /**
+   * @notice Pays one row of a batch, or passes it over
+   * @param _d The distribution
+   * @param _id Its id
+   * @param _holder The holder
+   * @param _amount Its share
+   * @param _proof The Merkle proof
+   * @return _paid True if the holder was paid
+   */
+  function _claimRow(
+    Distribution storage _d,
+    uint256 _id,
+    address _holder,
+    uint256 _amount,
+    bytes32[] calldata _proof
+  ) internal returns (bool _paid) {
+    bytes32 _leaf = keccak256(bytes.concat(keccak256(abi.encode(_holder, _amount))));
+    if (!MerkleProof.verifyCalldata(_proof, _d.root, _leaf)) revert Distributor_BadProof();
+    if (hasClaimed[_id][_holder]) {
+      emit DistributionClaimSkipped(_id, _holder, ClaimSkip.ALREADY_CLAIMED);
+      return false;
+    }
+    if (!IERC7943Fungible(TOKEN).canReceive(_holder)) {
+      emit DistributionClaimSkipped(_id, _holder, ClaimSkip.MAY_NOT_RECEIVE);
+      return false;
+    }
+    if (_amount > _d.total - _d.claimed) revert Distributor_OverFunding();
+
+    // Recorded before the payment, and taken back if the asset refuses it: a refused payment reverted inside the
+    // asset, so nothing it did there stands.
+    hasClaimed[_id][_holder] = true;
+    _d.claimed += _amount;
+    _paid = _d.asset.trySafeTransfer(_holder, _amount);
+    if (_paid) {
+      emit DistributionClaimed(_id, _holder, _amount);
+    } else {
+      hasClaimed[_id][_holder] = false;
+      _d.claimed -= _amount;
+      emit DistributionClaimSkipped(_id, _holder, ClaimSkip.PAYMENT_FAILED);
+    }
   }
 
   /**

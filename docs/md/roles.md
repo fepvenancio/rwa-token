@@ -132,7 +132,7 @@ These have no role table of their own, and none is a proxy. Each names its vault
 |  | Any account | `closePeriod`, once `periodLength` has passed. `execute`, after acceptance and the `cooldown`, with a report no older than `maxReportAge`. The desk acts on the vault through its own `SETTLER_ROLE`, which `isWired()` reports. |
 | [`Distributor`](contracts/Distributor.md)<br>asks its token; `Distributor_Unauthorized` | `DISTRIBUTION_MAKER_ROLE` | `propose` |
 |  | `CHECKER_ROLE` | `approve`, but not a distribution the same account proposed (`Distributor_SelfApproval`). Approving pulls the funding. |
-|  | Any account | `claim`, which pays the holder a proof names, if the token's `canReceive` says yes. `sweep`, after the expiry, which returns what is left to the funder. |
+|  | Any account | `claim`, which pays the holder a proof names, if the token's `canReceive` says yes. `claimBatch`, the same for many holders at once, passing over a holder that cannot be paid now. `sweep`, after the expiry, which returns what is left to the funder. |
 
 `CHECKER_ROLE` is the same role id on `NavDesk` and `Distributor`. On a vault that has both, one holder can check both prices and distributions.
 

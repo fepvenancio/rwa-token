@@ -335,6 +335,38 @@ contract SignedEntry_Permit is SignedEntryTest {
     _router.cancelEntry(_nonce);
   }
 
+  /// @dev A nonce is one bit of a word, so 256 nonces numbered one after the other take one storage slot
+  function test_WhenAnInvestorUsesTheNoncesOfOneWord_TheyShareOneStorageSlot() external {
+    uint256 _word = uint256(keccak256('a word')) << 8;
+    vm.record();
+    vm.startPrank(_investor);
+    for (uint256 _bit; _bit < 256; ++_bit) {
+      _router.cancelEntry(bytes32(_word | _bit));
+    }
+    vm.stopPrank();
+    (, bytes32[] memory _writes) = vm.accesses(address(_router));
+    assertEq(_writes.length, 256);
+    for (uint256 _i = 1; _i < _writes.length; ++_i) {
+      assertEq(_writes[_i], _writes[0], 'one slot for the whole word');
+    }
+  }
+
+  function testFuzz_WhenANonceIsUsed_NoOtherNonceIs(
+    bytes32 _nonce,
+    uint8 _otherBit
+  ) external {
+    vm.prank(_investor);
+    _router.cancelEntry(_nonce);
+    assertTrue(_router.nonceUsed(_investor, _nonce));
+    uint256 _n = uint256(_nonce);
+    uint256 _neighbour = (_n & ~uint256(0xff)) | _otherBit;
+    if (_neighbour != _n) assertFalse(_router.nonceUsed(_investor, bytes32(_neighbour)), 'another bit of the word');
+    unchecked {
+      assertFalse(_router.nonceUsed(_investor, bytes32(_n + 256)), 'the same bit of the next word');
+    }
+    assertFalse(_router.nonceUsed(_stranger, _nonce), 'another investor');
+  }
+
   function testFuzz_SomeoneElseCancellingDoesNothing(
     address _caller
   ) external {

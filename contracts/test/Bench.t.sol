@@ -126,6 +126,87 @@ contract Bench_FundClass is FundEntitiesTest, BenchReport {
     _report('distribution: claim', _gas);
   }
 
+  /// @dev A hundred holders, each with a credential, paid once row by row and once in a batch. The first number is
+  ///      the sum of the hundred calls, without the loop around them
+  function test_DistributionToAHundred() external {
+    _fourRulesAndTwoHolders();
+    Distributor _distributor = new Distributor(address(_classA));
+    MockAsset _money = new MockAsset(6);
+    _classA.grantRole(_distributor.DISTRIBUTION_MAKER_ROLE(), _agent);
+    _classA.grantRole(_distributor.CHECKER_ROLE(), _stranger);
+    address[] memory _holders = new address[](100);
+    uint256[] memory _amounts = new uint256[](100);
+    bytes32[] memory _leaves = new bytes32[](100);
+    for (uint256 _i; _i < 100; ++_i) {
+      _holders[_i] = address(uint160(0x5000 + _i));
+      _amounts[_i] = 10;
+      _leaves[_i] = _leaf(_holders[_i], 10);
+      _cred(_holders[_i], 0);
+    }
+    (bytes32 _root, bytes32[][] memory _proofs) = _tree(_leaves);
+    _money.mint(_minter, 2000);
+    vm.prank(_minter);
+    _money.approve(address(_distributor), 2000);
+    uint256[2] memory _ids;
+    for (uint256 _i; _i < 2; ++_i) {
+      vm.prank(_agent);
+      _ids[_i] = _distributor.propose(_root, IERC20(address(_money)), 1000, uint64(block.timestamp + 30 days), _minter);
+      vm.prank(_stranger);
+      _distributor.approve(_ids[_i]);
+    }
+
+    uint256 _first = _ids[0];
+    uint256 _sum;
+    vm.startStateDiffRecording();
+    for (uint256 _i; _i < 100; ++_i) {
+      uint256 _each = gasleft();
+      _distributor.claim(_first, _holders[_i], 10, _proofs[_i]);
+      _sum += _each - gasleft();
+    }
+    _report('distribution: 100 claims, one by one', _sum);
+
+    uint256 _second = _ids[1];
+    vm.startStateDiffRecording();
+    uint256 _gas = gasleft();
+    _distributor.claimBatch(_second, _holders, _amounts, _proofs);
+    _gas -= gasleft();
+    _report('distribution: claimBatch, 100 holders', _gas);
+  }
+
+  /// @dev A Merkle tree over the leaves with sorted pairs, as `MerkleProof` reads it. A node with no sibling moves up
+  function _tree(
+    bytes32[] memory _leaves
+  ) internal pure returns (bytes32 _treeRoot, bytes32[][] memory _proofs) {
+    uint256 _count = _leaves.length;
+    _proofs = new bytes32[][](_count);
+    uint256[] memory _position = new uint256[](_count);
+    for (uint256 _i; _i < _count; ++_i) {
+      _position[_i] = _i;
+    }
+    bytes32[] memory _level = _leaves;
+    while (_level.length > 1) {
+      bytes32[] memory _next = new bytes32[]((_level.length + 1) / 2);
+      for (uint256 _i; _i < _count; ++_i) {
+        uint256 _sibling = _position[_i] ^ 1;
+        if (_sibling < _level.length) {
+          bytes32[] memory _longer = new bytes32[](_proofs[_i].length + 1);
+          for (uint256 _k; _k < _proofs[_i].length; ++_k) {
+            _longer[_k] = _proofs[_i][_k];
+          }
+          _longer[_proofs[_i].length] = _level[_sibling];
+          _proofs[_i] = _longer;
+        }
+        _position[_i] /= 2;
+      }
+      for (uint256 _j; _j < _next.length; ++_j) {
+        _next[_j] =
+          2 * _j + 1 < _level.length ? Hashes.commutativeKeccak256(_level[2 * _j], _level[2 * _j + 1]) : _level[2 * _j];
+      }
+      _level = _next;
+    }
+    _treeRoot = _level[0];
+  }
+
   function _fourRulesAndTwoHolders() internal {
     MinPositionRule _minPositionRule = new MinPositionRule();
     HolderRestrictionRule _restrictionRule = new HolderRestrictionRule();
