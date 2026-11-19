@@ -24,7 +24,10 @@ PolicyGatedCoreUpgradeable         core: roles, guardian and recovery, pause, ho
         │   IntentToken (+ IntentSettledUpgradeable)  holder-signed EIP-712 TransferIntent, settled by EXECUTOR_ROLE
         │   Gated4626Vault (ERC-4626, gated max*, decimals offset 6), Gated7540Vault (ERC-7540 async, dealt in periods, escrow, settled by a NavDesk)
         │
-        └── Gated721                      ERC-721, a metadata URI per token; ERC-7943 freeze per account and token
+        ├── Gated721                      ERC-721, a metadata URI per token; ERC-7943 freeze per account and token
+        │
+        └── Gated1155                     ERC-1155, a supply and a URI per token id; ERC-7943 frozen amount per account and id;
+                                          a batch is its items in order, each one checked, moved and reported on its own
 
 ComplianceHook (one per deployment, immutable) ──► per token, an ordered list of ≤16 attested IComplianceRule (first
                                                  rejection wins); a token installs its own list when it is initialised
@@ -49,12 +52,12 @@ Distributor (one per token, immutable)           pays holders from an approved, 
 
 | Path | Contents |
 |---|---|
-| `contracts/interfaces/` | Frozen ABI: `IPolicyGatedCore`, `IPolicyGated`, `IERC7943Fungible`, `IERC7943NonFungible`, `IGated721`, `ITemplated`, `IERC8473`, `IERC8473Policy`, `IComplianceRule`, `IComplianceHook`, `IPolicyRegistry`, `ITransferIntent`, `IIntentExecutor`, `IIntentExecutorBatch`, `IDvPExecutor`, `IERC3009`, `IIdentityRegistry`, `ICredentialRegistry`, `ICredentialRule`, `Quals`, `IMinPositionRule`, `IHolderRestrictionRule`, `ISettlementWindowRule`, `ISupplyCapRule`, `IExecutedOnlyRule`, `IFund`, `IFundHoldersRule`, `IProxyDeployer`, `IGovernanceTimelock`, `IGatedVaultBase`, `IGated4626Vault`, `IGated7540Vault`, `IPortfolio`, `IAdapter`, `IERC4626Adapter`, `IGuardedAccount`, `ICallValidator`, `IERC20CallValidator`, `INavDesk`, `IFeeModel`, `ISignedEntry`, `IDistributor`, `IERC7540Operator` / `IERC7540Deposit` / `IERC7540Redeem` / `IERC7575` (spec-exact ids), `Errors.sol` (reason codes) |
+| `contracts/interfaces/` | Frozen ABI: `IPolicyGatedCore`, `IPolicyGated`, `IERC7943Fungible`, `IERC7943NonFungible`, `IERC7943MultiToken`, `IGated721`, `IGated1155`, `ITemplated`, `IERC8473`, `IERC8473Policy`, `IComplianceRule`, `IComplianceHook`, `IPolicyRegistry`, `ITransferIntent`, `IIntentExecutor`, `IIntentExecutorBatch`, `IDvPExecutor`, `IERC3009`, `IIdentityRegistry`, `ICredentialRegistry`, `ICredentialRule`, `Quals`, `IMinPositionRule`, `IHolderRestrictionRule`, `ISettlementWindowRule`, `ISupplyCapRule`, `IExecutedOnlyRule`, `IFund`, `IFundHoldersRule`, `IProxyDeployer`, `IGovernanceTimelock`, `IGatedVaultBase`, `IGated4626Vault`, `IGated7540Vault`, `IPortfolio`, `IAdapter`, `IERC4626Adapter`, `IGuardedAccount`, `ICallValidator`, `IERC20CallValidator`, `INavDesk`, `IFeeModel`, `ISignedEntry`, `IDistributor`, `IERC7540Operator` / `IERC7540Deposit` / `IERC7540Redeem` / `IERC7575` (spec-exact ids), `Errors.sol` (reason codes) |
 | `contracts/base/` | `PolicyGatedCoreUpgradeable`, `PolicyGatedERC20Upgradeable` |
 | `contracts/governance/` | `PolicyRegistry`, `GovernanceTimelock` |
 | `contracts/identity/` | `CredentialRegistry` |
 | `contracts/deploy/` | `ProxyDeployer`, `TokenProxy` |
-| `contracts/mixins/`, `contracts/tokens/` | `IntentSettledUpgradeable`, `GatedToken`, `IntentToken`, `Gated721` |
+| `contracts/mixins/`, `contracts/tokens/` | `IntentSettledUpgradeable`, `GatedToken`, `IntentToken`, `Gated721`, `Gated1155` |
 | `contracts/hooks/` | `ComplianceHook`, `BaseRule`, `rules/` `CredentialRule`, `MinPositionRule`, `HolderRestrictionRule`, `SettlementWindowRule`, `FundHoldersRule` (in the recommended order), `SupplyCapRule`, `ExecutedOnlyRule` |
 | `contracts/fund/` | `Fund` |
 | `contracts/portfolio/` | `Portfolio`, `ERC4626Adapter`, `GuardedAccount`, `ERC20CallValidator`, `ERC4626CallValidator`: where one vault's money may go |
@@ -154,7 +157,7 @@ two run the same code.
 One core per issuer, then one product at a time, so an issuer runs many products on one set of timelocks, one guardian, one
 hook and one credential registry, and a client is verified once. A core may instead read an existing credential registry,
 another issuer's (**Using an existing credential registry**, below). Someone who wants one product alone deploys the core and
-that product, with the same code. `ignition/profiles.ts` names the combinations: `token`, `nft` (one ERC-721, a certificate or a note per token), `intent` (one intent token with both executors), `vault4626`, `vault7540` (a fund with one custodian and a desk),
+that product, with the same code. `ignition/profiles.ts` names the combinations: `token`, `nft` (one ERC-721, a certificate or a note per token), `multi` (one ERC-1155, several series of one instrument), `intent` (one intent token with both executors), `vault4626`, `vault7540` (a fund with one custodian and a desk),
 `managed-fund` (custodians, a mandate and fees, no on-chain yield), `vault4626-invest` (an instant vault investing through a
 portfolio), and `full`, which keeps a plain settler account so that a test can price at will.
 `PROFILE` chooses one for `hardhat ignition deploy`, and `PRODUCT` one of its products; `full` and its first product are the
@@ -266,7 +269,7 @@ exact sequence on the local network, playing the council and the KYC attester, a
      fund's rule as the parameter `fundHoldersRule`, but never touches the fund, so a launch cannot fail on one. Nothing is set
      for the escrow: the 7540 vault is the token itself, which neither the fund rule nor the minimum counts;
    - grant roles: AGENT to the issuer's account, **UPGRADER to the timelock only**, RECOVERY to the recovery timelock; MINTER and
-     BURNER on a `GatedToken`, `IntentToken` or `Gated721`; EXECUTOR on an `IntentToken` to the executors the product names; SETTLER on a
+     BURNER on a `GatedToken`, `IntentToken`, `Gated721` or `Gated1155`; EXECUTOR on an `IntentToken` to the executors the product names; SETTLER on a
      7540 vault to its `NavDesk`, and REPORTER and CHECKER to two different accounts; ALLOCATOR on a vault with a portfolio to
      the fund manager; with a distributor, DISTRIBUTION_MAKER to the `distributionMaker` account and CHECKER to the `checker`,
      the same account that approves a desk's prices;
@@ -409,8 +412,8 @@ The brief is in [`CLAUDE.md`](CLAUDE.md). Where the code intentionally differs, 
 - **`canTransferWithReason` scope.** It, and the boolean `canTransfer`, model holder-driven movements, with the operator
   set to `from`, which is zero for a mint, so the answer does not depend on who asks. A simulated burn is a holder's
   and respects frozen tokens. The enforcement paths `burn` and `forcedTransfer` are FORCED: they release frozen tokens
-  first, the pause does not stop them, and no pre-flight predicts them. `Gated721` has no holder burn, so a burn asked
-  about there is answered as a holder's would be, although `burn` takes a frozen token.
+  first, the pause does not stop them, and no pre-flight predicts them. `Gated721` and `Gated1155` have no holder burn, so a burn
+  asked about there is answered as a holder's would be, although `burn` takes frozen tokens.
 - **Duplicate rules.** A duplicate `ruleId` reuses `ComplianceHook_DuplicateRule`, so the frozen ABI is unchanged.
 - **7540 operators are full delegates** (review L-5, owner decision): the code follows ERC-7540, so an approved
   operator can also create requests that pull the owner's assets or shares under any controller. Owners should approve

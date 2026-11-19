@@ -4291,7 +4291,7 @@ contracts identical. `md_check.py`: 44 pages, 0 problems.
 sentences and sizes corrected, so anything wrong there is wrong here. They were not opened in a browser on this
 branch. The footers name `01024e9` on `main`, the squash of this port (#49), re-pinned after the merge.
 
-## The multi-token template, `Gated1155` (plan, 2026-11-19, nothing built)
+## The multi-token template, `Gated1155` (planned and built on `main` 2026-11-19; the port to `paris` and the pages are not done)
 
 Source: the owner, 2026-11-19: "lets plan to build a Gated1155 I saw 7943 has a IERC7943MultiToken". Derived from the code at `38fdbc1` on `main`, ERC-7943's Final text, the ERC-8473 draft's movement rules and OpenZeppelin 5.6.1's `ERC1155Upgradeable`. Nothing is built. The six decisions the first version of this plan left open are settled below, from the two standards.
 
@@ -4429,6 +4429,18 @@ Planted bugs, each to be caught by a test: the unfrozen check skipped for the se
 - Intents, DvP and vaults over a multi-token. `DvPExecutor` settles ERC-20 legs only.
 - ERC-6909 as the base. ERC-7943 allows it, and it is the lighter standard, with no callbacks and no batches; the owner asked for ERC-1155.
 - A fund whose classes are ids of one contract. `Fund` counts investors across separate tokens, and a class as an id would need the fund layer rewritten.
+
+### As built on `main` (2026-11-19)
+
+The owner approved the plan on 2026-11-19 ("Yes, start"). Steps 1 to 5 are done on this line; steps 6 and 7 are not.
+
+- **Step 1, the texts.** ERC-7943 and ERC-1155 were read in their own text. Two details differed from the summary the plan was written from, and the interface follows the text: `tokenId` is indexed in `ForcedTransfer` and in `Frozen`, and `ERC7943CannotTransfer` carries the amount. D4 stands: ERC-1155 says a mint is a specialised transfer that follows the receiver rules, and that a non-standard transfer function follows them too when the receiver implements the interface and SHOULD revert when it does not, which is what `mint` and `forcedTransfer` do. A batch may emit several `TransferSingle`, and the batch callback is the one the text recommends for a batch.
+- **Interfaces.** `IERC7943MultiToken` (`0x41c4fbad`, which solc computes from the file) and `IGated1155` (`0xc12446d8`: mint, burn, setURI, name, symbol, canTransferWithReason). Three new topics pinned. No existing id or topic moved. The freeze test failed on the unpinned values and passes with them.
+- **The token.** `contracts/tokens/Gated1155.sol`, 15,700 bytes. As planned, with nothing added: `ERC1155SupplyUpgradeable`, `ERC1155URIStorageUpgradeable` and the core; `_update` loops the items through one guarded `_move`.
+- **Tests.** `Gated1155.t.sol`, 95 tests: 85 unit with a mocked or a recording policy, 2 invariants and 8 through the real hook, `CredentialRule` and `HolderRestrictionRule`, deployed by `ProxyDeployer`. Against a stub with no checks 56 of the first 94 failed. The fuzz of `canTransfer` against `canSend` and `canReceive` is in this file, for this template, and `RuleSetIntegration.t.sol` is unchanged.
+- **Planted bugs.** The items of a batch after the first moved without any check; `afterTransfer` for the last item of a batch only; the frozen amount lowered after the transfer event; `canTransfer` counting the balance: 7, 4, 3 and 3 tests fail.
+- **Deployment.** Template `Gated1155`, part `multiImpl`, profile `multi`. The profile check refuses `fundHoldersRule` and `supplyCapRule` on it, and `windowRule` and `executedOnlyRule` as on every template without intents; `minPositionRule` is allowed. `products.test.ts` deploys the profile, moves a batch and checks the refusals, and the test that deploys every profile covers its hand-over check.
+- **Not done.** Halmos has no property for this template: the existing harness models the proxied `IntentToken`, and a frozen-amount property here needs a model of its own. The port to `paris` (step 6) and the pages with their Markdown copies (step 7) follow.
 
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
