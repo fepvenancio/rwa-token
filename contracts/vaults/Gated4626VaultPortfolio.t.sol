@@ -93,8 +93,8 @@ abstract contract Gated4626VaultPortfolioTest is Test {
     );
     _rule.setPolicy(address(_vault), Quals.KYC, 0, 0, 1);
     _vault.grantRole(_ALLOCATOR_ROLE, _allocator);
-    _creds.set(_alice, uint64(block.timestamp + 3650 days), Quals.KYC);
-    _creds.set(_bob, uint64(block.timestamp + 3650 days), Quals.KYC);
+    _creds.set(_alice, uint64(block.timestamp + 3650 days), Quals.KYC, 0);
+    _creds.set(_bob, uint64(block.timestamp + 3650 days), Quals.KYC, 0);
 
     address[2] memory _accounts = [_alice, _bob];
     for (uint256 _i; _i < 2; ++_i) {
@@ -688,7 +688,7 @@ contract Gated4626VaultPortfolio_Counting is Gated4626VaultPortfolioTest {
     _vault.setMaxRate(bound(_rate, 0, _MAX_RATE));
     _asset.mint(address(_portfolio), _IN);
     vm.warp(block.timestamp + bound(_elapsed, 0, 1000 * _YEAR));
-    _creds.set(_bob, uint64(block.timestamp + 3650 days), Quals.KYC);
+    _creds.set(_bob, uint64(block.timestamp + 3650 days), Quals.KYC, 0);
     _vault.totalAssets();
     _deposit(_bob, 1e6);
     vm.prank(_bob);

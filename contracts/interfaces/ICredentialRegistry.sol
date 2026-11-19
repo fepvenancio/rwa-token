@@ -44,6 +44,8 @@ interface ICredentialRegistry {
    * @param attester The id of the attester that wrote the record
    * @param issuedAt When the attester issued the record. Only ever rises for one address
    * @param guardianBlock Set by the guardian. Cleared only by `clearGuardianBlock`
+   * @param entity The investor the address belongs to, as the attester numbers its investors; zero when the address
+   *        stands alone. An opaque number: it says that two addresses are one investor, never who
    */
   struct Record {
     uint64 validUntil;
@@ -52,6 +54,7 @@ interface ICredentialRegistry {
     uint8 attester;
     uint64 issuedAt;
     bool guardianBlock;
+    uint48 entity;
   }
 
   /**
@@ -73,6 +76,7 @@ interface ICredentialRegistry {
    * @param quals The qualification bits
    * @param issuedAt When the attester issued it; strictly above the stored value and not in the future
    * @param attester The id of the signing attester
+   * @param entity The investor the address belongs to, in the attester's own numbering; zero for none
    */
   struct Credential {
     address subject;
@@ -80,6 +84,7 @@ interface ICredentialRegistry {
     uint32 quals;
     uint64 issuedAt;
     uint8 attester;
+    uint48 entity;
   }
 
   /*///////////////////////////////////////////////////////////////
@@ -93,9 +98,15 @@ interface ICredentialRegistry {
    * @param _validUntil Unix seconds
    * @param _quals The qualification bits
    * @param _issuedAt When the record was issued
+   * @param _entity The investor the address belongs to, in the attester's numbering; zero for none
    */
   event CredentialSet(
-    address indexed _subject, uint8 indexed _attester, uint64 _validUntil, uint32 _quals, uint64 _issuedAt
+    address indexed _subject,
+    uint8 indexed _attester,
+    uint64 _validUntil,
+    uint32 _quals,
+    uint64 _issuedAt,
+    uint48 _entity
   );
 
   /**
@@ -319,15 +330,18 @@ interface ICredentialRegistry {
    * @notice Writes a record as `ACTIVE`, directly
    * @dev Only an active attester, `issuedAt` is `block.timestamp`. `_quals` must be within the attester's allowed bits
    *      and `_validUntil` in the future. An attester may overwrite a record only if the address has none, the same
-   *      attester wrote it, or the attester that wrote it is killed. A guardian block is kept
+   *      attester wrote it, or the attester that wrote it is killed. A guardian block is kept. The entity is written
+   *      as given, so writing zero unlinks the address
    * @param _subject The address
    * @param _validUntil Unix seconds
    * @param _quals The qualification bits
+   * @param _entity The investor the address belongs to, in the caller's own numbering; zero for none
    */
   function set(
     address _subject,
     uint64 _validUntil,
-    uint32 _quals
+    uint32 _quals,
+    uint48 _entity
   ) external;
 
   /**
@@ -399,6 +413,19 @@ interface ICredentialRegistry {
   function credentialHash(
     Credential calldata _credential
   ) external view returns (bytes32 _hash);
+
+  /**
+   * @notice The key of the investor an address belongs to, from the stored record whatever its standing
+   * @dev Zero when the address has no record or its record names no entity: the address stands alone. Otherwise the
+   *      attester's id in the top 8 bits and its entity number in the low 48, so two attesters' numbers never
+   *      collide. A lapsed, exit-only or blocked record keeps its key: a count kept by key must not move because a
+   *      credential expired
+   * @param _subject The address
+   * @return _key The key, or zero
+   */
+  function entityKeyOf(
+    address _subject
+  ) external view returns (uint56 _key);
 
   /**
    * @notice The effective standing of an address, resolved now

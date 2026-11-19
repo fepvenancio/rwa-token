@@ -68,7 +68,7 @@ abstract contract SignedEntryTest is Test {
   function _credential(
     address _who
   ) internal {
-    _creds.set(_who, uint64(block.timestamp + 3650 days), Quals.KYC);
+    _creds.set(_who, uint64(block.timestamp + 3650 days), Quals.KYC, 0);
   }
 
   function _rules() internal view returns (IComplianceRule[] memory _list) {
@@ -490,7 +490,7 @@ contract SignedEntry_ExitsNeedNoLego is SignedEntryTest {
 
   function test_ARelayerFilesARedemptionOnAHoldersSignature() external {
     Gated7540Vault _vault = _vault7540(address(_asset));
-    _creds.set(_investor, uint64(block.timestamp + 3650 days), Quals.KYC);
+    _creds.set(_investor, uint64(block.timestamp + 3650 days), Quals.KYC, 0);
     vm.prank(_investor);
     _asset.approve(address(_vault), _ASSETS);
     vm.prank(_investor);

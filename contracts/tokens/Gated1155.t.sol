@@ -1518,8 +1518,8 @@ contract Gated1155IntegrationTest is Test {
     _series.grantRole(_series.AGENT_ROLE(), _agent);
 
     vm.startPrank(_kyc);
-    _creds.set(_alice, uint64(block.timestamp + 365 days), Quals.KYC);
-    _creds.set(_bob, uint64(block.timestamp + 365 days), Quals.KYC);
+    _creds.set(_alice, uint64(block.timestamp + 365 days), Quals.KYC, 0);
+    _creds.set(_bob, uint64(block.timestamp + 365 days), Quals.KYC, 0);
     vm.stopPrank();
     vm.startPrank(_minter);
     _series.mint(_alice, _ID, 100);

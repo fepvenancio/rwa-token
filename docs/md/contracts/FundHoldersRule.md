@@ -18,30 +18,33 @@ The fund-wide investor cap. It lets a new investor into a class of a fund only w
 >
 > A fund may be allowed only so many investors, counted across all its share classes. In the demo deployment this rule is the last one listed on every class of the fund. Before a movement it asks the [Fund](Fund.md) one question: would the receiver be a new investor, and if so, is there room? After the movement it tells the fund that someone has stopped holding a class, or has started.
 >
-> The count and the cap live in the fund, not in the rule, so the rule can be replaced without losing the count. An investor already in the fund is not refused for the cap, whichever class it moves into, and the issuer's forced transfers are not capped. A token that is not a registered class of the fund cannot move at all.
+> The count and the cap live in the fund, not in the rule, so the rule can be replaced without losing the count. An investor already in the fund is not refused for the cap, whichever class it moves into and whichever of its addresses receives, when the credential registry the fund reads gives those addresses one entity. The issuer's forced transfers are not capped. A token that is not a registered class of the fund cannot move at all.
 
 <a id="how"></a>
 ## How a movement is decided
 
-`check(ctx)` reads the fund once, with `admission(token, to)`, which returns the token's class number, the receiver's class mask and exempt flag, the count, the cap and the fund's installed rule. Only at a full fund does it read the fund a second time, for the sender. The balances before the move come from the context the token built (`data`), not from the token.
+`check(ctx)` reads the fund once, with `admission(token, to)`, which returns the token's class number, the receiver's class mask and exempt flag, the count, the cap and the fund's installed rule. For a receiver that holds no class and is not exempt it then asks `countedWith(to)`, whether the receiver's investor is already counted through another address. Only at a full fund does it read the fund for the sender, with `admission` and then `countedWith(from)`. The balances before the move come from the context the token built (`data`), not from the token.
 
-> **Diagram.** The check, in order. 1: if the token is not a registered class of the fund, or this rule is not the fund's installed rule, NOT_FUND_CLASS. 2: if the receiver is not a new investor (zero amount, a move to oneself, a burn, FORCED, a move to the class itself, to an exempt account, or to an account that already holds any class), TRANSFER_OK. 3: if the cap is 0, MAX_HOLDERS. 4: if the count is below the cap, TRANSFER_OK. 5: if the count equals the cap and the move takes all of the sender's only class, TRANSFER_OK. Otherwise MAX_HOLDERS, which includes any new investor while the count is above the cap.
+> **Diagram.** The check, in order. 1: if the token is not a registered class of the fund, or this rule is not the fund's installed rule, NOT_FUND_CLASS. 2: if the receiver is not a new investor (zero amount, a move to oneself, a burn, FORCED, a move to the class itself, to an exempt account, to an account that already holds any class, or to an account whose investor is already counted through another address), TRANSFER_OK. 3: if the cap is 0, MAX_HOLDERS. 4: if the count is below the cap, TRANSFER_OK. 5: if the count equals the cap and the sender's investor leaves the fund with this move, TRANSFER_OK. Otherwise MAX_HOLDERS, which includes any new investor while the count is above the cap.
 >
 > **Only a new investor is counted against the cap.** Step 2 lets through every move that cannot add an investor, and forced transfers, which can but are exempt, so trades between existing investors, exits and enforcement do not meet the cap. Red boxes are refusals, which the token turns into `ERC8473PolicyRejected(reason)`.
 
 1. **Wrong fund or wrong rule: refuse everything.** A token that is not a registered class of the fund, or a rule that the fund has replaced, answers `NOT_FUND_CLASS` for every movement, zero amounts, burns and forced transfers included. So a retired rule does not say yes in a pre-flight while its write would be refused, and a class cannot hold a balance before the fund records it.
-2. **Who is a new investor.** A receiver that holds no class of the fund and is not exempt, receiving a non-zero amount from someone else. The class token itself is not one: `Gated7540Vault` keeps the shares of pending redemptions at its own address.
+2. **Who is a new investor.** A receiver that holds no class of the fund and is not exempt, receiving a non-zero amount from someone else, and whose investor is not already counted: `Fund.countedWith(to)` is zero. That is so for an address with no entity, and for the first address of an entity to hold. Another address of an entity the fund already counts is not a new investor: it is admitted at a full fund, above a lowered cap and with a cap of 0 (`test_WhenTheReceiversInvestorIsAlreadyCounted_ItIsAdmittedAtAFullCapAndWithNoCap`, `test_WhenTheFundIsFull_AnotherAddressOfAnInvestorIsAdmittedAndAStrangerIsNot`). So a transfer between two addresses of one entity is not capped (`test_WhenTheFundIsFull_ATransferBetweenTwoAddressesOfOneEntityPasses`). The class token itself is not one: `Gated7540Vault` keeps the shares of pending redemptions at its own address.
 3. **Room, or a free slot.** Below the cap a new investor passes. At the cap it passes only by the net-zero case below.
 4. **Above a lowered cap, nobody new.** When the owner lowers the cap below the count, no new investor is admitted, even by a move that would be net zero, until the count is back down. Existing investors can still trade among themselves and leave.
 
 <a id="net-zero"></a>
 ## The net-zero case at a full cap
 
-When the count equals the cap, a new investor is admitted if the sender stops being an investor in the same move, because one goes out and one comes in. All of these must hold: there is a sender, the sender is not the class itself, it is not exempt, this is the only class it holds, and the amount is its whole balance in that class.
+When the count equals the cap, a new investor is admitted if the sender stops being an investor in the same move, because one goes out and one comes in. All of these must hold: there is a sender, the sender is not the class itself, it is not exempt, this is the only class it holds, the amount is its whole balance in that class, and it is the last counted address of its investor (`Fund.countedWith(from)` is one). The address leaving is not enough when another address of its entity still holds.
+
+The two sides are read differently. The receiver is judged by the key the credential registry gives it at that moment, because `join` will count it under that key. The sender is judged by the key it was counted under, because `leave` lowers that one. So when an attester has changed a sender's entity and nobody has called `Fund.rekey` yet, the pre-flight and the write still agree (`test_WhenTheRegistryUnlinksASenderAndNobodyRekeys_TheDecisionStillFollowsTheCount`, `test_WhenTheRegistryLinksASenderAndNobodyRekeys_ItStillLeavesAsItWasCounted`).
 
 | At a full cap, a move to a new investor where | Answer | Why |
 |---|---|---|
-| the sender holds only this class and moves all of it | `TRANSFER_OK` | one out, one in |
+| the sender holds only this class, moves all of it, and no other address of its entity is counted | `TRANSFER_OK` | one out, one in |
+| the sender holds only this class and moves all of it, while another address of its entity holds a class | `MAX_HOLDERS` | the address leaves, its investor does not |
 | the sender keeps part of its balance | `MAX_HOLDERS` | it stays an investor |
 | the sender moves all of this class but holds another | `MAX_HOLDERS` | it stays an investor |
 | the sender is exempt | `MAX_HOLDERS` | it was not counted, so it frees no slot |
@@ -55,7 +58,7 @@ Every kind first meets the class check of step 1, with `NOT_FUND_CLASS` for a to
 
 | Kind | The cap | Recorded after the move |
 |---|---|---|
-| TRANSFER | applies to a new investor, net of a sender who leaves the fund | the sender leaves the class if it moved all of it; the receiver joins if it held none of it |
+| TRANSFER | applies to a new investor, net of a sender who leaves the fund | the sender leaves the class if it moved all of it; the receiver joins if it held none of it. The fund works out what that does to the count |
 | EXECUTED | the same as a transfer | the same as a transfer |
 | FORCED | not applied: enforcement is exempt | both sides, so the count can end above the cap; after the burner's `burn`, which has no receiver, the sender leaves if all of it was burnt |
 | MINT | applies to a new investor; a mint has no sender to free a slot | the receiver joins |
@@ -75,7 +78,8 @@ The rule's `wantsAfter()` is true, so the hook calls its `after_` once the balan
 1. **Nothing to record.** After the hook check, a zero amount or a move to oneself returns without touching the fund.
 2. **The sender leaves.** `leave` is called when `from` is not the zero address, so a mint leaves nobody, and the amount equals the sender's whole balance before the move.
 3. **The receiver joins.** `join` is called when `to` is not the zero address, so a burn joins nobody, and the receiver's balance before the move was zero. Both balances come from `data`, which the token built before the balances moved.
-4. **The fund's own checks.** `join` and `leave` revert unless the caller is the fund's installed rule (`Fund_OnlyRule`) and the token is a registered class (`Fund_NotAClass`); a revert there undoes the whole movement. A class joining itself, such as shares going into the 7540 escrow, is ignored, and a leave for it changes nothing.
+4. **The fund keeps the count.** The rule reports classes and addresses. The fund decides whether a leave ends an investor or a join starts one, from the entity key of each address ([Investors, not addresses](Fund.md#entities)).
+5. **The fund's own checks.** `join` and `leave` revert unless the caller is the fund's installed rule (`Fund_OnlyRule`) and the token is a registered class (`Fund_NotAClass`); a revert there undoes the whole movement. A class joining itself, such as shares going into the 7540 escrow, is ignored, and a leave for it changes nothing.
 
 <a id="account-checks"></a>
 ## The account questions answer the class check alone
@@ -90,7 +94,7 @@ So at a full fund, `canReceive` is still true for a new investor, while a mint o
 | Code | When |
 |---|---|
 | `NOT_FUND_CLASS` | The token is not a registered class of this rule's fund, or the fund's installed rule is another one. Every movement, every kind, any amount. |
-| `MAX_HOLDERS` | A new investor while the cap is 0, or while the count is at the cap and the move is not net zero, or while the count is above the cap. |
+| `MAX_HOLDERS` | A new investor while the cap is 0, or while the count is at the cap and the move is not net zero, or while the count is above the cap. An address whose investor the fund already counts is not a new investor. |
 
 <a id="config"></a>
 ## Who configures it, and what happens before they do
@@ -133,27 +137,29 @@ A class is set up with no supply, so its first installation passes. A class that
 <a id="why"></a>
 ## Why it is built this way
 
-- **The investor count that matters is fund-wide.** One investor in three classes is one investor. A record shared by all the classes is what can see that, so the count lives in `Fund` and each class lists this one rule.
+- **The investor count that matters is fund-wide.** One investor in three classes is one investor, and so is one investor with three addresses. A record shared by all the classes is what can see that, so the count lives in `Fund`, which reads each address's entity from the credential registry, and each class lists this one rule.
 - **State in the fund, policy in the rule.** The rule can be replaced without losing the count. [`BaseRule`](BaseRule.md) accepts whichever hook a token names, which is safe for state kept per token and not for a count shared by tokens, so the fund adds its own gate: it takes writes from the installed rule, for registered classes.
 - **Fail closed on a mismatch.** A token that is not a class, or a rule other than the fund's installed one, refuses every movement rather than letting balances move uncounted. The pre-flight calls give the same answer as the write.
 - **Not in the way of an exit or of enforcement.** Only a new investor meets the cap. Existing investors trade and leave, and the agent's forced transfers are exempt, though counted.
-- **Few reads.** One `admission` call answers the usual case, and the fund keeps the rule, the count and the cap in one storage word. The sender is read only at a full fund. Balances come from the context, so the rule does not ask the token for one.
+- **Few reads.** One `admission` call answers a movement to a receiver that already holds a class (`test_WhenTheReceiverAlreadyHoldsAClass_TheFundIsNotAskedAboutItsInvestor`), and the fund keeps the rule, the count and the cap in one storage word. A receiver that holds nothing costs one more call, `countedWith`. The sender is read only at a full fund. Balances come from the context, so the rule does not ask the token for one.
 
 <a id="limits"></a>
 ## What it does not cover
 
-- **Investors are addresses.** One investor with two wallets counts twice, and an omnibus wallet counts once.
+- **An investor is what the credential registry says it is.** Two addresses count once only when their records carry the same entity from the same attester. Without that, with a fund built over no registry, or with entity zero, one investor with two addresses counts twice. An omnibus address counts once. Linking is public: an investor that does not want its addresses linked keeps entity zero and takes one place per address.
+- **A change of entity waits for `rekey`.** The fund reads an address's entity when it starts counting it. A holding address the attester links afterwards is still counted apart, and one it unlinks is still counted with its former entity, until someone calls `Fund.rekey(account)`. The rule decides on the count as it stands.
+- **Whoever writes entities can admit an address past the cap.** An attester that gives a fresh address the entity of a counted investor stops it being a new investor, so it is admitted at a full fund and the count does not rise. The rule trusts the registry for that, as `CredentialRule` trusts it for who may receive.
 - **Dust can take a slot.** A non-zero balance makes an investor. On a class with no minimum position set, a tiny transfer to an eligible address takes a slot for as long as it is held; the agent can take it back with `forcedTransfer`. The demo lists put [`MinPositionRule`](MinPositionRule.md) before this rule for that reason, and it does nothing until a minimum is set.
 - **A class whose list drops this rule is uncapped.** The hook accepts a list without this rule. A class whose list does not name the fund's rule moves uncounted, and the fund's count goes stale. `Fund.isClassIntact` and `firstBrokenClass` report it, and the post-deploy check asserts none is broken at hand-over; nothing prevents it afterwards.
 - **A class that ran without the rule gets it back only when it is empty.** Once a class with a supply has a list that names no rule of the fund, the rule refuses to go live on it again, through `setRules` or through an installation, until the class's supply is zero. There is no recount of the movements it missed. Until then the class stays uncounted and uncapped, and `Fund.isClassIntact` and `firstBrokenClass` show it.
-- **It holds no place for an open 7540 request.** A full `requestRedeem` takes the investor out of the count while the shares wait in the escrow, and `requestDeposit` reserves nothing. If the fund fills up meanwhile, a reject that returns the shares, or a deposit claim, is refused with `MAX_HOLDERS`. The agent's recovery works, and delivering to an account that holds nothing puts the count above the cap until investors leave.
+- **It holds no place for an open 7540 request.** A full `requestRedeem` takes the investor out of the count while the shares wait in the escrow, and `requestDeposit` reserves nothing. If the fund fills up meanwhile, a reject that returns the shares, or a deposit claim, is refused with `MAX_HOLDERS`. The agent's recovery works, and delivering to a new investor at a full fund puts the count above the cap until investors leave.
 - **The cap is a ratchet.** Above a lowered cap no new investor is admitted, net-zero moves included, until the count comes back down.
 - **Pre-flight of a two-class swap can miss.** When two legs of a trade move classes of one fund, each pre-flight reads the state before either has run, so a swap can pass and then fail on its second leg.
 
 <a id="connected"></a>
 ## Connected to
 
-- [Fund](Fund.md): Where the classes, the count, the cap and each investor's classes are kept.
+- [Fund](Fund.md): Where the classes, the count, the cap, each address's classes and the entity key it is counted under are kept.
 - [ComplianceHook](ComplianceHook.md): Lists this rule last on every class in the demo, and calls its `after_`.
 - [BaseRule](BaseRule.md): The parent, with the hook check on `after_`.
 - [MinPositionRule](MinPositionRule.md): Stops dust positions from taking investor slots, when a minimum is set.
@@ -163,4 +169,4 @@ A class is set up with no supply, so its first installation passes. A class that
 ## Source and tests
 
 - Contract: `contracts/hooks/rules/FundHoldersRule.sol`, interface `IFundHoldersRule.sol`, reason codes in `Errors.sol`
-- Tests: `FundHoldersRule.t.sol` (every step of the check, the net-zero cases, `after_`, the gate against fake tokens and fake hooks, the account questions, the check on installation), `FundIntegration.t.sol` (three real classes: the cap with pre-flight parity, no event showing the count above the cap, forced transfers, the 7540 escrow, a blocked claim, rule replacement, a class with holders that drops the rule and cannot take it back), `FundInvariant.t.sol`, `FundHalmos.t.sol`, and `test/nodejs/fund.test.ts` (through the real deployment)
+- Tests: `FundHoldersRule.t.sol` (every step of the check, the net-zero cases, a receiver or a sender whose investor has another counted address, `after_`, the gate against fake tokens and fake hooks, the account questions, the check on installation), `FundEntities.t.sol` (real classes over a real credential registry: the cap by entity with pre-flight parity, a sender whose entity changed before a `rekey`), `FundIntegration.t.sol` (three real classes: the cap with pre-flight parity, no event showing the count above the cap, forced transfers, the 7540 escrow, a blocked claim, rule replacement, a class with holders that drops the rule and cannot take it back), `FundInvariant.t.sol`, `FundHalmos.t.sol`, and `test/nodejs/fund.test.ts` (through the real deployment)

@@ -147,8 +147,8 @@ These have no role table of their own, and none is a proxy. Each names its vault
 |  | `DEFAULT_ADMIN_ROLE` | Grant and revoke roles. `RECOVERY_ROLE` may also revoke `GUARDIAN_ROLE`, and nothing else. |
 | [`PolicyRegistry`](contracts/PolicyRegistry.md) | `ATTESTER_ROLE` | `attest(codehash, kind, uri)`, `revoke(codehash)`. No delay. |
 |  | `DEFAULT_ADMIN_ROLE` | Manage the attesters. |
-| [`CredentialRegistry`](contracts/CredentialRegistry.md) | An attester in its list that is not killed | `set(subject, validUntil, quals)`, within the bits it may assert, over an empty address, a record it wrote or a killed attester's record. `setStatus` only on a record it wrote. |
-|  | Any account | `register(credential, sig)`, with a credential signed by an attester that is not killed. |
+| [`CredentialRegistry`](contracts/CredentialRegistry.md) | An attester in its list that is not killed | `set(subject, validUntil, quals, entity)`, within the bits it may assert, over an empty address, a record it wrote or a killed attester's record. The entity names the investor the address belongs to, in the attester's own numbering, and a fund built over the registry counts investors by it. `setStatus` only on a record it wrote. |
+|  | Any account | `register(credential, sig)`, with a credential signed by an attester that is not killed. The entity is part of what the attester signed. |
 |  | `GUARDIAN_ROLE` | `blockSubject(subject)`. `killAttester(id)`, which the admin may also call. |
 |  | `DEFAULT_ADMIN_ROLE` or `RECOVERY_ROLE` | `clearGuardianBlock(subject)`, `reviveAttester(id)`. |
 |  | `DEFAULT_ADMIN_ROLE` | `addAttester`, `setAttesterAccount`, `setAttesterQuals`, roles. `RECOVERY_ROLE` may also revoke `GUARDIAN_ROLE`. |
@@ -159,6 +159,7 @@ These have no role table of their own, and none is a proxy. Each names its vault
 |  | Nobody | `FundHoldersRule` has no settings, because its cap and exemptions live in the fund. `ExecutedOnlyRule` has no settings at all. |
 | [`Fund`](contracts/Fund.md) | Owner: the operations account until `FundOpen`, then the main timelock | `registerClass`, `setRule`, `setHolderCap`, `setExempt`, and OpenZeppelin's `transferOwnership` and `renounceOwnership`. |
 |  | The installed rule | `join`, `leave` (`Fund_OnlyRule`). |
+|  | Any account | `rekey(account)`, which moves a counted address to the entity key the credential registry gives it at that moment. It can move the count by one, also above the cap, and changes nothing else. |
 | [`ProxyDeployer`](contracts/ProxyDeployer.md) | Owner: the operations account | `deploy`, with no delay, and OpenZeppelin's `transferOwnership` and `renounceOwnership`. The main timelock has no power here. |
 | [Main timelock](contracts/GovernanceTimelock.md) | `PROPOSER_ROLE`, `EXECUTOR_ROLE`, `CANCELLER_ROLE` | `schedule`, `execute`, `cancel` and their batch forms. Proposer and executor: governance. Cancellers: governance and the guardian. |
 |  | The timelock itself | `updateDelay`, `grantRole`, `revokeRole`, through its own operations. |
@@ -291,7 +292,7 @@ The registries, the hook, the rules, the funds and `ProxyDeployer` have no pause
 - **The burner's power is not stopped by a pause.** A stolen burner key can destroy any holder's balance on a token, any item on a `Gated721` or any amount of any token id on a `Gated1155`, with no delay. `burn` is a FORCED move, so the guardian's pause does not stop it, and neither does a lockup, an address freeze or a frozen amount. The remedy is for the timelock to revoke `BURNER_ROLE`.
 - **The minter's power is bounded only by the rules.** A stolen minter key can mint to any eligible account. `SupplyCapRule` limits that where a product lists it, and no shipped profile does.
 - **Who holds `SETTLER_ROLE` sets the price and the redemption limit.** The vault takes whatever `settlePeriod` is given and does not check the holder. The role belongs with a desk, and the timelock can grant it to anyone: that is delayed and visible, not prevented.
-- **An attester decides who may hold.** A stolen attester key can credential any address that no other live attester has a record for, with any bit it may assert, for every token whose policy trusts it, until the guardian kills it.
+- **An attester decides who may hold.** A stolen attester key can credential any address that no other live attester has a record for, with any bit it may assert, for every token whose policy trusts it, until the guardian kills it. It also says which addresses are one investor: giving an address the entity of an investor a fund already counts admits that address at a full fund without the count rising.
 - **The council attests with no delay.** It takes the timelock to install attested code on an existing product, but the operations account can launch a product over any implementation the council has attested, so a launch has only those two checks.
 - **A stolen operations key cannot be locked out by the timelock.** `ProxyDeployer` answers to its owner alone. [What that means for later products](deployment.md#limits).
 

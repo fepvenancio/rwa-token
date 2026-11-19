@@ -43,6 +43,16 @@ contract FundHoldersRuleUnitTest is Helpers {
     vm.etch(_hook, hex'01');
     vm.mockCall(_token, abi.encodeCall(IERC8473.policy, ()), abi.encode(_hook));
     _rule = new FundHoldersRule(IFund(_fund));
+    // Unless a test says otherwise, no account shares its investor with a counted address.
+    vm.mockCall(_fund, abi.encodeWithSelector(IFund.countedWith.selector), abi.encode(uint256(0)));
+  }
+
+  /// @dev How many counted addresses the fund reports for an account's investor
+  function _countedWith(
+    address _account,
+    uint256 _addresses
+  ) internal {
+    vm.mockCall(_fund, abi.encodeCall(IFund.countedWith, (_account)), abi.encode(_addresses));
   }
 
   /// @dev What the fund reports for `_token` and an account
@@ -58,6 +68,8 @@ contract FundHoldersRuleUnitTest is Helpers {
       abi.encodeCall(IFund.admission, (_token, _account)),
       abi.encode(_INDEX, _held, _exempt, _count, _cap, address(_rule))
     );
+    // A counted account on its own: one address for its investor.
+    if (_held != 0 && !_exempt) _countedWith(_account, 1);
   }
 
   /// @dev A receiver that is a new investor in a fund holding `_count` of `_cap`
@@ -320,6 +332,34 @@ contract FundHoldersRuleUnit_Check is FundHoldersRuleUnitTest {
     assertEq(_check(IERC8473Policy.TransferKind.TRANSFER, _from, _to, 10), Reasons.MAX_HOLDERS);
   }
 
+  /// @dev The receiver holds nothing itself, but its investor is counted through another address: not a new investor
+  function test_WhenTheReceiversInvestorIsAlreadyCounted_ItIsAdmittedAtAFullCapAndWithNoCap() external {
+    _newReceiver(3, 3);
+    _countedWith(_to, 2);
+    assertEq(_check(IERC8473Policy.TransferKind.TRANSFER, _from, _to, 10), Reasons.TRANSFER_OK);
+    assertEq(_check(IERC8473Policy.TransferKind.MINT, address(0), _to, 10), Reasons.TRANSFER_OK);
+    _newReceiver(5, 3);
+    assertEq(_check(IERC8473Policy.TransferKind.MINT, address(0), _to, 10), Reasons.TRANSFER_OK, 'above a lowered cap');
+    _newReceiver(0, 0);
+    assertEq(_check(IERC8473Policy.TransferKind.MINT, address(0), _to, 10), Reasons.TRANSFER_OK, 'no cap set');
+  }
+
+  /// @dev The address leaves, its investor does not: no place is freed
+  function test_WhenTheSendersInvestorKeepsAnotherAddress_TheMoveIsRejectedAtAFullCap() external {
+    _newReceiver(3, 3);
+    _admit(_from, _BIT, false, 3, 3);
+    _countedWith(_from, 2);
+    _bal(_from, 10);
+    assertEq(_check(IERC8473Policy.TransferKind.TRANSFER, _from, _to, 10), Reasons.MAX_HOLDERS);
+  }
+
+  /// @dev The fund is asked about the investor only when the receiver holds nothing and is not exempt
+  function test_WhenTheReceiverAlreadyHoldsAClass_TheFundIsNotAskedAboutItsInvestor() external {
+    _admit(_to, _BIT, false, 3, 3);
+    vm.expectCall(_fund, abi.encodeWithSelector(IFund.countedWith.selector), 0);
+    assertEq(_check(IERC8473Policy.TransferKind.TRANSFER, _from, _to, 10), Reasons.TRANSFER_OK);
+  }
+
   function test_WhenTheCountIsBelowTheCap_TheSenderIsNotConsulted() external {
     _newReceiver(2, 3);
     vm.expectCall(_fund, abi.encodeCall(IFund.admission, (_token, _from)), 0);
@@ -476,6 +516,12 @@ contract FundHoldersRuleFundWritingOnSender {
     if (_account == SENDER && WRITES) ++writes;
     (_index, _held, _exempt, _count, _cap, _rule) = (1, _account == SENDER ? 1 : 0, false, 1, 1, msg.sender);
   }
+
+  function countedWith(
+    address _account
+  ) external view returns (uint256 _addresses) {
+    _addresses = _account == SENDER ? 1 : 0;
+  }
 }
 
 contract FundHoldersRuleUnit_TokenAndFundCallsAreStatic is FundHoldersRuleUnitTest {
@@ -587,7 +633,7 @@ contract FundHoldersRuleGate is Helpers {
 
   function setUp() public {
     _registry = _mockContract('registry');
-    _fund = new Fund(address(this), IPolicyRegistry(_registry));
+    _fund = new Fund(address(this), IPolicyRegistry(_registry), address(0));
     _rule = new FundHoldersRule(_fund);
     vm.mockCall(
       _registry,

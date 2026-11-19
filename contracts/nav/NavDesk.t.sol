@@ -90,8 +90,8 @@ abstract contract NavDeskTest is Test {
       )
     );
     _rule.setPolicy(address(_vault), Quals.KYC, 0, 0, 1);
-    _creds.set(_alice, uint64(block.timestamp + 3650 days), Quals.KYC);
-    _creds.set(_bob, uint64(block.timestamp + 3650 days), Quals.KYC);
+    _creds.set(_alice, uint64(block.timestamp + 3650 days), Quals.KYC, 0);
+    _creds.set(_bob, uint64(block.timestamp + 3650 days), Quals.KYC, 0);
 
     _desk = new NavDesk(address(_vault), _custodian, _LENGTH, _COOLDOWN, _MAX_AGE);
     _vault.grantRole(_vault.SETTLER_ROLE(), address(_desk));
@@ -788,7 +788,7 @@ contract NavDesk_Stuck is NavDeskTest {
   /// @dev A request in the open period is the agent's own to reject on the vault, and the desk cannot reach it
   function test_ARequestInTheOpenPeriodIsNotTheDesks() external {
     address _carol = makeAddr('carol');
-    _creds.set(_carol, uint64(block.timestamp + 3650 days), Quals.KYC);
+    _creds.set(_carol, uint64(block.timestamp + 3650 days), Quals.KYC, 0);
     _asset.mint(_carol, 10);
     vm.prank(_carol);
     _asset.approve(address(_vault), 10);
