@@ -115,6 +115,20 @@ const LEGO_ABI = parseAbi([
 ]);
 const SAFE_ABI = parseAbi(["function getThreshold() view returns (uint256)"]);
 const DISTRIBUTOR_ABI = parseAbi(["function TOKEN() view returns (address)"]);
+/** `SignedExit`'s EIP-712 type, as a holder signs it. */
+export const EXIT_TYPES = {
+  Exit: [
+    { name: "holder", type: "address" },
+    { name: "vault", type: "address" },
+    { name: "shares", type: "uint256" },
+    { name: "receiver", type: "address" },
+    { name: "minAssets", type: "uint256" },
+    { name: "asynchronous", type: "bool" },
+    { name: "nonce", type: "bytes32" },
+    { name: "validAfter", type: "uint256" },
+    { name: "deadline", type: "uint256" },
+  ],
+} as const;
 /** `SignedEntry`'s EIP-712 type, as an investor signs it. */
 export const ENTRY_TYPES = {
   Entry: [
@@ -199,7 +213,7 @@ export async function deployUntilProducts(connection: NetworkConnection) {
 
 export type Stack = Awaited<ReturnType<typeof deployStack>>;
 export type ProfileStack = Awaited<ReturnType<typeof deployProfile>>;
-type HandedOverKeys = "legos" | "parameters" | "profile" | "publicClient" | "wallets" | "timelock" | "recoveryTimelock" | "registry" | "hook" | "proxyDeployer" | "credentials" | "funds" | "executor" | "dvpExecutor" | "signedEntry" | "rules" | "deployed";
+type HandedOverKeys = "legos" | "parameters" | "profile" | "publicClient" | "wallets" | "timelock" | "recoveryTimelock" | "registry" | "hook" | "proxyDeployer" | "credentials" | "funds" | "executor" | "dvpExecutor" | "signedEntry" | "signedExit" | "rules" | "deployed";
 type Parameters_ = Record<string, Address | bigint | number>;
 
 /** `Core`, then the council step. Returns what the later stages need, and a function that runs them. */
@@ -266,6 +280,7 @@ async function stages(connection: NetworkConnection, profile: Profile) {
     executor: has("executor") ? await viem.getContractAt("IntentExecutor", components.executor.address) : undefined,
     dvpExecutor: has("dvpExecutor") ? await viem.getContractAt("DvPExecutor", components.dvpExecutor.address) : undefined,
     signedEntry: has("signedEntry") ? await viem.getContractAt("SignedEntry", components.signedEntry.address) : undefined,
+    signedExit: has("signedExit") ? await viem.getContractAt("SignedExit", components.signedExit.address) : undefined,
     rules: await attachRules(),
   });
   const attachRules = async () => ({
@@ -280,7 +295,7 @@ async function stages(connection: NetworkConnection, profile: Profile) {
     supplyCapRule: has("supplyCapRule") ? await viem.getContractAt("SupplyCapRule", components.supplyCapRule.address) : undefined,
     executedOnlyRule: has("executedOnlyRule") ? await viem.getContractAt("ExecutedOnlyRule", components.executedOnlyRule.address) : undefined,
   });
-  let { credentials, executor, dvpExecutor, signedEntry, rules } = await attachParts();
+  let { credentials, executor, dvpExecutor, signedEntry, signedExit, rules } = await attachParts();
 
   const attest = async (target: Address, kind: number, uri: string) => {
     const code = await publicClient.getCode({ address: target });
@@ -362,7 +377,7 @@ async function stages(connection: NetworkConnection, profile: Profile) {
       if (p.credentialRule === undefined) throw new Error("an external credential registry needs the credentialRule parameter");
       externalRule = p.credentialRule as Address;
       await attest(externalRule, ATTEST.RULE, `ipfs://rule-review/${externalRule}`);
-      ({ credentials, executor, dvpExecutor, signedEntry, rules } = await attachParts());
+      ({ credentials, executor, dvpExecutor, signedEntry, signedExit, rules } = await attachParts());
     }
 
     // Each fund, with the council attesting its rule: a class cannot list the rule before that.
@@ -467,7 +482,7 @@ async function stages(connection: NetworkConnection, profile: Profile) {
      * Adds to the running core what these products, or a signed entry, need and it lacks, as an issuer would: `CoreParts`,
      * the council's attestations, then `PartsHandover`. The stack then reads the new parts. Returns the parts added.
      */
-    const addParts = async (wanted: Pick<Profile, "products" | "signedEntry">) => {
+    const addParts = async (wanted: Pick<Profile, "products" | "signedEntry" | "signedExit">) => {
       const present = Object.keys(components);
       const parts = missingParts({ ...wanted, credentials: profile.credentials }, present);
       const module = corePartsModule(parts, present);
@@ -479,15 +494,20 @@ async function stages(connection: NetworkConnection, profile: Profile) {
       await attestParts(Object.keys(added));
       const partsHandover = partsHandoverModule(parts);
       await ignition.deploy(partsHandover, { parameters: { [partsHandover.id]: p } });
-      ({ credentials, executor, dvpExecutor, signedEntry, rules } = await attachParts());
+      ({ credentials, executor, dvpExecutor, signedEntry, signedExit, rules } = await attachParts());
       if (rules.windowRule !== undefined) p.windowDays = await rules.windowRule.read.MON_TO_FRI();
       Object.assign(stack, {
         credentials,
         executor,
         dvpExecutor,
         signedEntry,
+        signedExit,
         rules: { ...rules, fundHoldersRule: stack.rules.fundHoldersRule },
-        profile: { ...stack.profile, signedEntry: stack.profile.signedEntry === true || wanted.signedEntry === true },
+        profile: {
+          ...stack.profile,
+          signedEntry: stack.profile.signedEntry === true || wanted.signedEntry === true,
+          signedExit: stack.profile.signedExit === true || wanted.signedExit === true,
+        },
       });
       return parts;
     };
@@ -527,6 +547,7 @@ async function stages(connection: NetworkConnection, profile: Profile) {
       executor,
       dvpExecutor,
       signedEntry,
+      signedExit,
       rules: { ...rules, fundHoldersRule: firstFund?.rule },
       asset,
       deployed: products,
@@ -694,6 +715,28 @@ export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
       await s.signedEntry.read.entryHash([sample]),
       hashTypedData({ domain, types: ENTRY_TYPES, primaryType: "Entry", message: sample }),
       "the signed entry hashes entries for another domain",
+    );
+  }
+  // The signed exit, the same way: a sample exit's hash must be the one a holder signs for this chain and this address.
+  if (s.profile.signedExit === true || s.signedExit !== undefined) {
+    assert.ok(s.signedExit !== undefined, "the profile asks for a signed exit and the stack has no signed exit");
+    assert.ok(await isRelease(s.signedExit.address, "SignedExit"), `the signed exit ${s.signedExit.address} is not the release's`);
+    const sample = {
+      holder: s.signedExit.address,
+      vault: s.signedExit.address,
+      shares: 1n,
+      receiver: s.signedExit.address,
+      minAssets: 1n,
+      asynchronous: false,
+      nonce: zeroHash,
+      validAfter: 0n,
+      deadline: 1n,
+    };
+    const domain = { name: "SignedExit", version: "1", chainId: await s.publicClient.getChainId(), verifyingContract: s.signedExit.address };
+    assert.equal(
+      await s.signedExit.read.exitHash([sample]),
+      hashTypedData({ domain, types: EXIT_TYPES, primaryType: "Exit", message: sample }),
+      "the signed exit hashes exits for another domain",
     );
   }
   // EXECUTOR_ROLE on an intent token: the executors it names and no account the stack knows about, so nothing can run a

@@ -25,6 +25,7 @@ import {CredentialRegistry} from 'contracts/identity/CredentialRegistry.sol';
 import {DvPExecutor} from 'contracts/intents/DvPExecutor.sol';
 import {IntentExecutor} from 'contracts/intents/IntentExecutor.sol';
 import {SignedEntry} from 'contracts/intents/SignedEntry.sol';
+import {SignedExit} from 'contracts/intents/SignedExit.sol';
 import {FeeModel} from 'contracts/nav/FeeModel.sol';
 import {NavDesk} from 'contracts/nav/NavDesk.sol';
 import {ERC20CallValidator} from 'contracts/portfolio/ERC20CallValidator.sol';
@@ -86,6 +87,7 @@ contract ContractSizesTest is Test {
     _assertFits('Portfolio', address(new Portfolio(address(this), IERC20(address(_asset)), true)));
     _assertFits('NavDesk', address(new NavDesk(address(this), address(this), 1 days, 1 hours, 1 days)));
     _assertFits('SignedEntry', address(new SignedEntry()));
+    _assertFits('SignedExit', address(new SignedExit()));
     _assertFits('SupplyCapRule', address(new SupplyCapRule()));
     _assertFits('ExecutedOnlyRule', address(new ExecutedOnlyRule()));
     _assertFits('Distributor', address(new Distributor(address(this))));

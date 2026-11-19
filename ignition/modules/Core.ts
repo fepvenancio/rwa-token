@@ -32,6 +32,9 @@ const NO_RECOVERY = "0x0000000000000000000000000000000000000000";
  *   granting it EXECUTOR_ROLE.
  * - The `SignedEntry`, if the profile asks for it. It holds no money and no role, and a vault accepts it as a payer only if
  *   its policy does.
+ * - The `SignedExit`, if the profile asks for it. It holds no money and no role either: a holder's signature and its
+ *   permit let it redeem or file a request, and a controller that makes it an operator lets it deliver that controller's
+ *   settled claims, to that controller alone.
  *
  * A fund is not part of the core: an issuer has as many as it needs, each with its own `Fund` module.
  *

@@ -17,7 +17,7 @@ For each way money moves, this page shows where the asset and the shares are at 
 
 > ### In one minute
 >
-> Two kinds of value move here. **Token balances**: every fungible template is a gated ERC-20, the NFT a gated ERC-721 and the multi-token a gated ERC-1155, and each movement asks its hook and rules first. The **vault asset**: the two vaults take in and pay out an ERC-20 chosen at deployment, such as a stablecoin, and the vault's hook does not see those transfers. The intent token has no asset behind it: its balances are the record. A 4626 vault keeps its asset itself, or forwards it to a portfolio. A 7540 vault deals in periods: requests wait in the vault, one approved price settles them together, and only the difference between what came in and what must go out moves to or from a cash account. The DvP executor swaps a security against cash in one transaction and keeps nothing. SignedEntry lets an investor enter with signatures while a relayer pays the gas. A Distributor holds funded money until holders claim it.
+> Two kinds of value move here. **Token balances**: every fungible template is a gated ERC-20, the NFT a gated ERC-721 and the multi-token a gated ERC-1155, and each movement asks its hook and rules first. The **vault asset**: the two vaults take in and pay out an ERC-20 chosen at deployment, such as a stablecoin, and the vault's hook does not see those transfers. The intent token has no asset behind it: its balances are the record. A 4626 vault keeps its asset itself, or forwards it to a portfolio. A 7540 vault deals in periods: requests wait in the vault, one approved price settles them together, and only the difference between what came in and what must go out moves to or from a cash account. The DvP executor swaps a security against cash in one transaction and keeps nothing. SignedEntry lets an investor enter with signatures while a relayer pays the gas, and SignedExit lets a holder leave the same way. A Distributor holds funded money until holders claim it.
 
 | Flow | The asset sits | The shares or tokens sit | The price comes from |
 |---|---|---|---|
@@ -27,6 +27,7 @@ For each way money moves, this page shows where the asset and the shares are at 
 | `Gated7540Vault` | in the vault while a request or a payout waits; otherwise with the cash account | holders' balances; in escrow at the vault while a redemption waits; shares bought but not claimed are a number, `unclaimedShares` | a reported value, approved through a `NavDesk`, for a whole period |
 | DvP | moves straight between buyer and seller, or through the executor inside one call | moves from seller to buyer | agreed off-chain and signed by both parties |
 | `SignedEntry` | in `SignedEntry` inside one call, then as the vault | as the vault | as the vault; on a 4626 the investor signs the least it accepts |
+| `SignedExit` | never in `SignedExit`: the vault pays the signed receiver, or the controller on a claim | never in `SignedExit`: burnt from the holder on a 4626, moved from the holder into the vault's escrow on a 7540 | as the vault; on a 4626 the holder signs the least it accepts |
 | `Distributor` | in the `Distributor` from approval until claimed or swept | not touched | a list of `(holder, amount)` built off-chain |
 
 <a id="intent"></a>
@@ -330,7 +331,8 @@ For tokens that implement the calls they make, the pre-flights `canExecuteDvPGat
 - **It is an ordinary third-party payer.** The vault's policy decides whether to accept it, so `SignedEntry` needs a credential on the vault's policy (`GatedVault_ThirdPartyNotEligible` otherwise), and on the asset's if the asset is gated.
 - **What ties the cash to the entry.** An ERC-3009 authorization carries `cashNonce(entry)`, so it pays for this entry and no other. A `permit` is not bound the same way: one left unspent can pay for another entry of the same investor, which that investor also signed.
 - **Who can stop it.** The investor's nonce is single use, `cancelEntry(nonce)` marks it used, and the deadline ends it. A relayer can hold a signed entry back until its deadline, so a short deadline is the investor's control. Nothing here pays the relayer.
-- **Leaving** needs no such contract. On a 4626 a holder signs the share token's `permit`, and a relayer submits it with `redeem` through the token's `multicall`. On a 7540 the same route files `requestRedeem`. The later claim (`redeem`, `withdraw`) takes the controller or an operator it set with `setOperator`, and an allowance does not open it (`Gated7540Vault_Unauthorized`).
+- **Leaving** has its own contract, [`SignedExit`](contracts/SignedExit.md). The holder signs an EIP-712 `Exit` (the vault, the shares, where the cash goes, the least it accepts, when) and the share token's `permit` with `SignedExit` as spender, and anyone submits them. On a 4626 the vault pays the signed receiver, and the call reverts below the signed `minAssets`. On a 7540 it files `requestRedeem` with the holder as controller. The later claim (`redeem`, `withdraw`) takes the controller or an operator it set with `setOperator`, and an allowance does not open it (`Gated7540Vault_Unauthorized`). A controller that makes `SignedExit` its operator lets anyone deliver its settled claims with `claimFor`, to the controller and to nobody else. Neither shares nor cash stay in `SignedExit`.
+- **Leaving without it** also works. A holder signs the share token's `permit` naming a relayer, which submits it with `redeem` or `requestRedeem` through the token's `multicall`. That permit is an allowance, so the relayer chooses where the cash goes.
 
 <a id="distributor"></a>
 ## `Distributor`: funding and paying a distribution
@@ -353,7 +355,7 @@ The list is a claim, like a NAV report: the root proves which list two people ap
 <a id="absent"></a>
 ## What the code does not have
 
-- **Fees outside a fee model.** A token transfer, an intent, a DvP trade, a signed entry and a distribution charge nothing in these contracts. Fees come from a `FeeModel` on a 4626 with a portfolio or through a `NavDesk`; a plain account holding `SETTLER_ROLE` could name any fee in `settlePeriod`.
+- **Fees outside a fee model.** A token transfer, an intent, a DvP trade, a signed entry, a signed exit and a distribution charge nothing in these contracts. Fees come from a `FeeModel` on a 4626 with a portfolio or through a `NavDesk`; a plain account holding `SETTLER_ROLE` could name any fee in `settlePeriod`.
 - **A tie between `migrateTo` and `setPortfolio`.** No contract makes them run together. Between two separate transactions the outgoing portfolio gives no price, so a 4626 holds its price and stops dealing until the plug.
 - **A price feed, or proof that money exists.** A 4626 with a portfolio prices from its adapters, which ask the outside vault's `previewRedeem`. A 7540 prices from a report. `reportHash` proves which report was used, not that the money exists. A maker and a checker who collude can approve a wrong price. No contract compares either figure with an outside price.
 - **Yield of its own.** No contract here earns interest. Returns come from an outside vault, a custodian or a strategy, and a bad one can lose what was allocated to it. An `ERC4626Adapter`'s attestation covers its target's address, not its behaviour, so the control on the target itself is whatever review comes before that attestation.
@@ -394,6 +396,7 @@ The list is a claim, like a NAV report: the root proves which list two people ap
 - [GuardedAccount](contracts/GuardedAccount.md): A custodian or a strategy, reported, with default deny.
 - [DvPExecutor](contracts/DvPExecutor.md): Atomic settlement of a security against cash.
 - [SignedEntry](contracts/SignedEntry.md): Entering a vault with signatures.
+- [SignedExit](contracts/SignedExit.md): Leaving a vault with signatures, and delivering a 7540's settled claims.
 - [Distributor](contracts/Distributor.md): Pays a funded distribution to holders who claim.
 - [IntentToken](contracts/IntentToken.md): The token whose balances are the record.
 - [One movement](movement.md): What the rules do with each share movement.
@@ -404,5 +407,5 @@ The list is a claim, like a NAV report: the root proves which list two people ap
 
 - Vaults: `GatedVaultBase.sol`, `Gated4626Vault.sol`, `Gated4626Management.sol`, `Gated4626Common.sol`, `Gated7540Vault.sol`, `Gated7540Settlement.sol`, `Gated7540Common.sol`
 - Pricing and money's destinations: `NavDesk.sol`, `FeeModel.sol`, `Portfolio.sol`, `ERC4626Adapter.sol`, `GuardedAccount.sol`, `ERC20CallValidator.sol`, `ERC4626CallValidator.sol`
-- Settlement and distribution: `DvPExecutor.sol`, `IntentExecutor.sol`, `SignedEntry.sol`, `Distributor.sol`, `IntentSettledUpgradeable.sol`
-- Tests: `Gated4626Vault.t.sol`, `Gated4626VaultPortfolio.t.sol`, `Gated4626Management.t.sol`, `Gated7540Vault.t.sol`, `Gated7540Settlement.t.sol`, `NavDesk.t.sol`, `FeeModel.t.sol`, `Portfolio.t.sol`, `GuardedAccount.t.sol`, `DvPExecutor.t.sol`, `SignedEntry.t.sol`, `Distributor.t.sol`, `test/nodejs/vaults.test.ts`, `test/nodejs/dvp.test.ts`, `test/nodejs/legos.test.ts`
+- Settlement and distribution: `DvPExecutor.sol`, `IntentExecutor.sol`, `SignedEntry.sol`, `SignedExit.sol`, `Distributor.sol`, `IntentSettledUpgradeable.sol`
+- Tests: `Gated4626Vault.t.sol`, `Gated4626VaultPortfolio.t.sol`, `Gated4626Management.t.sol`, `Gated7540Vault.t.sol`, `Gated7540Settlement.t.sol`, `NavDesk.t.sol`, `FeeModel.t.sol`, `Portfolio.t.sol`, `GuardedAccount.t.sol`, `DvPExecutor.t.sol`, `SignedEntry.t.sol`, `SignedExit.t.sol`, `Distributor.t.sol`, `test/nodejs/vaults.test.ts`, `test/nodejs/dvp.test.ts`, `test/nodejs/legos.test.ts`
