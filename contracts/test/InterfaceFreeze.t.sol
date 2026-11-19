@@ -47,6 +47,7 @@ import {IPortfolio} from 'interfaces/IPortfolio.sol';
 import {IProxyDeployer} from 'interfaces/IProxyDeployer.sol';
 import {ISettlementWindowRule} from 'interfaces/ISettlementWindowRule.sol';
 import {ISignedEntry} from 'interfaces/ISignedEntry.sol';
+import {ISignedExit} from 'interfaces/ISignedExit.sol';
 import {ISupplyCapRule} from 'interfaces/ISupplyCapRule.sol';
 import {ITemplated} from 'interfaces/ITemplated.sol';
 import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
@@ -161,8 +162,9 @@ contract InterfaceFreezeTest is Test {
     // (was 0x6d2f4b62)
     assertEq(type(INavDesk).interfaceId, bytes4(0x17066f0f), 'INavDesk');
     assertEq(type(ISignedEntry).interfaceId, bytes4(0x05cc4f78), 'ISignedEntry');
+    assertEq(type(ISignedExit).interfaceId, bytes4(0x5ef9720f), 'ISignedExit');
     assertEq(type(ISupplyCapRule).interfaceId, bytes4(0x52c89ff1), 'ISupplyCapRule');
-    assertEq(type(IDistributor).interfaceId, bytes4(0xd75218de), 'IDistributor');
+    assertEq(type(IDistributor).interfaceId, bytes4(0xda4dcb2a), 'IDistributor');
     assertEq(type(IGuardedAccount).interfaceId, bytes4(0x30444861), 'IGuardedAccount');
     assertEq(type(ICallValidator).interfaceId, bytes4(0x9e8d53da), 'ICallValidator');
     assertEq(type(IERC20CallValidator).interfaceId, bytes4(0x4095b410), 'IERC20CallValidator');
@@ -257,6 +259,9 @@ contract InterfaceFreezeTest is Test {
       IDistributor.DistributionClaimed.selector, 0x64bdb55782b54d32d4886f2dc4f69cf7344fd99862caaa6703164c8fc13f2ea8
     );
     assertEq(
+      IDistributor.DistributionClaimSkipped.selector, 0xc5f61a3c122d3686e3c8a9bf03bc4ec72e08c9771a1ad22f0299d9639651dc83
+    );
+    assertEq(
       IDistributor.DistributionProposed.selector, 0xdecb52003d63f8fec877496be8045b66e1945cc76a8fb743c948fe181ead3feb
     );
     assertEq(
@@ -264,6 +269,10 @@ contract InterfaceFreezeTest is Test {
     );
     assertEq(ISignedEntry.EntryCancelled.selector, 0x112e0bf83077a00b180a2c526e1e40fd2b7ce442cc2bfb9c6d3510870ddf0e96);
     assertEq(ISignedEntry.EntryExecuted.selector, 0xb98db96ae7f09fd2003f14676b3a4f20fb1592e2f5adb29d28d14c116a594be0);
+    assertEq(ISignedExit.ExitCancelled.selector, 0xb39402fa1eca50462d7ae5a044687d738d2ce9ba59021554879d2e31a965ed38);
+    assertEq(ISignedExit.ExitExecuted.selector, 0x8b2329fbf60adbfc308eb570691f34d1b443248839347d2a331a57db9abbbee5);
+    assertEq(ISignedExit.ClaimDelivered.selector, 0x4fab0c6687d4c04acba77523929cdbf7aeec6c266f3faff7b1b0ec904bbee0aa);
+    assertEq(ISignedExit.ClaimSkipped.selector, 0x9377609760104fb36a6ec9be22df2fa6a1251cf1048efb47772890233ae92597);
     assertEq(IGuardedAccount.CallMade.selector, 0xf7069cb373783a30940dc185ef11ac49cdc063baa4035fbd6c914a9ab6975350);
     assertEq(
       IGuardedAccount.PermissionRevoked.selector, 0x9490008f9cc8bcb46b963024434fb1ff254b868936cc6c7614597b1b1a37c6a7

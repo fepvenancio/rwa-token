@@ -3,14 +3,14 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { network } from "hardhat";
-import { type Address, encodeAbiParameters, encodeFunctionData, getAddress, isAddressEqual, keccak256, maxUint256, toHex, zeroAddress, zeroHash } from "viem";
+import { type Address, encodeAbiParameters, encodeFunctionData, getAddress, isAddressEqual, keccak256, maxUint256, parseSignature, toHex, zeroAddress, zeroHash } from "viem";
 
 import { fundOpenModule } from "../../ignition/modules/FundOpen.js";
 import { productModule } from "../../ignition/modules/Product.js";
 import { QUALS } from "../../ignition/modules/roles.js";
 import { coreHas, corePartsModule, partsHandoverModule } from "../../ignition/parts.js";
 import { DEFAULT_POLICY, DEMO_SIGNERS, missingParts, partsOf, PROFILES, type Product, type Profile } from "../../ignition/profiles.js";
-import { assertHandedOver, deployProduct, deployProfile, deployStack, deverify, INTENT_TYPES, PAR, REASONS, RECEIVE_AUTHORIZATION_TYPES, settlePeriod, settleThroughDesk, verify } from "./fixtures.js";
+import { assertHandedOver, deployProduct, deployProfile, deployStack, deverify, EXIT_TYPES, INTENT_TYPES, PAR, REASONS, RECEIVE_AUTHORIZATION_TYPES, settlePeriod, settleThroughDesk, verify } from "./fixtures.js";
 
 const PLAIN = ["credentialRule", "holderRestrictionRule"] as const;
 const CORE = ["credentialRegistry", "credentialRule", "holderRestrictionRule", "hook", "proxyDeployer", "recoveryTimelock", "registry", "timelock"];
@@ -697,6 +697,56 @@ describe("adding to a running core", async function () {
     });
     await router.write.enterWith3009([entry, entrySig, cashSig], { account: s.holders.bob.account });
     assert.ok((await vault.read.balanceOf([a])) > 0n);
+  });
+
+  it("a signed exit joins a running core alone, a holder leaves a vault through it, and the check refuses a stack that lost it", async function () {
+    const usdc = await viem.deployContract("MockERC3009Token");
+    const s = await deployProfile(connection, PROFILES.vault4626, { asset: usdc.address });
+    assert.equal(s.signedExit, undefined);
+    assert.deepEqual(await s.addParts({ products: [], signedExit: true }), ["signedExit"]);
+    await assertHandedOver({ ...s, profile: { ...s.profile, signedExit: true } });
+    await assert.rejects(assertHandedOver({ ...s, profile: { ...s.profile, signedExit: true }, signedExit: undefined }), /no signed exit/);
+
+    const exits = s.signedExit!;
+    const vault = await viem.getContractAt("Gated4626Vault", s.products.fund.address);
+    const alice = s.holders.alice;
+    const a = alice.account.address;
+    await verify(s, alice);
+    const assets = 1_000_000n;
+    await usdc.write.mint([a, assets]);
+    await usdc.write.approve([vault.address, assets], { account: alice.account });
+    await vault.write.deposit([assets, a], { account: alice.account });
+    const shares = await vault.read.balanceOf([a]);
+
+    const chainId = await s.publicClient.getChainId();
+    const deadline = (await s.publicClient.getBlock()).timestamp + 3600n;
+    const exit = { holder: a, vault: vault.address, shares, receiver: a, minAssets: assets, asynchronous: false, nonce: zeroHash, validAfter: 0n, deadline };
+    const exitSig = await alice.signTypedData({
+      domain: { name: "SignedExit", version: "1", chainId, verifyingContract: exits.address },
+      types: EXIT_TYPES,
+      primaryType: "Exit",
+      message: exit,
+    });
+    const permitSig = await alice.signTypedData({
+      domain: { name: await vault.read.name(), version: "1", chainId, verifyingContract: vault.address },
+      types: {
+        Permit: [
+          { name: "owner", type: "address" },
+          { name: "spender", type: "address" },
+          { name: "value", type: "uint256" },
+          { name: "nonce", type: "uint256" },
+          { name: "deadline", type: "uint256" },
+        ],
+      },
+      primaryType: "Permit",
+      message: { owner: a, spender: exits.address, value: shares, nonce: await vault.read.nonces([a]), deadline },
+    });
+    const { r, s: sigS, v } = parseSignature(permitSig);
+    const relayer = s.holders.bob.account;
+    await exits.write.exitWithPermit([exit, exitSig, Number(v), r, sigS], { account: relayer });
+    assert.equal(await vault.read.balanceOf([a]), 0n);
+    assert.equal(await usdc.read.balanceOf([a]), assets);
+    assert.equal(await usdc.read.balanceOf([relayer.address]), 0n);
   });
 
   it("a whole deployment that asks for a signed entry has one, and the check refuses a stack that lost it", async function () {

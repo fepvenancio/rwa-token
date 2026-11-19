@@ -43,6 +43,7 @@ IntentExecutor (immutable)                       replaceable, role-gated submitt
                                                  an intent that states a consideration (it cannot enforce a payment)
 DvPExecutor (immutable)                          role-gated: settles a share trade against cash, both legs or neither
 SignedEntry (immutable)                          enters a vault on one signature, a relayer paying the gas
+SignedExit (immutable)                           leaves a vault on signatures; delivers a 7540's settled claims
 Portfolio (one per vault, immutable)             where the vault's money may go: idle, or adapters within caps
 GuardedAccount, ERC4626Adapter                   the adapters: a custodian's account with default-deny calls, an outside vault
 NavDesk (one per 7540 vault, immutable)          a reported value becomes a price two people approved, on a schedule; holds the redemption gate's level
@@ -52,7 +53,7 @@ Distributor (one per token, immutable)           pays holders from an approved, 
 
 | Path | Contents |
 |---|---|
-| `contracts/interfaces/` | Frozen ABI: `IPolicyGatedCore`, `IPolicyGated`, `IERC7943Fungible`, `IERC7943NonFungible`, `IERC7943MultiToken`, `IGated721`, `IGated1155`, `ITemplated`, `IERC8473`, `IERC8473Policy`, `IComplianceRule`, `IComplianceHook`, `IPolicyRegistry`, `ITransferIntent`, `IIntentExecutor`, `IIntentExecutorBatch`, `IDvPExecutor`, `IERC3009`, `IIdentityRegistry`, `ICredentialRegistry`, `ICredentialRule`, `Quals`, `IMinPositionRule`, `IHolderRestrictionRule`, `ISettlementWindowRule`, `ISupplyCapRule`, `IExecutedOnlyRule`, `IFund`, `IFundHoldersRule`, `IProxyDeployer`, `IGovernanceTimelock`, `IGatedVaultBase`, `IGated4626Vault`, `IGated7540Vault`, `IPortfolio`, `IAdapter`, `IERC4626Adapter`, `IGuardedAccount`, `ICallValidator`, `IERC20CallValidator`, `INavDesk`, `IFeeModel`, `ISignedEntry`, `IDistributor`, `IERC7540Operator` / `IERC7540Deposit` / `IERC7540Redeem` / `IERC7575` (spec-exact ids), `Errors.sol` (reason codes) |
+| `contracts/interfaces/` | Frozen ABI: `IPolicyGatedCore`, `IPolicyGated`, `IERC7943Fungible`, `IERC7943NonFungible`, `IERC7943MultiToken`, `IGated721`, `IGated1155`, `ITemplated`, `IERC8473`, `IERC8473Policy`, `IComplianceRule`, `IComplianceHook`, `IPolicyRegistry`, `ITransferIntent`, `IIntentExecutor`, `IIntentExecutorBatch`, `IDvPExecutor`, `IERC3009`, `IIdentityRegistry`, `ICredentialRegistry`, `ICredentialRule`, `Quals`, `IMinPositionRule`, `IHolderRestrictionRule`, `ISettlementWindowRule`, `ISupplyCapRule`, `IExecutedOnlyRule`, `IFund`, `IFundHoldersRule`, `IProxyDeployer`, `IGovernanceTimelock`, `IGatedVaultBase`, `IGated4626Vault`, `IGated7540Vault`, `IPortfolio`, `IAdapter`, `IERC4626Adapter`, `IGuardedAccount`, `ICallValidator`, `IERC20CallValidator`, `INavDesk`, `IFeeModel`, `ISignedEntry`, `ISignedExit`, `IDistributor`, `IERC7540Operator` / `IERC7540Deposit` / `IERC7540Redeem` / `IERC7575` (spec-exact ids), `Errors.sol` (reason codes) |
 | `contracts/base/` | `PolicyGatedCoreUpgradeable`, `PolicyGatedERC20Upgradeable` |
 | `contracts/governance/` | `PolicyRegistry`, `GovernanceTimelock` |
 | `contracts/identity/` | `CredentialRegistry` |
@@ -63,7 +64,7 @@ Distributor (one per token, immutable)           pays holders from an approved, 
 | `contracts/portfolio/` | `Portfolio`, `ERC4626Adapter`, `GuardedAccount`, `ERC20CallValidator`, `ERC4626CallValidator`: where one vault's money may go |
 | `contracts/nav/` | `NavDesk`, `FeeModel`: a 7540's price and the fee on it |
 | `contracts/distribution/` | `Distributor`: dividends and coupons |
-| `contracts/intents/` | `IntentExecutor`, `DvPExecutor`, `SignedEntry` |
+| `contracts/intents/` | `IntentExecutor`, `DvPExecutor`, `SignedEntry`, `SignedExit` |
 | `contracts/vaults/` | `GatedVaultBase`, which both vaults inherit, `Gated4626Vault`, `Gated7540Vault`, and each vault's second contract, which its implementation creates: `Gated7540Settlement`, to which the 7540 hands its settlement and recovery functions, and `Gated4626Management`, to which the 4626 hands plugging a portfolio, the rate limit, the fee model and paying fees; with `Gated7540Common` and `Gated4626Common`, which each pair shares |
 | `contracts/test/` | Test helpers and mocks, interface-freeze and contract-size guards, Halmos properties |
 
@@ -179,6 +180,7 @@ exact sequence on the local network, playing the council and the KYC attester, a
      - one implementation per template, shared by every product of that template;
      - `IntentExecutor` and `DvPExecutor` (neither is attested);
      - the one `SignedEntry`, if the profile sets `signedEntry` (not attested; no role and no money).
+     - the one `SignedExit`, if the profile sets `signedExit` (not attested; no role and no money).
 
    Parameters: `governance`, `council`, `guardian`, `minDelay`. These parts are `deployParts` in `ignition/parts.ts`, which
    also adds parts to a core that already runs (below).
@@ -319,6 +321,7 @@ exact sequence on the local network, playing the council and the KYC attester, a
      unless the profile's `singleSigners` names the role, for example for an MPC custody wallet whose policy engine does the same
      job. The demo profiles name all four, so a real deployment has to state its own;
    - the `SignedEntry`, where the profile asks for one, is the release's code with its own EIP-712 domain;
+   - the `SignedExit`, the same;
    - a product's `Distributor` is the release's code and names that product, and its maker and its checker are different
      accounts, each the only known account with its role;
    - `getMinDelay() ≥ 24 hours` on both timelocks.

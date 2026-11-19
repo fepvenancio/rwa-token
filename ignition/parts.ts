@@ -39,6 +39,7 @@ export function deployParts(m: IgnitionModuleBuilder, parts: readonly string[]) 
     else if (part === "executor") used.executor = m.contract("IntentExecutor", [deployer, guardian]);
     else if (part === "dvpExecutor") used.dvpExecutor = m.contract("DvPExecutor", [deployer, guardian]);
     else if (part === "signedEntry") used.signedEntry = m.contract("SignedEntry");
+    else if (part === "signedExit") used.signedExit = m.contract("SignedExit");
     else throw new Error(`${part} is not a part of a core`);
   }
   return used;
@@ -46,7 +47,7 @@ export function deployParts(m: IgnitionModuleBuilder, parts: readonly string[]) 
 
 /**
  * Adds parts to a core that already runs, for a product it was not built for: a rule, a template's implementation, an
- * executor or the signed entry. The timelocks, the registry, the hook and `ProxyDeployer` stay as they are, so the new
+ * executor, the signed entry or the signed exit. The timelocks, the registry, the hook and `ProxyDeployer` stay as they are, so the new
  * product joins the issuer's one stack. `present` is what the core already has, and naming a part in it throws. The
  * command line computes `parts` as what `CORE_HAS` does not list, so `CORE_HAS` must list the core's parts exactly. Run by
  * any account, which administers the new credential registry and executors only until `PartsHandover`.
@@ -106,7 +107,7 @@ export function handOverParts(m: IgnitionModuleBuilder, parts: readonly string[]
 
 /**
  * After `CoreParts` and the council's attestations, run by the account that ran `CoreParts`: the new parts' roles and their
- * hand-over to the timelock, as `CoreHandover` does for a whole deployment. Rules, implementations and the signed entry
+ * hand-over to the timelock, as `CoreHandover` does for a whole deployment. Rules, implementations, the signed entry and the signed exit
  * have no admin, so they need nothing here.
  */
 export function partsHandoverModule(parts: readonly string[]) {

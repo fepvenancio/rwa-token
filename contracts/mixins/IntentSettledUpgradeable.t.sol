@@ -649,6 +649,58 @@ contract IntentSettledUnit_CancelIntent is IntentSettledUnitTest {
     _token.cancelIntent(keccak256('n'));
     assertFalse(_token.nonceUsed(_alice, keccak256('n')));
   }
+
+  /// @dev A nonce is one bit: bit `nonce & 0xff` of word `nonce >> 8`. A signer that numbers its nonces one after the
+  ///      other spends one storage slot for 256 of them
+  function test_WhenASignerUsesTheNoncesOfOneWord_TheyShareOneStorageSlot() external {
+    uint256 _word = uint256(keccak256('a word')) << 8;
+    vm.record();
+    vm.startPrank(_alice);
+    for (uint256 _bit; _bit < 256; ++_bit) {
+      _token.cancelIntent(bytes32(_word | _bit));
+    }
+    vm.stopPrank();
+    (, bytes32[] memory _writes) = vm.accesses(address(_token));
+    assertEq(_writes.length, 256);
+    for (uint256 _i = 1; _i < _writes.length; ++_i) {
+      assertEq(_writes[_i], _writes[0], 'one slot for the whole word');
+    }
+    for (uint256 _bit; _bit < 256; ++_bit) {
+      assertTrue(_token.nonceUsed(_alice, bytes32(_word | _bit)));
+    }
+  }
+
+  /// @dev Spending a nonce spends that nonce and no other: not its neighbour in the word, not the same bit of the next
+  ///      word, not the same nonce of another signer
+  function testFuzz_WhenANonceIsUsed_NoOtherNonceIs(
+    bytes32 _nonce,
+    uint8 _otherBit
+  ) external {
+    vm.prank(_alice);
+    _token.cancelIntent(_nonce);
+    assertTrue(_token.nonceUsed(_alice, _nonce));
+    uint256 _n = uint256(_nonce);
+    uint256 _neighbour = (_n & ~uint256(0xff)) | _otherBit;
+    if (_neighbour != _n) assertFalse(_token.nonceUsed(_alice, bytes32(_neighbour)), 'another bit of the word');
+    unchecked {
+      assertFalse(_token.nonceUsed(_alice, bytes32(_n + 256)), 'the same bit of the next word');
+    }
+    assertFalse(_token.nonceUsed(_stranger, _nonce), 'another signer');
+  }
+
+  /// @dev Two nonces of one word are each spent once
+  function test_WhenTwoNoncesShareAWord_EachIsSpentOnce() external {
+    bytes32 _first = bytes32(uint256(0x1200));
+    bytes32 _second = bytes32(uint256(0x1201));
+    vm.startPrank(_alice);
+    _token.cancelIntent(_first);
+    _token.cancelIntent(_second);
+    vm.expectRevert(_rejected(Reasons.NONCE_USED));
+    _token.cancelIntent(_first);
+    vm.expectRevert(_rejected(Reasons.NONCE_USED));
+    _token.cancelIntent(_second);
+    vm.stopPrank();
+  }
 }
 
 contract IntentSettledUnit_CanExecute is IntentSettledUnitTest {

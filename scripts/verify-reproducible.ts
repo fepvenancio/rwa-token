@@ -50,6 +50,7 @@ const DEPLOYED = {
   IntentExecutor: "intents",
   DvPExecutor: "intents",
   SignedEntry: "intents",
+  SignedExit: "intents",
   NavDesk: "nav",
   Distributor: "distribution",
   ProxyDeployer: "deploy",

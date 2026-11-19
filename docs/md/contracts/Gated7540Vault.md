@@ -300,6 +300,8 @@ An operator is an account that a controller or owner approved with `setOperator(
 
 Operators are full delegates, as ERC-7540 defines them. An operator of an owner can open a request under any controller, its own included, that takes the owner's assets or shares, subject to the third-party check. A test pins this, so that nobody narrows it by accident (`test_WhenAnOperatorRequestsUnderItsOwnController_ItIsAFullDelegatePerErc7540`). An account should approve only operators it would trust with its assets and shares. Without an approval a deposit request reverts with `Gated7540Vault_Unauthorized(caller)`, and a redemption request needs a share allowance, as with an ERC-20 `transferFrom`.
 
+[`SignedExit`](SignedExit.md) uses both. With a holder's signed exit and share `permit` it files `requestRedeem` with the holder as controller, on the allowance, while a relayer pays the gas. A controller that makes it an operator lets anyone call its `claimFor`, which claims that controller's settled shares and cash in full, with the controller as receiver. A claim this vault refuses is skipped there and stays here. That contract is immutable, and without the holder's signature it does nothing else with the approval.
+
 <a id="functions"></a>
 ## What it can do
 
@@ -374,6 +376,7 @@ Operators are full delegates, as ERC-7540 defines them. An operator of an owner 
 - [FeeModel](FeeModel.md): The fee a desk passes to `settlePeriod`.
 - [Portfolio](Portfolio.md): With one plugged into the desk, the cash account and the on-chain part of the value.
 - [SignedEntry](SignedEntry.md): Files a deposit request from an investor's two signed messages, the entry and the cash, with a relayer paying the gas.
+- [SignedExit](SignedExit.md): Files a redemption request from a holder's signed exit and share permit, and delivers settled claims to a controller that made it an operator.
 - [ComplianceHook](ComplianceHook.md): Runs the vault's rule list on every share movement and probe.
 - [CredentialRule](CredentialRule.md): Who may become a controller, who may still collect, and why the escrow needs no credential.
 - [FundHoldersRule](FundHoldersRule.md): The fund-wide investor cap that can strand a settled deposit.

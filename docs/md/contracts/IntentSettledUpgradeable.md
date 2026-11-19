@@ -74,7 +74,7 @@ TransferIntent(address from,address to,uint256 amount,bytes32 nonce,uint256 dead
 <a id="nonces"></a>
 ## Nonces and cancelling
 
-A **nonce** here is a random 32-byte value that makes each intent unique, in the style of ERC-3009. The token keeps one used-or-not flag per signer and nonce, and nothing else. Because nonces are random rather than counted, the signer needs nothing from the chain to sign, can sign many intents at once, and the executor can run them in any order.
+A **nonce** here is a random 32-byte value that makes each intent unique, in the style of ERC-3009. The token keeps one used-or-not bit per signer and nonce, and nothing else: bit `nonce & 0xff` of word `nonce >> 8`. A signer that numbers its nonces one after the other spends one storage slot for 256 of them (`test_WhenASignerUsesTheNoncesOfOneWord_TheyShareOneStorageSlot`); a random nonce works as well and takes a slot of its own. Because nonces are random rather than counted, the signer needs nothing from the chain to sign, can sign many intents at once, and the executor can run them in any order.
 
 - Executing an intent marks its nonce used, so the same intent does not run twice (`NONCE_USED`; `check_executedIntentCannotReplay`).
 - `cancelIntent(nonce)` marks one of the caller's own nonces used, so no intent that account signed with it can run. It needs no other field, works while the token is paused, and emits `IntentCancelled(from, nonce)`. Cancelling a nonce that is already used reverts with `ERC8473PolicyRejected(NONCE_USED)`. An account that cancels a value has no effect on another signer's nonce of the same value (`test_WhenAnotherAccountCancels_ItDoesNotAffectTheSigner`).

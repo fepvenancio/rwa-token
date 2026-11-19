@@ -36,7 +36,7 @@ In scope, all under `contracts/` (`.t.sol` files and `contracts/test/` are test 
 | Credentials | `identity/CredentialRegistry` (immutable, not a proxy, not attested; the `CredentialRule` codehash covers its address, not its code) |
 | Fund | `fund/Fund` (not a proxy, not attested; the `FundHoldersRule` codehash covers its address, not its code) |
 | Governance | `governance/PolicyRegistry`, `governance/GovernanceTimelock` (the main timelock: OZ `TimelockController` plus a revoke-`CANCELLER_ROLE`-only `RECOVERY_ROLE`) |
-| Settlement | `intents/IntentExecutor`, `intents/DvPExecutor` (neither is a proxy, and neither is attested: each token authorises an executor by granting it `EXECUTOR_ROLE`), `intents/SignedEntry` (immutable, no roles: a vault judges it as any other payer) |
+| Settlement | `intents/IntentExecutor`, `intents/DvPExecutor` (neither is a proxy, and neither is attested: each token authorises an executor by granting it `EXECUTOR_ROLE`), `intents/SignedEntry` (immutable, no roles: a vault judges it as any other payer), `intents/SignedExit` (immutable, no roles: it moves a holder's shares on that holder's signature and permit, and claims for a controller that made it an operator) |
 | Deployment | `deploy/ProxyDeployer`, `deploy/TokenProxy` |
 | Portfolio | `portfolio/Portfolio`, `portfolio/ERC4626Adapter`, `portfolio/GuardedAccount` (immutable, attested as `PORTFOLIO` and `ADAPTER`), `portfolio/ERC20CallValidator`, `portfolio/ERC4626CallValidator` (attested as `VALIDATOR`) |
 | Pricing | `nav/NavDesk` (immutable, not attested: it acts by the `SETTLER_ROLE` it holds), `nav/FeeModel` (immutable, attested as `FEE_MODEL`) |
@@ -200,6 +200,28 @@ Further limits recorded during review:
   stack unless they hold those roles and neither the core's named accounts nor its timelocks hold another role there; it
   does not stop the admin granting a role later. Eligibility is an address's: the rule judges each address on its own record. Pinned by `CredentialRegistry.t.sol`,
   `CredentialRule.t.sol`, `test/nodejs/credentials.test.ts` and, for an external registry, `test/nodejs/products.test.ts`.
+- **`claimBatch` pays what it can and says what it could not.** Anyone may submit many holders' lines at once. A holder
+  already paid, one the token says may not receive, and one the asset refuses, as a gated cash token refuses an account it
+  does not accept, are passed over with an event and the last two stay unclaimed; a wrong proof or a line above the
+  funding reverts the batch. The payment is tried, and taken back in the books if the asset refuses it. An asset that
+  burns all the gas it is given still fails the whole transaction, and the asset is whatever the maker and the checker
+  agreed on. Pinned by `Distributor.t.sol::Distributor_ClaimBatch`.
+- **`SignedExit` is trusted with more than it uses.** A controller makes it an operator on a 7540 so that anyone can
+  deliver that controller's settled claims, and under ERC-7540 an operator is a full delegate: it could file requests
+  and name any receiver. The contract is immutable and offers one function without a signature, `claimFor`, which
+  claims in full with the controller as receiver, and its tests pin that it files nothing and pays nobody else. With the holder's signature it does one more thing on a 7540: an exit signed as synchronous reaches the vault's three-argument `redeem`, which there is a claim, so it pays settled redemption cash to the receiver the holder signed, whom the vault still judges. A
+  holder that does not want that trust does not make it an operator and claims for itself. An exit needs the holder's
+  signature for where the cash goes and the least it accepts, so whoever submits it can change neither; the receiver
+  still has to pass the vault's own third-party check. A request names no minimum, as with a signed entry: the
+  period's approved price is the protection. `claimFor` passes over a claim the vault refuses, so a controller the
+  policy blocks keeps its claim with the vault until it is unblocked or the agent's `recoverClaimable` delivers it.
+  A holder that already made the contract its operator on a 7540 needs no permit for a request: the vault spends no
+  allowance for an operator, so the permit passed with such an exit goes unused. Nothing on the contract moves shares
+  without a fresh signed `Exit`. Pinned by `SignedExit.t.sol`.
+- **A nonce is one bit, and a signer's client chooses how they pack.** An intent's nonce, a signed entry's and a signed exit's are kept
+  as bit `nonce & 0xff` of word `nonce >> 8`. Numbered one after the other, 256 nonces share a storage slot; chosen at
+  random, each takes its own, as before. Nothing forces a client to number them, so the saving in state is the
+  operator's to take. A cancelled nonce and a used one are the same bit.
 - **A fund counts investors by the entity an attester names, and only as well as the attester names it.** A record may
   carry an entity, an opaque number in its attester's numbering, and a fund built over the registry counts every holding
   address with the same attester and number as one investor. Four limits follow. The number is public, so it shows that
@@ -434,6 +456,7 @@ Inline suppressions (each carries its reason on the line above, in the source):
 | `NavDesk` | `incorrect-equality`, `unused-return`, `uninitialized-local` | Zero means nothing on the table, nothing accepted or no mark yet, not a balance. The unclaimed shares say nothing about whether a period is stuck, and the supply nothing about which period is closed. Of a period's book, the limit wants only what its deposits paid. A proposal is filled in a field at a time |
 | `ERC4626CallValidator` | `unused-state` | Slither does not see a constant used as a slice's bound |
 | `SignedEntry` | `arbitrary-send-erc20`, `arbitrary-send-erc20-permit`, `reentrancy-events`, `unused-return` | The investor signed the entry naming these assets, checked first. What it bought is known only after the vault's call, and the nonce was spent before it. A 7540 request returns the aggregated id, 0, which says nothing |
+| `SignedExit` | `reentrancy-events`, `calls-loop`, `unused-return` | What an exit or a claim delivered is known only after the vault's call, so its event follows it; an exit's nonce is spent before any call and a claim keeps no state. `claimFor` calls the vault for each controller on purpose, and a hostile vault gains nothing: the contract holds nothing. `requestRedeem` returns the aggregated request id, 0 |
 | `GuardedAccount` `execute` | `unused-return`, `reentrancy-events` | A permission is a timelock decision and the validator has judged the parameters, so what the call returns is not needed. Each call's event comes before that call, so in a batch it follows the earlier calls, which is the order they were made in |
 | `Gated4626Management` `collectFees`, `Gated4626Vault` `_withdraw` | `arbitrary-send-erc20` | The portfolio gave this vault an allowance at construction, for this; the recipient is the one the attested model names |
 | `Gated7540Vault` `_toSettlement`, `Gated4626Vault` `_toManagement` | `unused-return` | The functions handed to the second contract return nothing, and the target is the implementation's own immutable |
@@ -563,6 +586,8 @@ Each row is a bug deliberately planted, the tests that caught it, then the file 
 | `setRules` tells the rules it adds (2026-11-19) | the rules told after the list is stored; every rule told, not only the added ones; the fund rule accepting a rule of any fund | 7, 1 and 1 failing |
 | Entities (2026-11-19) | every address counted on its own; the key kept when the last class goes; a sender judged by its address alone; an exemption moving the count without the key; `rekey` always moving the count; the sender's side reading the registry; the receiver's investor ignored; the key without the attester; the entity kept when the attester writes zero | 13, 4, 3, 2, 3, 3, 5, 6 and 3 failing |
 | Halmos, the fund's count by key (2026-11-19) | `rekey` always moving the count; the key kept when an address stops being counted; an exemption moving the count without the key | 2 of the 3 symbolic properties fail on each |
+| Bitmap nonces and `claimBatch` (2026-11-19) | a whole word spent by one nonce, in the mixin and in the signed entry; the word ignored; the nonce never marked; a refused payment left as claimed; a holder already paid paid again; a bad proof passed over; the token's refusal ignored | 3 and 2, 11, 11, 1, 4, 1 and 1 failing |
+| `SignedExit` (2026-11-19) | a deposit claim sent to the caller; a redemption's cash sent to the caller; the minimum not checked; the signature not checked; a request allowed to name another receiver; the nonce not spent; the cash sent to the holder whatever was signed; the deadline not checked | 3, 1, 1, 1, 1, 2, 2 and 1 failing |
 | `Gated721` (2026-11-05) | the burner's freeze exemption dropped; approval checked after the hook instead of before; `canTransfer` counting ownership; and, before the fix of the outside review's first point, a burn's pre-flight taking the holder as its operator | 1, 2, 1 and 3 failing |
 | Every product deployable alone or as a whole (2026-11-06) | a part already in the core not refused; an executor left with the deployer; no operator on an executor; the signed entry or the DvP executor left out of the parts; the distribution maker's grant missing or given to the checker; no checker without a desk; the distributor naming another address; `CoreHandover` skipping the parts | 10 planted, all caught |
 | Input checks in the deploy scripts (2026-11-07) | `CORE_HAS` naming nothing accepted, its entries not trimmed, an unknown key accepted, the credential registry or the implementation keys not known; executors allowed on any template or refused on a plain token only; decimals allowed on any template or refused on an intent token | 9 planted, all caught |

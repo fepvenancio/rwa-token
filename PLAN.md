@@ -4559,6 +4559,178 @@ Step 7 of the multi-token plan and the last step of the `setRules` plan. Written
 - **Left as found.** The pause table on the roles page lists `transfer` and `transferFrom` under "every product", which the two non-fungible templates do not have. Older than this work.
 - **Also here.** Two corrections to the entities plan above, from its second review: the registry check in `Fund`'s constructor (N5), and two reopened interfaces, not three.
 
+## An ecosystem on a private chain: assessment and plan (2026-11-19, nothing built)
+
+Source: an outside assessment of the whole stack the owner passed on 2026-11-19, with "I want to plan the changes" and "do a full honest assessment, study how to integrate and implement the best solutions for each change and let's guarantee after that it is a nice improvement against the actual version". Derived from the code at `0f90907` on `main`. It proposes thirteen changes in four groups, for the step from one issuer with a few funds to many products on one private chain. Each is assessed below against the code, given the design that fits this stack, and a measure that says whether it improved on what exists. Nothing here is built, and nothing is built until the owner picks.
+
+### The target: one operator, a private Besu chain
+
+A second note from the owner the same day fixed the target: one operator runs every validator and node of a private Besu chain, with no gas price. That is the `paris` line, so each change below is built on `main`, ported to `paris` as always, and judged on `paris` where the two differ. It changes four things in the plan.
+
+- **One core serves the whole chain.** A single operator is the one governance, so E5's split into a chain core and issuer cores is not needed: the `Core` that exists is already the shared one, and every fund, note or series is a `Product` run. What is left of E5 is the limit that one `ProxyDeployer` takes each symbol once, which now covers the whole chain.
+- **No second attester.** The operator's own compliance function gathers its vendors' answers and writes one record for an address. E10 is dropped, and the one-slot read stays.
+- **No gas price** means the measure that matters is execution time and state growth, not cost. The benchmark still counts calls, slots and gas, which stand in for both, and step 0 gains a run on a local Besu network of the `paris` build.
+- **The operator runs the keepers.** Holders' addresses are the operator's own custody wallets or its clients'. So a claim, a payout and a rekey can each be pushed by a keeper, which makes E2 and E3 more useful and adds E13 and E14.
+
+### What the assessment gets right, and what it misses
+
+- **Right about the limits.** Settlement of a trade exists for `IntentToken` only, one trade for each transaction, with no partial fill. A frozen amount is one number that only the agent sets. A vault has its own portfolio. Every intent's nonce takes a storage slot for ever. One address has one live attester.
+- **Already done.** Its first identity item, entities, landed on 2026-11-19 (#57, #58).
+- **Smaller than it looks.** Four of the thirteen need little or no contract code here: the shared runtime is a deployment mode, the cash token is a profile, master and feeder funds can be composed from parts that exist, and the pool of relayers is an operations matter.
+- **Not shown.** "Two to three times the throughput" from a fused policy is a guess. What is measured: a transfer between two holders of a fund class with four rules makes 15 calls and costs 39,425 gas; to a new holder, 19 calls and 88,671 gas. On a chain with no gas price the limit is execution time and state growth, and neither has been measured on Besu.
+
+### How "better than today" is decided
+
+No change is kept on an argument alone. Step 0 of this plan is a benchmark every later change is held to.
+
+1. **A benchmark file**, `contracts/test/Bench.t.sol`, that runs fixed flows and records for each the calls, the storage slots written and the gas. Not a gate at first: `npm run bench` prints a table, and the table is copied here. Built on 2026-11-19.
+2. **The flows:** a transfer between holders and to a new holder (four rules, a fund class); an executed intent; a trade through `DvPExecutor` in both forms; a 4626 deposit and redeem; a 7540 request, settlement of a period with 1 and with 100 investors, and a claim; a signed entry; a distribution claim.
+3. **The base,** from `npm run bench` on `main` at the commit that added it (Cancun, the default test profile). Each flow's preparation runs in the same transaction, so what it touched is warm; the numbers compare two versions of the stack and are not what a first transaction costs.
+
+| Flow | Calls | Slots written | Gas |
+|---|---|---|---|
+| transfer: between holders, 4 rules, fund class | 15 | 2 | 39,329 |
+| transfer: to a new holder, 4 rules, fund class | 19 | 4 | 88,575 |
+| intent: executeTransfer through IntentExecutor | 13 | 3 | 102,004 |
+| intent: executeTransfer, the nonce next to a used one | 13 | 3 | 102,004 |
+| dvp: gated cash | 22 | 6 | 185,329 |
+| dvp: erc-3009 cash | 22 | 8 | 196,503 |
+| 4626: deposit | 14 | 4 | 62,140 |
+| 4626: redeem | 14 | 4 | 42,220 |
+| 7540: requestDeposit | 10 | 6 | 135,290 |
+| 7540: settlePeriod, 1 investor | 5 | 11 | 60,521 |
+| 7540: settlePeriod, 100 investors | 5 | 11 | 60,532 |
+| 7540: claim deposit | 22 | 7 | 124,720 |
+| signed entry: 4626 with permit | 24 | 12 | 240,115 |
+| distribution: claim | 11 | 4 | 82,403 |
+
+   The first two rows were first measured by hand at 39,425 and 88,671; the file reads its addresses into locals before it starts counting, which is the 96 gas between them. The fixtures are the existing integration ones: rows 1, 2 and 13 run on the real credential and fund rules, and rows 3 to 11 on the fixtures' identity mock in place of the credential rule, so their totals are a little below a production list's. Settling a period costs the same for 1 investor and for 100.
+
+4. **The rule for each change:** it names the flow it improves and by how much before it is built; it is kept only if the number is met; no other flow may get worse by more than 2% in gas or by one call, unless the change says so and why; and every existing gate stays green: the suites, the invariants, Halmos, Slither, sizes, upgrade safety, the reproducible build, with planted bugs for the new code.
+5. **What the benchmark cannot say:** throughput on Besu. A change justified by throughput (E11 below) needs a run on a Besu network before it is kept.
+
+### The changes, in the order proposed
+
+**Tier 1: small, clear, no open design.**
+
+| # | Change | Verdict and design | Touches | Kept if |
+|---|---|---|---|---|
+| E1 | Nonces in a bitmap | **Do.** `IntentSettledUpgradeable` keeps `nonceUsed(signer, nonce)` and the `bytes32` nonce as they are, and stores the nonce as bit `nonce & 0xff` of word `nonce >> 8`. A signer that numbers its nonces densely uses one slot for 256 intents; a random nonce still works and costs what it does today. No interface changes. `SignedEntry` gets the same | the mixin's storage (no deployment exists, so no migration), `SignedEntry`, tests, the signing helper | 256 intents with dense nonces write 1 nonce slot, not 256, and an executed intent on a used word costs at least 12,000 gas less |
+| E2 | A distribution pushed in batches | **Do.** `claim` already pays any holder, whoever calls. Add `claimBatch(id, holders, amounts, proofs)`, open to anyone, which skips a holder that already claimed or may not receive and says so in an event, so one bad row does not stop a payout. The payment itself can fail too: `claim` asks the share token whether the holder may receive, but the money is another token, and when that one is gated (the cash token of E4) a holder it refuses reverts the transfer. So the batch tries each payment, and a row whose payment fails is skipped, left unclaimed and named in the event. A bad proof, a row above the funding, a distribution not approved or expired still revert the whole batch: those are the caller's errors. `Multicall` would revert the whole batch on one row | `Distributor`, `IDistributor` (reopened) | 100 holders paid in one transaction, for less gas than 100 claims; a holder the share token or the cash token refuses leaves the other 99 paid and can still claim later; a bad proof reverts the batch |
+| E3 | Signed exits | **Do.** `SignedExit`, the mirror of `SignedEntry`: immutable, no roles, no money between calls. The holder signs where the cash goes and the least it accepts, with the share token's `permit`. On a 4626 the lego redeems to the signed receiver. On a 7540 it files the request, and claims for a controller that made it an operator once. Today's exit, a permit and a `multicall`, trusts the relayer with where the cash goes | new contract and interface, `Core` and `CoreParts`, tests | a relayer can submit an exit and cannot change its receiver or its minimum; the entry flow's numbers do not move |
+| E4 | A cash token | **Do as a profile, not a contract.** A `cash` profile: an `IntentToken` with `CredentialRule` and `SupplyCapRule`, minter and burner held by the issuer's payment operations. It already settles in `DvPExecutor`, pays into vaults, funds a `NavDesk` and a `Distributor`, and enters through `SignedEntry` by `permit`. ERC-3009 on our own token is not needed for any of that; add it only if an outside system requires it | `ignition/profiles.ts`, node tests, pages | the profile deploys, passes the post-deploy check, and each of the five uses is shown in a test |
+| E5 | One core for the chain | **Nothing to build for one operator; a deployment mode if a second issuer ever joins.** With one operator the existing `Core` is the chain's: one registry, one hook, one credential registry, one set of implementations, and a `Product` run for each instrument. For a second issuer with its own governance the design is a split, with no contract change expected: the hook has no admin and asks each token's own admin, rules take their settings from each token's roles, and each issuer would bring its own timelocks, guardian and `ProxyDeployer`. To decide now: one deployer takes each symbol once, so a ticker reused for a rolled note needs a new symbol or a second deployer | pages; Ignition only if a second issuer joins | twenty products of mixed templates launch on one core with no timelock wait and pass the post-deploy check |
+| E6 | Master and feeder funds | **Prove before building.** A feeder vault whose `Portfolio` holds an `ERC4626Adapter` into a master `Gated4626Vault`, each class with its own `FeeModel` and rule list, is this structure from parts that exist. Write the integration test and a profile first. Code follows only for a gap the test finds; the known candidates are a master that deals in periods, which the adapter cannot enter, and the master's limit on counted gains reaching the feeders late | a test, a profile, pages; contracts only if the test fails | two classes over one master: a gain in the master reaches both prices in proportion, each class charges its own fee, and the money sits in one place |
+| E13 | Claims that arrive on their own | **Do with what exists, and add no signature path yet.** After a period settles, a keeper that a controller made its operator can claim the shares or the cash to that controller: the 7540 has `setOperator`, and an operator's claim to the controller itself passes the third-party check. On this chain the grant is one transaction at onboarding, which costs the wallet nothing. A signed `setOperator` would reopen the vault's interface and add code to a contract near its size limit, so it waits for a wallet that cannot send that transaction. An operator is a full delegate under ERC-7540, so the keeper is a contract that can do nothing but claim to the controller: `SignedExit` (E3) carries that function, open to anyone, taking a list of controllers. A claim can fail for one controller, a deposit claim below the minimum position or into a full fund for instance, so the batch skips that controller with an event and delivers the rest. Tests pin that this entry point can only claim, and only to the controller itself: it can file no request and name no other receiver | E3's lego, the onboarding runbook, pages | after `NavDesk.execute`, one keeper transaction delivers every controller's claim; one controller whose claim is refused does not hold back the others; and the keeper can send nothing anywhere else |
+| E14 | The control plane | **Do, off-chain.** The post-deploy check is a function inside the test fixtures. Move it to a script that runs against a live network and exits non-zero, and add keepers for `Fund.rekey` (from `CredentialSet`), `NavDesk.closePeriod` and `execute`, `collectFees`, `claimBatch` and the claims of E13, and a reconciler that compares each cash token's supply with the ledger it mirrors and each fund's count with its cap. No contract changes | `scripts/`, the node tests that already call the check, the runbook | the check runs against a deployed stack from the command line; each keeper is shown in a node test doing its one job and nothing else |
+
+**Tier 2: new legos, a design to settle first.**
+
+| # | Change | Verdict and design | Touches | Kept if |
+|---|---|---|---|---|
+| E7 | Encumbrance | **Do, with the seizure redesigned.** "The holder may move only what is not pledged" is a policy decision, so by rule 11 it is a rule. `EncumbranceRule`: liens keyed by token, holder and lien id, each with a beneficiary and an amount; the holder creates one, only the beneficiary releases it; the rule refuses any movement, a redemption included, that would leave the holder with less than its pledged total, and exempts FORCED. Its decision reads the balances and the pledged total and nothing else, so it does not depend on the operator and a pre-flight agrees with the write. The first version of this row had the beneficiary seize under an allowance from the holder. A review showed two faults, both real: the holder can revoke an allowance after drawing the loan, and letting the beneficiary's own transfer through means a rule that reads the operator (dispatcher rule 6) and a lien that an ordinary payment to the lender would lower. Two designs remain. **(a) A scoped enforcement lego, preferred:** an immutable `LienAgent` that holds `AGENT_ROLE` on the token and has one power, to lower a lien and force exactly that amount from the holder to the lien's beneficiary when the beneficiary calls. The holder cannot revoke it, the tokens stay the holder's until default, so its distributions and its place in a fund's count stay too, and the rule needs no exception because FORCED is already exempt. Its cost is an `AGENT_ROLE` held by a contract, which the timelock grants and the council reviews. **(b) An escrow:** pledged tokens move to a `LienVault`. Seizure is then a plain transfer and `maxRedeem` is exact, but the vault is the holder of record: a distribution's list has to look through it, and a fund's count sees the vault, the same question as a 7540's escrow. To settle before any code: (a) or (b). Limit of (a) to state: `maxRedeem` does not know a lien, as it does not know a minimum | new rule and interface, the lego, a reason code, tests, pages | two lenders hold liens on one holder and neither can touch the other's; the holder cannot move pledged tokens, cannot stop a seizure, and can move the rest; a payment from the holder to its lender leaves the lien as it was; a transfer with the rule listed and no lien costs at most one cold read more |
+| E8 | Orders, fills and batches | **Do, as a new executor beside `DvPExecutor`.** A partial fill cannot come from an intent: its nonce is spent once and its amount is fixed. So `OrderSettlement`: a party signs an order on the executor's own domain (what it gives, what it takes, the least or the most it accepts, a counterparty or anyone, an expiry, a nonce) and gives the executor an allowance, by `permit` for the ERC-20 templates. The executor keeps `filled[orderHash]`, checks every fill against both orders, and pulls both sides. `settleBatch` takes many fills atomically and names the failing one. It works on `GatedToken` and on both vaults' shares with no token change; the hook sees a TRANSFER with the executor as operator. A token that trades here must not list `ExecutedOnlyRule`, which refuses a TRANSFER; an `IntentToken` under that rule keeps `DvPExecutor`. A `Gated1155` series can be a leg from the start, with the token id in the order and `setApprovalForAll` to the executor given at onboarding, so fixed-income series fill in parts without a third executor; that approval covers every id the holder has, and the signed order is what bounds the executor. Netting of a whole cycle is a second phase: the executor would have to hold tokens between legs or move only net amounts, and proving on-chain that the nets respect every order is the hard part | new executor and interface, role and pause as the others, `Core`, tests, pages | 100 fills settle in one transaction for less gas each than 100 DvP trades; an order fills in parts up to its amount and never past it; a fill worse than a signed limit reverts; shares of both vaults and a `Gated1155` series trade against cash |
+
+**Tier 3: decide later, on evidence or advice.**
+
+| # | Change | Verdict | What would decide it |
+|---|---|---|---|
+| E9 | Omnibus accounts | **A legal question first.** Today a pooled account is either one investor or, exempted, none. The small design is a weight: the fund counts a named account as the number of beneficial owners its holder declares. A qualification bit for such accounts costs nothing to reserve now (ten of 32 are used) and lets a token's policy admit or refuse them. Whether a declared number satisfies a statutory look-through is for counsel | counsel's answer; then about the size of the exemption path |
+| E10 | A second live attester | **Dropped for this target.** One operator writes one record for an address. If several issuers ever share the registry, the design that keeps the common read at one slot is an identity record as today plus a second slot of endorsements, read only when the first does not meet the policy | several issuers on one registry |
+| E11 | A fused policy, for the cash token first | **Measure first.** One contract in place of the hook and its rules removes most of the 15 calls, but it either copies the rules' state, which then has to be current at every installation, or still calls out for it. Build a spike for the cash token's short list, and keep it only if a transfer costs at least 35% less and a Besu run shows the throughput | the benchmark, then a Besu run |
+| E12 | Netting of a cycle | **After E8.** See E8 | E8 in use, and a desk that wants it |
+
+**Not code.** A pool of relayers: both executors already take many operators, and an intent's nonce belongs to its signer, not to the relayer, so several relayers can submit at once today. It belongs in the runbook.
+
+### Order and dependencies
+
+Step 0, the benchmark, comes first and is small. Then, in the order proposed:
+
+1. **One pass over the frozen surface, before any outside audit:** E1 (nonces), E2 (`claimBatch`, the only existing interface reopened) and E3 with E13 (`SignedExit` and the keeper's claim).
+2. **The rail and the desk:** E4 (the cash profile), then E8 (orders, fills and batches).
+3. **Operations:** E14 (the control plane), alongside the chain itself.
+4. **Capital:** E6 (master and feeder, test first), then E7 (encumbrance).
+5. **On evidence:** E11 (a fused policy), E12 (netting), E9 (omnibus).
+
+E12 needs E8, E13 needs E3, E11 needs step 0 and a Besu run. Each change is its own pull request on `main` with its port to `paris`, tests first, and its row in the benchmark table. Settings of the chain itself (block time, the storage format, which nodes validate and which serve) are the operator's and are not in this repository.
+
+### The first pass, as built on `main` (2026-11-19): E1 and E2
+
+The owner passed on the go-ahead for step 0 and the first pass on 2026-11-19. E3 with E13 followed the same day and has its own section below.
+
+- **E1, nonces in a bitmap.** `IntentSettledUpgradeable` and `SignedEntry` keep a nonce as bit `nonce & 0xff` of word `nonce >> 8`. No interface changed; `nonceUsed` and the `bytes32` nonce are as they were. Five tests: 256 nonces of one word share one slot, in the mixin and in the signed entry, which failed before the change; a used nonce spends no other, fuzzed over the nonce, its neighbours in the word, the next word and another signer; two nonces of a word are each spent once.
+- **E2, `claimBatch`.** As in the row above, with the row logic in one function so the batch and the stack both fit. `IDistributor` reopened: `claimBatch`, the `ClaimSkip` enum and `DistributionClaimSkipped`; the freeze test failed on the id before the re-pin. Eleven tests, ten failing against a stub: each of the three reasons to pass a row over, a holder named twice, the four reverts of the whole batch, an empty batch, and a hundred holders in one transaction.
+- **Planted bugs.** A whole word spent by one nonce, in the mixin and in the signed entry; the word ignored; the nonce never marked; a refused payment left as claimed; a holder already paid paid again; a bad proof passed over; the token's refusal ignored: 3 and 2, 11, 11, 1, 4, 1 and 1 tests fail.
+- **Against the benchmark.** Three rows were added for these two changes. Every other row moved by at most 154 gas (0.19%) and by no call.
+
+| Flow | Before | After |
+|---|---|---|
+| intent: executeTransfer, the nonce next to a used one | 13 calls, 3 slots, 102,004 gas | 13, 3, 82,123 |
+| intent: executeTransfer through IntentExecutor (a nonce in a fresh word) | 13, 3, 102,004 | 13, 3, 102,023 |
+| distribution: claim | 11, 4, 82,403 | 11, 4, 82,557 |
+| distribution: 100 claims, one by one | 1,100 calls, 400 slots, 6,487,454 gas (after the change; `claim` is as it was) | the same |
+| distribution: claimBatch, 100 holders | no such function | 1,001 calls, 400 slots, 4,938,738 gas |
+
+  E1's number was 12,000 gas less on a used word: it is 19,881 less here, where the word was written in the same transaction and is warm. In a later transaction the schedule gives about 17,100 less (a write to a slot that already holds a value, against a write to an empty one). In state, 256 numbered nonces take one slot where they took 256. E2's number was less gas than 100 claims: 24% less in the calls themselves, before the 100 transactions' own base cost.
+- **Gates.** `npx hardhat test`: 2227 passing (2027 solidity, 200 nodejs). Format, lint and typecheck clean, Slither 0 results, Halmos 22 of 22 on this branch, `validate:upgrades` 8 of 8, `verify:reproducible` 33 contracts identical.
+- **Not done.** No node test drives `claimBatch` through the deployed stack. The signing helpers still draw random nonces; numbering them is the client's choice. The port to `paris`.
+
+### The first pass, as built on `main` (2026-11-19): E3 with E13
+
+- **The contract.** `SignedExit`, immutable, no roles, with `ISignedExit` (a new interface, id `0x5ef9720f`, and four event topics, pinned). An exit is the holder's signed `Exit` and the share token's `permit`; a 4626 pays the signed receiver from the vault, and a 7540 gets a request with the holder as controller. `claimFor(vault, controllers)` is E13: open to anyone, it claims a settled deposit's shares and a settled redemption's cash to each controller itself, and passes over a claim the vault refuses with the vault's own error in the event. Its nonces are one bit each, as in E1.
+- **What the review asked for, and where it is pinned.** One refused controller does not hold back the others: `test_AControllerThatDidNotAllowItIsPassedOverAndTheOthersAreServed`, `test_AControllerThePolicyRefusesIsPassedOverAndTheOthersAreServed`. The entry point with no signature can only claim, and only to the controller: `test_ItLeavesAPendingRequestAloneAndFilesNone`, and the two delivery tests check that the caller and the contract end with nothing.
+- **Tests.** `SignedExit.t.sol`, 22 tests on real vaults behind the real credential registry, rule and hook; 19 of the first 21 failed against a stub. The freeze test failed on the unpinned id. One node test: the part joins a running core alone, a holder leaves a 4626 through it by a relayer, and the post-deploy check refuses a stack that lost it.
+- **Planted bugs.** A deposit claim sent to the caller; a redemption's cash sent to the caller; the minimum not checked; the signature not checked; a request allowed to name another receiver; the nonce not spent; the cash sent to the holder whatever was signed; the deadline not checked: 3, 1, 1, 1, 1, 2, 2 and 1 tests fail.
+- **Deployment.** Part `signedExit`, profile flag `signedExit`, in `Core` and `CoreParts`; the post-deploy check compares its code with the release and a sample exit's hash with the one a holder signs for the chain and the address.
+- **Against the benchmark.** Two rows added, and no existing row moved by a single gas: a signed exit from a 4626 makes 17 calls, writes 8 slots and costs 122,177 gas; `claimFor` for ten controllers with a settled deposit each makes 141 calls, writes 50 slots and costs 657,340 gas. The exit is a function that did not exist, so its number is a base for later, not a gain; what it buys is in the tests, a relayer that cannot change the receiver or the minimum.
+- **Found while writing the page.** On a 7540 the three-argument `redeem` is a claim, so an exit signed as synchronous for a 7540 is a signed claim of settled cash to the signed receiver, for a holder that made the contract its operator. It needs the holder's signature and the vault judges the receiver, so nothing is opened; it was unstated and untested. It is now in the interface's NatSpec, the brief and `SECURITY.md`, and pinned by `test_OnA7540ASynchronousExitIsASignedClaimThatNeedsTheHoldersLeave`.
+- **Pages.** A page for `SignedExit` and nine pages changed, with the Markdown copies (46 pages). The new page's figure was looked at in a browser; the overview drawing has no room for another box and names the contract in its caption.
+- **Gates.** `npx hardhat test`: 2251 passing (2050 solidity, 201 nodejs) before the test above was added, and that file then passed alone with 22. Format, lint and typecheck clean, Slither 0 results, Halmos 22 of 22, `validate:upgrades` 8 of 8, `verify:reproducible` 34 contracts identical.
+- **Not done.** No signed `setOperator`: a controller makes the contract its operator with a transaction of its own, as the plan decided. No Halmos property. The port to `paris`.
+
+### The first pass on `paris` (2026-11-19): step 0, E1 and E2
+
+Carried here by cherry-pick with no conflict; where the text above says "this line" it means `main`, and its numbers are `main`'s. The contracts, the tests and the pages are the same files. This is the line the target runs, so its own base is recorded. The guard here is in storage, which is the two more slots written on most rows.
+
+| Flow | Calls | Slots written | Gas |
+|---|---|---|---|
+| transfer: between holders, 4 rules, fund class | 15 | 4 | 42,687 |
+| transfer: to a new holder, 4 rules, fund class | 19 | 6 | 91,965 |
+| intent: executeTransfer through IntentExecutor | 13 | 5 | 106,075 |
+| intent: executeTransfer, the nonce next to a used one | 13 | 5 | 106,075 |
+| dvp: gated cash | 22 | 12 | 196,083 |
+| dvp: erc-3009 cash | 22 | 12 | 203,938 |
+| 4626: deposit | 14 | 6 | 65,829 |
+| 4626: redeem | 14 | 6 | 45,929 |
+| 7540: requestDeposit | 10 | 6 | 135,796 |
+| 7540: settlePeriod, 1 investor | 5 | 11 | 61,357 |
+| 7540: settlePeriod, 100 investors | 5 | 11 | 61,368 |
+| 7540: claim deposit | 22 | 9 | 128,365 |
+| signed entry: 4626 with permit | 24 | 14 | 241,913 |
+| distribution: claim | 11 | 4 | 82,708 |
+
+After E1 and E2, on this line: an executed intent next to a used nonce costs 86,184 gas, from 106,075; a `claimBatch` of 100 holders costs 4,973,956 against 6,516,678 for 100 claims; no other row moved by more than 153 gas or by a call. `npx hardhat test`: 2228 passing (2028 solidity, 200 nodejs). Format, lint and typecheck clean, Slither 0 results, Halmos 22 of 22, `validate:upgrades` 8 of 8, `verify:reproducible` 33 contracts identical.
+
+E3 with E13 followed, carried the same way; the brief keeps this line's deployment text. On this line a signed exit from a 4626 costs 123,620 gas and `claimFor` for ten controllers 664,720, and no existing row moved. `npx hardhat test`: 2253 passing (2052 solidity, 201 nodejs). Format, lint and typecheck clean, Slither 0 results, Halmos 22 of 22, `validate:upgrades` 8 of 8, `verify:reproducible` 34 contracts identical.
+
+### Decisions and review, 2026-11-19
+
+The owner passed on a reviewer's answers and four notes the same day. The answers settle three questions; the notes were each checked against the code and are right, and the rows above carry them.
+
+- **The bar:** the rule of step 0 stands: the named number met, and no other flow worse by more than 2% in gas or by one call.
+- **A reused ticker:** no second deployer. A rolled instrument takes a new series symbol, or is a token id of a `Gated1155`.
+- **Omnibus accounts:** stay in tier 3, for counsel.
+- **Go-ahead:** step 0, then the first pass: E1, E2, and E3 with E13.
+- **The notes:** the seizure in E7 (redesigned above); a gated cash token refusing one holder in E2; skipping one controller in E13 and pinning that the keeper only claims to the controller; `Gated1155` and `ExecutedOnlyRule` in E8; and a wrong reference in step 0, corrected.
+
+### Interfaces this would reopen
+
+`IDistributor` (E2). New interfaces only for E3, E7 and E8. E1, E4, E5, E6, E13 and E14 reopen none.
+
+### What this plan does not claim
+
+That the stack then runs a market at any given rate. The benchmark compares the stack with itself. Throughput and state growth over a year are measured on a Besu network; step 0 adds a local one for the `paris` build, and what it shows on a laptop is a ratio between two versions, not a production figure.
+
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
 2. Credential layer: none left. On 2026-10-30 the owner confirmed decisions 11, 12, 13, 15, 16 and 17 as built (17 at the measured +8,179 gas on a transfer). Decision 14 is moot, since `IdentityRule` was removed in the cleanup. Decisions 8 and 9 are recorded in the credential section's table.
@@ -4567,3 +4739,4 @@ Step 7 of the multi-token plan and the last step of the `setRules` plan. Written
 5. `setRules` tells the rules it adds: built on 2026-11-19 with R3 as written, no recount. Open: one sentence in `IComplianceHook`'s NatSpec for `setRules`, a frozen file.
 6. Entities in the credential registry: built on 2026-11-19 without N10. Still open: whether a second live attester for one address is expected, which would change how an entity is scoped.
 7. A review of both plans (2026-11-19) recommends: build both; keep R3 as written, with no recount; leave N10 out; put off the second attester. These are a reviewer's recommendations and decide nothing; items 5 and 6 stay the owner's.
+8. The ecosystem plan (2026-11-19): step 0 and the first pass (E1, E2, E3 with E13) are approved. Open: for E7, a scoped enforcement lego or an escrow; and counsel's view on omnibus accounts (E9).

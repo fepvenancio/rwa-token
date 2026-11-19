@@ -66,7 +66,8 @@ export type SensitiveRole = "minter" | "burner" | "agent" | "settler";
 /**
  * A combination the issuer deploys: what `Core` must contain follows from it. `singleSigners` names roles the hand-over check
  * lets a single key hold, for example an MPC custody wallet whose policy engine does the same job. A real deployment states
- * each one on purpose. `signedEntry` adds the one `SignedEntry` the issuer's vaults can be entered through.
+ * each one on purpose. `signedEntry` adds the one `SignedEntry` the issuer's vaults can be entered through, and `signedExit`
+ * the one `SignedExit` they can be left through and a 7540's settled claims delivered by.
  *
  * `credentials` chooses the KYC registry: `"own"` (the default) deploys the core's own `CredentialRegistry` and
  * `CredentialRule`; `"external"` deploys neither, and the deployment's parameters name an existing `credentialRule` and the
@@ -78,6 +79,7 @@ export type Profile = {
   products: readonly Product[];
   singleSigners?: readonly SensitiveRole[];
   signedEntry?: boolean;
+  signedExit?: boolean;
   credentials?: "own" | "external";
 };
 
@@ -162,15 +164,15 @@ export function assertUsable(product: Product) {
 /** The rules `CoreParts` deploys, in this order. The fund rule comes with its fund, from the `Fund` module. */
 const CORE_RULES: readonly RuleKey[] = ["credentialRule", "minPositionRule", "holderRestrictionRule", "windowRule", "supplyCapRule", "executedOnlyRule"];
 
-/** Every key a part of a core can have: the rules, the implementations, the executors and the signed entry. */
-export const PART_KEYS: readonly string[] = [...CORE_RULES, ...Object.values(IMPLEMENTATION_KEY), "executor", "dvpExecutor", "signedEntry"];
+/** Every key a part of a core can have: the rules, the implementations, the executors, the signed entry and the signed exit. */
+export const PART_KEYS: readonly string[] = [...CORE_RULES, ...Object.values(IMPLEMENTATION_KEY), "executor", "dvpExecutor", "signedEntry", "signedExit"];
 
 /**
  * What a core needs for these products, by the key each part has in the core and in the parameters: the rules, one
  * implementation per template, the executors and the signed entry. `credentialRule` brings its `credentialRegistry`, unless
  * the profile reads an external one.
  */
-export function partsOf(profile: Pick<Profile, "products" | "signedEntry" | "credentials">): string[] {
+export function partsOf(profile: Pick<Profile, "products" | "signedEntry" | "signedExit" | "credentials">): string[] {
   const rules = new Set(profile.products.flatMap((product) => product.rules));
   if (profile.credentials === "external") rules.delete("credentialRule");
   const templates = new Set(profile.products.map((product) => product.template));
@@ -181,11 +183,15 @@ export function partsOf(profile: Pick<Profile, "products" | "signedEntry" | "cre
     ...(executors.has("intent") ? ["executor"] : []),
     ...(executors.has("dvp") ? ["dvpExecutor"] : []),
     ...(profile.signedEntry ? ["signedEntry"] : []),
+    ...(profile.signedExit ? ["signedExit"] : []),
   ];
 }
 
 /** The parts these products need that a running core, whose parts are `present`, does not have. */
-export const missingParts = (profile: Pick<Profile, "products" | "signedEntry" | "credentials">, present: readonly string[]) =>
+export const missingParts = (
+  profile: Pick<Profile, "products" | "signedEntry" | "signedExit" | "credentials">,
+  present: readonly string[],
+) =>
   partsOf(profile).filter((part) => !present.includes(part));
 
 /** The funds a profile's products name, each once, in the order they first appear. */
