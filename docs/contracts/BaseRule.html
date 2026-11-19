@@ -44,7 +44,7 @@
 <section id="how">
   <div class="prose">
     <h2>How the hook check works</h2>
-    <p>Rules have two kinds of entry point. <code>check</code>, <code>checkSend</code> and <code>checkReceive</code> only read, so anyone may call them. <code>after_</code> is the one that may write: the hook calls it after the balances moved, for rules that asked for it. <code>BaseRule</code> guards it with the <code>onlyHook(ctx)</code> modifier, which asks <code>ctx.token</code> for its current hook (<code>policy()</code>, a read-only call) and compares the answer with the caller. A third entry point, <code>onInstall</code>, is called by the hook when a token installs it. In <code>BaseRule</code> it does nothing and has no guard.</p>
+    <p>Rules have two kinds of entry point. <code>check</code>, <code>checkSend</code> and <code>checkReceive</code> only read, so anyone may call them. <code>after_</code> is the one that may write: the hook calls it after the balances moved, for rules that asked for it. <code>BaseRule</code> guards it with the <code>onlyHook(ctx)</code> modifier, which asks <code>ctx.token</code> for its current hook (<code>policy()</code>, a read-only call) and compares the answer with the caller. A third entry point, <code>onInstall</code>, is called by the hook when a token installs it, and when the hook's <code>setRules</code> adds the rule to a token's list. In <code>BaseRule</code> it does nothing and has no guard.</p>
   </div>
   <figure>
     <div class="fig-scroll">
@@ -136,7 +136,7 @@
       <tbody>
         <tr><td><code>onlyHook(ctx)</code></td><td>A modifier, used on <code>after_</code></td><td>Lets the call through if the caller is <code>IPolicyGated(ctx.token).policy()</code>; otherwise reverts with <code>ComplianceRule_OnlyHook(caller)</code>.</td></tr>
         <tr><td><code>after_(ctx)</code></td><td>The hook of <code>ctx.token</code></td><td>Does nothing. Kept behind <code>onlyHook</code> even when empty.</td></tr>
-        <tr><td><code>onInstall(token, previousPolicy)</code></td><td>Anyone; the hook calls it for every rule of a token's list when the token installs the hook</td><td>Does nothing. A rule that keeps state derived from a token's movements replaces it, to confirm that state is current or revert, which undoes the installation.</td></tr>
+        <tr><td><code>onInstall(token, previousPolicy)</code></td><td>Anyone; the hook calls it for every rule of a token's list when the token installs the hook, and for each rule a <code>setRules</code> adds to the list</td><td>Does nothing. A rule that keeps state derived from a token's movements replaces it, to confirm that state is current or revert, which undoes the installation or the change of list.</td></tr>
         <tr><td><code>wantsAfter()</code></td><td>Anyone (read-only)</td><td>False: the hook will not call <code>after_</code>. The hook reads this once, when a list is installed, so a rule must keep it constant.</td></tr>
         <tr><td><code>checkSend(token, account)</code></td><td>Anyone (read-only)</td><td><code>TRANSFER_OK</code>: no opinion about a sender on its own.</td></tr>
         <tr><td><code>checkReceive(token, account)</code></td><td>Anyone (read-only)</td><td><code>TRANSFER_OK</code>: no opinion about a receiver on its own.</td></tr>
@@ -167,7 +167,7 @@
     </table>
   </div>
   <div class="prose">
-    <p>"Default" means the behaviour in the table above. <code>after_</code> stays reachable on all of them, but the hook calls it on <code>FundHoldersRule</code> alone, because that is the one rule whose <code>wantsAfter()</code> is true. <code>FundHoldersRule</code> is also the one rule with its own <code>onInstall</code>: it reverts unless the class has no supply or the token's previous hook listed it. The other six keep the default. The first six add their own interface to <code>supportsInterface</code>. <code>ExecutedOnlyRule</code> keeps the <code>BaseRule</code> answer.</p>
+    <p>"Default" means the behaviour in the table above. <code>after_</code> stays reachable on all of them, but the hook calls it on <code>FundHoldersRule</code> alone, because that is the one rule whose <code>wantsAfter()</code> is true. <code>FundHoldersRule</code> is also the one rule with its own <code>onInstall</code>: it reverts unless the class has no supply or the token's previous hook listed it or another rule of the same fund. The other six keep the default. The first six add their own interface to <code>supportsInterface</code>. <code>ExecutedOnlyRule</code> keeps the <code>BaseRule</code> answer.</p>
   </div>
 </section>
 
@@ -198,7 +198,7 @@
       <li><b><code>check</code> is read-only and does not revert on a decision.</b> It returns <code>TRANSFER_OK</code> or a reason code. It must not revert even for an amount above the sender's balance: the write does not offer the hook such an amount, but the token's <code>canTransfer</code> does, so a rule compares before it subtracts.</li>
       <li><b>The account questions agree with <code>check</code>.</b> If <code>checkSend</code> or <code>checkReceive</code> refuses an account, <code>check</code> refuses every movement on that side of a kind the rule does not exempt. They take no amount and must not encode a quantitative rule. ERC-7943 keeps those out of the account questions and names balance checks and amount limits, and <code>IComplianceRule</code> reads a holder count the same way.</li>
       <li><b>State is keyed by <code>ctx.token</code>.</b> The rules with per-token settings authorise them by the token's own roles, asked live with <code>hasRole</code>. <code>FundHoldersRule</code> has no settings: its cap and exemptions are on the fund, under the fund's owner. The post-deploy check (<code>assertHandedOver</code>) asserts that none of the core's rules has a <code>hasRole</code> or <code>owner</code> function of its own.</li>
-      <li><b><code>onInstall</code> answers for state derived from movements.</b> A rule that keeps such state confirms there that it is current for the token, or reverts, and the installation is undone. A rule that writes state there must accept only the token's installed policy as the caller.</li>
+      <li><b><code>onInstall</code> answers for state derived from movements.</b> A rule that keeps such state confirms there that it is current for the token, or reverts, and the installation or the change of list is undone. A rule that writes state there must accept only the token's installed policy as the caller.</li>
       <li><b><code>after_</code> moves nothing in the token.</b> It runs inside the token's reentrancy guard, so a transfer from it reverts.</li>
       <li><b><code>ruleId()</code> names the rule type.</b> A hook takes one rule of each type per token.</li>
     </ul>
@@ -248,7 +248,7 @@
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>01024e9</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>75aa171</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

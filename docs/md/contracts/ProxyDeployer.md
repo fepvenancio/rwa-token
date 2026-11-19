@@ -101,4 +101,4 @@ The constructor takes the owner and the registry. It refuses a zero registry (`P
 
 ---
 
-Describes the contracts at commit `01024e9` on `main`.
+Describes the contracts at commit `75aa171` on `main`.

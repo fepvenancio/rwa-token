@@ -83,7 +83,7 @@ The demo deployment (`full`, through `RULE_ORDER`) lists it second on all three 
 | `isExempt(token, account)` | Anyone (read-only) | True for the token itself and for listed accounts. |
 | `checkSend`, `checkReceive` | Anyone (read-only) | `TRANSFER_OK` for every account. |
 | `after_(ctx)` | The hook of `ctx.token` | The empty default. The hook does not call it, because `wantsAfter()` is false. |
-| `onInstall(token, previousPolicy)` | Anyone; the hook when a token installs it | The empty default: the rule keeps no state derived from movements. |
+| `onInstall(token, previousPolicy)` | Anyone; the hook when a token installs it, or when a `setRules` adds the rule to the token's list | The empty default: the rule keeps no state derived from movements. |
 | `ruleId()`, `wantsAfter()`, `supportsInterface(id)` | Anyone (read-only) | `keccak256('MinPositionRule.v1')`; false; ERC-165 for `IMinPositionRule`, `IComplianceRule` and `IERC165`. |
 
 <a id="edges"></a>
@@ -128,4 +128,4 @@ The demo deployment (`full`, through `RULE_ORDER`) lists it second on all three 
 
 ---
 
-Describes the contracts at commit `01024e9` on `main`.
+Describes the contracts at commit `75aa171` on `main`.

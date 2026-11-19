@@ -20,7 +20,7 @@ The parent every compliance rule is built on. It holds the one access check a ru
 <a id="how"></a>
 ## How the hook check works
 
-Rules have two kinds of entry point. `check`, `checkSend` and `checkReceive` only read, so anyone may call them. `after_` is the one that may write: the hook calls it after the balances moved, for rules that asked for it. `BaseRule` guards it with the `onlyHook(ctx)` modifier, which asks `ctx.token` for its current hook (`policy()`, a read-only call) and compares the answer with the caller. A third entry point, `onInstall`, is called by the hook when a token installs it. In `BaseRule` it does nothing and has no guard.
+Rules have two kinds of entry point. `check`, `checkSend` and `checkReceive` only read, so anyone may call them. `after_` is the one that may write: the hook calls it after the balances moved, for rules that asked for it. `BaseRule` guards it with the `onlyHook(ctx)` modifier, which asks `ctx.token` for its current hook (`policy()`, a read-only call) and compares the answer with the caller. A third entry point, `onInstall`, is called by the hook when a token installs it, and when the hook's `setRules` adds the rule to a token's list. In `BaseRule` it does nothing and has no guard.
 
 > **Diagram.** Three callers of after\_. First, the hook H calls after\_ with ctx.token set to the real token T; the rule asks T for its hook, T answers H, H is the caller, so the rule runs and writes under the key T. Second, an attacker A calls after\_ naming T; T answers H, A is not H, so the call reverts with ComplianceRule_OnlyHook(A). Third, the attacker deploys a fake token F whose policy returns A and calls after\_ naming F; the check passes, but the rule writes only under the key F, and T's records are untouched.
 >
@@ -39,7 +39,7 @@ A rule built on `BaseRule` must still write `check(ctx)`, its decision, and `rul
 |---|---|---|
 | `onlyHook(ctx)` | A modifier, used on `after_` | Lets the call through if the caller is `IPolicyGated(ctx.token).policy()`; otherwise reverts with `ComplianceRule_OnlyHook(caller)`. |
 | `after_(ctx)` | The hook of `ctx.token` | Does nothing. Kept behind `onlyHook` even when empty. |
-| `onInstall(token, previousPolicy)` | Anyone; the hook calls it for every rule of a token's list when the token installs the hook | Does nothing. A rule that keeps state derived from a token's movements replaces it, to confirm that state is current or revert, which undoes the installation. |
+| `onInstall(token, previousPolicy)` | Anyone; the hook calls it for every rule of a token's list when the token installs the hook, and for each rule a `setRules` adds to the list | Does nothing. A rule that keeps state derived from a token's movements replaces it, to confirm that state is current or revert, which undoes the installation or the change of list. |
 | `wantsAfter()` | Anyone (read-only) | False: the hook will not call `after_`. The hook reads this once, when a list is installed, so a rule must keep it constant. |
 | `checkSend(token, account)` | Anyone (read-only) | `TRANSFER_OK`: no opinion about a sender on its own. |
 | `checkReceive(token, account)` | Anyone (read-only) | `TRANSFER_OK`: no opinion about a receiver on its own. |
@@ -61,7 +61,7 @@ Each writes `check` and `ruleId`. The last column answers a question every rule 
 | [`SupplyCapRule`](SupplyCapRule.md) | default | default | the token's `DEFAULT_ADMIN_ROLE` | **Fails closed** for `MINT`: zero is a cap of zero, not off. Other kinds pass. |
 | [`ExecutedOnlyRule`](ExecutedOnlyRule.md) | default | default | nothing to configure | Listing it is the setting: a plain transfer is refused at once. |
 
-"Default" means the behaviour in the table above. `after_` stays reachable on all of them, but the hook calls it on `FundHoldersRule` alone, because that is the one rule whose `wantsAfter()` is true. `FundHoldersRule` is also the one rule with its own `onInstall`: it reverts unless the class has no supply or the token's previous hook listed it. The other six keep the default. The first six add their own interface to `supportsInterface`. `ExecutedOnlyRule` keeps the `BaseRule` answer.
+"Default" means the behaviour in the table above. `after_` stays reachable on all of them, but the hook calls it on `FundHoldersRule` alone, because that is the one rule whose `wantsAfter()` is true. `FundHoldersRule` is also the one rule with its own `onInstall`: it reverts unless the class has no supply or the token's previous hook listed it or another rule of the same fund. The other six keep the default. The first six add their own interface to `supportsInterface`. `ExecutedOnlyRule` keeps the `BaseRule` answer.
 
 <a id="context"></a>
 ## What a rule is told about a movement
@@ -84,7 +84,7 @@ The interface sets the terms between the hook and a rule. `BaseRule` cannot enfo
 - **`check` is read-only and does not revert on a decision.** It returns `TRANSFER_OK` or a reason code. It must not revert even for an amount above the sender's balance: the write does not offer the hook such an amount, but the token's `canTransfer` does, so a rule compares before it subtracts.
 - **The account questions agree with `check`.** If `checkSend` or `checkReceive` refuses an account, `check` refuses every movement on that side of a kind the rule does not exempt. They take no amount and must not encode a quantitative rule. ERC-7943 keeps those out of the account questions and names balance checks and amount limits, and `IComplianceRule` reads a holder count the same way.
 - **State is keyed by `ctx.token`.** The rules with per-token settings authorise them by the token's own roles, asked live with `hasRole`. `FundHoldersRule` has no settings: its cap and exemptions are on the fund, under the fund's owner. The post-deploy check (`assertHandedOver`) asserts that none of the core's rules has a `hasRole` or `owner` function of its own.
-- **`onInstall` answers for state derived from movements.** A rule that keeps such state confirms there that it is current for the token, or reverts, and the installation is undone. A rule that writes state there must accept only the token's installed policy as the caller.
+- **`onInstall` answers for state derived from movements.** A rule that keeps such state confirms there that it is current for the token, or reverts, and the installation or the change of list is undone. A rule that writes state there must accept only the token's installed policy as the caller.
 - **`after_` moves nothing in the token.** It runs inside the token's reentrancy guard, so a transfer from it reverts.
 - **`ruleId()` names the rule type.** A hook takes one rule of each type per token.
 
@@ -119,4 +119,4 @@ The interface sets the terms between the hook and a rule. `BaseRule` cannot enfo
 
 ---
 
-Describes the contracts at commit `01024e9` on `main`.
+Describes the contracts at commit `75aa171` on `main`.

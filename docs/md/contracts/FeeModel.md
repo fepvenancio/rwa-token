@@ -196,4 +196,4 @@ In a deployment, `Legos` deploys a model with the terms of the product's profile
 
 ---
 
-Describes the contracts at commit `01024e9` on `main`.
+Describes the contracts at commit `75aa171` on `main`.

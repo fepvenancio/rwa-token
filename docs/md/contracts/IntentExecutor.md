@@ -144,4 +144,4 @@ The post-deploy check pins the operator and the guardian on the executor. On an 
 
 ---
 
-Describes the contracts at commit `01024e9` on `main`.
+Describes the contracts at commit `75aa171` on `main`.

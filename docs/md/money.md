@@ -17,7 +17,7 @@ For each way money moves, this page shows where the asset and the shares are at 
 
 > ### In one minute
 >
-> Two kinds of value move here. **Token balances**: every fungible template is a gated ERC-20 and the NFT a gated ERC-721, and each movement asks its hook and rules first. The **vault asset**: the two vaults take in and pay out an ERC-20 chosen at deployment, such as a stablecoin, and the vault's hook does not see those transfers. The intent token has no asset behind it: its balances are the record. A 4626 vault keeps its asset itself, or forwards it to a portfolio. A 7540 vault deals in periods: requests wait in the vault, one approved price settles them together, and only the difference between what came in and what must go out moves to or from a cash account. The DvP executor swaps a security against cash in one transaction and keeps nothing. SignedEntry lets an investor enter with signatures while a relayer pays the gas. A Distributor holds funded money until holders claim it.
+> Two kinds of value move here. **Token balances**: every fungible template is a gated ERC-20, the NFT a gated ERC-721 and the multi-token a gated ERC-1155, and each movement asks its hook and rules first. The **vault asset**: the two vaults take in and pay out an ERC-20 chosen at deployment, such as a stablecoin, and the vault's hook does not see those transfers. The intent token has no asset behind it: its balances are the record. A 4626 vault keeps its asset itself, or forwards it to a portfolio. A 7540 vault deals in periods: requests wait in the vault, one approved price settles them together, and only the difference between what came in and what must go out moves to or from a cash account. The DvP executor swaps a security against cash in one transaction and keeps nothing. SignedEntry lets an investor enter with signatures while a relayer pays the gas. A Distributor holds funded money until holders claim it.
 
 | Flow | The asset sits | The shares or tokens sit | The price comes from |
 |---|---|---|---|
@@ -409,4 +409,4 @@ The list is a claim, like a NAV report: the root proves which list two people ap
 
 ---
 
-Describes the contracts at commit `01024e9` on `main`.
+Describes the contracts at commit `75aa171` on `main`.

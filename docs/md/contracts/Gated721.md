@@ -58,7 +58,7 @@ The tests compare the context with what each route sends: `test_WhenTheOwnerTran
 | [`CredentialRule`](CredentialRule.md) | Works as on any token: who may receive an item, and that a sender may leave. The `nft` profile lists it. |
 | [`HolderRestrictionRule`](HolderRestrictionRule.md) | Works as on any token: a holder's lockup and an address freeze. The `nft` profile lists it. |
 | [`MinPositionRule`](MinPositionRule.md) | Refused by the profile check. On chain it would count items, which means nothing for unique ones. |
-| [`FundHoldersRule`](FundHoldersRule.md) | Refused by the profile check. A `Fund` registers only a token that reports `IPolicyGated`, which the NFT does not, so on chain the rule would refuse every movement with `NOT_FUND_CLASS`. |
+| [`FundHoldersRule`](FundHoldersRule.md) | Refused by the profile check. A `Fund` registers only a token that reports `IPolicyGated`, which the NFT does not. On chain the hook cannot list it for an NFT: when a list adds the rule, the rule reads an ERC-20 `totalSupply`, which the NFT does not have, and the call reverts. |
 | [`SupplyCapRule`](SupplyCapRule.md) | Refused by the profile check. It reads an ERC-20 `totalSupply`, which the NFT does not have, so on chain the rule's check of a mint would revert: every mint would revert with `ERC8473PolicyRejected(CHECK_UNAVAILABLE)`, and the pre-flight of one would read false with that reason. |
 | [`SettlementWindowRule`](SettlementWindowRule.md), [`ExecutedOnlyRule`](ExecutedOnlyRule.md) | Refused, as on every template without signed intents. |
 
@@ -123,7 +123,7 @@ ERC-7943's freeze for NFTs is a yes or no for one account and one token id. The 
 - **No signed transfers and no delivery versus payment.** An item moves by a transaction of its owner or an approved operator, or by the agent.
 - **No holder burn.** `burn` needs `BURNER_ROLE`.
 - **No enumeration, no supply, no royalties, no `permit`.** A list of items is read from the `Transfer` events.
-- **The refusal of an unusable rule is off-chain.** `assertUsable` in `ignition/profiles.ts` stops it when the module is built. `ComplianceHook.setRules` accepts any attested rule, so a timelock operation could still list one, with the effects in [the table above](#rules).
+- **The refusal of an unusable rule is off-chain.** `assertUsable` in `ignition/profiles.ts` stops it when the module is built. `ComplianceHook.setRules` judges no combination of attested rules, so a timelock operation could still try to list one, with the effects in [the table above](#rules).
 - **It cannot be a fund class.** `Fund` registers fungible gated tokens only.
 - **The metadata is off-chain.** The token stores a URI and checks nothing about what it points to.
 
@@ -135,6 +135,7 @@ ERC-7943's freeze for NFTs is a yes or no for one account and one token id. The 
 - [ComplianceHook](ComplianceHook.md): Runs this token's rules on every movement.
 - [CredentialRule](CredentialRule.md): Who may hold an item.
 - [HolderRestrictionRule](HolderRestrictionRule.md): Each holder's lockup and address freeze.
+- [Gated1155](Gated1155.md): The multi-token template on the same core.
 - [ProxyDeployer](ProxyDeployer.md): Places the NFT and checks it came up as expected.
 - [Deployment and governance](../deployment.md): The `nft` profile, and how a product is handed over.
 
@@ -147,4 +148,4 @@ ERC-7943's freeze for NFTs is a yes or no for one account and one token id. The 
 
 ---
 
-Describes the contracts at commit `01024e9` on `main`.
+Describes the contracts at commit `75aa171` on `main`.

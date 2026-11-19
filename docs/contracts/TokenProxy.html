@@ -112,7 +112,7 @@
       <li><b>No gap.</b> ProxyDeployer creates the proxy and calls it with the setup data in the same function, and the constructor calls out to nothing. So nobody can set the token up first.</li>
       <li><b>No leftovers.</b> If the setup or a later check fails, the whole call reverts and no contract stays at the address.</li>
       <li><b>No other proxy counts.</b> A <code>TokenProxy</code> deployed any other way sits at a different address, because CREATE2 addresses include the deployer's own address, and none of ProxyDeployer's checks ran on it. It is not one of this system's tokens.</li>
-      <li><b>The code behind it cannot be set up directly.</b> Each of the five token templates calls <code>_disableInitializers()</code> in its constructor, so the implementation contract itself cannot be initialised; proxies running it can.</li>
+      <li><b>The code behind it cannot be set up directly.</b> Each of the six token templates calls <code>_disableInitializers()</code> in its constructor, so the implementation contract itself cannot be initialised; proxies running it can.</li>
     </ul>
   </div>
 </section>
@@ -244,12 +244,12 @@
     <h2>Source and tests</h2>
     <ul class="plain">
       <li>Contract: <code>contracts/deploy/TokenProxy.sol</code>. It has no interface of its own.</li>
-      <li>Tests: <code>TokenProxy.t.sol</code> (empty and non-empty setup data), <code>ProxyDeployer.t.sol</code>, the upgrade tests in <code>PolicyGatedERC20Upgradeable.t.sol</code>, <code>Gated721.t.sol</code> and <code>IntentToken.t.sol</code> (template refusal, state kept, ether refused), <code>test/nodejs/governance.test.ts</code> (upgrades through the real timelock) and <code>deployment.test.ts</code> (each token at the address computed off-chain)</li>
+      <li>Tests: <code>TokenProxy.t.sol</code> (empty and non-empty setup data), <code>ProxyDeployer.t.sol</code>, the upgrade tests in <code>PolicyGatedERC20Upgradeable.t.sol</code>, <code>Gated721.t.sol</code>, <code>Gated1155.t.sol</code> and <code>IntentToken.t.sol</code> (template refusal, state kept, ether refused), <code>test/nodejs/governance.test.ts</code> (upgrades through the real timelock) and <code>deployment.test.ts</code> (each token at the address computed off-chain)</li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>01024e9</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>75aa171</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

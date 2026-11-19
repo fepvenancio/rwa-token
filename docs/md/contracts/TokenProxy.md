@@ -43,7 +43,7 @@ It is safe because of how ProxyDeployer uses it:
 - **No gap.** ProxyDeployer creates the proxy and calls it with the setup data in the same function, and the constructor calls out to nothing. So nobody can set the token up first.
 - **No leftovers.** If the setup or a later check fails, the whole call reverts and no contract stays at the address.
 - **No other proxy counts.** A `TokenProxy` deployed any other way sits at a different address, because CREATE2 addresses include the deployer's own address, and none of ProxyDeployer's checks ran on it. It is not one of this system's tokens.
-- **The code behind it cannot be set up directly.** Each of the five token templates calls `_disableInitializers()` in its constructor, so the implementation contract itself cannot be initialised; proxies running it can.
+- **The code behind it cannot be set up directly.** Each of the six token templates calls `_disableInitializers()` in its constructor, so the implementation contract itself cannot be initialised; proxies running it can.
 
 <a id="upgrade"></a>
 ## Upgrades go through the token
@@ -98,8 +98,8 @@ The proxy has a constructor and a forwarding fallback, nothing else. The upgrade
 ## Source and tests
 
 - Contract: `contracts/deploy/TokenProxy.sol`. It has no interface of its own.
-- Tests: `TokenProxy.t.sol` (empty and non-empty setup data), `ProxyDeployer.t.sol`, the upgrade tests in `PolicyGatedERC20Upgradeable.t.sol`, `Gated721.t.sol` and `IntentToken.t.sol` (template refusal, state kept, ether refused), `test/nodejs/governance.test.ts` (upgrades through the real timelock) and `deployment.test.ts` (each token at the address computed off-chain)
+- Tests: `TokenProxy.t.sol` (empty and non-empty setup data), `ProxyDeployer.t.sol`, the upgrade tests in `PolicyGatedERC20Upgradeable.t.sol`, `Gated721.t.sol`, `Gated1155.t.sol` and `IntentToken.t.sol` (template refusal, state kept, ether refused), `test/nodejs/governance.test.ts` (upgrades through the real timelock) and `deployment.test.ts` (each token at the address computed off-chain)
 
 ---
 
-Describes the contracts at commit `01024e9` on `main`.
+Describes the contracts at commit `75aa171` on `main`.
