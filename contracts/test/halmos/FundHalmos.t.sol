@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {Test} from 'forge-std/Test.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+import {ICredentialRegistry} from 'interfaces/ICredentialRegistry.sol';
 import {IFund} from 'interfaces/IFund.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
@@ -226,5 +227,161 @@ contract FundHalmos is Test {
     vm.prank(_rule);
     if (_kind == 0) _fund.join(_token, _account);
     else _fund.leave(_token, _account);
+  }
+}
+
+/// @notice A credential registry stub with the two things a fund reads: the interface id and each address's key
+contract FundHalmosCredentials {
+  mapping(address _account => uint56 _key) public entityKeyOf;
+
+  function setKey(
+    address _account,
+    uint56 _key
+  ) external {
+    entityKeyOf[_account] = _key;
+  }
+
+  function supportsInterface(
+    bytes4 _interfaceId
+  ) external pure returns (bool _supported) {
+    _supported = _interfaceId == 0x01ffc9a7 || _interfaceId == type(ICredentialRegistry).interfaceId;
+  }
+}
+
+/**
+ * @notice Halmos symbolic properties on a fund that counts investors by the key a credential registry gives each
+ *         address
+ * @dev Two addresses, one class, and keys 0 (an address on its own), 1 and 2. An operation is a join, a leave, an
+ *      exemption or its removal, a change of an address's key in the registry, or a `rekey`
+ */
+contract FundKeyHalmos is Test {
+  Fund internal _fund;
+  FundHalmosCredentials internal _credentials;
+  address internal _rule;
+  address internal _class;
+  address internal _accountA = address(0xA1);
+  address internal _accountB = address(0xA2);
+
+  function setUp() public {
+    _credentials = new FundHalmosCredentials();
+    _fund = new Fund(address(this), IPolicyRegistry(address(new FundHalmosRegistry())), address(_credentials));
+    _rule = address(new FundHalmosRule(address(_fund)));
+    _fund.setRule(_rule);
+    _fund.setHolderCap(10);
+    _class = address(new FundHalmosClass(address(new FundHalmosHook(_rule))));
+    _fund.registerClass(_class);
+  }
+
+  /// @notice After any three operations the count is the number of investors among the counted addresses, by the key
+  ///         each was counted under, and an address that is not counted has no key
+  function check_countIsTheInvestorsByKeyAfterThreeOperations(
+    uint8 _op0,
+    uint8 _who0,
+    uint8 _key0,
+    uint8 _op1,
+    uint8 _who1,
+    uint8 _key1,
+    uint8 _op2,
+    uint8 _who2,
+    uint8 _key2
+  ) public {
+    _apply(_op0, _who0, _key0);
+    _apply(_op1, _who1, _key1);
+    _apply(_op2, _who2, _key2);
+    _assertCountMatchesTheKeys();
+  }
+
+  /// @notice The same after any two operations when both addresses already hold under one key, which reaches the
+  ///         sequences that end an investor: unlink then rekey, exempt then leave
+  function check_countIsTheInvestorsByKeyAfterTwoOperationsOnOneInvestor(
+    uint8 _op0,
+    uint8 _who0,
+    uint8 _key0,
+    uint8 _op1,
+    uint8 _who1,
+    uint8 _key1
+  ) public {
+    _credentials.setKey(_accountA, 1);
+    _credentials.setKey(_accountB, 1);
+    vm.startPrank(_rule);
+    _fund.join(_class, _accountA);
+    _fund.join(_class, _accountB);
+    vm.stopPrank();
+    assert(_fund.holderCount() == 1);
+    _apply(_op0, _who0, _key0);
+    _apply(_op1, _who1, _key1);
+    _assertCountMatchesTheKeys();
+  }
+
+  /// @notice Once both addresses are rekeyed, each counted address is counted under the key the registry gives it
+  function check_rekeyBringsTheFundIntoLineWithTheRegistry(
+    uint8 _op0,
+    uint8 _who0,
+    uint8 _key0,
+    uint8 _op1,
+    uint8 _who1,
+    uint8 _key1
+  ) public {
+    _apply(_op0, _who0, _key0);
+    _apply(_op1, _who1, _key1);
+    _fund.rekey(_accountA);
+    _fund.rekey(_accountB);
+    if (_isCounted(_accountA)) assert(_fund.countedKeyOf(_accountA) == _credentials.entityKeyOf(_accountA));
+    if (_isCounted(_accountB)) assert(_fund.countedKeyOf(_accountB) == _credentials.entityKeyOf(_accountB));
+    _assertCountMatchesTheKeys();
+  }
+
+  function _isCounted(
+    address _account
+  ) internal view returns (bool _counted) {
+    _counted = _fund.heldClasses(_account) != 0 && !_fund.isExempt(_account);
+  }
+
+  function _assertCountMatchesTheKeys() internal view {
+    bool _countedA = _isCounted(_accountA);
+    bool _countedB = _isCounted(_accountB);
+    uint56 _keyA = _fund.countedKeyOf(_accountA);
+    uint56 _keyB = _fund.countedKeyOf(_accountB);
+    if (!_countedA) assert(_keyA == 0);
+    if (!_countedB) assert(_keyB == 0);
+
+    uint256 _expected;
+    if (_countedA) ++_expected;
+    if (_countedB) ++_expected;
+    bool _oneInvestor = _countedA && _countedB && _keyA != 0 && _keyA == _keyB;
+    if (_oneInvestor) --_expected;
+    assert(_fund.holderCount() == _expected);
+
+    // The counter behind `countedWith`, for a counted address: itself, plus the other when they share a key.
+    if (_countedA) assert(_fund.countedWith(_accountA) == (_oneInvestor ? 2 : 1));
+    if (_countedB) assert(_fund.countedWith(_accountB) == (_oneInvestor ? 2 : 1));
+    // They share a slot with the count, so nothing here may touch them.
+    assert(_fund.rule() == _rule);
+    assert(_fund.holderCap() == 10);
+  }
+
+  /// @dev One of six operations. The key is read only where it matters, which keeps the number of symbolic paths down
+  function _apply(
+    uint8 _op,
+    uint8 _who,
+    uint8 _key
+  ) internal {
+    address _account = _who % 2 == 0 ? _accountA : _accountB;
+    uint8 _kind = _op % 6;
+    if (_kind == 0) {
+      vm.prank(_rule);
+      _fund.join(_class, _account);
+    } else if (_kind == 1) {
+      vm.prank(_rule);
+      _fund.leave(_class, _account);
+    } else if (_kind == 2) {
+      _fund.setExempt(_account, true);
+    } else if (_kind == 3) {
+      _fund.setExempt(_account, false);
+    } else if (_kind == 4) {
+      _credentials.setKey(_account, _key % 3);
+    } else {
+      _fund.rekey(_account);
+    }
   }
 }

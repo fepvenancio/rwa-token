@@ -4525,7 +4525,7 @@ The owner approved the plan on 2026-11-19 ("Merge both when CI is green, then bu
 - **Deployment.** The `Fund` module takes `credentials`; the fixtures pass the core's registry, or zero for a core with none; the post-deploy check compares `CREDENTIALS()`. One node test through the real deployment: two addresses of one entity count once, and a later link is followed by `rekey`.
 - **Pages.** Eight pages changed for entities, with their Markdown copies; none carries a commit id.
 - **Gates.** `npx hardhat test`: 2197 passing (1997 solidity, 200 nodejs). Format, lint and typecheck clean, Slither 0 results, `validate:upgrades` 8 of 8, `verify:reproducible` 33 contracts identical.
-- **Not done.** No Halmos property for the count by key: the existing fund harness still proves its properties on a fund with no registry. The port to `paris`.
+- **Halmos, added after the merge (2026-11-19).** `FundKeyHalmos` in `FundHalmos.t.sol`: over two addresses, with a registry stub whose keys the run sets, the count is the investors among the counted addresses by the key each was counted under after any three operations (a join, a leave, an exemption or its removal, a key change in the registry, a `rekey`); the same after any two when both addresses start under one key; and after a `rekey` of both, each counted address is under the registry's key. Three planted bugs each fail two of the three. The same change corrects two page sentences that said a one-unit deposit to an empty receiver takes an investor's place: it does only when the receiver's investor is not counted yet.
 
 ### The port to `paris` (2026-11-19)
 

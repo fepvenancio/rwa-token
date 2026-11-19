@@ -219,7 +219,7 @@
   <div class="prose">
     <h2>Why it is built this way</h2>
     <ul class="plain">
-      <li><b>No dust, no cheap investor slots.</b> A fund caps its number of investors (<a href="FundHoldersRule.html"><code>FundHoldersRule</code></a>), and a one-unit balance counts as an investor. With a minimum set, a movement this rule judges cannot create such a position.</li>
+      <li><b>No dust, no cheap investor slots.</b> A fund caps its number of investors (<a href="FundHoldersRule.html"><code>FundHoldersRule</code></a>), and a one-unit balance is enough to count as one. With a minimum set, a movement this rule judges cannot create such a position.</li>
       <li><b>No call back into the token for balances.</b> The token puts the balances before the move in the context, the same way for the write and for every pre-flight, so <code>check</code> makes no call to the token at all.</li>
       <li><b>One instance for every token.</b> The minimum and the exemptions are stored per token and authorised by that token's own admin, so the same attested contract serves every token in the deployment.</li>
     </ul>
@@ -230,7 +230,7 @@
   <div class="prose">
     <h2>What it does not do</h2>
     <ul class="plain">
-      <li><b>It does nothing until a minimum is set.</b> Listing the rule is not enough, and the deployment sets none unless given one. Where no minimum is set, a payer the token's policy accepts can deposit 1 unit into a 4626 for an eligible empty receiver and take a fund investor slot. No rule answers that there: the agent can take the dust back with <code>forcedTransfer</code> to an exempt or already counted account, and someone can watch <code>Fund.holderCount()</code>.</li>
+      <li><b>It does nothing until a minimum is set.</b> Listing the rule is not enough, and the deployment sets none unless given one. Where no minimum is set, a payer the token's policy accepts can deposit 1 unit into a 4626 for an eligible empty receiver whose investor is not counted yet and take a fund investor slot. No rule answers that there: the agent can take the dust back with <code>forcedTransfer</code> to an exempt or already counted account, and someone can watch <code>Fund.holderCount()</code>.</li>
       <li><b>Enforcement and exempt accounts can still leave dust.</b> Forced movements, the burner's burn included, and listed accounts are not held to the minimum.</li>
       <li><b>1 unit can still reach an existing holder.</b> A receiver already at or above the minimum can receive any amount. A holder trying to exit an exact balance it read earlier then reverts with <code>BELOW_MIN_POSITION</code>, because the extra unit would stay behind. It exits the current balance instead.</li>
       <li><b>A frozen remainder makes <code>maxRedeem</code> overstate.</b> <code>maxRedeem</code> is the unfrozen balance, and the minimum judges the whole balance. A holder whose frozen amount is above zero and below the minimum cannot redeem all of <code>maxRedeem</code>: the frozen remainder would stay behind, and the redemption reverts with <code>BELOW_MIN_POSITION</code>.</li>
