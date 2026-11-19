@@ -52,7 +52,7 @@ When that period is later settled, the shares are burnt from the escrow, and the
 <a id="register"></a>
 ## Registering a class
 
-Four conditions decide whether a token can become a class: the caller is the owner, the token reports ERC-165 support for `IPolicyGated`, the interface of a fungible gated token (a `Gated721` does not report it), its current hook lists the fund's installed rule, and its total supply is zero. `registerClass(token)` runs them with the housekeeping checks, in this order:
+Four conditions decide whether a token can become a class: the caller is the owner, the token reports ERC-165 support for `IPolicyGated`, the interface of a fungible gated token (a `Gated721` and a `Gated1155` do not report it), its current hook lists the fund's installed rule, and its total supply is zero. `registerClass(token)` runs them with the housekeeping checks, in this order:
 
 1. The caller is the owner (`OwnableUnauthorizedAccount`).
 2. The token is not the zero address (`Fund_ZeroAddress`) and is not already a class (`Fund_AlreadyRegistered`).
@@ -88,7 +88,7 @@ The owner's `setExempt` is the one other path that moves the count, and by one, 
 
 It takes effect at once: from then on only that rule may call `join` and `leave`. The count and the masks stay where they are, and the incoming rule starts from them. But each class's hook lists its rules by address. A class whose list still names the outgoing rule sends it each movement, and that rule, seeing from `admission` that it is not the installed one, rejects each movement of the class with `NOT_FUND_CLASS`, forced transfers and burns included. The pre-flight calls give the same answer and the fund's state does not change, but the class is closed until its list names the installed rule.
 
-So the change goes through the main timelock as one batch: `setRule` on the fund and, for each registered class, `setRules` on its hook with the rule swapped in the class's list. A second rule instance for the same fund has the same code hash as the first, because the fund's address is its one immutable, so it is already attested.
+So the change goes through the main timelock as one batch: `setRule` on the fund and, for each registered class, `setRules` on its hook with the rule swapped in the class's list. The hook tells the incoming rule in that call, and the rule accepts on a class with holders because the list it replaces names another rule of the same fund. A second rule instance for the same fund has the same code hash as the first, because the fund's address is its one immutable, so it is already attested.
 
 <a id="monitor"></a>
 ## The monitor: isClassIntact and firstBrokenClass
@@ -164,7 +164,7 @@ Together with the class tokens' own `Transfer` events, `HolderClassesUpdated` an
 <a id="limits"></a>
 ## What it does not do
 
-- **It does not stop a class dropping the rule.** The hook accepts a list without `FundHoldersRule`, and then the class stops counting investors and stops enforcing the cap. The monitor detects it, and nothing prevents it (`test_WhenAClassDropsTheFundRule_ItIsUncappedAndTheMonitorNamesIt`). The same is true of a swap to a hook whose list for the class lacks the rule. A swap to a hook that lists the rule is refused by the rule's `onInstall` with `FundHoldersRule_CountNotCurrent` when the class has a supply and the hook it leaves does not list the rule.
+- **It does not stop a class dropping the rule.** The hook accepts a list without `FundHoldersRule`, and then the class stops counting investors and stops enforcing the cap. The monitor detects it, and nothing prevents it (`test_WhenAClassDropsTheFundRule_ItIsUncappedAndTheMonitorNamesIt`). The same is true of a swap to a hook whose list for the class lacks the rule. A swap to a hook that lists the rule is refused by the rule's `onInstall` with `FundHoldersRule_CountNotCurrent` when the class has a supply and the hook it leaves lists no rule of the fund. A `setRules` that names the rule again on such a class is refused the same way, so a class that dropped the rule gets it back only when it is empty, and there is no recount (`test_WhenAClassWithHoldersDropsTheFundRule_ItCannotTakeItBack`).
 - **It does not repair a gap.** While a class's list lacks the rule its movements are not recorded, and no function sets a mask directly. A seller in the gap stays counted until a later full exit, or until the fund's owner exempts it with `setExempt`, which takes it out of the count. A buyer with no other class stays uncounted, with the cap treating it as new, until it takes up another class, or its balance reaches zero and it receives again.
 - **The cap is not an absolute ceiling on the count.** A forced move is exempt from the cap and still counted, so the agent's recovery of a stranded position can put the count above the cap, where it stays until investors leave. Ending an exemption can do the same. A monitor should alert when `holderCount()` is above `holderCap()`.
 - **It holds no place for an open request.** A full `requestRedeem` on a 7540 class takes the investor out of the count while the shares wait in the escrow, and `requestDeposit` reserves nothing. If the fund fills up meanwhile, a reject that returns the shares, or a deposit claim, is refused with `MAX_HOLDERS` (`test_WhenARejectedRedemptionReturnsSharesToAnInvestorWhoWasReplaced_TheFundCapAppliesAndRecoveryIsCounted`). The agent's recovery path still works. Whether a redeeming investor still counts as a holder is for counsel.
@@ -193,4 +193,4 @@ Together with the class tokens' own `Transfer` events, `HolderClassesUpdated` an
 
 ---
 
-Describes the contracts at commit `18e60b3` on `paris`.
+Describes the contracts at commit `5670fa8` on `paris`.

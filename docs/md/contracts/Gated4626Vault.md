@@ -257,4 +257,4 @@ The previews are arithmetic only. They tell you what the formula gives, and the 
 
 ---
 
-Describes the contracts at commit `18e60b3` on `paris`.
+Describes the contracts at commit `5670fa8` on `paris`.

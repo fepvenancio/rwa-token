@@ -82,7 +82,7 @@ One product lists it at this commit: the intent token of the demo deployment (`f
 | `MON_TO_FRI()` | Anyone (read-only) | `0x1F`, the mask for Monday to Friday. |
 | `checkSend`, `checkReceive` | Anyone (read-only) | `TRANSFER_OK` for every account. |
 | `after_(ctx)` | The hook of `ctx.token` | The empty default. The hook does not call it, because `wantsAfter()` is false. |
-| `onInstall(token, previousPolicy)` | Anyone; the hook when a token installs it | The empty default: the rule keeps no state derived from movements. |
+| `onInstall(token, previousPolicy)` | Anyone; the hook when a token installs it, or when a `setRules` adds the rule to the token's list | The empty default: the rule keeps no state derived from movements. |
 | `ruleId()`, `wantsAfter()`, `supportsInterface(id)` | Anyone (read-only) | `keccak256('SettlementWindowRule.v1')`; false; ERC-165 for `ISettlementWindowRule`, `IComplianceRule` and `IERC165`. |
 
 <a id="why"></a>
@@ -121,4 +121,4 @@ One product lists it at this commit: the intent token of the demo deployment (`f
 
 ---
 
-Describes the contracts at commit `18e60b3` on `paris`.
+Describes the contracts at commit `5670fa8` on `paris`.

@@ -389,4 +389,4 @@ Operators are full delegates, as ERC-7540 defines them. An operator of an owner 
 
 ---
 
-Describes the contracts at commit `18e60b3` on `paris`.
+Describes the contracts at commit `5670fa8` on `paris`.

@@ -15,7 +15,7 @@ The base every fungible token in the stack is built on. It keeps the balances an
 
 > ### In one minute
 >
-> `GatedToken`, `IntentToken` and both vaults share this code. It extends [`PolicyGatedCoreUpgradeable`](PolicyGatedCoreUpgradeable.md), which holds the roles, the guardian and recovery, the pause, the hook pointer and the upgrade checks, and which the NFT template, [`Gated721`](Gated721.md), shares too. This page describes them as they apply to a fungible token. It does the bookkeeping of an ordinary ERC-20 token, plus what a regulated issuer needs: create and destroy tokens, move tokens without the holder's consent (a forced transfer), freeze part of a holder's balance, and pause the token in an emergency.
+> `GatedToken`, `IntentToken` and both vaults share this code. It extends [`PolicyGatedCoreUpgradeable`](PolicyGatedCoreUpgradeable.md), which holds the roles, the guardian and recovery, the pause, the hook pointer and the upgrade checks, and which the NFT template, [`Gated721`](Gated721.md), and the multi-token template, [`Gated1155`](Gated1155.md), share too. This page describes them as they apply to a fungible token. It does the bookkeeping of an ordinary ERC-20 token, plus what a regulated issuer needs: create and destroy tokens, move tokens without the holder's consent (a forced transfer), freeze part of a holder's balance, and pause the token in an emergency.
 >
 > It does not decide who may hold the token, where or when. For every movement it asks a separate contract, the **policy hook**, which runs a list of small checks called **rules** (identity, lockups, settlement hours, a fund's investor cap). The hook and its rules can be changed through governance without touching the token. Changing this base takes an upgrade to code the security council has reviewed and recorded in the registry (code that is **attested**).
 
@@ -268,4 +268,4 @@ OpenZeppelin then checks that the target is a UUPS implementation (`UUPSUnsuppor
 
 ---
 
-Describes the contracts at commit `18e60b3` on `paris`.
+Describes the contracts at commit `5670fa8` on `paris`.

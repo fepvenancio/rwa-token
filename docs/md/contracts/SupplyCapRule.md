@@ -66,7 +66,7 @@ Both vault templates decide whether a receiver is allowed in by asking the rules
 - On [`Gated4626Vault`](Gated4626Vault.md), a deposit above zero reverts with OpenZeppelin's `ERC4626ExceededMaxDeposit`, and a mint above zero with `ERC4626ExceededMaxMint`.
 - On [`Gated7540Vault`](Gated7540Vault.md), `requestDeposit` and the deposit claim revert with `Gated7540Vault_ControllerNotEligible(ABOVE_SUPPLY_CAP)`.
 
-`assertUsable` in `ignition/profiles.ts` throws "a vault cannot use supplyCapRule" when a module is built. That check is in the deployment tooling. On chain, the hook accepts any attested rule on any token.
+`assertUsable` in `ignition/profiles.ts` throws "a vault cannot use supplyCapRule" when a module is built. That check is in the deployment tooling. On chain, the hook accepts any attested rule on any token, unless the rule itself refuses to go live.
 
 <a id="functions"></a>
 ## What it can do
@@ -78,7 +78,7 @@ Both vault templates decide whether a receiver is allowed in by asking the rules
 | `check(ctx)` | Anyone (read-only); the hook in practice | The decision above: `TRANSFER_OK` or `ABOVE_SUPPLY_CAP`. |
 | `checkSend`, `checkReceive` | Anyone (read-only) | `TRANSFER_OK` for every account. |
 | `after_(ctx)` | The hook of `ctx.token` | The empty default. The hook does not call it, because `wantsAfter()` is false. |
-| `onInstall(token, previousPolicy)` | Anyone; the hook when a token installs it | The empty default: the rule keeps no state derived from movements. |
+| `onInstall(token, previousPolicy)` | Anyone; the hook when a token installs it, or when a `setRules` adds the rule to the token's list | The empty default: the rule keeps no state derived from movements. |
 | `ruleId()`, `wantsAfter()`, `supportsInterface(id)` | Anyone (read-only) | `keccak256('SupplyCapRule.v1')`; false; ERC-165 for `ISupplyCapRule`, `IComplianceRule` and `IERC165` (`test_ItAnswersForItsInterfaces`). |
 
 <a id="why"></a>
@@ -114,4 +114,4 @@ Both vault templates decide whether a receiver is allowed in by asking the rules
 
 ---
 
-Describes the contracts at commit `18e60b3` on `paris`.
+Describes the contracts at commit `5670fa8` on `paris`.

@@ -73,4 +73,4 @@ The last row is the one case that does not return false. The call has the right 
 
 ---
 
-Describes the contracts at commit `18e60b3` on `paris`.
+Describes the contracts at commit `5670fa8` on `paris`.

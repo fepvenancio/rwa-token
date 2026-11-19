@@ -192,7 +192,7 @@
         <tr><td><code>MON_TO_FRI()</code></td><td>Anyone (read-only)</td><td><code>0x1F</code>, the mask for Monday to Friday.</td></tr>
         <tr><td><code>checkSend</code>, <code>checkReceive</code></td><td>Anyone (read-only)</td><td><code>TRANSFER_OK</code> for every account.</td></tr>
         <tr><td><code>after_(ctx)</code></td><td>The hook of <code>ctx.token</code></td><td>The empty default. The hook does not call it, because <code>wantsAfter()</code> is false.</td></tr>
-        <tr><td><code>onInstall(token, previousPolicy)</code></td><td>Anyone; the hook when a token installs it</td><td>The empty default: the rule keeps no state derived from movements.</td></tr>
+        <tr><td><code>onInstall(token, previousPolicy)</code></td><td>Anyone; the hook when a token installs it, or when a <code>setRules</code> adds the rule to the token's list</td><td>The empty default: the rule keeps no state derived from movements.</td></tr>
         <tr><td><code>ruleId()</code>, <code>wantsAfter()</code>, <code>supportsInterface(id)</code></td><td>Anyone (read-only)</td><td><code>keccak256('SettlementWindowRule.v1')</code>; false; ERC-165 for <code>ISettlementWindowRule</code>, <code>IComplianceRule</code> and <code>IERC165</code>.</td></tr>
       </tbody>
     </table>
@@ -247,7 +247,7 @@
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>18e60b3</code> on <code>paris</code>.</footer>
+<footer>Describes the contracts at commit <code>5670fa8</code> on <code>paris</code>.</footer>
 </main>
 </body>
 </html>

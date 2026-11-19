@@ -113,4 +113,4 @@ The token takes no ether. It has no `receive` function and no payable function o
 
 ---
 
-Describes the contracts at commit `18e60b3` on `paris`.
+Describes the contracts at commit `5670fa8` on `paris`.

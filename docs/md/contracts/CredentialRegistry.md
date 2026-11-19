@@ -248,4 +248,4 @@ The calls that do nothing (blocking twice, clearing a block that is not there, k
 
 ---
 
-Describes the contracts at commit `18e60b3` on `paris`.
+Describes the contracts at commit `5670fa8` on `paris`.

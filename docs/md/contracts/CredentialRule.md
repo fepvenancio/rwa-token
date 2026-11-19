@@ -129,7 +129,7 @@ The `Core` module deploys one `CredentialRegistry` and one rule reading it, if a
 | `policyOf(token)` | Anyone (read-only) | The token's policy; all zero when not set. |
 | `REGISTRY()` | Anyone (read-only) | The registry the rule reads, fixed at construction. The constructor refuses the zero address (`CredentialRule_ZeroAddress`). |
 | `after_(ctx)` | The hook of `ctx.token` | The empty default from [`BaseRule`](BaseRule.md). The hook does not call it, because `wantsAfter()` is false. |
-| `onInstall(token, previousPolicy)` | Anyone; the hook when a token installs it | The empty default from `BaseRule`: the rule keeps no state derived from movements. |
+| `onInstall(token, previousPolicy)` | Anyone; the hook when a token installs it, or when a `setRules` adds the rule to the token's list | The empty default from `BaseRule`: the rule keeps no state derived from movements. |
 | `ruleId()`, `wantsAfter()`, `supportsInterface(id)` | Anyone (read-only) | `keccak256('CredentialRule.v1')`; false; ERC-165 for `ICredentialRule`, `IComplianceRule` and `IERC165`. |
 
 <a id="why"></a>
@@ -167,4 +167,4 @@ The `Core` module deploys one `CredentialRegistry` and one rule reading it, if a
 
 ---
 
-Describes the contracts at commit `18e60b3` on `paris`.
+Describes the contracts at commit `5670fa8` on `paris`.

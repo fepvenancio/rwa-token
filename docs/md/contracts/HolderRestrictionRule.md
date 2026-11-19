@@ -91,7 +91,7 @@ Every product in every profile of `ignition/profiles.ts` lists it. In the demo d
 | `unlockTime(token, holder)`, `isFrozen(token, holder)` | Anyone (read-only) | The stored unlock time and the freeze flag. The time is 0 when never set or when cleared; a lockup that has run out still returns its past time. |
 | `AGENT_ROLE()` | Anyone (read-only) | `keccak256('AGENT_ROLE')`, the token role the setters require. |
 | `after_(ctx)` | The hook of `ctx.token` | The empty default. The hook does not call it, because `wantsAfter()` is false. |
-| `onInstall(token, previousPolicy)` | Anyone; the hook when a token installs it | The empty default: the rule keeps no state derived from movements. |
+| `onInstall(token, previousPolicy)` | Anyone; the hook when a token installs it, or when a `setRules` adds the rule to the token's list | The empty default: the rule keeps no state derived from movements. |
 | `ruleId()`, `wantsAfter()`, `supportsInterface(id)` | Anyone (read-only) | `keccak256('HolderRestrictionRule.v1')`; false; ERC-165 for `IHolderRestrictionRule`, `IComplianceRule` and `IERC165`. |
 
 <a id="why"></a>
@@ -129,4 +129,4 @@ Every product in every profile of `ignition/profiles.ts` lists it. In the demo d
 
 ---
 
-Describes the contracts at commit `18e60b3` on `paris`.
+Describes the contracts at commit `5670fa8` on `paris`.
