@@ -30,7 +30,7 @@ In scope, all under `contracts/` (`.t.sol` files and `contracts/test/` are test 
 | Area | Contracts |
 |---|---|
 | Base | `base/PolicyGatedCoreUpgradeable` (the roles, guardian and recovery, pause, hook pointer, registry and upgrade checks every template shares), `base/PolicyGatedERC20Upgradeable` (the fungible base over it) |
-| Templates | `tokens/GatedToken`, `tokens/IntentToken`, `tokens/Gated721` (the ERC-721 template, on the core alone), `vaults/GatedVaultBase` (what both vaults share: the issuer's mint and burn refused, and the third-party payer and receiver check), `vaults/Gated4626Vault`, `vaults/Gated7540Vault`, with `vaults/Gated7540Common` and `vaults/Gated7540Settlement` (created by the implementation's constructor; its codehash pins the address, and the post-deploy check compares the code with the release) |
+| Templates | `tokens/GatedToken`, `tokens/IntentToken`, `tokens/Gated721` (the ERC-721 template, on the core alone), `vaults/GatedVaultBase` (what both vaults share: the issuer's mint and burn refused, and the third-party payer and receiver check), `vaults/Gated4626Vault`, `vaults/Gated7540Vault`, and each vault's second contract with what the pair shares: `vaults/Gated7540Settlement` and `vaults/Gated7540Common`, `vaults/Gated4626Management` and `vaults/Gated4626Common` (a second contract is created by its vault implementation's constructor; that codehash pins the address, and the post-deploy check compares the code with the release) |
 | Mixin | `mixins/IntentSettledUpgradeable` |
 | Policy | `hooks/ComplianceHook` (one per deployment, shared by every token), `hooks/BaseRule`, `hooks/rules/{Credential,MinPosition,HolderRestriction,SettlementWindow,FundHolders,SupplyCap,ExecutedOnly}Rule` |
 | Credentials | `identity/CredentialRegistry` (immutable, not a proxy, not attested; the `CredentialRule` codehash covers its address, not its code) |
@@ -192,29 +192,48 @@ Further limits recorded during review:
   exit-only at once) and `blockSubject`. A holder whose credential lapsed, or whose attester was killed, can still send,
   burn and redeem and cannot receive; only a blocked or unknown holder cannot send. That is deliberate (a holder must be
   able to leave), so a lapse does not stop funds already held: the address freeze, the lockup and `forcedTransfer` do.
-  An enforcement burn (operator holds `BURNER_ROLE`) passes the sender check, so the issuer can burn from a blocked
-  holder. The council attests `CredentialRule`, whose codehash covers the registry's address and not its code, so it
+  An enforcement burn (`burn`, which the policy sees as FORCED) is not judged on the sender, so the issuer can burn
+  from a blocked holder. The council attests `CredentialRule`, whose codehash covers the registry's address and not its code, so it
   reads the registry (code, admin, attester list) first. A core may read another core's registry
   (`credentials: "external"` in its profile): that registry's admin then decides who does KYC for the issuer's tokens, and
   its guardian can block their investors with no delay. The deployment names both, and the post-deploy check refuses the
   stack unless they hold those roles and neither the core's named accounts nor its timelocks hold another role there; it
   does not stop the admin granting a role later. Entities are not modelled: one wallet is one holder. Pinned by `CredentialRegistry.t.sol`,
   `CredentialRule.t.sol`, `test/nodejs/credentials.test.ts` and, for an external registry, `test/nodejs/products.test.ts`.
-- **A pause blocks mint and burn as well.** Only FORCED movements pass: `forcedTransfer`, and the 7540 vault's `recoverRedeemRequest` and `recoverClaimable`. Enforcement during a pause is `forcedTransfer`
-  to a quarantine account (holding an active credential the token's policy accepts, never address-frozen: the freeze on a receiver applies to FORCED), and the
-  burn waits for the unpause. The ERC-3643 reference token differs: its agents can mint, burn and force while paused
+- **A pause blocks mint as well.** Only FORCED movements pass: `forcedTransfer`, the issuer's `burn`, and the 7540 vault's `recoverRedeemRequest` and `recoverClaimable`. Enforcement during a pause is `forcedTransfer`
+  to a quarantine account (holding an active credential the token's policy accepts, never address-frozen: the freeze on a receiver applies to FORCED), or
+  `burn`. So a stolen `BURNER_ROLE` key can destroy holdings while the token is paused, and the pause is no defence against it: revoke the role. The ERC-3643 reference token's agents can also mint while paused
   (checked 2026-10-23; the ERC-3643 text itself was not checked).
 - **`canTransfer` can say yes where the write reverts.** ERC-7943 forbids `canTransfer` to fail on a balance check, so an
-  amount above the balance reads true when the hook accepts it and no frozen amount is in the way (nothing frozen, or a
-  burn by a sender that holds `BURNER_ROLE`), and the write reverts with the base's `ERC20InsufficientBalance`. While
+  amount above the balance reads true when the hook accepts it and nothing is frozen on the sender, and the write reverts with the base's `ERC20InsufficientBalance`. While
   part of the balance is frozen, an amount above the unfrozen balance reads false: the standard asks `canTransfer` to
   validate the unfrozen amount, but does not say which rule wins above the balance, and this follows the draft ERC's
   reference, so a one-unit freeze flips the answer. `canTransferWithReason` and `canExecute` make no exception and say
   no with `INSUFFICIENT_UNFROZEN`. An integrator that wants to know whether a movement will succeed should call those.
-- **A `BURNER_ROLE` holder's own burns are enforcement burns.** The rules ask the operator, not the intent: a burner who
-  redeems its own shares through a vault passes its own lockup and minimum (a probe showed a locked holder redeeming in
-  full). It does not pass its own frozen tokens (the vault's `maxRedeem` stops at the unfrozen balance) or its own address
-  freeze. Burner accounts are issuer service accounts; do not also use one as an investor.
+- **An enforcement burn is the `burn` function, not the burner's account.** `burn` reaches the policy as FORCED, and a
+  holder's own burn (a vault redemption) as BURN, whoever the holder is: no check reads the operator's role. A burner
+  that also invests redeems under its own lockup, minimum and freeze like anyone else (until 2026-11-13 it passed its
+  own lockup and minimum). `burn` takes tokens from an address-frozen or locked account and during a pause, as
+  `forcedTransfer` does (owner decision of 2026-11-13, replacing RD4).
+- **A policy that cannot be asked rejects, and its revert data is lost.** The token asks its policy through one bounded
+  static call that copies one word. A policy that reverts, runs out of gas, answers fewer than 32 bytes or has no code
+  reads `CHECK_UNAVAILABLE`: `canSend`, `canReceive` and `canTransfer` return false and never revert, and a movement
+  reverts with `ERC8473PolicyRejected(CHECK_UNAVAILABLE)`, not with whatever the policy reverted with. A rule that
+  reverts inside the hook therefore shows up as that one code; the trace has the cause.
+- **ERC-8473 (uRWA Policy) is a draft, and two readings of it are ours.** The tokens and the hook take its names, ids
+  and requirements as its pull request stood on 2026-11-13; a change to the draft can move them. `wantsAfterTransfer()`
+  takes no token and may not read the caller, so the shared hook answers true for every caller and every movement pays
+  the `afterTransfer` call, which returns at once for a token none of whose rules wants it. The draft says a policy keeps
+  no movement-derived state from an earlier installation; the fund's investor count is kept on purpose, and
+  `FundHoldersRule.onInstall` refuses to go live unless the class has no supply or the previous policy listed the rule.
+  A hook replacement that lists the rule on both sides therefore keeps the count; one that dropped it in between cannot
+  bring it back without emptying the class. The hook tells every rule before it stores a list from the installation's data, so
+  installing the same hook again with the rule added is refused too. `setRules` is the gap: it calls no rule's
+  `onInstall`, so a list that drops the rule and later takes it back leaves the count without the movements in between.
+  `Fund.isClassIntact` and `firstBrokenClass` show a class whose list lacks the rule.
+- **`installPolicy` runs the new policy's code.** The token calls the policy's `onInstall` while holding its reentrancy
+  guard, so the policy cannot move tokens or install another policy from there, and a revert undoes the installation.
+  The policy is attested and the call is the timelock's.
 - **A frozen remainder below the minimum makes `maxRedeem` overstate.** `maxRedeem` is the unfrozen balance, and the minimum
   judges the whole balance. A holder whose frozen amount is above zero and below the minimum cannot redeem all of
   `maxRedeem`: the frozen remainder would be left behind and the redemption reverts with `BELOW_MIN_POSITION`. The holder
@@ -370,7 +389,7 @@ Slither 0.11.5 runs as a CI gate with 0 findings, on the contracts that ship: `n
 | Detector | Reason |
 |---|---|
 | `naming-convention` | Wonderland style uses `_camelCase` for parameters and internals |
-| `assembly` | ERC-7201 storage accessors, and two bounded static calls that copy a fixed number of words and decode nothing: `ERC4626Adapter` `_ask` (one word) and `Gated4626Vault` `_hasAdapters` (two) |
+| `assembly` | ERC-7201 storage accessors, and three bounded static calls that copy a fixed number of words and decode nothing: `PolicyGatedCoreUpgradeable` `_ask` (one word, every policy check), `ERC4626Adapter` `_ask` (one word) and `Gated4626Management` `_hasAdapters` (two) |
 | `timestamp` | Intent deadlines and `validAfter`, lockups and settlement windows are time-based by specification |
 | `calls-loop` | The hook calls at most 16 attested rules, the fund at most 32 classes and the portfolio its attested adapters; a batch (`IntentExecutor.executeBatch`, `GuardedAccount.execute`) is the caller's own and atomic |
 
@@ -394,22 +413,23 @@ Inline suppressions (each carries its reason on the line above, in the source):
 | `NavDesk` | `incorrect-equality`, `unused-return`, `uninitialized-local` | Zero means nothing on the table, nothing accepted or no mark yet, not a balance. The unclaimed shares say nothing about whether a period is stuck, and the supply nothing about which period is closed. Of a period's book, the limit wants only what its deposits paid. A proposal is filled in a field at a time |
 | `ERC4626CallValidator` | `unused-state` | Slither does not see a constant used as a slice's bound |
 | `SignedEntry` | `arbitrary-send-erc20`, `arbitrary-send-erc20-permit`, `reentrancy-events`, `unused-return` | The investor signed the entry naming these assets, checked first. What it bought is known only after the vault's call, and the nonce was spent before it. A 7540 request returns the aggregated id, 0, which says nothing |
-| `GuardedAccount` `execute` | `unused-return` | A permission is a timelock decision and the validator has judged the parameters, so what the call returns is not needed |
-| `Gated4626Vault` `collectFees`, `_withdraw` | `arbitrary-send-erc20` | The portfolio gave this vault an allowance at construction, for this; the recipient is the one the attested model names |
-| `Gated7540Vault` `_toSettlement` | `unused-return` | The functions handed to the second contract return nothing, and the target is the implementation's own immutable |
+| `GuardedAccount` `execute` | `unused-return`, `reentrancy-events` | A permission is a timelock decision and the validator has judged the parameters, so what the call returns is not needed. Each call's event comes before that call, so in a batch it follows the earlier calls, which is the order they were made in |
+| `Gated4626Management` `collectFees`, `Gated4626Vault` `_withdraw` | `arbitrary-send-erc20` | The portfolio gave this vault an allowance at construction, for this; the recipient is the one the attested model names |
+| `Gated7540Vault` `_toSettlement`, `Gated4626Vault` `_toManagement` | `unused-return` | The functions handed to the second contract return nothing, and the target is the implementation's own immutable |
 | `SettlementWindowRule` | `weak-prng` | Calendar arithmetic on the timestamp, not randomness |
 | `ComplianceHook` `_setRules` | `uninitialized-local` | The after-mask starts at zero by design |
+| `ComplianceHook` `onInstall` | `reentrancy-no-eth`, `reentrancy-events` | The list from the installation's data is stored after every rule has been told, on purpose: a rule may ask the previous policy for the list it held, and that policy can be this hook. A rule is attested and cannot re-enter: `onInstall` accepts only the token, which holds its reentrancy guard throughout, and `setRules` only the token or its admin (`test_WhenTheSameHookIsInstalledWithANewList_TheRulesAreToldBeforeTheListIsStored`) |
 | `Portfolio` `_allocate`, `_deallocate` | `reentrancy-benign`, `reentrancy-events`, `reentrancy-balance` | The guard is held, the adapter is attested, and what the move changed can only be measured after the call: the balance read before it is the point of the comparison. A reentrant target is refused (`test_AReentrantTargetCannotAllocateAgainMidCall`) |
 | `Portfolio` `allocate`, `_deallocate`, `removeAdapter` | `incorrect-equality` | A zero test on a caller's argument, and the definition of an empty adapter. A donation only delays a removal until the allocator brings it back |
 | `Portfolio` `_takeOff`, `ERC4626Adapter` `allocate`, `deallocate` | `unused-return` | The list removal is false only if the adapter was not there, which the caller has checked; the portfolio measures what a target move changed |
 | `Gated7540Vault` | `missing-inheritance` | `IERC7575` re-declares inherited ERC-4626 functions; conformance pinned by ERC-165 id `0x2f0a18c5` |
 | `Gated7540Vault` `requestDeposit` | `arbitrary-send-erc20` | `owner` is the caller or an approved operator. Fuzzed: a non-operator with a victim owner reverts and moves nothing. Removing the guard fails 2 tests |
-| `ProxyDeployer` `deploy` | `unused-return` | `initialize` returns nothing; success is checked by the post-init assertions |
+| `ProxyDeployer` `deploy` | `unused-return`, `reentrancy-events` | `initialize` returns nothing; success is checked by the post-init assertions. The event after it names a proxy this owner-only call created and initialised, so nothing in it is stale |
 | `DvPExecutor` `canExecuteDvPGated`, `canExecuteDvP3009` | `unused-return` | The token's `ok` is `reason == TRANSFER_OK`, so the reason carries it |
 
 Aderyn 0.6.8 (Cyfrin) was a second CI gate from 2026-10-17 to 2026-11-14, when it was removed: Aderyn was retired
 upstream on 2026-11-13 and its release binaries were deleted, so the pinned binary can no longer be fetched. Its last
-run, in CI on commit `3010880` before the binaries were removed, had 0 findings. Nothing checks the tables
+run, on commit `259d82b` with a binary installed before the retirement, had 0 findings. Nothing checks the tables
 below any longer; they record what was accepted while the gate ran, and the inline `aderyn-ignore` comments and
 `aderyn.toml` are kept as that record. Slither is the static-analysis gate. First run: 5 high and 13 low
 detector types. One real fix: `ProxyDeployer`'s constructor parameter shadowed `Ownable._owner` and was renamed. Every
@@ -429,28 +449,29 @@ Inline acknowledgements (reason on the line above each `aderyn-ignore`):
 
 | Detector | Where | Verdict | Evidence |
 |---|---|---|---|
-| `contract-locks-ether` (high) | `GatedToken`, `IntentToken`, `Gated721`, `Gated4626Vault`, `Gated7540Vault`, `Gated7540Settlement`, `TokenProxy` | False positive: no path accepts ETH. `Gated7540Settlement` is reached through the vault by delegatecall, from non-payable functions, and called directly its one payable function, the inherited `upgradeToAndCall`, reverts (`onlyProxy`). There is no `receive` or payable function, `upgradeToAndCall` with empty data rejects value (`ERC1967NonPayable`), and with data the value is delegated into a non-payable function | `GatedTokenIntegrationTest::test_WhenEtherIsSent_ItReverts`, `IntentTokenIntegration_Ether`, `Gated4626VaultUnit_Ether`, `Gated7540VaultUnit_Ether`, `Gated721Unit_Initialize::test_WhenEtherIsSent_ItReverts`, `Gated7540SettlementUnit_DirectCalls::test_WhenUpgradedDirectly_ItReverts` |
+| `contract-locks-ether` (high) | `GatedToken`, `IntentToken`, `Gated721`, `Gated4626Vault`, `Gated4626Management`, `Gated7540Vault`, `Gated7540Settlement`, `TokenProxy` | False positive: no path accepts ETH. A second contract (`Gated7540Settlement`, `Gated4626Management`) is reached through its vault by delegatecall, from non-payable functions, and called directly its one payable function, the inherited `upgradeToAndCall`, reverts (`onlyProxy`). There is no `receive` or payable function, `upgradeToAndCall` with empty data rejects value (`ERC1967NonPayable`), and with data the value is delegated into a non-payable function | `GatedTokenIntegrationTest::test_WhenEtherIsSent_ItReverts`, `IntentTokenIntegration_Ether`, `Gated4626VaultUnit_Ether`, `Gated7540VaultUnit_Ether`, `Gated721Unit_Initialize::test_WhenEtherIsSent_ItReverts`, `Gated7540SettlementUnit_DirectCalls::test_WhenUpgradedDirectly_ItReverts` |
 | `reentrancy-state-change` (high) | `HolderRestrictionRule`, `MinPositionRule`, `SettlementWindowRule`, `CredentialRule.setPolicy` and `_checkSender`, `Fund.registerClass`, `Fund.setRule`, `Portfolio.writeOffAdapter` | False positive: the token, the hook, the fund or the registry is called through view interfaces, which compile to STATICCALL, so nothing it does can change any state | `*Unit_TokenCallsAreStatic` for the rules, `FundHoldersRuleUnit_TokenAndFundCallsAreStatic` and `FundUnit_CallsAreStatic` for the fund layer, `test_AnAdapterThatWritesDuringARead_MakesTheCallRevert` for the portfolio: a callee whose reads write makes the entry point revert, while a quiet callee succeeds (control) |
 | `arbitrary-transfer-from` (high) | `Gated7540Vault.requestDeposit` | Same as Slither's `arbitrary-send-erc20` (§4 above) | Fuzzed victim-owner test; removing the guard fails 2 tests |
 | `arbitrary-transfer-from` (high) | `Distributor.approve` | Same as Slither's `arbitrary-send-erc20` (§4 above) | `Distributor.t.sol::test_ItPullsTheFundingAndEmits`, `test_TheMakerCannotApproveItsOwn` |
-| `arbitrary-transfer-from` (high) | `SignedEntry`, `Gated4626Vault.collectFees` and `_withdraw`, `Gated7540Settlement._net` | Same as Slither's `arbitrary-send-erc20` (§4 above) | As for Slither |
+| `arbitrary-transfer-from` (high) | `SignedEntry`, `Gated4626Management.collectFees`, `Gated4626Vault._withdraw`, `Gated7540Settlement._net` | Same as Slither's `arbitrary-send-erc20` (§4 above) | As for Slither |
 | `abi-encode-packed-hash-collision` (high) | `ProxyDeployer._initCodeHash` | False positive: only the second operand varies; the first is fixed creation code | Fuzzed `predict` formula test; off-chain CREATE2 test |
 | `storage-array-memory-edit` (high) | `SettlementWindowRule.check`, `isOpen` | False positive: a read-only copy of a storage struct into memory | Window tests |
 | `reentrancy-state-change` | `Gated7540Vault.initialize` (the asset's `decimals()`), `NavDesk.adopt` (the old desk's views), `NavDesk.setFeeModel`, `Distributor.claim`, `SupplyCapRule.setSupplyCap`, the `GuardedAccount` constructor and `setPermission` | View interfaces, compiled to STATICCALL | |
-| `reentrancy-state-change` | `Gated4626Vault` `setPortfolio`, `setFeeModel`, `collectFees` | View interfaces on attested components, compiled to STATICCALL | |
+| `reentrancy-state-change` | `Gated4626Management` `setPortfolio`, `setFeeModel`, `collectFees` | View interfaces on attested components, compiled to STATICCALL | |
 | `require-revert-in-loop` | `Gated7540Common._request` | The walk is one controller's own request, so a revert in it could only fail that controller's own call | `testFuzz_TheVaultCanPayEveryClaimAfterAGate` |
 | `require-revert-in-loop` | `GuardedAccount.execute` | All or nothing, by design: a batch that moves money must not half-run | `test_AllOrNothing` |
 | `unsafe-erc20-operation` | `ERC20CallValidator.validate` | It only reads the selectors and moves no tokens | |
 | `unsafe-casting` | `Gated7540Vault._claim` | Neither part exceeds what the request holds, each being a share of it at most | `testFuzz_TheSumOfClaimsNeverExceedsTheBookAndFallsShortByAtMostOneUnitEach` |
 | `state-no-address-check` | `NavDesk._setSettings` | Zero is a choice for both: no portfolio, or a portfolio to be plugged | `test_WithNoCashAccount_ItReverts` |
 | `unsafe-oz-erc721-mint` | `Gated721.mint` | By design: issuance calls no receiver, so nothing runs between the mint and the URI being set. Transfers keep `safeTransferFrom` | `test_WhenTheMinterMints_TheHookSeesAMintOfOneAndTheTokenHasItsUri` |
-| `unused-state-variable` | `GatedToken`, `IntentToken`, `Gated721`, `Gated4626Vault` and `Gated7540Common` ERC-7201 locations | False positive: read in assembly | `GatedTokenIntegrationTest::test_TheErc7201LocationHoldsTheDecimals`, `IntentTokenIntegration_Decimals::test_TheErc7201LocationHoldsTheDecimals`, `Gated4626VaultPortfolio_Storage::test_TheErc7201LocationHoldsThePortfolio`, `Gated7540VaultUnit_Storage` and `Gated721Unit_Initialize::test_TheErc7201LocationHoldsTheFreezes`: the formula equals the constant and the slot holds the decimals, the portfolio, the asset, or a freeze |
-| `unchecked-return` | `EnumerableSet.remove` in `Portfolio`; `deposit` and `withdraw` in `ERC4626Adapter`; `_grantRole` in constructors and initialisers (`CredentialRegistry` included), and `_revokeRole` in the `revokeRole` overrides of the core, `GovernanceTimelock`, both executors and `CredentialRegistry` (it returns false only if the role was not held, and either way the account ends up without it); `Address.functionCall` in `ProxyDeployer` and in `GuardedAccount.execute`; `Address.functionDelegateCall` in `Gated7540Vault._toSettlement`; `requestDeposit` in `SignedEntry._deal` (the aggregated id, 0); `_executeLeg` in `DvPExecutor`; in `Gated721`, `_requireOwned` in `setTokenURI` (called for its revert) and the previous owner `super._update` returns in `_move` (already read by the caller) | `_grantRole` returns false only if the role is already held; `initialize` returns nothing; the cash leg's digest is not needed and the securities leg's digest was read before the call | Role, deploy and DvP tests |
-| `costly-loop`, `require-revert-in-loop` | `ComplianceHook._setRules`, `IntentExecutor.executeBatch`, `Portfolio._addAllocation`, `_subtractAllocation` | By design: at most 16 rules, and invalid rules must fail closed; batches are atomic; an adapter names only a few risks, and a move past any cap fails whole | Hook, batch and portfolio tests |
+| `unused-state-variable` | `GatedToken`, `IntentToken`, `Gated721`, `Gated4626Common` and `Gated7540Common` ERC-7201 locations | False positive: read in assembly | `GatedTokenIntegrationTest::test_TheErc7201LocationHoldsTheDecimals`, `IntentTokenIntegration_Decimals::test_TheErc7201LocationHoldsTheDecimals`, `Gated4626VaultPortfolio_Storage::test_TheErc7201LocationHoldsThePortfolio`, `Gated7540VaultUnit_Storage` and `Gated721Unit_Initialize::test_TheErc7201LocationHoldsTheFreezes`: the formula equals the constant and the slot holds the decimals, the portfolio, the asset, or a freeze |
+| `unchecked-return` | `EnumerableSet.remove` in `Portfolio`; `deposit` and `withdraw` in `ERC4626Adapter`; `_grantRole` in constructors and initialisers (`CredentialRegistry` included), and `_revokeRole` in the `revokeRole` overrides of the core, `GovernanceTimelock`, both executors and `CredentialRegistry` (it returns false only if the role was not held, and either way the account ends up without it); `Address.functionCall` in `ProxyDeployer` and in `GuardedAccount.execute`; `Address.functionDelegateCall` in `Gated7540Vault._toSettlement` and `Gated4626Vault._toManagement`; `requestDeposit` in `SignedEntry._deal` (the aggregated id, 0); `_executeLeg` in `DvPExecutor`; in `Gated721`, `_requireOwned` in `setTokenURI` (called for its revert) and the previous owner `super._update` returns in `_move` (already read by the caller) | `_grantRole` returns false only if the role is already held; `initialize` returns nothing; the cash leg's digest is not needed and the securities leg's digest was read before the call | Role, deploy and DvP tests |
+| `delegate-call-unchecked-address` (high) | The functions each vault hands to its second contract: six on `Gated7540Vault`, four on `Gated4626Vault` | False positive: the target is `SETTLEMENT_LOGIC` or `MANAGEMENT_LOGIC`, an immutable the implementation's own constructor creates, so no caller chooses it | `Gated7540SettlementUnit_Wiring`, `Gated4626ManagementUnit_Wiring` |
+| `costly-loop`, `require-revert-in-loop` | `ComplianceHook.onInstall` and `_setRules`, `IntentExecutor.executeBatch`, `Portfolio._addAllocation`, `_subtractAllocation` | By design: at most 16 rules, and invalid rules must fail closed; batches are atomic; an adapter names only a few risks, and a move past any cap fails whole | Hook, batch and portfolio tests |
 | `literal-instead-of-constant` | `SettlementWindowRule` calendar arithmetic | Calendar constants | Window tests |
-| `empty-block`, `modifier-used-only-once` | `BaseRule.after_`, `__IntentSettled_init`, `Fund.onlyRule`, the two empty `catch` blocks of `Fund._listsInstalledRule` | By design; in the fund views a token or a hook that fails is a broken class, and the answer is `false` | `FundUnit_ClassIntegrity` |
+| `empty-block`, `modifier-used-only-once` | `BaseRule.after_` and `onInstall`, `__IntentSettled_init`, `Fund.onlyRule`, the two empty `catch` blocks of `Fund._listsInstalledRule` | By design; in the fund views a token or a hook that fails is a broken class, and the answer is `false` | `FundUnit_ClassIntegrity` |
 | `unsafe-casting` | `ComplianceHook._setRules`, `HolderRestrictionRule.setLockup`, `Portfolio._addAllocation`, `_subtractAllocation` | Each narrowing follows an explicit bound: at most 16 rules and a 16-bit mask; a range check against 64 bits; an allocation at most the 120-bit cap | Hook tests; `HolderRestrictionRuleUnit_SetLockup`; `testFuzz_ARiskAlwaysEqualsTheSumOfItsAdapters` |
-| `unused-error` | `IERC7943Fungible`, `IERC7943NonFungible` | The standard's `ERC7943CannotSend`, `ERC7943CannotReceive` and `ERC7943CannotTransfer` are part of the interface the token inherits; the token reverts with `PolicyGated_TransferRejected` and `ERC7943InsufficientUnfrozenBalance` instead | n/a |
+| `unused-error` | `IERC7943Fungible`, `IERC7943NonFungible` | The standard's `ERC7943CannotSend`, `ERC7943CannotReceive` and `ERC7943CannotTransfer` are part of the interface the token inherits; the token reverts with `ERC8473PolicyRejected` and `ERC7943InsufficientUnfrozenBalance` instead | n/a |
 
 solhint (Wonderland config, `--max-warnings 0`):
 - `style-guide-casing` is disabled on getters of `UPPER_SNAKE` constants and immutables and on OZ-style `__X_init`

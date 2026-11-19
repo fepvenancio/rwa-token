@@ -57,7 +57,7 @@ describe("DvP: a share trade against cash, settled in one transaction", async fu
     assert.equal(failure.errorName, "DvPExecutor_LegFailed");
     const [leg, inner] = failure.args as [number, Hex];
     const { errorName, args } = decodeErrorResult({ abi: s.token.abi, data: inner });
-    assert.equal(errorName, "PolicyGated_TransferRejected");
+    assert.equal(errorName, "ERC8473PolicyRejected");
     return { leg, reason: (args as readonly Hex[])[0] };
   }
   const CASH = 0;
@@ -152,9 +152,9 @@ describe("DvP: a share trade against cash, settled in one transaction", async fu
     const args = gatedArgs(s, cash, trade);
 
     await time.increaseTo(saturday);
-    assert.deepEqual(await s.dvpExecutor.read.canExecuteDvPGated(args), [false, REASONS.OUTSIDE_SETTLEMENT_WINDOW]);
+    assert.deepEqual(await s.dvpExecutor.read.canExecuteDvPGated(args), [false, REASONS.WINDOW_CLOSED]);
     const refused = await legFailure(s, s.dvpExecutor.write.executeDvPGated(args, { account: s.wallets.operator.account }));
-    assert.deepEqual(refused, { leg: SECURITIES, reason: REASONS.OUTSIDE_SETTLEMENT_WINDOW });
+    assert.deepEqual(refused, { leg: SECURITIES, reason: REASONS.WINDOW_CLOSED });
     assert.equal(await cash.read.balanceOf([bob.account.address]), usd("1000"), "the cash leg ran first and was undone");
 
     await time.increaseTo(nextMonday);
@@ -193,7 +193,7 @@ describe("DvP: a share trade against cash, settled in one transaction", async fu
     // Naming the DvP executor and stating no payment: the intent executor forwards it, and the token refuses it.
     const bound = await signIntent(s, alice, { to: bob.account.address, amount: 1n, executor: s.dvpExecutor.address });
     const byToken = await revertOf(s.executor.write.execute([s.token.address, bound.intent, bound.sig], { account: operator }), abi);
-    assert.deepEqual(byToken, { errorName: "PolicyGated_TransferRejected", args: [REASONS.WRONG_EXECUTOR] });
+    assert.deepEqual(byToken, { errorName: "ERC8473PolicyRejected", args: [REASONS.WRONG_EXECUTOR] });
 
     // Stating the payment it is for: the intent executor refuses it before it reaches the token, because it cannot
     // enforce a payment, whoever the intent names.

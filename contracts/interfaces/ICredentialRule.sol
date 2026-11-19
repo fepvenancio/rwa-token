@@ -9,8 +9,9 @@ import {ICredentialRegistry} from 'interfaces/ICredentialRegistry.sol';
  * @notice Applies a per-token policy to the records of an `ICredentialRegistry`. The sender of a movement needs only a
  *         standing that lets it leave (`ACTIVE`, `EXIT_ONLY` or `LAPSED`). The receiver needs an `ACTIVE` record from a
  *         trusted attester whose qualification bits satisfy the token's policy
- * @dev Which leg is checked, by kind: TRANSFER and EXECUTED check both; MINT and FORCED check the receiver only; BURN
- *      checks the sender only, and a BURN whose operator holds the token's BURNER_ROLE (enforcement) checks nothing.
+ * @dev Which leg is checked, by kind: TRANSFER and EXECUTED check both; MINT and FORCED check the receiver only, when there
+ *      is one, so the burner's enforcement burn, a FORCED movement to the zero address, checks nothing; BURN, a holder's
+ *      own, checks the sender only, whoever the operator is.
  *      Zero amounts are checked like any other. The rule keeps no running state and no `after_`; the registry is the
  *      state. Policy is keyed by token and set by the token's own DEFAULT_ADMIN_ROLE, checked live
  */

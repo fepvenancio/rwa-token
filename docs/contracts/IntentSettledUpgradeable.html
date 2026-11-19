@@ -49,7 +49,7 @@
   </div>
   <figure>
     <div class="fig-scroll">
-      <svg class="d" viewBox="0 0 780 636" role="img" aria-label="Sequence of a signed intent. The holder signs the intent off-chain with EIP-712 and hands the intent and signature to the operator key. The operator may first ask the token canExecute, naming the executor, and gets true or a reason code. The operator calls execute on the IntentExecutor, which checks its operator role, that it is not paused and that the intent states no consideration, then calls executeTransfer on the token. The token runs its checks and marks the nonce used, asks the hook beforeTransfer with kind EXECUTED, gets TRANSFER_OK, moves the balances, calls afterTransfer if the hook wants it, and returns the intent hash with the event IntentExecuted. The executor returns the intent hash to the operator.">
+      <svg class="d" viewBox="0 0 780 636" role="img" aria-label="Sequence of a signed intent. The holder signs the intent off-chain with EIP-712 and hands the intent and signature to the operator key. The operator may first ask the token canExecute, naming the executor, and gets true or a reason code. The operator calls execute on the IntentExecutor, which checks its operator role, that it is not paused and that the intent states no consideration, then calls executeTransfer on the token. The token runs its checks and marks the nonce used, asks the hook checkTransfer with kind EXECUTED, gets TRANSFER_OK, moves the balances, calls afterTransfer if the hook wants it, and returns the intent hash with the event IntentExecuted. The executor returns the intent hash to the operator.">
         <defs>
           <marker id="is-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
         </defs>
@@ -102,7 +102,7 @@
         <text x="480" y="406" class="sm">nonce marked used</text>
 
         <line class="ln" x1="540" y1="440" x2="701" y2="440" marker-end="url(#is-arrow)"/>
-        <text x="550" y="432" class="mono sm">beforeTransfer(ctx)</text>
+        <text x="550" y="432" class="mono sm">checkTransfer(ctx)</text>
         <text x="550" y="455" class="sm m">kind EXECUTED</text>
         <line class="ln dash" x1="705" y1="474" x2="544" y2="474" marker-end="url(#is-arrow)"/>
         <text x="600" y="490" class="mono sm">TRANSFER_OK</text>
@@ -229,7 +229,7 @@
         <text x="60" y="763" class="bold">Emit IntentExecuted, return the intent hash</text>
       </svg>
     </div>
-    <figcaption class="wrap-any"><b>Message checks first, then the policy.</b> Checks 1 to 7, and the pause and the hook in step 9, revert with <code>PolicyGated_TransferRejected(reason)</code> carrying the code in the red box. <code>canExecute</code> returns the same codes without reverting. At step 0 it answers <code>NOT_EXECUTOR</code> when the account it names lacks the role, and at step 8 it writes nothing.</figcaption>
+    <figcaption class="wrap-any"><b>Message checks first, then the policy.</b> Checks 1 to 7, and the pause and the hook in step 9, revert with <code>ERC8473PolicyRejected(reason)</code> carrying the code in the red box. <code>canExecute</code> returns the same codes without reverting. At step 0 it answers <code>NOT_EXECUTOR</code> when the account it names lacks the role, and at step 8 it writes nothing.</figcaption>
   </figure>
   <ul class="plain wrap-any">
     <li><b>The role comes first in both.</b> A caller without the role gets the access error whatever else is wrong (<code>test_WhenTheCallerLacksTheRole_TheRoleCheckComesFirst</code>), and <code>canExecute</code> says <code>NOT_EXECUTOR</code> before it looks at anything else (<code>test_TheRoleIsCheckedBeforeEverythingElseAsInTheCall</code>).</li>
@@ -272,7 +272,7 @@
     <p>A <b>nonce</b> here is a random 32-byte value that makes each intent unique, in the style of ERC-3009. The token keeps one used-or-not flag per signer and nonce, and nothing else. Because nonces are random rather than counted, the signer needs nothing from the chain to sign, can sign many intents at once, and the executor can run them in any order.</p>
     <ul class="plain wrap-any">
       <li>Executing an intent marks its nonce used, so the same intent does not run twice (<code>NONCE_USED</code>; <code>check_executedIntentCannotReplay</code>).</li>
-      <li><code>cancelIntent(nonce)</code> marks one of the caller's own nonces used, so no intent that account signed with it can run. It needs no other field, works while the token is paused, and emits <code>IntentCancelled(from, nonce)</code>. Cancelling a nonce that is already used reverts with <code>PolicyGated_TransferRejected(NONCE_USED)</code>. An account that cancels a value has no effect on another signer's nonce of the same value (<code>test_WhenAnotherAccountCancels_ItDoesNotAffectTheSigner</code>).</li>
+      <li><code>cancelIntent(nonce)</code> marks one of the caller's own nonces used, so no intent that account signed with it can run. It needs no other field, works while the token is paused, and emits <code>IntentCancelled(from, nonce)</code>. Cancelling a nonce that is already used reverts with <code>ERC8473PolicyRejected(NONCE_USED)</code>. An account that cancels a value has no effect on another signer's nonce of the same value (<code>test_WhenAnotherAccountCancels_ItDoesNotAffectTheSigner</code>).</li>
       <li>A cancel and an execution race: whichever transaction is mined first wins. A used nonce stays used, and nothing undoes an execution.</li>
       <li><code>nonceUsed(signer, nonce)</code> tells whether a nonce is spent. These nonces are separate from the counter <code>nonces(owner)</code> that <code>permit</code> uses.</li>
     </ul>
@@ -324,7 +324,7 @@
         <tr><td><code>kind</code></td><td><span class="k k-executed">EXECUTED</span></td></tr>
         <tr><td><code>from</code>, <code>to</code>, <code>amount</code></td><td>From the intent.</td></tr>
         <tr><td><code>operator</code></td><td>The account that called <code>executeTransfer</code>: the executor, not the holder. In <code>canExecute</code>, the account it names (<code>test_TheRulesSeeTheNamedAccountAsTheOperator</code>).</td></tr>
-        <tr><td><code>extra</code></td><td><code>abi.encode(fromBalance, toBalance, ref, deadline)</code>: the two balances before the move, then the intent's reference and deadline. Rules that read the balances decode the first two words.</td></tr>
+        <tr><td><code>data</code></td><td><code>abi.encode(fromBalance, toBalance, ref, deadline)</code>: the two balances before the move, then the intent's reference and deadline. Rules that read the balances decode the first two words.</td></tr>
       </tbody>
     </table>
   </div>
@@ -355,7 +355,7 @@
       <tbody>
         <tr><td><code>IntentExecuted(intentHash, from, to, amount, executor, ref)</code></td><td>After the balances have moved and the hook's <code>afterTransfer</code> has run.</td></tr>
         <tr><td><code>IntentCancelled(from, nonce)</code></td><td>A signer cancels a nonce.</td></tr>
-        <tr><td><code>PolicyGated_TransferRejected(reason)</code></td><td>Any check above that carries a reason code: <code>INTENT_EXPIRED</code>, <code>NONCE_USED</code>, <code>CONSIDERATION_NEEDS_EXECUTOR</code>, <code>WRONG_EXECUTOR</code>, <code>INTENT_NOT_YET_VALID</code>, <code>ZERO_RECEIVER</code>, <code>BAD_SIGNATURE</code>, <code>PAUSED</code>, or a rule's reason. <code>NOT_EXECUTOR</code> is <code>canExecute</code>'s answer; the write reverts with the access error instead.</td></tr>
+        <tr><td><code>ERC8473PolicyRejected(reason)</code></td><td>Any check above that carries a reason code: <code>INTENT_EXPIRED</code>, <code>NONCE_USED</code>, <code>CONSIDERATION_NEEDS_EXECUTOR</code>, <code>WRONG_EXECUTOR</code>, <code>INTENT_NOT_YET_VALID</code>, <code>ZERO_RECEIVER</code>, <code>BAD_SIGNATURE</code>, <code>PAUSED</code>, a rule's reason, or <code>CHECK_UNAVAILABLE</code> when the hook cannot be asked. <code>NOT_EXECUTOR</code> is <code>canExecute</code>'s answer; the write reverts with the access error instead.</td></tr>
         <tr><td><code>AccessControlUnauthorizedAccount</code></td><td><code>executeTransfer</code> from an account without the role.</td></tr>
         <tr><td><code>ERC7943InsufficientUnfrozenBalance</code>, <code>ERC20InsufficientBalance</code></td><td>The amount does not fit, as in any movement.</td></tr>
       </tbody>
@@ -417,7 +417,7 @@
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>4a906cc</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>6ef0d4e</code> on <code>erc8473-conformance</code>.</footer>
 </main>
 </body>
 </html>

@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gated4626Management · Gated Token Stack</title>
+<meta name="description" content="Why a 4626 vault hands its management functions to a second contract, what fixes that contract in place, and what it cannot do when reached directly.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="../index.html">Gated Token Stack</a>
+  <a href="../index.html">Overview</a>
+  <a href="../index.html#contracts">Contracts</a>
+  <a href="../roles.html">Who can do what</a>
+  <a href="../movement.html">One movement</a>
+  <a href="../deployment.html">Deployment and governance</a>
+  <a href="../money.html">Where the money sits</a>
+</nav>
+<main class="page">
+
+<header class="top">
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Vaults</div>
+  <h1>Gated4626Management</h1>
+  <p class="lede wrap-any">The management code of a <a href="Gated4626Vault.html">Gated4626Vault</a>, in a second contract. The vault keeps every function by name and hands four of them here, where they run on the vault's own storage with the vault's own caller. Reached directly, this contract acts on empty storage of its own and touches no vault.</p>
+  <div class="facts">
+    <span class="fact"><b>contracts/vaults/Gated4626Management.sol</b></span>
+    <span class="fact">created by: <b>the implementation's constructor</b></span>
+    <span class="fact">one per implementation, <b>not a proxy</b></span>
+    <span class="fact">not attested on its own: the implementation's codehash fixes its <b>address</b></span>
+    <span class="fact">no role holders, no money</span>
+  </div>
+</header>
+
+<section id="in-one-minute">
+  <div class="callout wrap-any">
+    <h3>In one minute</h3>
+    <p>A contract on this chain may hold at most 24,576 bytes of code (EIP-170). Four functions of <code>Gated4626Vault</code> that no investor calls live here, which leaves the vault room under that limit: plugging a portfolio, the rate limit, the fee model and paying fees.</p>
+    <p>An investor sees no difference. It calls the vault's address, the functions keep their names, and the events come from the vault. For anyone deciding how far to trust the vault, the question is whether this opens a new way to change what the vault does. The implementation's constructor creates this contract, so its address is written into the code the security council attests. The second contract has no role, no storage and no admin function of its own. Changing it takes what changing the vault takes: an upgrade through the timelock to an attested implementation, which brings its own second contract.</p>
+  </div>
+</section>
+
+<section id="how">
+  <div class="prose wrap-any">
+    <h2>How a call reaches it</h2>
+    <p>A vault is a proxy: a small contract that keeps the address, the balances and the roles, and runs shared code with a <code>delegatecall</code>. That code is the implementation. A <code>delegatecall</code> runs another contract's code as if it were the caller's own. The vault's implementation does the same once more for these four functions.</p>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 780 286" role="img" aria-label="How a call reaches the second contract. An investor calls the vault's address, the TokenProxy, which holds the storage, the roles, the shares and the money. The proxy delegatecalls the Gated4626Vault implementation, and deposits and redemptions run there. The timelock, the guardian, or anyone paying out fees also calls the vault's address. The proxy delegatecalls the implementation, and the implementation delegatecalls Gated4626Management for setPortfolio, setMaxRate, setFeeModel and collectFees. All of it runs on the vault's storage: the caller stays the caller, the events come from the vault's address, and a revert comes back as it came.">
+        <defs>
+          <marker id="v46m-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+        </defs>
+
+        <rect class="b2" x="12" y="34" width="130" height="52" rx="8"/>
+        <text x="24" y="55" class="bold">Investor</text>
+        <text x="24" y="73" class="sm m">deposits, redeems</text>
+
+        <rect class="b2" x="12" y="130" width="130" height="66" rx="8"/>
+        <text x="24" y="151" class="bold">Management call</text>
+        <text x="24" y="169" class="sm m">timelock, guardian,</text>
+        <text x="24" y="185" class="sm m">or anyone for fees</text>
+
+        <rect class="act" x="182" y="20" width="130" height="196" rx="8"/>
+        <text x="194" y="42" class="bold">The vault</text>
+        <text x="194" y="60" class="mono sm">TokenProxy</text>
+        <text x="194" y="100" class="sm">storage and roles,</text>
+        <text x="194" y="116" class="sm">shares and money</text>
+
+        <rect class="b" x="392" y="20" width="140" height="196" rx="8"/>
+        <text x="404" y="42" class="mono sm bold">Gated4626Vault</text>
+        <text x="404" y="60" class="sm m">implementation</text>
+        <text x="404" y="88" class="sm">runs deposits and</text>
+        <text x="404" y="104" class="sm">redemptions itself</text>
+        <text x="404" y="186" class="sm">names the other four</text>
+
+        <rect class="b" x="612" y="110" width="156" height="106" rx="8"/>
+        <text x="622" y="132" class="mono sm bold">Gated4626Management</text>
+        <text x="622" y="150" class="sm m">the second contract</text>
+        <text x="622" y="176" class="sm">runs the four, on the</text>
+        <text x="622" y="192" class="sm">vault's storage</text>
+
+        <line class="ln" x1="142" y1="60" x2="180" y2="60" marker-end="url(#v46m-arrow)"/>
+        <line class="ln" x1="142" y1="160" x2="180" y2="160" marker-end="url(#v46m-arrow)"/>
+        <line class="ln" x1="312" y1="60" x2="390" y2="60" marker-end="url(#v46m-arrow)"/>
+        <text x="352" y="52" class="m" text-anchor="middle">delegatecall</text>
+        <line class="ln" x1="312" y1="160" x2="390" y2="160" marker-end="url(#v46m-arrow)"/>
+        <text x="352" y="152" class="m" text-anchor="middle">delegatecall</text>
+        <line class="ln" x1="532" y1="160" x2="610" y2="160" marker-end="url(#v46m-arrow)"/>
+        <text x="572" y="152" class="m" text-anchor="middle">delegatecall</text>
+
+        <rect class="band" x="12" y="234" width="756" height="38" rx="6"/>
+        <text x="26" y="258">The caller stays the caller, the events come from the vault's address, a revert comes back as it came.</text>
+      </svg>
+    </div>
+    <figcaption class="wrap-any"><b>Two hand-offs, one set of books.</b> A role check in the second contract asks the vault's role table, because that is the storage it runs on. So the holders are the vault's, and nothing here keeps a list of its own.</figcaption>
+  </figure>
+  <ol class="steps wrap-any">
+    <li><div><b>The vault names the function.</b> Each of the four is one line on <code>Gated4626Vault</code>. It passes the call data, unchanged, to <code>MANAGEMENT_LOGIC</code> with OpenZeppelin's <code>Address.functionDelegateCall</code>, and a typed error comes back as it came (<code>test_WhenAMovedFunctionReverts_TheTypedErrorComesBack</code>). The vault states the whole of <code>IGated4626Vault</code>, so the compiler checks that nothing is missing.</div></li>
+    <li><div><b>It acts on the vault.</b> It writes the vault's storage (<code>test_WhenAMovedFunctionRuns_ItWritesTheVaultsStorage</code>) and its events come from the vault's address (<code>test_WhenAMovedFunctionRuns_TheEventsComeFromTheVault</code>). The money a first plug forwards leaves the vault, not this contract (<code>test_WhenAPlugForwardsTheVaultsBalance_ItLeavesTheVault</code>). A caller without the role gets the usual error naming that caller (<code>test_WhenCalledWithoutTheRole_TheErrorNamesTheCaller</code>), the guardian asked about the rate is the vault's (<code>test_WhenTheGuardianLowersTheRate_ItIsTheVaultsGuardianThatIsAsked</code>), and a batch through the vault's <code>multicall</code> keeps the caller too (<code>test_WhenBatched_MovedFunctionsKeepTheCaller</code>).</div></li>
+    <li><div><b>Only these four.</b> The vault has no fallback, so a function it does not name reverts. What an investor calls runs on the vault itself: <code>deposit</code>, <code>mint</code>, <code>withdraw</code>, <code>redeem</code>, <code>accrue</code>, share transfers and the views.</div></li>
+  </ol>
+</section>
+
+<section id="fixed">
+  <div class="prose wrap-any">
+    <h2>What is fixed, and what checks it</h2>
+    <p>The vault's <code>MANAGEMENT_LOGIC()</code> gives the address (<code>test_WhenQueried_TheVaultNamesContractCode</code>). It is an immutable of the implementation, set in its constructor with <code>new Gated4626Management()</code>.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>What</th><th>What fixes it</th><th>What checks it</th></tr></thead>
+      <tbody>
+        <tr><td>Which contract the vault hands to</td><td>The immutable is part of the implementation's code, so the codehash the council attests covers the address. No function sets it.</td><td><a href="PolicyRegistry.html"><code>PolicyRegistry</code></a>, asked at <code>ProxyDeployer.deploy</code> and at every upgrade. Each implementation creates its own (<code>test_WhenTwoImplementationsAreDeployed_EachCreatesItsOwn</code>).</td></tr>
+        <tr><td>Which functions go there</td><td>The vault's own named functions, in that same attested code.</td><td>The same attestation.</td></tr>
+        <tr><td>The code at that address</td><td>Not the attested hash: a codehash covers an address, not the code that lives there. Once deployed the code stays: this contract is not a proxy, its <code>upgradeToAndCall</code> refuses to run, and it has no <code>selfdestruct</code>.</td><td><code>npm run verify:reproducible</code> fails unless the vault's creation code embeds this contract's creation code. <code>assertHandedOver</code> reads the address from the product and compares the code there with the artifact, with its own address in the <code>__self</code> slot.</td></tr>
+        <tr><td>Where each figure is stored</td><td>One definition, in <a href="Gated4626Common.html"><code>Gated4626Common</code></a>, which both contracts inherit.</td><td>The compiler: neither contract declares the layout itself.</td></tr>
+        <tr><td>Who may call</td><td>The vault's role table. There is no role, list or setter of this contract's own that a vault reads.</td><td><code>test_WhenCalledWithoutTheRole_TheErrorNamesTheCaller</code>, and the role tests in <code>Gated4626VaultPortfolio.t.sol</code> (<code>testFuzz_OnlyTheAdminPlugs</code>, <code>testFuzz_OnlyTheAdminPlugsAModel</code>, <code>test_TheRateLimitIsRaisedByTheAdminAndLoweredByTheGuardian</code>).</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose wrap-any">
+    <p>The comparison of the code needs someone to run it. <code>assertHandedOver</code> lives in the test fixtures, and on a live chain an operator has to run it against each real product (<a href="../deployment.html#check">the post-deploy check</a>).</p>
+  </div>
+</section>
+
+<section id="direct">
+  <div class="prose wrap-any">
+    <h2>What it cannot do when reached directly</h2>
+    <p>Anyone can call this contract's address. It then runs on its own storage, which holds no roles, no portfolio, no fee model and no balances.</p>
+    <ul class="plain wrap-any">
+      <li><b>Nobody holds a role on it, and nobody can be granted one.</b> It has no initializer, so no account ever became its admin (<code>test_WhenTheVaultsAdminGrantsARoleOnIt_ItReverts</code>). Plugging a portfolio and setting a fee model revert for want of the role, even for the vault's own admin (<code>test_WhenTheVaultsAdminPlugsAPortfolioOnIt_ItReverts</code>, <code>test_WhenTheVaultsAdminSetsAFeeModelOnIt_ItReverts</code>). Setting the rate reverts with <code>Gated4626Vault_Unauthorized</code> for the vault's admin and for its guardian (<code>test_WhenTheVaultsAdminOrGuardianSetsTheRateOnIt_ItReverts</code>).</li>
+      <li><b>There are no fees on it.</b> It has no fee model, so <code>collectFees</code> reverts with <code>Gated4626Vault_NoFeeModel</code> (<code>test_WhenAnyoneCollectsFeesOnIt_ThereIsNoFeeModel</code>).</li>
+      <li><b>It cannot be upgraded.</b> <code>upgradeToAndCall</code> reverts with <code>UUPSUnauthorizedCallContext</code> (<code>test_WhenUpgradedDirectly_ItReverts</code>).</li>
+      <li><b>It takes no deposit.</b> It has no asset and no policy, so a deposit into it reverts and no share is issued (<code>test_WhenAnInvestorDepositsIntoIt_ItReverts</code>).</li>
+      <li><b>It holds no money, and no vault can be moved onto it.</b> It has no <code>receive</code> function and no payable function that runs. <code>templateId()</code> is its own, so a vault's upgrade onto it reverts with <code>Templated_WrongTemplate</code> even if someone attested it by mistake (<code>test_WhenUpgradedOntoTheSecondContract_ItIsRefused</code>).</li>
+    </ul>
+    <p>It inherits the base token and OpenZeppelin's vault for its internals, so their external functions exist on it too. A stranger can write an allowance into its own storage. That storage belongs to no vault and means nothing. Through a vault those functions cannot be reached here, because the vault forwards only the four.</p>
+  </div>
+</section>
+
+<section id="functions">
+  <div class="prose wrap-any">
+    <h2>What it can do</h2>
+    <p>Each runs through the vault, as described on the <a href="Gated4626Vault.html#functions"><code>Gated4626Vault</code></a> page.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Function</th><th>Who can call, through the vault</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>setPortfolio(portfolio, maxRateBps)</code></td><td><code>DEFAULT_ADMIN_ROLE</code></td><td>Plugs a portfolio, or replaces one. The rate must be above zero and at most 1e9 basis points a year. The portfolio must be attested as <code>PORTFOLIO</code>, name this vault and its asset, and refuse reported adapters. One already plugged must have no adapter on its list and price at zero, and if it has written off an adapter the vault stays exit-only. A first plug starts the limit's clock. The vault's own balance of the asset is added to <code>last</code> and sent to the portfolio. Emits <code>PortfolioSet</code> and <code>MaxRateSet</code>.</td></tr>
+        <tr><td><code>setMaxRate(maxRateBps)</code></td><td><code>DEFAULT_ADMIN_ROLE</code>, up to 1e9 basis points a year. <code>GUARDIAN_ROLE</code>, at or below the present rate.</td><td>Counts the value at the outgoing rate when a price can be used, then sets the limit on how fast the counted value may rise. Emits <code>MaxRateSet</code>. Anyone else gets <code>Gated4626Vault_Unauthorized(caller)</code>, and a rate above the ceiling <code>Gated4626Vault_RateTooHigh(maxRateBps)</code>.</td></tr>
+        <tr><td><code>setFeeModel(feeModel)</code></td><td><code>DEFAULT_ADMIN_ROLE</code></td><td>Plugs or replaces the fee model. It needs a portfolio (<code>Gated4626Vault_NoPortfolio</code>) and a model attested as <code>FEE_MODEL</code>, and counts first. A first plug starts the fee clock, and starts the mark at the last counted price, or at par if that is lower. Emits <code>FeeModelSet</code>.</td></tr>
+        <tr><td><code>collectFees()</code></td><td>Anyone, not while paused</td><td>Counts, then pays the fee model's <code>RECIPIENT()</code> the smaller of the fees owed and the portfolio's idle money, from the portfolio. Emits <code>FeesCollected</code>. With no model it reverts with <code>Gated4626Vault_NoFeeModel</code>.</td></tr>
+        <tr><td><code>templateId()</code></td><td>Anyone (read-only), directly on this contract</td><td><code>keccak256('Gated4626Management')</code>, not the vault's. Through a vault, the same selector answers with the vault's own.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small wrap-any">Its one immutable is <code>__self</code>, which OpenZeppelin's <code>UUPSUpgradeable</code> keeps: its own address. It has no constructor and no state variable of its own. Its one constant is the ceiling on the rate, 1e9 basis points a year, which only this contract reads. It declares no events or errors of its own: it uses the vault's, from <code>IGated4626Vault</code> and the base token.</p>
+</section>
+
+<section id="upgrade">
+  <div class="prose wrap-any">
+    <h2>An upgrade</h2>
+    <p>Nothing changes this contract alone. An upgrade moves the proxy to a new implementation, which the council has attested and which reports the same template id. That implementation created its own second contract when it was deployed, so the vault's <code>MANAGEMENT_LOGIC()</code> answers with the new address and the new code acts on the same state: the portfolio and the last counted value stay, and the rate can be set through it (<code>test_WhenUpgraded_TheNewLogicActsOnTheOldState</code>).</p>
+  </div>
+</section>
+
+<section id="why">
+  <div class="prose wrap-any">
+    <h2>Why it is built this way</h2>
+    <ul class="plain wrap-any">
+      <li><b>Fixed in the constructor, not looked up in a table.</b> A table of selectors an admin can edit would make adding a function an upgrade by another name, and the attested codehash would stop saying what a proxy runs. Here it does, down to the address.</li>
+      <li><b>One deployment and one attestation.</b> Deploying the implementation creates the second contract, so the modules have no extra step and the council no extra kind of code to attest.</li>
+      <li><b>Investor paths stay on the vault.</b> Deposits, redemptions, <code>accrue</code> and the views run there with no hand-off.</li>
+      <li><b>Management, as a group.</b> Their callers are the timelock, the guardian or an occasional caller paying out fees, so the extra gas of a hand-off falls on few calls.</li>
+      <li><b>A shared parent for the layout and the counting.</b> Two copies of a storage struct, or of the count, could drift apart. One parent cannot.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="prose wrap-any">
+    <h2>What it costs</h2>
+    <ul class="plain wrap-any">
+      <li><b>Two contracts to read as one.</b> This is <code>delegatecall</code> inside a UUPS implementation, a pattern OpenZeppelin does not ship, though the call itself is theirs. <code>npm run validate:upgrades</code> passes because the hand-off, the immutable, the constructor and the missing initializer carry <code>@custom:oz-upgrades-unsafe-allow</code> annotations: the tool is told to allow them, and does not prove them safe.</li>
+      <li><b>An unreachable copy of the base.</b> Most of its code is the base token and the vault logic it inherits, and no vault can call that code's external functions.</li>
+      <li><b>The counting is in both.</b> Deposits and withdrawals count the value on the vault, and three of the four functions count it here, so both contracts carry that code.</li>
+      <li><b>A larger deployment.</b> The vault's creation code carries this contract's. A test holds it under the 49,152 bytes that EIP-3860 allows (<code>test_WhenDeployed_TheVaultsWithASecondContractFitTheEip3860Limit</code>).</li>
+      <li><b>Some gas on each hand-off.</b> Each of the four calls takes one more <code>delegatecall</code>. An investor's call takes none.</li>
+      <li><b>No fix without an upgrade.</b> A bug here is fixed the way a bug in the vault is: through the timelock, to a newly attested implementation.</li>
+      <li><b>Not reviewed.</b> No review has covered this contract, and nothing here has had an external audit.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="connected">
+  <div class="prose wrap-any"><h2>Connected to</h2></div>
+  <div class="cards">
+    <a class="card" href="Gated4626Vault.html"><span class="name">Gated4626Vault</span><p>Creates this contract, names its four functions, and holds the state they act on.</p></a>
+    <a class="card" href="Gated4626Common.html"><span class="name">Gated4626Common</span><p>The storage and the counting the two contracts share.</p></a>
+    <a class="card" href="Portfolio.html"><span class="name">Portfolio</span><p>What <code>setPortfolio</code> plugs, and where <code>collectFees</code> pays from.</p></a>
+    <a class="card" href="FeeModel.html"><span class="name">FeeModel</span><p>What <code>setFeeModel</code> plugs, and whose recipient <code>collectFees</code> pays.</p></a>
+    <a class="card" href="PolicyRegistry.html"><span class="name">PolicyRegistry</span><p>Attests the implementation whose code holds this contract's address.</p></a>
+    <a class="card" href="TokenProxy.html"><span class="name">TokenProxy</span><p>The proxy each vault is, and the first of the two hand-offs.</p></a>
+    <a class="card" href="../deployment.html"><span class="name">Deployment and governance</span><p>Where the attestation, the reproducible build and the post-deploy check sit.</p></a>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose wrap-any">
+    <h2>Source and tests</h2>
+    <ul class="plain wrap-any">
+      <li>Contract: <code>contracts/vaults/Gated4626Management.sol</code>, specified in <code>IGated4626Vault.sol</code></li>
+      <li>Tests: <code>Gated4626Management.t.sol</code> (the wiring, direct calls, the hand-off and upgrades), <code>Gated4626VaultPortfolio.t.sol</code> (plugging, the rate and fees through the vault), <code>ContractSizes.t.sol</code> (the runtime and creation-code limits)</li>
+      <li>Checks: <code>scripts/verify-reproducible.ts</code>, <code>assertHandedOver</code> in <code>test/nodejs/fixtures.ts</code></li>
+    </ul>
+  </div>
+</section>
+
+<footer>Describes the contracts at commit <code>6ef0d4e</code> on <code>erc8473-conformance</code>.</footer>
+</main>
+</body>
+</html>

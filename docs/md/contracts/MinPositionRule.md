@@ -21,15 +21,15 @@ A minimum holding per token. After a movement, every account it judges holds eit
 <a id="how"></a>
 ## How a position is judged
 
-The rule looks at the balance each side will have after the move. It reads both balances before the move from the context the token built (`extra`) and works from the amount, so it makes no call back into the token for a balance.
+The rule looks at the balance each side will have after the move. It reads both balances before the move from the context the token built (`data`) and works from the amount, so it makes no call back into the token for a balance.
 
 > **Diagram.** Allowed balances after a move. The sender may keep nothing, or the minimum or more; keeping more than zero and less than the minimum is refused with BELOW_MIN_POSITION. The receiver always ends above zero, so it must end with the minimum or more; less is refused with BELOW_MIN_POSITION.
 >
 > **Zero, or the minimum or more.** A sender may leave entirely or keep at least the minimum. A receiver of a non-zero amount ends above zero, so it must reach the minimum. Exactly the minimum is allowed on both sides.
 
-> **Diagram.** The check, in order. First, if the minimum is 0, the amount is 0, the sender is the receiver, or the kind is FORCED, it returns TRANSFER_OK without judging. Second, if there is a receiver that would end below the minimum and is not exempt, it returns BELOW_MIN_POSITION. Third, if there is a sender that would keep more than zero and less than the minimum, is not exempt, and the movement is not a burn by a holder of the token's BURNER_ROLE, it returns BELOW_MIN_POSITION. Otherwise TRANSFER_OK.
+> **Diagram.** The check, in order. First, if the minimum is 0, the amount is 0, the sender is the receiver, or the kind is FORCED, it returns TRANSFER_OK without judging. Second, if there is a receiver that would end below the minimum and is not exempt, it returns BELOW_MIN_POSITION. Third, if there is a sender that would keep more than zero and less than the minimum and is not exempt, it returns BELOW_MIN_POSITION. Otherwise TRANSFER_OK.
 >
-> **Three steps, receiver before sender.** The exemption list and the token's roles are read only once a position would breach the minimum, so an ordinary movement pays for neither.
+> **Three steps, receiver before sender.** The exemption list is read only once a position would breach the minimum, so an ordinary movement does not pay for it.
 
 <a id="kinds"></a>
 ## What it does for each kind of movement
@@ -42,15 +42,15 @@ With a minimum above 0, a non-zero amount, and two different accounts:
 | EXECUTED | the same as a transfer | the same as a transfer |
 | FORCED | not judged | not judged (an enforcement mint has no sender) |
 | MINT | ends at the minimum or more, unless exempt | none: a mint has no sender |
-| BURN | none: a burn has no receiver | keeps 0, or the minimum or more, unless exempt or the operator holds the token's `BURNER_ROLE` |
+| BURN | none: a burn has no receiver | keeps 0, or the minimum or more, unless exempt |
 
-The one reason code is `BELOW_MIN_POSITION`, and the token reverts with `PolicyGated_TransferRejected(BELOW_MIN_POSITION)`. A holder's own burn, such as a vault redemption, is judged on what it leaves behind. A burn by an account holding the token's `BURNER_ROLE` counts as enforcement and may leave any remainder. A plain transfer by that same account is judged like any other.
+The one reason code is `BELOW_MIN_POSITION`, and the token reverts with `ERC8473PolicyRejected(BELOW_MIN_POSITION)`. A holder's own burn, such as a vault redemption, is judged on what it leaves behind. The burner's `burn` reaches the rule as `FORCED` and may leave any remainder. A plain transfer or a vault redemption by an account holding the token's `BURNER_ROLE` is judged like any other.
 
 <a id="exempt"></a>
 ## What is not judged
 
 - **Nothing to judge.** A minimum of 0 (the rule is off for the token), an amount of 0, and a move from an account to itself all pass. Nothing changes hands, so no dust appears.
-- **Enforcement.** `FORCED` passes on both sides, the enforcement mint included, and so does a burn whose operator holds the token's `BURNER_ROLE` on the sender side. The rule asks the token for that role only when a burn would leave a remainder below the minimum.
+- **Enforcement.** `FORCED` passes on both sides: the agent's forced transfer, the enforcement mint and the burner's `burn`. The rule does not look at the operator and asks the token for no role.
 - **The token itself.** The token's own address is exempt. On [`Gated7540Vault`](Gated7540Vault.md) that address is the escrow that holds the shares of pending redemptions.
 - **Listed accounts.** The token's admin can exempt an account with `setExempt(token, account, true)`. An exempt account is not judged on its own side; the other side of the same movement still is. A listing on one token does not carry over to another.
 
@@ -83,6 +83,7 @@ The demo deployment (`full`, through `RULE_ORDER`) lists it second on all three 
 | `isExempt(token, account)` | Anyone (read-only) | True for the token itself and for listed accounts. |
 | `checkSend`, `checkReceive` | Anyone (read-only) | `TRANSFER_OK` for every account. |
 | `after_(ctx)` | The hook of `ctx.token` | The empty default. The hook does not call it, because `wantsAfter()` is false. |
+| `onInstall(token, previousPolicy)` | Anyone; the hook when a token installs it | The empty default: the rule keeps no state derived from movements. |
 | `ruleId()`, `wantsAfter()`, `supportsInterface(id)` | Anyone (read-only) | `keccak256('MinPositionRule.v1')`; false; ERC-165 for `IMinPositionRule`, `IComplianceRule` and `IERC165`. |
 
 <a id="edges"></a>
@@ -97,15 +98,14 @@ The demo deployment (`full`, through `RULE_ORDER`) lists it second on all three 
 ## Why it is built this way
 
 - **No dust, no cheap investor slots.** A fund caps its number of investors ([`FundHoldersRule`](FundHoldersRule.md)), and a one-unit balance counts as an investor. With a minimum set, a movement this rule judges cannot create such a position.
-- **No call back into the token for balances.** The token puts the balances before the move in the context, the same way for the write and for every pre-flight, so the usual path makes no call to the token at all. The token is asked for a role, and only when a burn would leave dust.
+- **No call back into the token for balances.** The token puts the balances before the move in the context, the same way for the write and for every pre-flight, so `check` makes no call to the token at all.
 - **One instance for every token.** The minimum and the exemptions are stored per token and authorised by that token's own admin, so the same attested contract serves every token in the deployment.
 
 <a id="limits"></a>
 ## What it does not do
 
 - **It does nothing until a minimum is set.** Listing the rule is not enough, and the deployment sets none unless given one. Where no minimum is set, a payer the token's policy accepts can deposit 1 unit into a 4626 for an eligible empty receiver and take a fund investor slot. No rule answers that there: the agent can take the dust back with `forcedTransfer` to an exempt or already counted account, and someone can watch `Fund.holderCount()`.
-- **Enforcement and exempt accounts can still leave dust.** Forced transfers, burns by a `BURNER_ROLE` holder and listed accounts are not held to the minimum.
-- **It asks the operator, not the intent.** A `BURNER_ROLE` holder that redeems its own vault shares passes its own minimum, because the rule sees a burn by that role. Burner accounts are issuer service accounts and should not also be investors.
+- **Enforcement and exempt accounts can still leave dust.** Forced movements, the burner's burn included, and listed accounts are not held to the minimum.
 - **1 unit can still reach an existing holder.** A receiver already at or above the minimum can receive any amount. A holder trying to exit an exact balance it read earlier then reverts with `BELOW_MIN_POSITION`, because the extra unit would stay behind. It exits the current balance instead.
 - **A frozen remainder makes `maxRedeem` overstate.** `maxRedeem` is the unfrozen balance, and the minimum judges the whole balance. A holder whose frozen amount is above zero and below the minimum cannot redeem all of `maxRedeem`: the frozen remainder would stay behind, and the redemption reverts with `BELOW_MIN_POSITION`.
 - **A minimum above `type(uint128).max` would refuse the vaults' mint probe** and read as a block in `maxDeposit`.
@@ -128,4 +128,4 @@ The demo deployment (`full`, through `RULE_ORDER`) lists it second on all three 
 
 ---
 
-Describes the contracts at commit `4a906cc` on `main`.
+Describes the contracts at commit `6ef0d4e` on `erc8473-conformance`.

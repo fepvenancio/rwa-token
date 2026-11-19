@@ -23,11 +23,11 @@ The fund-wide investor cap. It lets a new investor into a class of a fund only w
 <a id="how"></a>
 ## How a movement is decided
 
-`check(ctx)` reads the fund once, with `admission(token, to)`, which returns the token's class number, the receiver's class mask and exempt flag, the count, the cap and the fund's installed rule. Only at a full fund does it read the fund a second time, for the sender. The balances before the move come from the context the token built (`extra`), not from the token.
+`check(ctx)` reads the fund once, with `admission(token, to)`, which returns the token's class number, the receiver's class mask and exempt flag, the count, the cap and the fund's installed rule. Only at a full fund does it read the fund a second time, for the sender. The balances before the move come from the context the token built (`data`), not from the token.
 
 > **Diagram.** The check, in order. 1: if the token is not a registered class of the fund, or this rule is not the fund's installed rule, NOT_FUND_CLASS. 2: if the receiver is not a new investor (zero amount, a move to oneself, a burn, FORCED, a move to the class itself, to an exempt account, or to an account that already holds any class), TRANSFER_OK. 3: if the cap is 0, MAX_HOLDERS. 4: if the count is below the cap, TRANSFER_OK. 5: if the count equals the cap and the move takes all of the sender's only class, TRANSFER_OK. Otherwise MAX_HOLDERS, which includes any new investor while the count is above the cap.
 >
-> **Only a new investor is counted against the cap.** Step 2 lets through every move that cannot add an investor, and forced transfers, which can but are exempt, so trades between existing investors, exits and enforcement do not meet the cap. Red boxes are refusals, which the token turns into `PolicyGated_TransferRejected(reason)`.
+> **Only a new investor is counted against the cap.** Step 2 lets through every move that cannot add an investor, and forced transfers, which can but are exempt, so trades between existing investors, exits and enforcement do not meet the cap. Red boxes are refusals, which the token turns into `ERC8473PolicyRejected(reason)`.
 
 1. **Wrong fund or wrong rule: refuse everything.** A token that is not a registered class of the fund, or a rule that the fund has replaced, answers `NOT_FUND_CLASS` for every movement, zero amounts, burns and forced transfers included. So a retired rule does not say yes in a pre-flight while its write would be refused, and a class cannot hold a balance before the fund records it.
 2. **Who is a new investor.** A receiver that holds no class of the fund and is not exempt, receiving a non-zero amount from someone else. The class token itself is not one: `Gated7540Vault` keeps the shares of pending redemptions at its own address.
@@ -57,7 +57,7 @@ Every kind first meets the class check of step 1, with `NOT_FUND_CLASS` for a to
 |---|---|---|
 | TRANSFER | applies to a new investor, net of a sender who leaves the fund | the sender leaves the class if it moved all of it; the receiver joins if it held none of it |
 | EXECUTED | the same as a transfer | the same as a transfer |
-| FORCED | not applied: enforcement is exempt | both sides, so the count can end above the cap |
+| FORCED | not applied: enforcement is exempt | both sides, so the count can end above the cap; after the burner's `burn`, which has no receiver, the sender leaves if all of it was burnt |
 | MINT | applies to a new investor; a mint has no sender to free a slot | the receiver joins |
 | BURN | not applied: a burn has no receiver | the sender leaves if it burnt all of it |
 
@@ -68,13 +68,13 @@ A vault deposit is a `MINT` of shares, a 4626 redemption a `BURN`, and a 7540 re
 
 The rule's `wantsAfter()` is true, so the hook calls its `after_` once the balances have moved, inside the token's guard against reentry. The state lives in the [`Fund`](Fund.md): the rule keeps none. `after_` writes there, in this order: the sender leaves first, then the receiver joins.
 
-> **Diagram.** After a movement. The class token moves the balances, then calls afterTransfer on the ComplianceHook, which accepts it only from the token named in the context. The hook calls after\_ on FundHoldersRule. The rule asks the token for its current policyHook and requires it to be the caller. It stops if the amount is zero or the sender is the receiver. It then calls leave on the Fund if the sender is not the zero address and the move took its whole balance, and after that join if the receiver is not the zero address and held none of the class before. The Fund accepts these only from its installed rule, only for a registered class, and ignores the class itself.
+> **Diagram.** After a movement. The class token moves the balances, then calls afterTransfer on the ComplianceHook, which accepts it only from the token named in the context. The hook calls after\_ on FundHoldersRule. The rule asks the token for its current policy and requires it to be the caller. It stops if the amount is zero or the sender is the receiver. It then calls leave on the Fund if the sender is not the zero address and the move took its whole balance, and after that join if the receiver is not the zero address and held none of the class before. The Fund accepts these only from its installed rule, only for a registered class, and ignores the class itself.
 >
 > **Two gates before the fund changes, and the leave comes first.** The rule accepts `after_` only from the hook the token currently has, and the fund accepts `join` and `leave` only from its installed rule and only for a registered class. A movement that changes nobody's holding of the class writes nothing. Because the leave comes first, a net-zero move at a full fund does not show the count above the cap, even for a moment.
 
 1. **Nothing to record.** After the hook check, a zero amount or a move to oneself returns without touching the fund.
 2. **The sender leaves.** `leave` is called when `from` is not the zero address, so a mint leaves nobody, and the amount equals the sender's whole balance before the move.
-3. **The receiver joins.** `join` is called when `to` is not the zero address, so a burn joins nobody, and the receiver's balance before the move was zero. Both balances come from `extra`, which the token built before the balances moved.
+3. **The receiver joins.** `join` is called when `to` is not the zero address, so a burn joins nobody, and the receiver's balance before the move was zero. Both balances come from `data`, which the token built before the balances moved.
 4. **The fund's own checks.** `join` and `leave` revert unless the caller is the fund's installed rule (`Fund_OnlyRule`) and the token is a registered class (`Fund_NotAClass`); a revert there undoes the whole movement. A class joining itself, such as shares going into the 7540 escrow, is ignored, and a leave for it changes nothing.
 
 <a id="account-checks"></a>
@@ -111,6 +111,13 @@ Each fund has its own rule instance: the `Fund` module deploys the two together.
 
 The rule holds no state, only the fund's address, so a replacement starts with the count and the masks as they are. The fund names one installed rule at a time, and this rule compares itself with it on every movement. While a class's rule list still names a rule the fund has replaced, that rule answers `NOT_FUND_CLASS` to everything, forced transfers included, and the class is closed. The change is therefore one main-timelock batch: `setRule` on the fund together with the hook's `setRules` for every class. A second instance for the same fund has the same code hash, so it is already attested. `Fund.firstBrokenClass()` names a class whose list does not name the installed rule.
 
+<a id="install"></a>
+## When a class installs a hook
+
+The fund's count is built from the movements of each class, and it is kept across installations. So the rule answers for it each time a class installs a hook whose list for the class names the rule. The hook calls the rule's `onInstall(token, previousPolicy)`, and the rule lets the installation go ahead in two cases. The class has no supply, so there is nothing to count. Or the hook the class consulted until then lists this rule for it, so no movement went unseen. Otherwise the rule reverts with `FundHoldersRule_CountNotCurrent(token)`, the installation is undone and the class keeps the hook it had. `onInstall` writes nothing, so anyone may call it.
+
+A class is set up with no supply, so its first installation passes. A class that has a supply can move to another hook that lists the rule only while the hook it leaves lists the rule too. The same holds when a class installs the hook it already has: the hook tells the rules before it stores a list from the data, so it still answers with the list it held. A class with a supply that installs its own hook with data that adds this rule to a list that lacked it is refused with `FundHoldersRule_CountNotCurrent`. The fund's count survives a hook replacement when both hooks list the rule. A receiving hook whose list for the class does not name the rule does not ask it: the installation goes through, the class moves uncounted, and `Fund.firstBrokenClass()` names it.
+
 <a id="functions"></a>
 ## What it can do
 
@@ -118,6 +125,7 @@ The rule holds no state, only the fund's address, so a replacement starts with t
 |---|---|---|
 | `check(ctx)` | Anyone (read-only); the hook in practice | The decision above: `TRANSFER_OK`, `NOT_FUND_CLASS` or `MAX_HOLDERS`. |
 | `after_(ctx)` | The hook currently installed on `ctx.token` | Calls the fund's `leave` and then `join` as described above. Reverts with `ComplianceRule_OnlyHook(caller)` for any other caller. |
+| `onInstall(token, previousPolicy)` | Anyone (read-only); the hook when a class installs it | Returns when the class's `totalSupply()` is zero, or when `previousPolicy` is not the zero address and its `rules(token)` names this rule. Otherwise reverts with `FundHoldersRule_CountNotCurrent(token)`. Writes nothing. |
 | `checkSend(token, account)`, `checkReceive(token, account)` | Anyone (read-only) | The class check of step 1 alone: `NOT_FUND_CLASS` or `TRANSFER_OK`. |
 | `FUND()` | Anyone (read-only) | The fund the rule reads and writes, fixed at construction. The constructor refuses the zero address (`FundHoldersRule_ZeroAddress`). |
 | `ruleId()`, `wantsAfter()`, `supportsInterface(id)` | Anyone (read-only) | `keccak256('FundHoldersRule.v1')`; true; ERC-165 for `IFundHoldersRule`, `IComplianceRule` and `IERC165`. |
@@ -137,6 +145,7 @@ The rule holds no state, only the fund's address, so a replacement starts with t
 - **Investors are addresses.** One investor with two wallets counts twice, and an omnibus wallet counts once.
 - **Dust can take a slot.** A non-zero balance makes an investor. On a class with no minimum position set, a tiny transfer to an eligible address takes a slot for as long as it is held; the agent can take it back with `forcedTransfer`. The demo lists put [`MinPositionRule`](MinPositionRule.md) before this rule for that reason, and it does nothing until a minimum is set.
 - **A class whose list drops this rule is uncapped.** The hook accepts any list of attested rules. A class whose list does not name the fund's rule moves uncounted, and the fund's count goes stale. `Fund.isClassIntact` and `firstBrokenClass` report it, and the post-deploy check asserts none is broken at hand-over; nothing prevents it afterwards.
+- **Its check on installation covers an installation only.** The hook's `setRules` calls no `onInstall`. A list set that way can drop this rule and name it again later, and the count misses the movements in between.
 - **It holds no place for an open 7540 request.** A full `requestRedeem` takes the investor out of the count while the shares wait in the escrow, and `requestDeposit` reserves nothing. If the fund fills up meanwhile, a reject that returns the shares, or a deposit claim, is refused with `MAX_HOLDERS`. The agent's recovery works, and delivering to an account that holds nothing puts the count above the cap until investors leave.
 - **The cap is a ratchet.** Above a lowered cap no new investor is admitted, net-zero moves included, until the count comes back down.
 - **Pre-flight of a two-class swap can miss.** When two legs of a trade move classes of one fund, each pre-flight reads the state before either has run, so a swap can pass and then fail on its second leg.
@@ -154,8 +163,8 @@ The rule holds no state, only the fund's address, so a replacement starts with t
 ## Source and tests
 
 - Contract: `contracts/hooks/rules/FundHoldersRule.sol`, interface `IFundHoldersRule.sol`, reason codes in `Errors.sol`
-- Tests: `FundHoldersRule.t.sol` (every step of the check, the net-zero cases, `after_`, the gate against fake tokens and fake hooks, the account questions), `FundIntegration.t.sol` (three real classes: the cap with pre-flight parity, no event showing the count above the cap, forced transfers, the 7540 escrow, a blocked claim, rule replacement), `FundInvariant.t.sol`, `FundHalmos.t.sol`, and `test/nodejs/fund.test.ts` (through the real deployment)
+- Tests: `FundHoldersRule.t.sol` (every step of the check, the net-zero cases, `after_`, the gate against fake tokens and fake hooks, the account questions, the check on installation), `FundIntegration.t.sol` (three real classes: the cap with pre-flight parity, no event showing the count above the cap, forced transfers, the 7540 escrow, a blocked claim, rule replacement), `FundInvariant.t.sol`, `FundHalmos.t.sol`, and `test/nodejs/fund.test.ts` (through the real deployment)
 
 ---
 
-Describes the contracts at commit `4a906cc` on `main`.
+Describes the contracts at commit `6ef0d4e` on `erc8473-conformance`.

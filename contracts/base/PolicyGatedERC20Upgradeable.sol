@@ -11,8 +11,8 @@ import {IERC165} from '@openzeppelin/contracts/utils/introspection/IERC165.sol';
 import {Reasons} from 'interfaces/Errors.sol';
 
 import {IERC7943Fungible} from 'interfaces/IERC7943Fungible.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 
 import {PolicyGatedCoreUpgradeable} from 'contracts/base/PolicyGatedCoreUpgradeable.sol';
 
@@ -56,8 +56,11 @@ abstract contract PolicyGatedERC20Upgradeable is ERC20PermitUpgradeable, PolicyG
     address _from,
     uint256 _amount
   ) external virtual onlyRole(BURNER_ROLE) {
+    if (_from == address(0)) revert ERC20InvalidSender(address(0));
     _releaseFrozen(_from, _amount);
-    _burn(_from, _amount);
+    // An enforcement burn takes tokens without the holder directing it, so the policy sees FORCED with a zero receiver
+    // (ERC-8473, transfer kinds). BURN is the holder's own, such as a vault redemption.
+    _move(_from, address(0), _amount, IERC8473Policy.TransferKind.FORCED, bytes32(0), 0);
   }
 
   /// @inheritdoc IPolicyGated
@@ -90,10 +93,9 @@ abstract contract PolicyGatedERC20Upgradeable is ERC20PermitUpgradeable, PolicyG
    * @inheritdoc IERC7943Fungible
    * @dev ERC-7943 says this MUST NOT return false for a balance check and MUST return false when a frozen amount keeps
    *      the amount from the unfrozen balance, so a shortfall counts here only while a frozen amount is in the way.
-   *      With nothing frozen on `_from`, or for a burn by a sender that holds BURNER_ROLE (which may take frozen
-   *      tokens), an amount above the balance reads true if the hook accepts it, and the write reverts with
-   *      `ERC20InsufficientBalance`. `canTransferWithReason` does not make that exception, so it says the write would
-   *      revert
+   *      With nothing frozen on `_from` an amount above the balance reads true if the policy accepts it, and the write
+   *      reverts with `ERC20InsufficientBalance`. `canTransferWithReason` does not make that exception, so it says the
+   *      write would revert. Neither depends on who asks: the operator simulated is `_from` (ERC-8473, check rule 3)
    */
   function canTransfer(
     address _from,
@@ -112,7 +114,7 @@ abstract contract PolicyGatedERC20Upgradeable is ERC20PermitUpgradeable, PolicyG
     uint256 _amount
   ) public virtual onlyRole(AGENT_ROLE) returns (bool _result) {
     _releaseFrozen(_from, _amount);
-    _moveAs(_from, _to, _amount, IPolicyHook.TransferKind.FORCED, bytes32(0), 0);
+    _moveAs(_from, _to, _amount, IERC8473Policy.TransferKind.FORCED, bytes32(0), 0);
     // Emitted after the hook's afterTransfer: re-entry is blocked by `_move`'s guard and the hook is attested.
     // slither-disable-start reentrancy-events
     emit ForcedTransfer(_from, _to, _amount);
@@ -176,14 +178,14 @@ abstract contract PolicyGatedERC20Upgradeable is ERC20PermitUpgradeable, PolicyG
     address _from,
     address _to,
     uint256 _value,
-    IPolicyHook.TransferKind _kind,
+    IERC8473Policy.TransferKind _kind,
     bytes32 _ref,
     uint256 _deadline
   ) internal virtual nonReentrant {
-    IPolicyHook.TransferContext memory _ctx = _context(_from, _to, _value, _msgSender(), _kind, _ref, _deadline);
+    IERC8473Policy.TransferContext memory _ctx = _context(_from, _to, _value, _msgSender(), _kind, _ref, _deadline);
 
     // Read once: the hook that approves the movement is the hook that sees `afterTransfer`.
-    IPolicyHook _hook = _policyHook();
+    IERC8473Policy _hook = _policy();
     bytes32 _reason = _check(_ctx, _hook);
     if (_reason != Reasons.TRANSFER_OK) {
       // The token's own balance checks revert with the standard's error for an amount within the balance, which a frozen
@@ -196,12 +198,12 @@ abstract contract PolicyGatedERC20Upgradeable is ERC20PermitUpgradeable, PolicyG
         if (_value > _balance) revert ERC20InsufficientBalance(_from, _balance, _value);
         revert ERC7943InsufficientUnfrozenBalance(_from, _value, _unfrozenBalance(_from));
       }
-      revert PolicyGated_TransferRejected(_reason);
+      revert ERC8473PolicyRejected(_reason);
     }
 
     super._update(_from, _to, _value);
 
-    if (_hook.wantsAfter()) _hook.afterTransfer(_ctx);
+    if (_hook.wantsAfterTransfer()) _hook.afterTransfer(_ctx);
   }
 
   /**
@@ -218,7 +220,7 @@ abstract contract PolicyGatedERC20Upgradeable is ERC20PermitUpgradeable, PolicyG
     address _from,
     address _to,
     uint256 _amount,
-    IPolicyHook.TransferKind _kind,
+    IERC8473Policy.TransferKind _kind,
     bytes32 _ref,
     uint256 _deadline
   ) internal {
@@ -239,7 +241,7 @@ abstract contract PolicyGatedERC20Upgradeable is ERC20PermitUpgradeable, PolicyG
   function _mintAs(
     address _to,
     uint256 _amount,
-    IPolicyHook.TransferKind _kind
+    IERC8473Policy.TransferKind _kind
   ) internal {
     if (_to == address(0)) revert ERC20InvalidReceiver(address(0));
     _move(address(0), _to, _amount, _kind, bytes32(0), 0);
@@ -284,7 +286,8 @@ abstract contract PolicyGatedERC20Upgradeable is ERC20PermitUpgradeable, PolicyG
 
   /**
    * @notice The pre-flight behind `canTransferWithReason`, shared with templates (e.g. vault `max*`)
-   * @dev Simulates a holder-driven movement: the operator is `_from`, or the caller for a mint. Every shortfall counts
+   * @dev Simulates a holder-driven movement: the operator is `_from`, which is zero for a mint, so the answer does not
+   *      depend on who asks (ERC-8473, check rule 3). Every shortfall counts
    * @param _from The sender, or address(0) for a mint
    * @param _to The receiver, or address(0) for a burn
    * @param _amount The amount
@@ -300,7 +303,8 @@ abstract contract PolicyGatedERC20Upgradeable is ERC20PermitUpgradeable, PolicyG
 
   /**
    * @notice The pre-flight behind `canTransfer` and `canTransferWithReason`
-   * @dev Simulates a holder-driven movement: the operator is `_from`, or the caller for a mint
+   * @dev Simulates a holder-driven movement: the operator is `_from`, which is zero for a mint, so the answer does not
+   *      depend on who asks (ERC-8473, check rule 3)
    * @param _from The sender, or address(0) for a mint
    * @param _to The receiver, or address(0) for a burn
    * @param _amount The amount
@@ -315,10 +319,8 @@ abstract contract PolicyGatedERC20Upgradeable is ERC20PermitUpgradeable, PolicyG
   ) internal view returns (bytes32 _reason) {
     // A mint to the zero address cannot happen, so the hook is not asked about one.
     if (_from == address(0) && _to == address(0)) return Reasons.ZERO_RECEIVER;
-    address _operator = _from == address(0) ? _msgSender() : _from;
-    _reason = _check(
-      _context(_from, _to, _amount, _operator, _inferKind(_from, _to), bytes32(0), 0), _policyHook(), _balanceCounts
-    );
+    _reason =
+      _check(_context(_from, _to, _amount, _from, _inferKind(_from, _to), bytes32(0), 0), _policy(), _balanceCounts);
   }
 
   /**
@@ -326,8 +328,8 @@ abstract contract PolicyGatedERC20Upgradeable is ERC20PermitUpgradeable, PolicyG
    * @dev The amount is `_MINT_PROBE`: it is not zero, so a rule that caps holders sees a new holder, and it is above
    *      any minimum position up to `type(uint128).max`, so such a minimum does not read as a block (one wei would; a
    *      minimum set above that would refuse the probe). A rule that bounds the size of a position, such as a supply
-   *      cap or a maximum balance, would refuse it and zero the `max*` that use it. The operator is the caller, as in
-   *      `_canTransfer`
+   *      cap or a maximum balance, would refuse it and zero the `max*` that use it. The operator is the zero address, as
+   *      in `_canTransfer`, so the answer does not depend on who asks
    * @param _receiver The account that would receive the shares
    * @return _reason TRANSFER_OK, or the reason a mint to `_receiver` would be rejected
    */
@@ -344,8 +346,8 @@ abstract contract PolicyGatedERC20Upgradeable is ERC20PermitUpgradeable, PolicyG
    * @return _reason The reason code
    */
   function _check(
-    IPolicyHook.TransferContext memory _ctx,
-    IPolicyHook _hook
+    IERC8473Policy.TransferContext memory _ctx,
+    IERC8473Policy _hook
   ) internal view returns (bytes32 _reason) {
     _reason = _check(_ctx, _hook, true);
   }
@@ -353,31 +355,32 @@ abstract contract PolicyGatedERC20Upgradeable is ERC20PermitUpgradeable, PolicyG
   /**
    * @notice Mechanical checks then the hook decision, with the choice of whether a balance shortfall counts
    * @dev The amount must fit in the unfrozen balance, which is zero when the frozen amount is the larger (ERC-7943). A
-   *      forced transfer and an enforcement burn (the operator holds BURNER_ROLE, as the holder restriction rule defines
-   *      it) may take frozen tokens, since `_releaseFrozen` lowers the frozen amount by the part that comes out of it, but
-   *      never more than the balance: that bound holds for the write and for the pre-flights that count every
-   *      shortfall. With `_balanceCounts` false a shortfall counts only while a frozen amount is in the way of a holder:
-   *      ERC-7943 leaves a plain balance shortfall to the base standard, whose error the write reverts with
+   *      FORCED movement (a forced transfer or the burner's enforcement burn) may take frozen tokens, since
+   *      `_releaseFrozen` lowers the frozen amount by the part that comes out of it, but never more than the balance:
+   *      that bound holds for the write and for the pre-flights that count every shortfall. With `_balanceCounts` false
+   *      a shortfall counts only while a frozen amount is in the way: ERC-7943 leaves a plain balance shortfall to the
+   *      base standard, whose error the write reverts with. No pre-flight simulates FORCED, so none depends on who
+   *      asks. The policy is asked through `_ask`: one that cannot be asked is `CHECK_UNAVAILABLE`
    * @param _ctx The movement context
    * @param _hook The hook to consult, read once by the caller
    * @param _balanceCounts Whether a balance shortfall with no frozen amount in the way counts as a failure
    * @return _reason The reason code
    */
   function _check(
-    IPolicyHook.TransferContext memory _ctx,
-    IPolicyHook _hook,
+    IERC8473Policy.TransferContext memory _ctx,
+    IERC8473Policy _hook,
     bool _balanceCounts
   ) internal view returns (bytes32 _reason) {
-    if (paused() && _ctx.kind != IPolicyHook.TransferKind.FORCED) return Reasons.PAUSED;
+    if (paused() && _ctx.kind != IERC8473Policy.TransferKind.FORCED) return Reasons.PAUSED;
 
     if (_ctx.from != address(0) && _availableToMove(_ctx) < _ctx.amount) {
-      if (_balanceCounts || (!_takesFrozenTokens(_ctx) && _getPolicyGatedStorage().frozen[_ctx.from] > 0)) {
+      if (_balanceCounts || _getPolicyGatedStorage().frozen[_ctx.from] > 0) {
         return Reasons.INSUFFICIENT_UNFROZEN;
       }
     }
 
     if (address(_hook) == address(0)) return Reasons.NO_HOOK;
-    _reason = _hook.beforeTransfer(_ctx);
+    _reason = _ask(address(_hook), abi.encodeCall(IERC8473Policy.checkTransfer, (_ctx)));
   }
 
   /**
@@ -396,23 +399,23 @@ abstract contract PolicyGatedERC20Upgradeable is ERC20PermitUpgradeable, PolicyG
     address _to,
     uint256 _amount,
     address _operator,
-    IPolicyHook.TransferKind _kind,
+    IERC8473Policy.TransferKind _kind,
     bytes32 _ref,
     uint256 _deadline
-  ) internal view returns (IPolicyHook.TransferContext memory _ctx) {
+  ) internal view returns (IERC8473Policy.TransferContext memory _ctx) {
     // The balances before the move, so rules never call back into the token. Zero for the zero address, which holds
     // nothing. EXECUTED continues with the intent's reference and deadline.
     uint256 _fromBalance = _from == address(0) ? 0 : balanceOf(_from);
     uint256 _toBalance = _to == address(0) ? 0 : balanceOf(_to);
-    _ctx = IPolicyHook.TransferContext({
+    _ctx = IERC8473Policy.TransferContext({
       token: address(this),
       from: _from,
       to: _to,
-      id: 0,
+      tokenId: 0,
       amount: _amount,
       operator: _operator,
       kind: _kind,
-      extra: _kind == IPolicyHook.TransferKind.EXECUTED
+      data: _kind == IERC8473Policy.TransferKind.EXECUTED
         ? abi.encode(_fromBalance, _toBalance, _ref, _deadline)
         : abi.encode(_fromBalance, _toBalance)
     });
@@ -425,23 +428,11 @@ abstract contract PolicyGatedERC20Upgradeable is ERC20PermitUpgradeable, PolicyG
    * @return _available The amount the sender can move
    */
   function _availableToMove(
-    IPolicyHook.TransferContext memory _ctx
+    IERC8473Policy.TransferContext memory _ctx
   ) private view returns (uint256 _available) {
-    _available = _takesFrozenTokens(_ctx) ? balanceOf(_ctx.from) : _unfrozenBalance(_ctx.from);
-  }
-
-  /**
-   * @notice Whether a movement is an enforcement action that may take frozen tokens
-   * @param _ctx The movement context
-   * @return _takes True for FORCED, and for a BURN driven by an account holding BURNER_ROLE
-   */
-  function _takesFrozenTokens(
-    IPolicyHook.TransferContext memory _ctx
-  ) private view returns (bool _takes) {
-    // Compares movement kinds, not balances.
+    // FORCED, the token's enforcement authority, may take frozen tokens. Compares movement kinds, not balances.
     // slither-disable-next-line incorrect-equality
-    _takes = _ctx.kind == IPolicyHook.TransferKind.FORCED
-      || (_ctx.kind == IPolicyHook.TransferKind.BURN && hasRole(BURNER_ROLE, _ctx.operator));
+    _available = _ctx.kind == IERC8473Policy.TransferKind.FORCED ? balanceOf(_ctx.from) : _unfrozenBalance(_ctx.from);
   }
 
   /**

@@ -7,8 +7,9 @@ import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+import {IERC8473} from 'interfaces/IERC8473.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {ISupplyCapRule} from 'interfaces/ISupplyCapRule.sol';
 
@@ -46,11 +47,11 @@ contract SupplyCapRuleUnitTest is Helpers {
   }
 
   function _ctx(
-    IPolicyHook.TransferKind _kind,
+    IERC8473Policy.TransferKind _kind,
     uint256 _amount
-  ) internal view returns (IPolicyHook.TransferContext memory _context) {
-    _context = IPolicyHook.TransferContext({
-      token: _token, from: address(0), to: _to, id: 0, amount: _amount, operator: _admin, kind: _kind, extra: ''
+  ) internal view returns (IERC8473Policy.TransferContext memory _context) {
+    _context = IERC8473Policy.TransferContext({
+      token: _token, from: address(0), to: _to, tokenId: 0, amount: _amount, operator: _admin, kind: _kind, data: ''
     });
   }
 }
@@ -79,11 +80,11 @@ contract SupplyCapRuleUnit_Set is SupplyCapRuleUnitTest {
 
 contract SupplyCapRuleUnit_Check is SupplyCapRuleUnitTest {
   function test_UpToTheCapPasses() external view {
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.MINT, _CAP)), Reasons.TRANSFER_OK);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.MINT, _CAP)), Reasons.TRANSFER_OK);
   }
 
   function test_OneAboveTheCapIsRefused() external view {
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.MINT, _CAP + 1)), Reasons.ABOVE_SUPPLY_CAP);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.MINT, _CAP + 1)), Reasons.ABOVE_SUPPLY_CAP);
   }
 
   function testFuzz_ItCountsWhatIsAlreadyThere(
@@ -95,21 +96,22 @@ contract SupplyCapRuleUnit_Check is SupplyCapRuleUnitTest {
     _supply(_existing);
     bool _fits = _existing <= _CAP && _amount <= _CAP - _existing;
     assertEq(
-      _rule.check(_ctx(IPolicyHook.TransferKind.MINT, _amount)), _fits ? Reasons.TRANSFER_OK : Reasons.ABOVE_SUPPLY_CAP
+      _rule.check(_ctx(IERC8473Policy.TransferKind.MINT, _amount)),
+      _fits ? Reasons.TRANSFER_OK : Reasons.ABOVE_SUPPLY_CAP
     );
   }
 
   /// @dev Lowering a cap below the supply stops further mints and does not revert
   function test_AboveALoweredCapAMintIsRefusedAndNothingReverts() external {
     _supply(_CAP + 500);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.MINT, 1)), Reasons.ABOVE_SUPPLY_CAP);
-    assertEq(_rule.check(_ctx(IPolicyHook.TransferKind.MINT, 0)), Reasons.ABOVE_SUPPLY_CAP);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.MINT, 1)), Reasons.ABOVE_SUPPLY_CAP);
+    assertEq(_rule.check(_ctx(IERC8473Policy.TransferKind.MINT, 0)), Reasons.ABOVE_SUPPLY_CAP);
   }
 
   function test_WithNoCapSetItFailsClosed() external {
     address _unset = _mockContract('unset');
     vm.mockCall(_unset, abi.encodeCall(IERC20.totalSupply, ()), abi.encode(uint256(0)));
-    IPolicyHook.TransferContext memory _c = _ctx(IPolicyHook.TransferKind.MINT, 1);
+    IERC8473Policy.TransferContext memory _c = _ctx(IERC8473Policy.TransferKind.MINT, 1);
     _c.token = _unset;
     assertEq(_rule.check(_c), Reasons.ABOVE_SUPPLY_CAP);
   }
@@ -118,15 +120,15 @@ contract SupplyCapRuleUnit_Check is SupplyCapRuleUnitTest {
     uint8 _kindSeed,
     uint256 _amount
   ) external {
-    IPolicyHook.TransferKind _kind = IPolicyHook.TransferKind(bound(_kindSeed, 0, 4));
-    if (_kind == IPolicyHook.TransferKind.MINT) _kind = IPolicyHook.TransferKind.FORCED;
+    IERC8473Policy.TransferKind _kind = IERC8473Policy.TransferKind(bound(_kindSeed, 0, 4));
+    if (_kind == IERC8473Policy.TransferKind.MINT) _kind = IERC8473Policy.TransferKind.FORCED;
     _supply(_CAP);
     assertEq(_rule.check(_ctx(_kind, _amount)), Reasons.TRANSFER_OK);
   }
 
   function test_ItAsksNothingAboutAnotherKind() external {
     vm.expectCall(_token, abi.encodeCall(IERC20.totalSupply, ()), 0);
-    _rule.check(_ctx(IPolicyHook.TransferKind.TRANSFER, 1));
+    _rule.check(_ctx(IERC8473Policy.TransferKind.TRANSFER, 1));
   }
 
   function test_ItHasNoAccountLevelOpinion() external view {
@@ -139,7 +141,7 @@ contract SupplyCapRuleUnit_Check is SupplyCapRuleUnitTest {
 
   function test_CheckIsAView() external {
     vm.record();
-    _rule.check(_ctx(IPolicyHook.TransferKind.MINT, 1));
+    _rule.check(_ctx(IERC8473Policy.TransferKind.MINT, 1));
     (, bytes32[] memory _writes) = vm.accesses(address(_rule));
     assertEq(_writes.length, 0);
   }
@@ -188,9 +190,7 @@ contract SupplyCapRuleIntegration is Helpers {
     (bool _ok, bytes32 _reason) = _token.canTransferWithReason(address(0), _alice, 1);
     assertFalse(_ok);
     assertEq(_reason, Reasons.ABOVE_SUPPLY_CAP);
-    vm.expectRevert(
-      abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, Reasons.ABOVE_SUPPLY_CAP)
-    );
+    vm.expectRevert(abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, Reasons.ABOVE_SUPPLY_CAP));
     vm.prank(_minter);
     _token.mint(_alice, 1);
     assertEq(_token.totalSupply(), _CAP);

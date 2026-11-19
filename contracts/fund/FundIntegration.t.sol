@@ -8,11 +8,12 @@ import {Vm} from 'forge-std/Vm.sol';
 import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+import {IERC8473} from 'interfaces/IERC8473.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IFund} from 'interfaces/IFund.sol';
 import {IGated7540Vault} from 'interfaces/IGated7540Vault.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 
 import {ProxyDeployer} from 'contracts/deploy/ProxyDeployer.sol';
@@ -254,7 +255,7 @@ contract FundIntegrationTest is Test {
   function _rejected(
     bytes32 _reason
   ) internal pure returns (bytes memory _revertData) {
-    _revertData = abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, _reason);
+    _revertData = abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, _reason);
   }
 
   function _assertTransferParity(
@@ -676,7 +677,7 @@ contract FundIntegration_Replacement is FundIntegrationTest {
     ComplianceHook _twin = new ComplianceHook(_registry);
     assertEq(address(_twin).codehash, address(_hook).codehash);
     _twin.setRules(address(_token), _reordered);
-    _token.setPolicyHook(address(_twin));
+    _token.installPolicy(address(_twin), '');
     assertEq(_fund.holderCount(), 2);
 
     _mintToken(_carol, 1 ether);
@@ -726,16 +727,16 @@ contract FundIntegration_Replacement is FundIntegrationTest {
   function _ctxFor(
     address _tokenAddress,
     address _receiver
-  ) internal view returns (IPolicyHook.TransferContext memory _context) {
-    _context = IPolicyHook.TransferContext({
+  ) internal view returns (IERC8473Policy.TransferContext memory _context) {
+    _context = IERC8473Policy.TransferContext({
       token: _tokenAddress,
       from: address(0),
       to: _receiver,
-      id: 0,
+      tokenId: 0,
       amount: 1 ether,
       operator: _minter,
-      kind: IPolicyHook.TransferKind.MINT,
-      extra: abi.encode(uint256(0), IERC20(_tokenAddress).balanceOf(_receiver))
+      kind: IERC8473Policy.TransferKind.MINT,
+      data: abi.encode(uint256(0), IERC20(_tokenAddress).balanceOf(_receiver))
     });
   }
 }
@@ -772,7 +773,7 @@ contract FundIntegration_Integrity is FundIntegrationTest {
     IComplianceRule[] memory _without = new IComplianceRule[](1);
     _without[0] = _identityRule;
     _twin.setRules(address(_token), _without);
-    _token.setPolicyHook(address(_twin));
+    _token.installPolicy(address(_twin), '');
     assertFalse(_fund.isClassIntact(address(_token)));
     assertEq(_fund.firstBrokenClass(), address(_token));
   }

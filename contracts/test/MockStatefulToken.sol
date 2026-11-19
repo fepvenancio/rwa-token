@@ -6,7 +6,7 @@ pragma solidity ^0.8.28;
  * @notice A "token" whose read functions write state. Rules call the token through view interfaces, which compile to
  *         STATICCALL, so any rule that calls this mock must revert: proof that nothing the rule calls can change state
  *         (and so cannot re-enter the rule with effect) between the call and the rule's own write
- * @dev The selectors match `IAccessControl.hasRole`, `IERC20.balanceOf` and `IPolicyGated.policyHook`; mutability is not
+ * @dev The selectors match `IAccessControl.hasRole`, `IERC20.balanceOf` and `IERC8473.policy`; mutability is not
  *      part of a selector
  */
 contract MockStatefulToken {
@@ -37,10 +37,10 @@ contract MockStatefulToken {
   }
 
   /**
-   * @notice `policyHook` that writes
+   * @notice `policy` that writes
    * @return _hook The caller, so `onlyHook` would pass if the call succeeded
    */
-  function policyHook() external returns (address _hook) {
+  function policy() external returns (address _hook) {
     ++writes;
     _hook = msg.sender;
   }

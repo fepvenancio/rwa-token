@@ -17,7 +17,7 @@ interface IIntentExecutorBatch {
   /**
    * @notice Thrown when one intent of a batch fails; the whole batch reverts
    * @param _index The position of the failing intent, so the operator can drop it and resubmit
-   * @param _reason The token's revert data, e.g. `IPolicyGated.PolicyGated_TransferRejected(reason)`
+   * @param _reason The token's revert data, e.g. `IERC8473.ERC8473PolicyRejected(reason)`
    */
   error IntentExecutor_BatchItemFailed(uint256 _index, bytes _reason);
 

@@ -79,7 +79,7 @@
   </div>
   <figure>
     <div class="fig-scroll">
-      <svg class="d" viewBox="0 0 780 250" role="img" aria-label="Intent token flows. The minter mints tokens to holder A, raising the supply. Holder A moves tokens to holder B by a transfer or by a signed intent that an executor contract runs. The agent can force-transfer holder A's tokens to a quarantine account that holds a credential. The burner burns from holder B, lowering the supply.">
+      <svg class="d" viewBox="0 0 780 250" role="img" aria-label="Intent token flows. The minter mints tokens to holder A, raising the supply. Holder A moves tokens to holder B by a transfer or by a signed intent that an executor contract runs. The agent can force-transfer holder A's tokens to a quarantine account that holds a credential. The burner burns from holder B, a forced movement that lowers the supply.">
         <defs>
           <marker id="mo-a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
         </defs>
@@ -102,9 +102,9 @@
         <line class="ln c-transfer" x1="346" y1="84" x2="466" y2="84" marker-end="url(#mo-a1)"/>
         <text x="407" y="62" class="sm t-transfer" text-anchor="middle">transfer or</text>
         <text x="407" y="76" class="sm t-transfer" text-anchor="middle">signed intent</text>
-        <line class="ln c-burn" x1="592" y1="84" x2="674" y2="84" marker-end="url(#mo-a1)"/>
-        <text x="634" y="62" class="sm t-burn" text-anchor="middle">burn:</text>
-        <text x="634" y="76" class="sm t-burn" text-anchor="middle">supply down</text>
+        <line class="ln c-forced" x1="592" y1="84" x2="674" y2="84" marker-end="url(#mo-a1)"/>
+        <text x="634" y="62" class="sm t-forced" text-anchor="middle">burn:</text>
+        <text x="634" y="76" class="sm t-forced" text-anchor="middle">supply down</text>
 
         <rect class="b" x="222" y="180" width="124" height="56" rx="8"/>
         <text x="284" y="204" class="bold" text-anchor="middle">Quarantine</text>
@@ -119,7 +119,7 @@
         <text x="438" y="150" class="sm m">runs a holder-signed intent</text>
       </svg>
     </div>
-    <figcaption class="wrap-any"><b>No asset, no payment: only balances move.</b> Colours follow the movement kinds the rules see: <span class="k k-mint">MINT</span>, <span class="k k-transfer">TRANSFER</span> or <span class="k k-executed">EXECUTED</span>, <span class="k k-forced">FORCED</span>, <span class="k k-burn">BURN</span>. The executor contracts hold no tokens; they submit the holder's signed intent. <a href="movement.html">One movement</a> follows each kind through the rules.</figcaption>
+    <figcaption class="wrap-any"><b>No asset, no payment: only balances move.</b> Colours follow the movement kinds the rules see: <span class="k k-mint">MINT</span>, <span class="k k-transfer">TRANSFER</span> or <span class="k k-executed">EXECUTED</span>, <span class="k k-forced">FORCED</span>. The burner's <code>burn</code> is <span class="k k-forced">FORCED</span> too: these tokens have no holder's burn. The executor contracts hold no tokens; they submit the holder's signed intent. <a href="movement.html">One movement</a> follows each kind through the rules.</figcaption>
   </figure>
   <div class="table-wrap">
     <table class="tight">
@@ -129,7 +129,7 @@
         <tr><td>A spender</td><td><code>transferFrom</code>, with an allowance set by <code>approve</code> or by a signed <code>permit</code></td><td>As for the holder, plus the allowance.</td></tr>
         <tr><td>An executor contract (<code>EXECUTOR_ROLE</code>)</td><td><code>executeTransfer(intent, sig)</code></td><td>With the holder's signature, once per nonce, inside its validity window, and only if the intent names this executor or none.</td></tr>
         <tr><td>The agent (<code>AGENT_ROLE</code>)</td><td><code>forcedTransfer(from, to, amount)</code></td><td>Up to the whole balance, frozen part included, also while paused. The receiver must hold a credential the policy accepts and must not be address-frozen.</td></tr>
-        <tr><td>The burner (<code>BURNER_ROLE</code>)</td><td><code>burn(from, amount)</code></td><td>No allowance needed and may take frozen tokens. Refused for an address-frozen holder and while paused.</td></tr>
+        <tr><td>The burner (<code>BURNER_ROLE</code>)</td><td><code>burn(from, amount)</code></td><td>No allowance needed. Up to the whole balance, frozen part included, also while paused. An address-frozen or locked-up holder can be burned from.</td></tr>
       </tbody>
     </table>
   </div>
@@ -286,7 +286,7 @@ totalAssets = asset.balanceOf(vault)</pre>
     <p>The formula is the same, but <code>totalAssets()</code> is a counted value, not a balance. Losses count at once. Gains count only up to a yearly rate, so a donation to the portfolio cannot jump the price, and in one block a second count adds nothing. Each deposit and withdrawal counts first (<code>accrue</code> does the same for anyone), then moves <code>last</code> by exactly its amount, so a price quoted is the price paid.</p>
   </div>
   <div class="code-block">
-    <div class="code-label">Gated4626Vault: _counting and _accrue</div>
+    <div class="code-label">Gated4626Common: _counting and _accrue</div>
 <pre>net     = pricedValue() − feesOwed, stopping at zero
 limit   = last + last × maxRate × elapsed / (10,000 × 365 days)
 counted = min(net, limit)
@@ -389,7 +389,7 @@ totalAssets() = counted − fee
       <li><b>The escrow is one balance</b> at the vault's address for every controller, while the bookkeeping is per controller. The agent's <code>forcedTransfer</code> out of that address may take only shares above <code>pendingRedeemShares</code> (<code>Gated7540Vault_ExceedsSurplus</code> otherwise), and <code>setFrozenTokens</code> refuses that address (<code>GatedVault_Unsupported</code>). For escrowed shares the agent's tool is <code>recoverRedeemRequest</code>.</li>
       <li><b>Operators are full delegates.</b> An account approved with <code>setOperator</code> can open requests that pull the owner's assets or shares under any controller, and choose the receiver of a claim, as ERC-7540 specifies.</li>
       <li><b>The balance audit</b> is the last thing <code>settlePeriod</code> does. It reverts with <code>Gated7540Vault_BalanceAudit(held, owed)</code> unless the vault's asset balance is at least <code>pendingDeposits + claimableCash</code>, so a period cannot settle while the vault is short of what it owes. A cash account that is short, or has not approved the vault, makes the pull revert first. A <code>Portfolio</code> approved its vault at construction.</li>
-      <li><b>During a pause.</b> <code>settlePeriod</code> and the redemption claims revert with <code>EnforcedPause</code>. <code>requestDeposit</code> and the deposit claims revert with <code>Gated7540Vault_ControllerNotEligible(PAUSED)</code>, and <code>requestRedeem</code> and <code>rejectRedeemRequest</code> with <code>PolicyGated_TransferRejected(PAUSED)</code>. <code>closePeriod</code>, <code>rejectDepositRequest</code>, <code>recoverRedeemRequest</code> and <code>recoverClaimable</code> still work.</li>
+      <li><b>During a pause.</b> <code>settlePeriod</code> and the redemption claims revert with <code>EnforcedPause</code>. <code>requestDeposit</code> and the deposit claims revert with <code>Gated7540Vault_ControllerNotEligible(PAUSED)</code>, and <code>requestRedeem</code> and <code>rejectRedeemRequest</code> with <code>ERC8473PolicyRejected(PAUSED)</code>. <code>closePeriod</code>, <code>rejectDepositRequest</code>, <code>recoverRedeemRequest</code> and <code>recoverClaimable</code> still work.</li>
     </ul>
   </div>
 </section>
@@ -924,15 +924,15 @@ withdraw(assets)  shares = ceil(assets × paid / owed)</pre>
   <div class="prose wrap-any">
     <h2>Source and tests</h2>
     <ul class="plain wrap-any">
-      <li>Vaults: <code>GatedVaultBase.sol</code>, <code>Gated4626Vault.sol</code>, <code>Gated7540Vault.sol</code>, <code>Gated7540Settlement.sol</code>, <code>Gated7540Common.sol</code></li>
+      <li>Vaults: <code>GatedVaultBase.sol</code>, <code>Gated4626Vault.sol</code>, <code>Gated4626Management.sol</code>, <code>Gated4626Common.sol</code>, <code>Gated7540Vault.sol</code>, <code>Gated7540Settlement.sol</code>, <code>Gated7540Common.sol</code></li>
       <li>Pricing and money's destinations: <code>NavDesk.sol</code>, <code>FeeModel.sol</code>, <code>Portfolio.sol</code>, <code>ERC4626Adapter.sol</code>, <code>GuardedAccount.sol</code>, <code>ERC20CallValidator.sol</code>, <code>ERC4626CallValidator.sol</code></li>
       <li>Settlement and distribution: <code>DvPExecutor.sol</code>, <code>IntentExecutor.sol</code>, <code>SignedEntry.sol</code>, <code>Distributor.sol</code>, <code>IntentSettledUpgradeable.sol</code></li>
-      <li>Tests: <code>Gated4626Vault.t.sol</code>, <code>Gated4626VaultPortfolio.t.sol</code>, <code>Gated7540Vault.t.sol</code>, <code>Gated7540Settlement.t.sol</code>, <code>NavDesk.t.sol</code>, <code>FeeModel.t.sol</code>, <code>Portfolio.t.sol</code>, <code>GuardedAccount.t.sol</code>, <code>DvPExecutor.t.sol</code>, <code>SignedEntry.t.sol</code>, <code>Distributor.t.sol</code>, <code>test/nodejs/vaults.test.ts</code>, <code>test/nodejs/dvp.test.ts</code>, <code>test/nodejs/legos.test.ts</code></li>
+      <li>Tests: <code>Gated4626Vault.t.sol</code>, <code>Gated4626VaultPortfolio.t.sol</code>, <code>Gated4626Management.t.sol</code>, <code>Gated7540Vault.t.sol</code>, <code>Gated7540Settlement.t.sol</code>, <code>NavDesk.t.sol</code>, <code>FeeModel.t.sol</code>, <code>Portfolio.t.sol</code>, <code>GuardedAccount.t.sol</code>, <code>DvPExecutor.t.sol</code>, <code>SignedEntry.t.sol</code>, <code>Distributor.t.sol</code>, <code>test/nodejs/vaults.test.ts</code>, <code>test/nodejs/dvp.test.ts</code>, <code>test/nodejs/legos.test.ts</code></li>
     </ul>
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>4a906cc</code> on <code>main</code>.</footer>
+<footer>Describes the contracts at commit <code>6ef0d4e</code> on <code>erc8473-conformance</code>.</footer>
 </main>
 </body>
 </html>

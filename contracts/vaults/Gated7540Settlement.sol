@@ -8,8 +8,8 @@ import {SafeCast} from '@openzeppelin/contracts/utils/math/SafeCast.sol';
 
 import {Reasons} from 'interfaces/Errors.sol';
 
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IGated7540Vault} from 'interfaces/IGated7540Vault.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 // Needed by the compiler to resolve `@inheritdoc ITemplated`; solhint does not see NatSpec usage.
 // solhint-disable-next-line no-unused-vars
 import {ITemplated} from 'interfaces/ITemplated.sol';
@@ -145,7 +145,7 @@ contract Gated7540Settlement is Gated7540Common {
     $.unclaimedShares -= _shares;
     $.claimableCash -= _assets;
     emit IGated7540Vault.ClaimableRecovered(_controller, _to, _assets, _shares, _msgSender());
-    if (_shares != 0) _mintAs(_to, _shares, IPolicyHook.TransferKind.FORCED);
+    if (_shares != 0) _mintAs(_to, _shares, IERC8473Policy.TransferKind.FORCED);
     if (_assets != 0) $.asset.safeTransfer(_to, _assets);
   }
 
@@ -163,7 +163,7 @@ contract Gated7540Settlement is Gated7540Common {
     _getGated7540Storage().pendingRedeemShares -= _shares;
     emit IGated7540Vault.RedeemRequestRecovered(_controller, _to, _shares, _msgSender());
     // Internal FORCED move: an enforcement action; identity still applies to the recovery account.
-    _moveAs(address(this), _to, _shares, IPolicyHook.TransferKind.FORCED, bytes32(0), 0);
+    _moveAs(address(this), _to, _shares, IERC8473Policy.TransferKind.FORCED, bytes32(0), 0);
   }
 
   /**

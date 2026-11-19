@@ -4051,6 +4051,177 @@ Method: the import closure of the contracts that ship is 71 OpenZeppelin files. 
 
 Nothing here is a fix this code needs, so the pin to 5.3.0 costs one piece of hardening, the bounded ERC-1271 read. The review covers the files as released; it is no substitute for following the library's advisories from here on, since a fix that lands after 5.6.1 will not reach a pin at 5.3.0 by itself.
 
+## ERC-8473 conformance (planned and built 2026-11-13)
+
+Branch `erc8473-conformance`, cut from `paris` (`3010880`). This section is the plan the brief's rule 3 asks for before a change across files, as the owner approved it; "As built" at its end says what was done and what was not.
+
+### Goal
+
+Every token template is an ERC-8473 token and `ComplianceHook` is an ERC-8473 policy, as the draft stands in its pull request (head `cf6e212`, read on 2026-11-13). Done means: the selectors and ERC-165 ids in the draft's table are the ones `InterfaceFreeze.t.sol` pins, the draft's token, check, installation and policy requirements each have a test that fails without the change, and every gate passes.
+
+### What already conforms
+
+`TRANSFER_OK` is `keccak256('TRANSFER_OK')`; the five kinds and their encoding; the context's field types and order; checks made by `STATICCALL`; the policy address read once per movement; check, then balances, then the transfer event, then the callback; the reentrancy guard on the movement path; every movement refused with no policy; `Frozen` before `Transfer` on a forced move; `afterTransfer` accepted only from the token the context names; `canExecute` building the context as the execution does; no installation from a constructor; `canTransfer` false when both accounts are zero; escrowed shares returned as a `TRANSFER`.
+
+### Gaps and the change for each
+
+| # | Draft requirement | Today | Change |
+|---|---|---|---|
+| G1 | `checkTransfer`, `wantsAfterTransfer` on the policy; `policy()` and `PolicyChanged` on the token | `beforeTransfer`, `wantsAfter`, `policyHook()`, `PolicyHookChanged` | `IPolicyHook` gives way to `IERC8473Policy`, written here with the draft's ABI. `IPolicyGatedCore` inherits `IERC8473`: `policy()`, `setPolicy(newPolicy, data)`, `PolicyChanged`. The context's `id` and `extra` become `tokenId` and `data`, which moves no selector. `IComplianceRule` keeps `check`, `after_` and `wantsAfter`: it is the hook's own boundary, outside the ERC |
+| G2 | Ids `0x9cb56a99` (policy) and `0x0505c8c9` (token); a token refuses a policy that does not answer its id | Other ids; attestation only | Both answer the draft's ids. `_setPolicy` asks `supportsInterface(0x9cb56a99)` beside the attestation and the registry match |
+| G3 | The token SHOULD revert with `ERC8473PolicyRejected(reason)` | `PolicyGated_TransferRejected(reason)` | Adopt the draft's error (decision D5). The brief's rule 7 is amended to name it |
+| G4 | A movement that takes tokens without the holder directing it is `FORCED`; for `BURN` neither the token's own checks nor the policy may read `operator` | `burn(from, amount)` by `BURNER_ROLE` is labelled `BURN`; the base and three rules exempt it by asking whether `operator` holds the role | `burn` announces `FORCED` with `to` zero, the case section 5 of the brief reserved. `_takesFrozenTokens` becomes `kind == FORCED`. `CredentialRule`, `MinPositionRule` and `HolderRestrictionRule` drop their `hasRole(BURNER_ROLE, operator)` reads: their `FORCED` exemptions already cover it. `canTransfer`'s burner exception goes. Two behaviours change, see D2 |
+| G5 | The token calls `onInstall(token, previous, data)` on every installation, after `policy()` returns the new policy; a revert undoes the installation; no movement or installation may begin while it runs | No such call; the initialiser calls `hook.setRules` | `_setPolicy` sets the pointer, emits, then calls `onInstall`, under the reentrancy guard. `ComplianceHook.onInstall` accepts only the token itself. Non-empty `data` is the ordered rule list, installed as `setRules` does today, so the initialiser's separate `setRules` call goes. Empty `data` keeps the list the hook already holds for the token |
+| G6 | On every installation a policy sets all state it derives from the token's movements, or reverts; it keeps none from an earlier installation | The fund's investor count is kept across hook replacements on purpose | See D3. The hook's `onInstall` calls a new `onInstall(token, previousPolicy)` on each rule in the list; `BaseRule`'s does nothing. `FundHoldersRule`'s accepts when the class's supply is zero, or when the previous policy listed this same rule for the token, so no movement went unseen; otherwise it reverts |
+| G7 | `canSend`, `canReceive` and `canTransfer` never revert: a policy that reverts, runs out of gas, answers fewer than 32 bytes or has no code reads false. At most 32 bytes copied | High-level calls, which revert in each of those cases | One private helper in the core makes the bounded static call and returns the reason, or a rejecting `CHECK_UNAVAILABLE` (appended reason code). The views and the movement path both use it; the movement path reverts on anything but `TRANSFER_OK`, as today |
+| G8 | `canSend(address(0))` and `canReceive(address(0))` are true without calling the policy | The hook is asked | `_accountAllowed` returns true for the zero address first, before the pause |
+| G9 | In `canTransfer` the operator is `from`, zero for a mint | The caller, for a mint | `_canTransfer` passes `_from` always. After G4 no shipped rule reads the operator of a mint |
+| G10 | `wantsAfterTransfer` does not depend on the caller | The shared hook reads the calling token's rule list | See D4 |
+| G11 | For every kind but `FORCED`, `checkTransfer` rejects when `checkSend(from)` or `checkReceive(to)` rejects | Fuzzed for a plain transfer only, one way | Not known to be a gap. `RuleSetIntegration.t.sol` gains the same fuzz for `MINT`, `BURN` and `EXECUTED`, over every shipped rule list. Whatever it finds is fixed in the rule, and reported before it is fixed |
+| G12 | Recommended reason names: `SENDER_NOT_ELIGIBLE`, `LOCKED_UP`, `WINDOW_CLOSED`, `KIND_NOT_ALLOWED`, `CHECK_UNAVAILABLE` | `SENDER_NOT_VERIFIED`, `LOCKED`, `OUTSIDE_SETTLEMENT_WINDOW`, `TRANSFER_NOT_EXECUTED` | See D6. Optional in the draft |
+
+### Decisions for the owner
+
+- **D1. Reopen the frozen interfaces.** G1, G2, G3 and G5 change `contracts/interfaces/`: `IPolicyHook` (replaced), `IPolicyGatedCore`, `IComplianceHook`, `IComplianceRule` (one function added), `Errors.sol` (one code appended). Every id that includes a changed member moves and `InterfaceFreeze.t.sol` is re-pinned. Rule 4 needs the instruction.
+- **D2. Two behaviours change when an enforcement burn becomes `FORCED`.** Today a burner's burn is refused while the token is paused and refused from an address `HolderRestrictionRule` has frozen, where the documented route is `forcedTransfer` to a quarantine account. As `FORCED` it passes both, like `forcedTransfer` does. Option A: accept both, so every enforcement action behaves alike. Option B: keep the frozen-sender refusal by having `HolderRestrictionRule` refuse a `FORCED` movement to zero from a frozen address. I recommend A: one rule for all enforcement, and no reason a regulator's burn should fail where its transfer succeeds.
+- **D3. The fund's count across installations.** The draft's policy requirement 16 says a policy must not keep movement-derived state from an earlier installation, and its rationale says a policy may "rebuild or verify" that state. A count of investors cannot be rebuilt on-chain, so G6 verifies continuity and refuses otherwise. That follows the rationale and not the letter of requirement 16. As the draft's author you can make the two agree; I recommend wording requirement 16 to allow state that the policy verifies was observed without a gap.
+- **D4. `wantsAfterTransfer()` on a shared policy.** It takes no argument and may not read the caller, so a policy serving many tokens cannot answer for one of them. Option A: amend the draft to `wantsAfterTransfer(address token)`, which moves the policy's id. Option B: `ComplianceHook` answers true always and its `afterTransfer` returns early for a token with no after-rules, at one extra call a movement. I recommend A in the draft, and B here until the draft settles, since B conforms to both texts.
+- **D5. The rejection error.** Adopt `ERC8473PolicyRejected` and drop `PolicyGated_TransferRejected`, or keep ours, which the draft allows. I recommend adopting it: 13 test files, 11 TypeScript files and 43 pages name the old one, and they are touched by G1 anyway.
+- **D6. Reason names.** Renaming changes the `bytes32` values, which the brief says are never renamed. Nothing is deployed, so this is the cheapest moment. I recommend adopting the draft's five names and keeping every other code as it is.
+- **D7. Where this lands.** The branch is cut from `paris`, the build being deployed. If `main` stays the Cancun build, the same commits apply there, apart from the size step below.
+
+### Size comes first
+
+G5 and G7 add code to the shared core, which every template inherits. `Gated4626Vault` has 271 bytes left on the Paris build. Step 1 therefore measures what the core change adds, on a throwaway commit. If the 4626 does not fit, its fee and rate-limit accounting move to a second contract reached by delegatecall, as `Gated7540Settlement` already is, in its own change and before anything else here. The design is not cut to fit.
+
+### Steps
+
+Each step ends with its check; the next does not start until it passes.
+
+1. Measure the core change's bytes on every template. Check: a table of sizes before and after; the 4626 decision above is made on it.
+2. Interfaces (after D1): `IERC8473Policy.sol`, `IERC8473.sol`, `IPolicyGatedCore`, `IComplianceHook`, `IComplianceRule`, `Errors.sol`. Check: `InterfaceFreeze.t.sol` fails on the old pins and passes on the draft's selectors and ids, written into the test from the draft's table by hand.
+3. Tests, written first and shown failing: one per requirement in the gap table, in `PolicyGatedERC20Upgradeable.t.sol`, `Gated721.t.sol`, `ComplianceHook.t.sol` and `RuleSetIntegration.t.sol`, with `contracts/test/` mocks for a policy that reverts, answers short, has no code and re-enters during `onInstall`. The G11 fuzz is part of this step and its result is reported before step 5.
+4. Core, fungible base and `Gated721`: G1 to G5 and G7 to G9. Check: the step 3 token tests pass; the whole Solidity suite passes.
+5. `ComplianceHook`, `BaseRule` and the rules: G4's rule side, G5, G6, G10, and what G11 found. Check: the step 3 policy tests pass.
+6. `ProxyDeployer` (the init data now carries the rule list through `onInstall`), the Ignition modules, the post-deploy check and `test/nodejs`. Check: `npx hardhat test`, both runners.
+7. The brief (sections 4, 5 and 6, rules 7 and 14), `README.md`, `SECURITY.md`, the pages and their Markdown copies. Check: no page names a member that no longer exists (`grep` for the old names returns nothing outside history sections).
+8. Gates: format, lint, typecheck, Slither, Aderyn, Halmos, `validate:upgrades`, `verify:reproducible`, the size test.
+
+### Reach, measured on `3010880`
+
+| Name | Contracts | Solidity tests | TypeScript | Docs and brief |
+|---|---|---|---|---|
+| `IPolicyHook` | 21 | 17 | 0 | 10 |
+| `policyHook` | 10 | 11 | 3 | 14 |
+| `wantsAfter()` | 8 | 10 | 0 | 23 |
+| `beforeTransfer` | 4 | 7 | 0 | 18 |
+| `PolicyGated_TransferRejected` | 10 | 13 | 11 | 43 |
+| `extra` | 5 | 15 | 0 | 1 |
+
+The counts are files. The read of whether the operator holds the burner role is in 5 contract files.
+
+### Not covered by this plan
+
+- The draft's reference tests are not ported: they are written against its example token. Step 3 writes the stack's own.
+- An ERC-1155 template, and so the draft's batch rule.
+- An adapter that presents an ERC-3643 compliance contract as a policy.
+
+### As built (2026-11-13)
+
+The owner accepted the seven recommendations on 2026-11-13 ("Yes, start"): D1 the interfaces reopened; D2 option A; D3 verify continuity, with the draft's wording to follow; D4 option B here and A proposed for the draft; D5 the draft's error; D6 the draft's four names; D7 the branch stays on `paris`.
+
+**Size, measured first.** A throwaway version of the core change added about 220 bytes to each fungible template. As built:
+
+| Contract | Before | After | Left |
+|---|---|---|---|
+| `Gated4626Vault` | 24,305 | 24,556 | 20 |
+| `Gated7540Vault` | 22,832 | 23,126 | 1,450 |
+| `IntentToken` | 18,915 | 19,120 | 5,456 |
+| `Gated721` | 16,055 | 16,220 | 8,356 |
+| `GatedToken` | 15,692 | 15,980 | 8,596 |
+| `ComplianceHook` | 4,173 | 4,832 | 19,744 |
+
+The 4626 fits, by 20 bytes, so the second contract was not built here. It has no room for a fix: moving its fee and rate-limit accounting to a second contract, as the 7540 has, is the next change this branch needs before anything else touches the vault.
+
+**What each gap became.**
+
+- **G1, G2, G3.** `contracts/interfaces/IERC8473.sol` and `IERC8473Policy.sol`, written here with the draft's ABI; `IPolicyHook.sol` is gone. `IPolicyGatedCore` inherits `IERC8473`. The setter is `installPolicy(newPolicy, data)`, not `setPolicy`, because `CredentialRule` already has a `setPolicy` for its own credential policy and the draft calls the act an installation. New error `PolicyGated_NotAPolicy(target)` for a contract that does not answer `0x9cb56a99`. `InterfaceFreeze.t.sol` pins the seven selectors and two ids copied by hand from the draft's table, and the compiled interfaces match them.
+- **G4.** `burn` announces `FORCED` with a zero receiver on the fungible base and on `Gated721`. The base's frozen bound is `kind == FORCED`. `CredentialRule`, `MinPositionRule` and `HolderRestrictionRule` lost their `BURNER_ROLE` reads and the constant. `CredentialRule` judges a receiver whenever `to` is not zero. This also closes a weakness `SECURITY.md` listed: a burner that redeemed its own vault shares passed its own lockup and minimum.
+- **G5.** `_installPolicy` in the core, private and under the reentrancy guard: attestation, registry match, interface id, set, `PolicyChanged`, `onInstall`. The initialiser passes `abi.encode(rules)` as the data, or nothing. `ComplianceHook.onInstall` accepts only the token, installs a list from non-empty data, and calls each rule's `onInstall`.
+- **G6.** `IComplianceRule.onInstall(token, previousPolicy)`; `BaseRule`'s is empty. `FundHoldersRule`'s is a view: it returns when the class's `totalSupply()` is zero or the previous policy's `rules(token)` holds this rule, and otherwise reverts with the new `FundHoldersRule_CountNotCurrent(token)`. It writes nothing, so it has no caller check.
+- **G7.** `_ask(policy, call)` in the core: one static call, one word copied to the scratch space, `CHECK_UNAVAILABLE` on any failure. Both the views and `_move` go through it, so a movement whose policy cannot be asked reverts with `ERC8473PolicyRejected(CHECK_UNAVAILABLE)` and the policy's own revert data is no longer bubbled. `wantsAfterTransfer` and `afterTransfer` stay high-level calls, which revert as the draft's token rule 4 asks.
+- **G8, G9.** As planned.
+- **G10.** `ComplianceHook.wantsAfterTransfer()` is `pure` and true. A token's after mask is no longer visible through it, so the hook's tests observe the mask through `afterTransfer`.
+- **G11.** No gap. `RuleSetIntegration_PolicyRequirement4` fuzzes TRANSFER, EXECUTED, MINT and BURN over senders, receivers, freezes, lockups and operators against the hook, and `CredentialRule.t.sol` already pinned `check` as the two account answers in order; both pass. Not covered by a fuzz: a list with `FundHoldersRule`, whose account answers are the class check that `check` returns first, read by hand.
+- **G12.** `SENDER_NOT_ELIGIBLE`, `LOCKED_UP`, `WINDOW_CLOSED`, `KIND_NOT_ALLOWED`, and `CHECK_UNAVAILABLE` appended. `RECEIVER_NOT_VERIFIED` keeps its name beside `RECEIVER_NOT_ELIGIBLE`: they are two different reasons here, and the draft's list has one.
+
+**Install order, fixed after the build (2026-11-13).** Writing the pages turned up a gap in G6: `ComplianceHook.onInstall` stored a new list before telling the rules, so a class with a supply that installed the hook it already had, with data adding the fund rule, passed the rule's check, because the previous policy was that same hook and already answered with the new list. `onInstall` now tells every rule first, attesting each rule from the data before calling it, and stores the list after. `test_WhenTheSameHookIsInstalledWithANewList_TheRulesAreToldBeforeTheListIsStored` failed before the change (the rule saw 2 rules, not 1). A list set through `setRules` still calls no rule's `onInstall`: dropping the fund rule and adding it back that way leaves the count behind, which `Fund.isClassIntact` and `firstBrokenClass` are there to show.
+
+**Tests first.** The 16 token tests in `PolicyGatedUnit_Erc8473` were run against the renamed, unchanged code: 15 failed and the interface-id one passed. The 9 hook tests in `ComplianceHookUnit_OnInstall`: 7 failed against the stub. Then the change, then 25 older tests that described the old behaviour were rewritten to the new one, each named for what it now says.
+
+**Not done.**
+
+- **The pages**: done later the same day, see "The pages" below.
+- **The 4626's second contract**, above.
+- **The draft itself.** D3 and D4 ask for two changes to the draft's text, in its own repository.
+- **An upgrade from a deployed token.** A token deployed before this change has its hook installed without `onInstall` having run; nothing is deployed, so no migration is written.
+
+**Verified.** `npx hardhat test`: 2022 passing (1824 solidity, 198 nodejs). Format, lint and typecheck clean. Slither 0 results, Aderyn 0 findings, Halmos 22 of 22 checks, `validate:upgrades` 6 of 6, `verify:reproducible` 31 contracts identical. The size test passes with the 4626 at 24,556 bytes.
+
+## The 4626's second contract (2026-11-13)
+
+On branch `erc8473-conformance`, after the conformance change left `Gated4626Vault` 20 bytes under the limit. The owner asked for the split on 2026-11-13.
+
+**Design, as the 7540 has it.** Nothing an investor calls moves, and no behaviour changes.
+
+- `Gated4626Common` (abstract; `ERC4626Upgradeable` + `GatedVaultBase`): the storage struct and its ERC-7201 accessor, the constants, and the accounting both contracts need (`_accrue`, `_counting`, `_dealingStopped`, `_fellTooFar` and the two portfolio reads), with the overrides the inheritance needs.
+- `Gated4626Management` (is `Gated4626Common`): `setPortfolio`, `setMaxRate`, `setFeeModel` and `collectFees`, with the helpers only they use. These are the timelock's, the guardian's or an occasional caller's, so the cost of a hand-off falls on few calls.
+- `Gated4626Vault` keeps the four names and hands each to `MANAGEMENT_LOGIC` by delegatecall, unchanged, passing back a revert as it came. Its constructor creates the second contract, so the attested codehash pins the address, each implementation has its own, and it has no role, storage or admin function of its own. Reached directly it does nothing.
+
+**Interface.** `IGated4626Vault` gains `MANAGEMENT_LOGIC()`, as `IGated7540Vault` has `SETTLEMENT_LOGIC()`; its id is re-pinned. No other interface changes.
+
+**Steps.** Tests first in `Gated4626Management.t.sol` (wiring, direct calls, hand-off, upgrade), shown failing. Then the three contracts. Then `ContractSizes.t.sol`, `scripts/verify-reproducible.ts` (the vault embeds the second contract's creation code), the post-deploy check in `test/nodejs/fixtures.ts`, the brief, `README.md`, `SECURITY.md`. Then every gate.
+
+**Done means** every existing vault test passes untouched, and the vault has real room.
+
+**As built.** As designed, in `contracts/vaults/Gated4626Common.sol`, `Gated4626Management.sol` and the slimmed `Gated4626Vault.sol`. The code moved without being rewritten: the functions' bodies are the ones the vault had, with events and errors named through `IGated4626Vault`.
+
+| Contract | Deployed size | Left under 24,576 | Creation code |
+|---|---|---|---|
+| `Gated4626Vault`, before | 24,556 | 20 | 24,809 |
+| `Gated4626Vault`, after | 22,836 | 1,740 | 43,987 |
+| `Gated4626Management` | 20,754 | 3,822 | 20,815 |
+
+- The vault's creation code now carries the second contract's, as the 7540's does. An EVM at Paris has no limit on it; `ContractSizes.t.sol` still holds both vaults under the 49,152 bytes a later EVM allows, so the same code deploys there.
+- The room gained is 1,720 bytes, not more: the four functions were small, and the counting stays in both contracts because deposits and withdrawals need it. More room would mean moving `_deposit` and `_withdraw` paths, which investors call, and that was not done.
+- `_MAX_RATE_BPS` lives in the second contract, its only user (Slither's one finding on the first cut).
+- Tests first: `Gated4626Management.t.sol` did not compile before the contract existed, since the vault had no `MANAGEMENT_LOGIC`. It has 18 tests: wiring, direct calls on the second contract, the hand-off through the vault, and upgrades. The 141 tests in the two existing vault test files pass untouched.
+- `IGated4626Vault` id `0x7c5d7975` became `0xecc03c50`. `ContractSizes.t.sol`, `scripts/verify-reproducible.ts` and the post-deploy check in `test/nodejs/fixtures.ts` now cover the second contract as they cover the 7540's.
+- The pages: done later the same day, see "The pages" below.
+
+**Verified.** `npx hardhat test`: 2040 passing (1842 solidity, 198 nodejs). Format, lint and typecheck clean. Slither 0 results, Aderyn 0 findings, Halmos 22 of 22 checks, `validate:upgrades` 7 of 7, `verify:reproducible` 32 contracts identical, with `Gated4626Management` matching the creation code `Gated4626Vault` embeds.
+
+## The pages, for ERC-8473 and the 4626's second contract (2026-11-13)
+
+Asked for by the owner on 2026-11-13, on branch `erc8473-conformance`.
+
+**What was done.** 44 pages, two of them new (`Gated4626Management`, `Gated4626Common`), each with its Markdown copy in `docs/md`. A script applied the renames to 26 pages. Five writers then rewrote the behaviour, each on its own pages and from one brief of facts taken from the code: the movement page; the overview and the three other topic pages; the base, token, deploy and governance pages; the hook and rule pages; the vault pages and the two new ones. Four separate checkers, who had not written the pages, checked every changed passage against the code and read each page through: 15 corrections, 30 pages clean. Seven diagrams had text changed and one arrow moved; none lost a box, and the edited ones were looked at in a browser. The footers pin `6ef0d4e` on `erc8473-conformance`, the last commit that changed the contracts. `md_check`: 44 pages, 0 problems.
+
+**What the pages found in the code.**
+
+- The install order in `ComplianceHook.onInstall`, fixed (see "Install order" above).
+- Comments that still described the burner-role reads, the context's old field names and the initialiser calling `setRules`, in six contracts and interfaces, and a test whose name said the opposite of what it checks. Corrected.
+- My own comment on `Gated4626Management.setFeeModel` said the model could be removed. It cannot: the vault requires an attested model. Corrected.
+
+**An outside review, pasted by the owner while the pages were being written.** Its page findings were all of pages not yet rewritten at the moment it looked; each cited statement was searched for afterwards and none remains. Its other points:
+
+- Same-hook reinstall passing the fund rule's check: fixed, above.
+- `SECURITY.md` section 4 behind the code: true. The Slither table lacked `reentrancy-events` on `ProxyDeployer.deploy` and `GuardedAccount.execute`, and the Aderyn table lacked the delegatecall-target finding on both vaults and the 4626's hand-off. Every inline suppression in the contracts that ship was compared with the tables by script; they agree now.
+- Stale `id` and `extra` in `Gated721.sol` and its test: corrected.
+- **`setRules` calls no rule's `onInstall`: left as it is (owner decision, 2026-11-13).** A list set through `setRules` can drop the fund rule and take it back, or add it to a class that already has holders, and the count then lacks the movements in between. Telling the rules from `setRules` too would refuse that, by the same reasoning as an installation. It was not done, because it changes behaviour the tests pin and it closes a door: today a class whose list dropped the rule by mistake gets it back with one `setRules`, and with the check it could not, until the class is empty. It would also need the rule to accept a successor of the same fund, since replacing a fund's rule goes through `setRules` on classes that have holders (`FundIntegration.t.sol`). The pages and `SECURITY.md` state the gap as a limit, and `Fund.isClassIntact` and `firstBrokenClass` show a class whose list lacks the rule. The owner chose to keep it a documented limit: a mistaken drop stays recoverable with one call, and the monitor is the control.
+
+**Not covered.** The worked numbers on `money.html` and `FeeModel.html` were not recomputed, and statements about the Ignition modules and the TypeScript checks were spot-checked, not re-derived. The footers name a commit of this branch: when the branch lands on `main` by squash, the commit changes and the footers need the new one.
+
 ## The Aderyn gate is removed (owner decision, 2026-11-14)
 
 Aderyn was retired upstream on 2026-11-13: its README says it is no longer maintained and has no supported install
@@ -4067,7 +4238,7 @@ commands in `README.md`.
 while the gate ran, with the tables in `SECURITY.md` section 4. No contract changes, so no bytecode, codehash or page
 pin moves. Nothing checks those comments any longer.
 
-**State.** Aderyn's last run, in CI on `3010880` before the binaries were removed, had 0 findings. Slither is
+**State.** Aderyn's last run, on `259d82b` with a binary installed before the retirement, had 0 findings. Slither is
 the static-analysis gate.
 
 ## Open questions for the owner

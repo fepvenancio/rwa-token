@@ -9,6 +9,7 @@ import {Vm} from 'forge-std/Vm.sol';
 
 import {IComplianceHook} from 'interfaces/IComplianceHook.sol';
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+import {IERC8473} from 'interfaces/IERC8473.sol';
 import {IFund} from 'interfaces/IFund.sol';
 import {IFundHoldersRule} from 'interfaces/IFundHoldersRule.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
@@ -70,7 +71,7 @@ contract FundUnitTest is Helpers {
     _token = _mockContract(_name);
     address _hook = _mockContract(string.concat(_name, 'Hook'));
     _mockErc165(_token, true);
-    vm.mockCall(_token, abi.encodeCall(IPolicyGatedCore.policyHook, ()), abi.encode(_hook));
+    vm.mockCall(_token, abi.encodeCall(IERC8473.policy, ()), abi.encode(_hook));
     vm.mockCall(_token, abi.encodeCall(IERC20.totalSupply, ()), abi.encode(0));
     _hookLists(_hook, _rule);
   }
@@ -386,7 +387,7 @@ contract FundUnit_RegisterClass is FundUnitTest {
   function test_WhenTheHookDoesNotListTheRule_Reverts() external {
     _setRule();
     address _token = _newClass('classA');
-    _hookLists(IPolicyGated(_token).policyHook(), makeAddr('otherRule'));
+    _hookLists(IPolicyGated(_token).policy(), makeAddr('otherRule'));
     vm.expectRevert(abi.encodeWithSelector(IFund.Fund_RuleNotListed.selector, _token, _rule));
     vm.prank(_owner);
     _fund.registerClass(_token);
@@ -400,7 +401,7 @@ contract FundUnit_RegisterClass is FundUnitTest {
     _list[1] = IComplianceRule(_rule);
     _list[2] = IComplianceRule(makeAddr('last'));
     vm.mockCall(
-      IPolicyGated(_token).policyHook(), abi.encodeWithSelector(IComplianceHook.rules.selector), abi.encode(_list)
+      IPolicyGated(_token).policy(), abi.encodeWithSelector(IComplianceHook.rules.selector), abi.encode(_list)
     );
     vm.prank(_owner);
     _fund.registerClass(_token);
@@ -771,7 +772,7 @@ contract FundUnit_Views is FundUnitTest {
   }
 }
 
-/// @notice A class stub for `registerClass` whose read `WRITING` writes: 1 `policyHook`, 2 `totalSupply`, 0 none
+/// @notice A class stub for `registerClass` whose read `WRITING` writes: 1 `policy`, 2 `totalSupply`, 0 none
 contract FundStatefulClass {
   address public immutable HOOK;
   uint8 public immutable WRITING;
@@ -791,7 +792,7 @@ contract FundStatefulClass {
     _supported = _interfaceId == 0x01ffc9a7 || _interfaceId == type(IPolicyGated).interfaceId;
   }
 
-  function policyHook() external returns (address _hook) {
+  function policy() external returns (address _hook) {
     if (WRITING == 1) ++writes;
     _hook = HOOK;
   }
@@ -961,7 +962,7 @@ contract FundUnit_ClassIntegrity is FundUnitTest {
   function _hookOf(
     address _token
   ) internal view returns (address _hook) {
-    _hook = IPolicyGated(_token).policyHook();
+    _hook = IPolicyGated(_token).policy();
   }
 
   /// @dev Replaces the rule list the class's hook reports
@@ -1035,17 +1036,17 @@ contract FundUnit_ClassIntegrity is FundUnitTest {
 
   function test_WhenTheTokenCannotNameItsHook_TheClassIsNotIntactAndTheViewDoesNotRevert() external {
     address _token = _registered('alpha');
-    vm.mockCallRevert(_token, abi.encodeCall(IPolicyGatedCore.policyHook, ()), 'no hook');
+    vm.mockCallRevert(_token, abi.encodeCall(IERC8473.policy, ()), 'no hook');
     assertFalse(_fund.isClassIntact(_token));
     assertEq(_fund.firstBrokenClass(), _token);
   }
 
   function test_WhenTheHookHasNoCode_TheClassIsNotIntactAndTheViewDoesNotRevert() external {
     address _token = _registered('alpha');
-    vm.mockCall(_token, abi.encodeCall(IPolicyGatedCore.policyHook, ()), abi.encode(address(0)));
+    vm.mockCall(_token, abi.encodeCall(IERC8473.policy, ()), abi.encode(address(0)));
     assertFalse(_fund.isClassIntact(_token));
     assertEq(_fund.firstBrokenClass(), _token);
-    vm.mockCall(_token, abi.encodeCall(IPolicyGatedCore.policyHook, ()), abi.encode(makeAddr('no code')));
+    vm.mockCall(_token, abi.encodeCall(IERC8473.policy, ()), abi.encode(makeAddr('no code')));
     assertFalse(_fund.isClassIntact(_token));
   }
 

@@ -55,8 +55,8 @@ This is how the rules a vault can list answer each probe, read from each rule's 
 
 | Rule | Enforcement probe | Mint probe | Burn probe |
 |---|---|---|---|
-| [`CredentialRule`](CredentialRule.md) | The account must be `ACTIVE` and meet the token's policy. Otherwise `CREDENTIAL_EXPIRED`, `RECEIVER_NOT_VERIFIED` or `RECEIVER_NOT_ELIGIBLE`. |  | `ACTIVE`, `EXIT_ONLY` and `LAPSED` pass. Otherwise `SENDER_NOT_VERIFIED`. |
-| [`HolderRestrictionRule`](HolderRestrictionRule.md) | The account must not be address-frozen (`RECEIVER_FROZEN`). A lockup does not matter. |  | `SENDER_FROZEN`, then `LOCKED` |
+| [`CredentialRule`](CredentialRule.md) | The account must be `ACTIVE` and meet the token's policy. Otherwise `CREDENTIAL_EXPIRED`, `RECEIVER_NOT_VERIFIED` or `RECEIVER_NOT_ELIGIBLE`. |  | `ACTIVE`, `EXIT_ONLY` and `LAPSED` pass. Otherwise `SENDER_NOT_ELIGIBLE`. |
+| [`HolderRestrictionRule`](HolderRestrictionRule.md) | The account must not be address-frozen (`RECEIVER_FROZEN`). A lockup does not matter. |  | `SENDER_FROZEN`, then `LOCKED_UP` |
 | [`MinPositionRule`](MinPositionRule.md) | Passes: FORCED is exempt. | Passes while the minimum is at most `type(uint128).max`. | Passes: an amount of zero is not judged. |
 | [`FundHoldersRule`](FundHoldersRule.md) | `NOT_FUND_CLASS` if the vault is not a registered class under this rule. The amount is zero, so the cap does not apply. | `NOT_FUND_CLASS` as before, and `MAX_HOLDERS` for a new investor at a full fund. | `NOT_FUND_CLASS` as before. The cap does not apply to a burn. |
 
@@ -134,4 +134,4 @@ The contract adds no state, no event and no role. Everything else a vault inheri
 
 ---
 
-Describes the contracts at commit `4a906cc` on `main`.
+Describes the contracts at commit `6ef0d4e` on `erc8473-conformance`.

@@ -82,4 +82,4 @@ It emits no events of its own. The portfolio's `Allocated` and `Deallocated` rec
 
 ---
 
-Describes the contracts at commit `4a906cc` on `main`.
+Describes the contracts at commit `6ef0d4e` on `erc8473-conformance`.

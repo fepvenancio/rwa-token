@@ -305,7 +305,7 @@ describe("the rules a profile can list", async function () {
     await viem.assertions.revertWithCustomErrorWithArgs(
       note.write.mint([a, 1n], { account: s.wallets.minter.account }),
       note,
-      "PolicyGated_TransferRejected",
+      "ERC8473PolicyRejected",
       [REASONS.ABOVE_SUPPLY_CAP],
     );
 
@@ -313,8 +313,8 @@ describe("the rules a profile can list", async function () {
     await viem.assertions.revertWithCustomErrorWithArgs(
       signed.write.transfer([bob.account.address, 1n], { account: alice.account }),
       signed,
-      "PolicyGated_TransferRejected",
-      [REASONS.TRANSFER_NOT_EXECUTED],
+      "ERC8473PolicyRejected",
+      [REASONS.KIND_NOT_ALLOWED],
     );
   });
 });

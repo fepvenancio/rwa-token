@@ -8,6 +8,7 @@ import {IERC165} from '@openzeppelin/contracts/utils/introspection/IERC165.sol';
 
 import {Reasons} from 'interfaces/Errors.sol';
 
+import {IERC8473} from 'interfaces/IERC8473.sol';
 import {IIntentExecutor} from 'interfaces/IIntentExecutor.sol';
 import {IIntentExecutorBatch} from 'interfaces/IIntentExecutorBatch.sol';
 import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
@@ -86,7 +87,7 @@ contract IntentExecutorUnitTest is Helpers {
   function _rejected(
     bytes32 _reason
   ) internal pure returns (bytes memory _revertData) {
-    _revertData = abi.encodeWithSelector(IPolicyGatedCore.PolicyGated_TransferRejected.selector, _reason);
+    _revertData = abi.encodeWithSelector(IERC8473.ERC8473PolicyRejected.selector, _reason);
   }
 }
 

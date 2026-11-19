@@ -6,6 +6,7 @@ import {IERC20Errors} from '@openzeppelin/contracts/interfaces/draft-IERC6093.so
 import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {ISettlementWindowRule} from 'interfaces/ISettlementWindowRule.sol';
 import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
@@ -95,9 +96,9 @@ contract RuleSetIntegration_Lockup is RuleSetIntegrationTest {
     // The standard's account question agrees: a locked holder cannot send, and can still be paid.
     assertFalse(_token.canSend(_alice));
     assertTrue(_token.canReceive(_alice));
-    _assertTransferParity(_alice, _bob, 1 ether, Reasons.LOCKED);
+    _assertTransferParity(_alice, _bob, 1 ether, Reasons.LOCKED_UP);
     (ITransferIntent.TransferIntent memory _i, bytes memory _sig) = _signedIntent(_bob, 1 ether, keccak256('n'));
-    _assertExecuteParity(_i, _sig, Reasons.LOCKED);
+    _assertExecuteParity(_i, _sig, Reasons.LOCKED_UP);
 
     vm.prank(_agent);
     _token.forcedTransfer(_alice, _bob, 1 ether); // FORCED is exempt
@@ -113,7 +114,7 @@ contract RuleSetIntegration_SettlementWindow is RuleSetIntegrationTest {
   function test_WhenOutsideTheWindow_IntentsAreRejectedButPlainTransfersAreNot() external {
     vm.warp(_SATURDAY_10AM);
     (ITransferIntent.TransferIntent memory _i, bytes memory _sig) = _signedIntent(_bob, 1 ether, keccak256('n'));
-    _assertExecuteParity(_i, _sig, Reasons.OUTSIDE_SETTLEMENT_WINDOW);
+    _assertExecuteParity(_i, _sig, Reasons.WINDOW_CLOSED);
     _assertTransferParity(_alice, _bob, 1 ether, Reasons.TRANSFER_OK);
   }
 
@@ -173,6 +174,62 @@ contract RuleSetIntegration_AccountQuestions is RuleSetIntegrationTest {
   }
 }
 
+/// @dev ERC-8473, policy requirement 4: for every kind except FORCED the policy does not permit a movement when its
+///      own account check rejects the sender or the receiver. Asked of the hook directly, as anyone may
+contract RuleSetIntegration_PolicyRequirement4 is RuleSetIntegrationTest {
+  function testFuzz_ThePolicyNeverPermitsWhatAnAccountCheckRejects(
+    uint256 _kindSeed,
+    uint256 _senderSeed,
+    uint256 _receiverSeed,
+    bool _freezeSender,
+    bool _lockSender,
+    bool _freezeReceiver,
+    bool _wholeBalance,
+    address _operator
+  ) external {
+    IERC8473Policy.TransferKind[4] memory _kinds = [
+      IERC8473Policy.TransferKind.TRANSFER,
+      IERC8473Policy.TransferKind.EXECUTED,
+      IERC8473Policy.TransferKind.MINT,
+      IERC8473Policy.TransferKind.BURN
+    ];
+    IERC8473Policy.TransferKind _kind = _kinds[bound(_kindSeed, 0, 3)];
+    // alice holds tokens, bob is verified and empty, eve is not verified
+    address _sender = [_alice, _bob, _eve][bound(_senderSeed, 0, 2)];
+    address _receiver = [_carol, _bob, _eve][bound(_receiverSeed, 0, 2)];
+    vm.startPrank(_agent);
+    if (_freezeSender) _restrictionRule.setFrozen(address(_token), _sender, true);
+    if (_lockSender) _restrictionRule.setLockup(address(_token), _sender, block.timestamp + 1 days);
+    if (_freezeReceiver) _restrictionRule.setFrozen(address(_token), _receiver, true);
+    vm.stopPrank();
+
+    address _from = _kind == IERC8473Policy.TransferKind.MINT ? address(0) : _sender;
+    address _to = _kind == IERC8473Policy.TransferKind.BURN ? address(0) : _receiver;
+    uint256 _fromBalance = _from == address(0) ? 0 : _token.balanceOf(_from);
+    uint256 _toBalance = _to == address(0) ? 0 : _token.balanceOf(_to);
+    IERC8473Policy.TransferContext memory _context = IERC8473Policy.TransferContext({
+      token: address(_token),
+      from: _from,
+      to: _to,
+      tokenId: 0,
+      amount: _wholeBalance && _fromBalance > 0 ? _fromBalance : 1,
+      operator: _operator,
+      kind: _kind,
+      data: _kind == IERC8473Policy.TransferKind.EXECUTED
+        ? abi.encode(_fromBalance, _toBalance, keccak256('ref'), block.timestamp)
+        : abi.encode(_fromBalance, _toBalance)
+    });
+
+    if (_hook.checkTransfer(_context) != Reasons.TRANSFER_OK) return;
+    if (_from != address(0)) {
+      assertEq(_hook.checkSend(address(_token), _from), Reasons.TRANSFER_OK, 'permitted, but checkSend rejects');
+    }
+    if (_to != address(0)) {
+      assertEq(_hook.checkReceive(address(_token), _to), Reasons.TRANSFER_OK, 'permitted, but checkReceive rejects');
+    }
+  }
+}
+
 contract RuleSetIntegration_Freeze is RuleSetIntegrationTest {
   function _freeze(
     address _account,
@@ -219,12 +276,14 @@ contract RuleSetIntegration_Freeze is RuleSetIntegrationTest {
     assertEq(_token.balanceOf(_treasury), 1 ether);
   }
 
-  /// @dev RD4: a burn, even the enforcement burner's, is refused from a frozen account
-  function test_WhenTheSenderIsFrozen_ABurnIsRejected() external {
+  /// @dev Owner decision of 2026-11-13, replacing RD4: the burner's burn is enforcement, announced as FORCED, so it
+  ///      takes tokens from a frozen account as a forced transfer does. A holder's own burn stays refused
+  function test_WhenTheSenderIsFrozen_TheEnforcementBurnPasses() external {
     _freeze(_alice, true);
-    vm.expectRevert(_rejected(Reasons.SENDER_FROZEN));
     vm.prank(_burner);
     _token.burn(_alice, 1 ether);
+    assertEq(_token.balanceOf(_alice), 999 ether);
+    assertFalse(_token.canTransfer(_alice, address(0), 1 ether));
   }
 
   function test_WhenAFrozenHolderIsAlsoLocked_TheFreezeIsReportedFirst() external {

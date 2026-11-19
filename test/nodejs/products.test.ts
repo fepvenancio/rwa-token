@@ -40,7 +40,7 @@ describe("one product alone: the core and that product, and nothing else", async
     await viem.assertions.revertWithCustomErrorWithArgs(
       token.write.transfer([eve.account.address, 1n], { account: alice.account }),
       token,
-      "PolicyGated_TransferRejected",
+      "ERC8473PolicyRejected",
       [REASONS.RECEIVER_NOT_VERIFIED],
     );
   });
@@ -65,7 +65,7 @@ describe("one product alone: the core and that product, and nothing else", async
     await viem.assertions.revertWithCustomErrorWithArgs(
       nft.write.transferFrom([bob.account.address, eve.account.address, 1n], { account: bob.account }),
       nft,
-      "PolicyGated_TransferRejected",
+      "ERC8473PolicyRejected",
       [REASONS.RECEIVER_NOT_VERIFIED],
     );
   });
@@ -269,7 +269,7 @@ describe("a vault whose asset is a gated cash token", async function () {
     await viem.assertions.revertWithCustomError(
       vault.write.deposit([1_000n, alice.account.address], { account: alice.account }),
       cash,
-      "PolicyGated_TransferRejected",
+      "ERC8473PolicyRejected",
     );
   });
 });
@@ -569,7 +569,7 @@ describe("adding to a running core", async function () {
     assert.ok(isAddressEqual(s.timelock.address, timelock) && isAddressEqual(s.hook.address, hook) && isAddressEqual(s.registry.address, registry));
     for (const product of later) {
       const placed = await viem.getContractAt("GatedToken", s.products[product.key].address);
-      assert.ok(isAddressEqual(await placed.read.policyHook(), hook), `${product.key} runs another hook`);
+      assert.ok(isAddressEqual(await placed.read.policy(), hook), `${product.key} runs another hook`);
     }
     await assertHandedOver({ ...s, deployed: [...s.deployed, ...later.map((product) => ({ product, contract: s.products[product.key] }))] });
 

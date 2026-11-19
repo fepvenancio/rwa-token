@@ -6,8 +6,8 @@ import {IAccessControl} from '@openzeppelin/contracts/access/IAccessControl.sol'
 import {Reasons} from 'interfaces/Errors.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
+import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IHolderRestrictionRule} from 'interfaces/IHolderRestrictionRule.sol';
-import {IPolicyHook} from 'interfaces/IPolicyHook.sol';
 
 import {BaseRule} from 'contracts/hooks/BaseRule.sol';
 
@@ -31,9 +31,6 @@ contract HolderRestrictionRule is BaseRule, IHolderRestrictionRule {
 
   /// @inheritdoc IHolderRestrictionRule
   bytes32 public constant AGENT_ROLE = keccak256('AGENT_ROLE');
-
-  /// @notice The token role whose burns are enforcement actions, exempt from lockups
-  bytes32 private constant _BURNER_ROLE = keccak256('BURNER_ROLE');
 
   /// @notice The restrictions per token and holder
   mapping(address _token => mapping(address _holder => Restriction _restriction)) internal _restrictions;
@@ -88,16 +85,18 @@ contract HolderRestrictionRule is BaseRule, IHolderRestrictionRule {
   /**
    * @inheritdoc IComplianceRule
    * @dev The sender is judged first, then the receiver. A forced transfer ignores the sender's freeze and lockup, and a
-   *      mint has no sender; a burn has no receiver. The storage word is read before the token is asked for a role, and
-   *      the role only while a lockup is active on a burn
+   *      mint has no sender; a burn has no receiver. The burner's enforcement burn arrives as FORCED. The token is asked
+   *      nothing
    */
   function check(
-    IPolicyHook.TransferContext calldata _ctx
+    IERC8473Policy.TransferContext calldata _ctx
   ) external view returns (bytes32 _reason) {
-    if (_ctx.kind != IPolicyHook.TransferKind.FORCED && _ctx.from != address(0)) {
+    if (_ctx.kind != IERC8473Policy.TransferKind.FORCED && _ctx.from != address(0)) {
       Restriction memory _sender = _restrictions[_ctx.token][_ctx.from];
       if (_sender.frozen) return Reasons.SENDER_FROZEN;
-      if (block.timestamp < _sender.unlockTime && _lockApplies(_ctx)) return Reasons.LOCKED;
+      // A lockup stops every movement the holder directs: a transfer, an executed intent and the holder's own burn (an
+      // ERC-4626 redeem). The burner's enforcement burn is FORCED and is not judged here; a mint has no sender.
+      if (block.timestamp < _sender.unlockTime) return Reasons.LOCKED_UP;
     }
     if (_ctx.to != address(0) && _restrictions[_ctx.token][_ctx.to].frozen) return Reasons.RECEIVER_FROZEN;
     _reason = Reasons.TRANSFER_OK;
@@ -113,8 +112,8 @@ contract HolderRestrictionRule is BaseRule, IHolderRestrictionRule {
 
   /**
    * @inheritdoc IComplianceRule
-   * @dev A holder whose lockup is running cannot send in any holder-driven kind, so the answer is `LOCKED`, after the
-   *      freeze as in `check`. The kinds the lockup exempts (FORCED, an enforcement burn) are decided by the movement, which
+   * @dev A holder whose lockup is running cannot send in any holder-driven kind, so the answer is `LOCKED_UP`, after
+   *      the freeze as in `check`. The kind the lockup exempts (FORCED, the burner's burn included) is decided by the movement, which
    *      an account question cannot know, and `check` still passes them. The holder's word is the one `check` reads, and
    *      no role is asked
    */
@@ -124,7 +123,7 @@ contract HolderRestrictionRule is BaseRule, IHolderRestrictionRule {
   ) external view override(BaseRule, IComplianceRule) returns (bytes32 _reason) {
     Restriction memory _restriction = _restrictions[_token][_account];
     if (_restriction.frozen) return Reasons.SENDER_FROZEN;
-    _reason = block.timestamp < _restriction.unlockTime ? Reasons.LOCKED : Reasons.TRANSFER_OK;
+    _reason = block.timestamp < _restriction.unlockTime ? Reasons.LOCKED_UP : Reasons.TRANSFER_OK;
   }
 
   /// @inheritdoc IHolderRestrictionRule
@@ -153,21 +152,5 @@ contract HolderRestrictionRule is BaseRule, IHolderRestrictionRule {
     bytes4 _interfaceId
   ) public view override returns (bool _supported) {
     _supported = _interfaceId == type(IHolderRestrictionRule).interfaceId || super.supportsInterface(_interfaceId);
-  }
-
-  /**
-   * @notice Whether an active lockup stops this movement
-   * @dev A transfer and an executed intent are stopped. A burn is an enforcement action only when the token's BURNER_ROLE
-   *      drives it; a holder-initiated burn (e.g. an ERC-4626 redeem) is an exit and respects the lockup. Other kinds
-   *      never reach here
-   * @param _ctx The movement context
-   * @return _applies True if the lockup stops the movement
-   */
-  function _lockApplies(
-    IPolicyHook.TransferContext calldata _ctx
-  ) private view returns (bool _applies) {
-    if (_ctx.kind == IPolicyHook.TransferKind.TRANSFER || _ctx.kind == IPolicyHook.TransferKind.EXECUTED) return true;
-    _applies =
-      _ctx.kind == IPolicyHook.TransferKind.BURN && !IAccessControl(_ctx.token).hasRole(_BURNER_ROLE, _ctx.operator);
   }
 }

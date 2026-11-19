@@ -99,7 +99,7 @@ describe("credentials: the registry and the rule through the real deployment", a
     assert.equal(await s.token.read.canReceive([eve]), false);
     assert.deepEqual(await s.token.read.canTransferWithReason([zeroAddress, eve, 1n]), [false, REASONS.RECEIVER_NOT_VERIFIED]);
     const refused = await revertOf(s.token.simulate.mint([eve, 1n], { account: s.wallets.minter.account.address }), s.token.abi);
-    assert.deepEqual(refused, { errorName: "PolicyGated_TransferRejected", args: [REASONS.RECEIVER_NOT_VERIFIED] });
+    assert.deepEqual(refused, { errorName: "ERC8473PolicyRejected", args: [REASONS.RECEIVER_NOT_VERIFIED] });
 
     await verify(s, s.holders.eve);
     assert.equal(await s.token.read.canReceive([eve]), true);
@@ -149,7 +149,7 @@ describe("credentials: the registry and the rule through the real deployment", a
     assert.equal(await s.token.read.canReceive([dave.address]), false);
     await s.token.write.transfer([bob, parseEther("1")], { account: dave });
     const refused = await revertOf(s.token.simulate.mint([dave.address, 1n], { account: s.wallets.minter.account.address }), s.token.abi);
-    assert.deepEqual(refused, { errorName: "PolicyGated_TransferRejected", args: [REASONS.CREDENTIAL_EXPIRED] });
+    assert.deepEqual(refused, { errorName: "ERC8473PolicyRejected", args: [REASONS.CREDENTIAL_EXPIRED] });
 
     await verify(s, s.holders.dave);
     assert.equal(await s.token.read.canReceive([dave.address]), true);
@@ -166,7 +166,7 @@ describe("credentials: the registry and the rule through the real deployment", a
     assert.equal(await standing(s, alice.address), STATUS.BLOCKED);
     assert.equal(await s.token.read.canSend([alice.address]), false);
     const refused = await revertOf(s.token.simulate.transfer([recovery, 1n], { account: alice.address }), s.token.abi);
-    assert.deepEqual(refused, { errorName: "PolicyGated_TransferRejected", args: [REASONS.SENDER_NOT_VERIFIED] });
+    assert.deepEqual(refused, { errorName: "ERC8473PolicyRejected", args: [REASONS.SENDER_NOT_ELIGIBLE] });
     // Enforcement is not blocked by the block: the agent takes the tokens to a credentialed account.
     await s.token.write.forcedTransfer([alice.address, recovery, parseEther("1")], { account: s.wallets.agent.account });
     assert.equal(await s.token.read.balanceOf([recovery]), parseEther("1"));
