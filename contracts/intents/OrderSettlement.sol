@@ -211,6 +211,9 @@ contract OrderSettlement is AccessControl, Pausable, ReentrancyGuard, EIP712, IO
       return;
     }
 
+    // The balance is read before and after the call on purpose: the difference is what the receiver got. The entry
+    // point is guarded, so nothing else of this contract runs in between.
+    // slither-disable-start reentrancy-balance
     uint256 _before = IERC20(_token).balanceOf(_to);
     // A low-level call, so that the token's own error can be reported with the fill's index, and so that a token
     // that returns nothing is accepted as OpenZeppelin's SafeERC20 accepts it. The maker signed the order naming this
@@ -220,6 +223,7 @@ contract OrderSettlement is AccessControl, Pausable, ReentrancyGuard, EIP712, IO
     if (!_ok || !_saysTrue(_token, _returned)) revert OrderSettlement_TransferFailed(_index, _secondLeg, _returned);
     uint256 _received = IERC20(_token).balanceOf(_to) - _before;
     if (_received != _amount) revert OrderSettlement_WrongAmountReceived(_index, _secondLeg, _amount, _received);
+    // slither-disable-end reentrancy-balance
   }
 
   /**
