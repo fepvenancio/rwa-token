@@ -791,6 +791,46 @@ contract FundHoldersRuleUnit_OnInstall is FundHoldersRuleUnitTest {
     _rule.onInstall(_token, _previous);
   }
 
+  /// @dev What ERC-165 and `FUND()` answer for a listed rule of some fund
+  function _isFundRuleOf(
+    address _listed,
+    address _itsFund
+  ) internal {
+    vm.mockCall(_listed, abi.encodeCall(IERC165.supportsInterface, (type(IERC165).interfaceId)), abi.encode(true));
+    vm.mockCall(_listed, abi.encodeCall(IERC165.supportsInterface, (bytes4(0xffffffff))), abi.encode(false));
+    vm.mockCall(
+      _listed, abi.encodeCall(IERC165.supportsInterface, (type(IFundHoldersRule).interfaceId)), abi.encode(true)
+    );
+    vm.mockCall(_listed, abi.encodeCall(IFundHoldersRule.FUND, ()), abi.encode(_itsFund));
+  }
+
+  /// @dev Another rule of the same fund was listed: it counted every movement while the fund had it installed and
+  ///      refused every movement while it did not, so the count missed nothing
+  function test_WhenThePreviousPolicyListedAnotherRuleOfTheSameFund_ItAccepts() external {
+    _supplyIs(1);
+    address _predecessor = _mockContract('predecessor');
+    _isFundRuleOf(_predecessor, _fund);
+    _previousLists(_predecessor);
+    _rule.onInstall(_token, _previous);
+  }
+
+  function test_WhenThePreviousPolicyListedARuleOfAnotherFund_ItReverts() external {
+    _supplyIs(1);
+    address _foreign = _mockContract('foreignRule');
+    _isFundRuleOf(_foreign, makeAddr('anotherFund'));
+    _previousLists(_foreign);
+    vm.expectRevert(abi.encodeWithSelector(IFundHoldersRule.FundHoldersRule_CountNotCurrent.selector, _token));
+    _rule.onInstall(_token, _previous);
+  }
+
+  /// @dev The other rules of a list have no `FUND()`: they are passed over, and the answer is the typed refusal
+  function test_WhenThePreviousPolicyListedOnlyRulesThatAreNotFundRules_ItRevertsWithItsOwnError() external {
+    _supplyIs(1);
+    _previousLists(_mockContract('plainRule'));
+    vm.expectRevert(abi.encodeWithSelector(IFundHoldersRule.FundHoldersRule_CountNotCurrent.selector, _token));
+    _rule.onInstall(_token, _previous);
+  }
+
   /// @dev It writes nothing, so it needs no caller check, and it changes no state whoever calls
   function test_ItWritesNothing() external {
     _supplyIs(0);
