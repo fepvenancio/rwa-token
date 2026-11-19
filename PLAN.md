@@ -4453,9 +4453,97 @@ The owner passed on a review of both pull requests the day they were opened. Eac
 - **Comments.** The core's NatSpec now names this template. `IERC8473Policy`'s comment on `tokenId` still names only the ERC-721: the file is frozen (rule 4) and waits for the owner's word.
 - **Sizes.** After the fix the token is 17,461 bytes on `main` and 17,861 on `paris`.
 - **Tests.** `Gated1155.t.sol` has 98 tests on both lines.
+## `setRules` tells the rules it adds (plan, 2026-11-19, nothing built)
+
+Source: an outside assessment the owner passed on 2026-11-19, which named this gap again, and the owner's "Yes, both" to planning it. Derived from the code at `38fdbc1`. It reopens the owner decision of 2026-11-13 recorded under "ERC-8473 conformance": "`setRules` calls no rule's `onInstall`: left as it is".
+
+### The gap
+
+`ComplianceHook.onInstall` calls `onInstall(token, previousPolicy)` on every rule of the list before the list goes live, and `FundHoldersRule` uses that call to refuse a class that has a supply unless the policy the token consulted until now listed the rule. `setRules` stores a list without calling any rule. So a timelock `setRules` can drop the fund rule from a class, movements then go uncounted, and a second `setRules` takes the rule back with `Fund.holderCount()` and the class masks no longer matching the balances. Nothing reverts. `Fund.isClassIntact` shows the class as broken only between the two calls.
+
+### Why it was left, and what answers each reason
+
+The decision of 2026-11-13 gave three reasons. Each needs an answer before this is built.
+
+| Reason then | Answer now |
+|---|---|
+| It changes behaviour the tests pin | True. The tests that drop a rule and take it back change with the behaviour, and each is listed in the build's notes when found |
+| It closes a door: a class whose list dropped the rule by mistake gets it back with one `setRules`, and with the check it could not until the class is empty | That door is the gap. Taking the rule back after uncounted movements is exactly the wrong count. See decision R3 for what replaces it |
+| Replacing a fund's rule goes through `setRules` on classes that have holders, so the rule would have to accept a successor of the same fund | Decision R2: the rule accepts when the previous list held any rule of the same fund |
+
+### Decisions
+
+| # | Decision | Why |
+|---|---|---|
+| R1 | `setRules` calls `onInstall(token, address(this))` on every rule of the new list that the list it replaces does not hold, before it stores the new list. A rule that stays is not called | The previous policy for a list change is the hook itself, which still answers `rules(token)` with the old list while the rules are asked, the same order `onInstall` already keeps. A rule that stays has nothing new to confirm |
+| R2 | `FundHoldersRule.onInstall` accepts when the class has no supply, or the previous list holds a rule whose `FUND()` is this rule's fund. Today it accepts only itself in that list | While any rule of the fund is listed, every movement of the class is either counted, when that rule is the one the fund has installed, or refused with `NOT_FUND_CLASS`, when it is not. So the count missed nothing, whichever of the fund's rules was listed. This keeps the replacement of a fund's rule working on classes with holders, and applies to a hook replacement as well as to `setRules` |
+| R3 | No way back for a class that ran without the rule: it gets the rule again when its supply is zero. `Fund.isClassIntact` and `firstBrokenClass` stay the monitor | A recount needs the full holder list, which nothing on-chain can prove complete; the earlier `MaxHoldersRule` seed was removed for that reason. **Open for the owner:** the alternative is a timelock function on `Fund` that reads each named account's balance, corrects its mask and the count, and marks the class as current once, so that the rule's `onInstall` accepts it. It puts the completeness of the list on the timelock. Not in this plan unless asked |
+| R4 | The token's own first installation is unchanged: the initialiser reaches `_setRules` through the hook's `onInstall`, which already tells every rule, so no rule is told twice | `setRules` is the external function; the internal one stays as it is |
+| R5 | No interface changes. `IComplianceRule.onInstall` and `IFundHoldersRule.FUND()` exist | Rule 4 |
+
+A rule's `onInstall` is not `view` in the interface, so `setRules` makes a call that may write before it stores the list. The rule is attested before it is called, `setRules` accepts only the token or its admin, and the hook's own `onInstall` already has this shape and its Slither note. The call from `setRules` gets the same note.
+
+### Steps
+
+1. Tests first, shown failing: `setRules` adding a rule calls its `onInstall` with the hook as the previous policy, before the list is stored; a rule that stays is not called; a rule that reverts leaves the old list; dropping the fund rule from a class with holders and taking it back reverts with `FundHoldersRule_CountNotCurrent`; replacing the fund's rule by a successor on a class with holders passes; a rule of another fund in the previous list does not count.
+2. `ComplianceHook.setRules` and `FundHoldersRule.onInstall`.
+3. `SECURITY.md`, the brief (§6, dispatcher rule 4 and the fund rule's paragraph) and this file: the gap becomes a closed item, and R3's limit is stated.
+4. Gates, then the port to `paris`, then the pages on each line.
+
+## Entities in the credential registry (plan, 2026-11-19, nothing built)
+
+Source: the same assessment, and the owner's "Yes, both". Derived from the code at `38fdbc1`. It reopens `ICredentialRegistry`, `IFund` and `IFundHoldersRule`, which rule 4 freezes: nothing here is built until the owner says so.
+
+### What is missing
+
+`SECURITY.md` says it: "Entities are not modelled: one wallet is one holder." An institution with a custody wallet, a trading wallet and a rotated key takes three places under a fund's investor cap, and a statutory cap counts investors, not addresses. The registry's `Record` uses 184 of its 256 bits, so there is room to name the investor without a second storage read.
+
+### Decisions
+
+| # | Decision | Why |
+|---|---|---|
+| N1 | `Record` gains `uint48 entity`. Zero means none: the wallet is its own investor, as today. The number is opaque and chosen by the attester; it says nothing about who the investor is | It fits the spare 72 bits, so `profileOf` still reads one slot |
+| N2 | An entity belongs to the attester that wrote it. The key an investor is counted under is the attester's id and the entity number together, 56 bits | Two attesters number their investors independently. With one live attester for an address, which is today's rule, the record's attester gives the scope |
+| N3 | The attester writes the entity with the credential: `set` takes it, and the signed `Credential` carries it, which changes `CREDENTIAL_TYPEHASH` | The party that verified the investor is the one that knows two wallets are the same investor. Signed, so a relayer cannot change it |
+| N4 | New view `entityKeyOf(subject)`, from the stored record whatever its standing. A lapsed or exit-only record keeps its entity | The count must not move because a credential expired |
+| N5 | A `Fund` is built with the registry it reads, or with none. With none it counts wallets, as today | A fund over an external registry names that one. Funds without a credential layer keep working |
+| N6 | `Fund` counts distinct keys. For each key it keeps how many of its wallets hold a class, and each holding wallet remembers the key it was counted under, in the spare bits of its existing word | A wallet leaving must lower the key it raised, even if the registry has changed since. No new storage slot for a wallet; one counter for each entity |
+| N7 | A new investor is a receiver whose key has no wallet holding any class. A transfer between two wallets of one entity is never capped. At a full cap the net-zero case holds only when the sender's key has that one wallet and that wallet holds that one class | The cap is about investors |
+| N8 | `Fund.rekey(account)`, callable by anyone: when a holding wallet's key in the registry differs from the one it was counted under, it moves the wallet to the new key and corrects the count | An attester can link or unlink a wallet while it holds. The function only makes the fund agree with the registry, so it needs no role. Until it is called, a newly linked wallet is counted twice, which errs on the strict side, and an unlinked one is not counted separately, which a monitor on `CredentialSet` catches |
+| N9 | `rekey` and a FORCED movement may put the count above the cap, where nobody new is admitted, as today | Same rule as the lowered cap |
+| N10 | No block by entity in this version. The guardian blocks wallets, as today | An entity block is one more cold storage read for each party on every transfer, about 4,200 gas, for an action the guardian can already take wallet by wallet. **Open for the owner** |
+| N11 | `MinPositionRule` and any future limit on a position stay per wallet | Summing an entity's wallets needs the wallet list on-chain. Not in this work |
+| N12 | No country in the record | The standing decision: a jurisdiction group is a qualification bit. A country would publish more about each investor |
+
+### What it costs
+
+- **Privacy.** An entity number shows publicly that two wallets belong to one investor, although not which. An investor that does not want its wallets linked keeps entity zero and takes one place for each wallet.
+- **Gas.** On a movement to a wallet that holds no class, one more call from the fund to the registry, whose record the credential rule has already read, and one more storage read for the key's counter. Nothing more on a movement between wallets that already hold. To be measured in step 1 against today's 63,389 for a transfer through the standard list.
+- **Interfaces.** `ICredentialRegistry` (the record, `set`, the credential, the event, the new view), `IFund` (constructor, `admission`, `rekey`, a new event) and the pinned ids and topics of each. `CredentialRule` reads `profileOf` and does not change.
+- **An external registry** must be this version for a fund to count entities over it. Over an older one the fund is built with no registry.
+
+### A second live attester for one address: not in this plan
+
+The assessment also asks that an investor hold records from two attesters at once. Today a second attester writes only after the first is killed. The two ways to lift that, and why neither is planned yet:
+
+- **A record for each attester.** The credential rule would read as many records as the policy trusts attesters, on every transfer.
+- **One record, with the bits each attester added.** Killing one attester must remove only its bits, so the record needs to keep who set which, which no longer fits one slot.
+
+The way that works today costs nothing: the attester of record takes the second verification off-chain and writes the union, within the bits it is allowed. **Open for the owner:** whether a real second attester is expected soon enough to design for it now. N2 would then need the entity to be scoped differently.
+
+### Steps
+
+1. Measure a transfer to a new holder and between holders on the code as it is, so each later number has its base.
+2. Interfaces and the brief (§6's fund rule and credential rule paragraphs), with the freeze test re-pinned and shown failing first.
+3. Registry: tests first, then the record, `set`, `register`, the event and `entityKeyOf`.
+4. Fund and `FundHoldersRule`: tests first, with the invariant that the count equals the number of distinct keys among non-exempt holding wallets once every wallet is rekeyed, then the code.
+5. Deployment: the `Fund` module's registry parameter, the profiles, the post-deploy check, the node tests.
+6. Gates, the measured gas written here, then the port to `paris`, then the pages on each line.
 
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
 2. Credential layer: none left. On 2026-10-30 the owner confirmed decisions 11, 12, 13, 15, 16 and 17 as built (17 at the measured +8,179 gas on a transfer). Decision 14 is moot, since `IdentityRule` was removed in the cleanup. Decisions 8 and 9 are recorded in the credential section's table.
 3. Redemption gate and the second contract: built and landed in #24 and #25. Open from its review: dust in a fund everyone has left ends the performance fee. Fixed in #27; the pages at `bfb424e` describe it. What it leaves, dust left on purpose and the 4626's management fee on a small or low-decimal fund, is in `SECURITY.md`.
 4. The NFT template: answered 2026-11-05, A, and built (the core split and `Gated721`); its pages landed in #36.
+5. `setRules` tells the rules it adds (plan of 2026-11-19): whether to build it, which reverses the decision of 2026-11-13, and R3, whether a class that ran without the fund rule gets a timelock recount or waits until it is empty.
+6. Entities in the credential registry (plan of 2026-11-19): whether to build it and reopen the three interfaces; N10, a block by entity at about 4,200 gas a transfer; and whether a second live attester for one address is expected.
