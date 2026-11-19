@@ -77,7 +77,7 @@ contract FundIntegrationTest is Test {
 
     _identityRule = new MockIdentityRule(IIdentityRegistry(address(_identity)));
     _restrictionRule = new HolderRestrictionRule();
-    _fund = new Fund(address(this), IPolicyRegistry(address(_registry)));
+    _fund = new Fund(address(this), IPolicyRegistry(address(_registry)), address(0));
     _fundRule = new FundHoldersRule(_fund);
     _registry.attest(address(_identityRule).codehash, IPolicyRegistry.AttestKind.RULE, '');
     _registry.attest(address(_restrictionRule).codehash, IPolicyRegistry.AttestKind.RULE, '');

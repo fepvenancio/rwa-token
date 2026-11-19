@@ -198,8 +198,25 @@ Further limits recorded during review:
   (`credentials: "external"` in its profile): that registry's admin then decides who does KYC for the issuer's tokens, and
   its guardian can block their investors with no delay. The deployment names both, and the post-deploy check refuses the
   stack unless they hold those roles and neither the core's named accounts nor its timelocks hold another role there; it
-  does not stop the admin granting a role later. Entities are not modelled: one wallet is one holder. Pinned by `CredentialRegistry.t.sol`,
+  does not stop the admin granting a role later. Eligibility is an address's: the rule judges each address on its own record. Pinned by `CredentialRegistry.t.sol`,
   `CredentialRule.t.sol`, `test/nodejs/credentials.test.ts` and, for an external registry, `test/nodejs/products.test.ts`.
+- **A fund counts investors by the entity an attester names, and only as well as the attester names it.** A record may
+  carry an entity, an opaque number in its attester's numbering, and a fund built over the registry counts every holding
+  address with the same attester and number as one investor. Four limits follow. The number is public, so it shows that
+  two addresses are one investor, though not which; an investor that wants no such link keeps entity zero and takes a
+  place for each address. The count follows the registry only when someone calls `Fund.rekey(address)`, which anyone
+  may: until then an address linked after it started holding is still counted apart, which errs on the strict side, and
+  one unlinked after is still counted with its entity, which a monitor on `CredentialSet` must catch; `rekey` can put
+  the count above the cap, where nobody new is admitted. An entity belongs to one attester's numbering, so the same
+  investor verified by two attesters is two investors. An attester, or whoever holds its key, that gives an address the
+  entity of an investor already counted gets that address admitted to a full fund without the count rising: naming
+  entities is part of the trust already placed in an attester, and killing the attester does not undo the links it wrote.
+  And only the fund's count uses it: the guardian blocks
+  addresses, not entities, and a minimum position is still judged address by address. A fund built with no registry
+  counts addresses, as does one built before a registry had entities; the constructor refuses a registry that does not
+  answer the current interface. The decision on a sender reads the key the fund counted it under, never the registry, so
+  a pre-flight agrees with the write while a `rekey` is outstanding. Pinned by `FundEntities.t.sol`, with the invariant
+  `invariant_TheCountIsTheInvestorsAmongTheCountedAddresses`.
 - **A pause blocks mint as well.** Only FORCED movements pass: `forcedTransfer`, the issuer's `burn`, and the 7540 vault's `recoverRedeemRequest` and `recoverClaimable`. Enforcement during a pause is `forcedTransfer`
   to a quarantine account (holding an active credential the token's policy accepts, never address-frozen: the freeze on a receiver applies to FORCED), or
   `burn`. So a stolen `BURNER_ROLE` key can destroy holdings while the token is paused, and the pause is no defence against it: revoke the role. The ERC-3643 reference token's agents can also mint while paused
@@ -545,6 +562,7 @@ Each row is a bug deliberately planted, the tests that caught it, then the file 
 | A soft hurdle's catch-up carried (2026-11-05) | in the model what was paid not added back, the comparison with it at `<`, a band count carrying nothing or moving the mark, caught up at `<`, what was paid not cleared when the mark moves, a hard hurdle never caught up, a figure too large let through; on the desk what was paid not passed, not stored at execution, not adopted, left out of the hash, or kept through a period with no shares; on the 4626 not passed, not stored, or kept with no shares | 17 planted, 14 caught at first. Two survivors, what was paid kept once everyone has left on the desk and on the 4626, are caught by `test_WhenEveryoneHasLeftWhatWasPaidRestarts` on each. The third, the 4626 returning zero while there is no price, is equivalent: `_accrue` stops before counting then, and no other caller stores the value |
 | `Gated1155` (2026-11-19) | the items of a batch after the first moved without any check; `afterTransfer` called for the last item of a batch only; the frozen amount lowered after the transfer event; `canTransfer` counting the balance | 7, 4, 3 and 3 failing |
 | `setRules` tells the rules it adds (2026-11-19) | the rules told after the list is stored; every rule told, not only the added ones; the fund rule accepting a rule of any fund | 7, 1 and 1 failing |
+| Entities (2026-11-19) | every address counted on its own; the key kept when the last class goes; a sender judged by its address alone; an exemption moving the count without the key; `rekey` always moving the count; the sender's side reading the registry; the receiver's investor ignored; the key without the attester; the entity kept when the attester writes zero | 13, 4, 3, 2, 3, 3, 5, 6 and 3 failing |
 | `Gated721` (2026-11-05) | the burner's freeze exemption dropped; approval checked after the hook instead of before; `canTransfer` counting ownership; and, before the fix of the outside review's first point, a burn's pre-flight taking the holder as its operator | 1, 2, 1 and 3 failing |
 | Every product deployable alone or as a whole (2026-11-06) | a part already in the core not refused; an executor left with the deployer; no operator on an executor; the signed entry or the DvP executor left out of the parts; the distribution maker's grant missing or given to the checker; no checker without a desk; the distributor naming another address; `CoreHandover` skipping the parts | 10 planted, all caught |
 | Input checks in the deploy scripts (2026-11-07) | `CORE_HAS` naming nothing accepted, its entries not trimmed, an unknown key accepted, the credential registry or the implementation keys not known; executors allowed on any template or refused on a plain token only; decimals allowed on any template or refused on an intent token | 9 planted, all caught |

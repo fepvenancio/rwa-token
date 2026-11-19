@@ -242,7 +242,8 @@ exact sequence on the local network, playing the council and the KYC attester, a
    `CredentialRule` (its `ruleId` is fixed, and a hook takes one rule per id), so it reads one registry.
 4. **`Fund`** (the operations account), once per fund, if the products use one: a `Fund` (owner = the operations account) and
    the `FundHoldersRule` that points at it. An issuer has as many as it has funds, each with its own cap, and `FUND` chooses one
-   for `hardhat ignition deploy`. Then the council attests the rule as in step 2, after reading the `Fund` it points at
+   for `hardhat ignition deploy`. Its `credentials` parameter is the core's credential registry, so that an investor's
+   several addresses count once, or the zero address to count every address on its own. Then the council attests the rule as in step 2, after reading the `Fund` it points at
    (`FUND()`): the rule's codehash covers the fund's address, not the fund's code. Check the fund's runtime code against the
    manifest's `Fund` entry, filling its `immutableSlots` (the registry address) as for the rules, and that its `owner()` is the
    operations account. `Fund` itself is not attested.

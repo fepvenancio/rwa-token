@@ -72,7 +72,7 @@ abstract contract GatedVaultBaseTest is Test {
     address _who,
     uint256 _validFor
   ) internal {
-    _creds.set(_who, uint64(block.timestamp + _validFor), Quals.KYC);
+    _creds.set(_who, uint64(block.timestamp + _validFor), Quals.KYC, 0);
   }
 
   function _fund(

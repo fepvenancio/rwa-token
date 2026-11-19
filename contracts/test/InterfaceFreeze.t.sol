@@ -177,7 +177,7 @@ contract InterfaceFreezeTest is Test {
     assertEq(type(IGovernanceTimelock).interfaceId, bytes4(0x31993a1c), 'IGovernanceTimelock');
     // Added in the fund layer (2026-10-22), ids computed from the signatures with `cast sig`
     // Re-pinned in S4 of the review items (2026-10-24): `isClassIntact` and `firstBrokenClass` (was 0x44c4a64f)
-    assertEq(type(IFund).interfaceId, bytes4(0x2d89d7d8), 'IFund');
+    assertEq(type(IFund).interfaceId, bytes4(0xa7306593), 'IFund');
     assertEq(type(IFundHoldersRule).interfaceId, bytes4(0x5c275a39), 'IFundHoldersRule');
     // Added in the DvP executor (E-1, 2026-10-23), ids computed from the signatures with `cast sig`. `IERC3009` is the
     // subset of ERC-3009 that the executor calls; its id is the XOR of those two selectors, not a standard id
@@ -192,7 +192,7 @@ contract InterfaceFreezeTest is Test {
     // Added in the credential layer (C-1, 2026-10-23), ids computed from the signatures with `cast sig`. The enum
     // `Status` is `uint8` in a signature and `Credential` a tuple
     // Re-pinned 2026-11-01 on owner instruction: a record no longer holds a country (was 0x4573f2ef).
-    assertEq(type(ICredentialRegistry).interfaceId, bytes4(0xd224eb70), 'ICredentialRegistry');
+    assertEq(type(ICredentialRegistry).interfaceId, bytes4(0x5f51feac), 'ICredentialRegistry');
     assertEq(type(ICredentialRule).interfaceId, bytes4(0x35778007), 'ICredentialRule');
   }
 
@@ -306,6 +306,7 @@ contract InterfaceFreezeTest is Test {
     assertEq(IFund.ExemptSet.selector, 0xf33950bf7aa3300efb48f7896f309484c287418977abeba9f08f12cbe451d36a);
     assertEq(IFund.HolderCountUpdated.selector, 0x8ac0638de66e0910c02cbd2be8467a89277dac49177d5811c91422a8f475ba75);
     assertEq(IFund.HolderClassesUpdated.selector, 0x020767ac8d9f815f24bcaa5228933945b8766fe5dff7fe83d918163bcfd787fa);
+    assertEq(IFund.HolderKeyUpdated.selector, 0x3ae3e581c2634facc365c73908aaa7d1112428b3a4de514abca7fee336c3370b);
     // Added in the DvP executor (E-1, 2026-10-23), topic computed with `cast keccak`
     assertEq(IDvPExecutor.DvPSettled.selector, 0xf86f6efd1a86b116715d573898aa1ed9745de3ea96e91eb7d0eb96b775182845);
     // Added in S0 of the review items (2026-10-23), topics computed with `cast keccak`. ERC-7943's `Frozen` has the
@@ -330,7 +331,7 @@ contract InterfaceFreezeTest is Test {
     );
     // Added in the credential layer (C-1, 2026-10-23), topics computed with `cast keccak`
     assertEq(
-      ICredentialRegistry.CredentialSet.selector, 0x62696bfef46e93b00f133a80152dadf9f45c617aa5b847061be528b3e677b32a
+      ICredentialRegistry.CredentialSet.selector, 0xae3864e1c3283e3dd63ba2b829f46e52a3f44b2c6f832dd71518726bb9ffeaa6
     );
     assertEq(ICredentialRegistry.StatusSet.selector, 0xe07c9ed653206f6d019e37fbf43c2610409800ac75a0178854d7a6ec8974a61b);
     assertEq(
