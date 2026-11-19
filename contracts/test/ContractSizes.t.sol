@@ -24,6 +24,7 @@ import {SupplyCapRule} from 'contracts/hooks/rules/SupplyCapRule.sol';
 import {CredentialRegistry} from 'contracts/identity/CredentialRegistry.sol';
 import {DvPExecutor} from 'contracts/intents/DvPExecutor.sol';
 import {IntentExecutor} from 'contracts/intents/IntentExecutor.sol';
+import {OrderSettlement} from 'contracts/intents/OrderSettlement.sol';
 import {SignedEntry} from 'contracts/intents/SignedEntry.sol';
 import {SignedExit} from 'contracts/intents/SignedExit.sol';
 import {FeeModel} from 'contracts/nav/FeeModel.sol';
@@ -86,6 +87,7 @@ contract ContractSizesTest is Test {
     MockAsset _asset = new MockAsset(6);
     _assertFits('Portfolio', address(new Portfolio(address(this), IERC20(address(_asset)), true)));
     _assertFits('NavDesk', address(new NavDesk(address(this), address(this), 1 days, 1 hours, 1 days)));
+    _assertFits('OrderSettlement', address(new OrderSettlement(address(this), address(this))));
     _assertFits('SignedEntry', address(new SignedEntry()));
     _assertFits('SignedExit', address(new SignedExit()));
     _assertFits('SupplyCapRule', address(new SupplyCapRule()));

@@ -65,7 +65,7 @@
   <div class="prose">
     <h2>What it means for a holder</h2>
     <ul class="plain">
-      <li><b>The send button reverts.</b> <code>transfer</code> reverts with <code>ERC8473PolicyRejected(KIND_NOT_ALLOWED)</code>. So does <code>transferFrom</code>: <code>approve</code> and <code>permit</code> still set an allowance, but a spender cannot use it to move the tokens.</li>
+      <li><b>The send button reverts.</b> <code>transfer</code> reverts with <code>ERC8473PolicyRejected(KIND_NOT_ALLOWED)</code>. So does <code>transferFrom</code>: <code>approve</code> and <code>permit</code> still set an allowance, but a spender cannot use it to move the tokens. That includes the <a href="OrderSettlement.html"><code>OrderSettlement</code></a>, which moves each leg with <code>transferFrom</code>: a token that lists this rule cannot trade there.</li>
       <li><b>To move, the holder signs.</b> The holder signs a <code>TransferIntent</code> (EIP-712 typed data) and hands it to whoever runs the executor. An account holding the token's <code>EXECUTOR_ROLE</code> calls <code>executeTransfer</code>, in a deployment <a href="IntentExecutor.html"><code>IntentExecutor</code></a> or <a href="DvPExecutor.html"><code>DvPExecutor</code></a>. The other rules on the list still apply to that movement.</li>
       <li><b>The holder depends on the executor.</b> The rule leaves no way for a holder to move tokens alone. An <code>IntentToken</code> has no holder burn either: <code>burn</code> needs <code>BURNER_ROLE</code>. If nobody submits the intent, nothing moves, and the intent lapses at its deadline.</li>
       <li><b>Each such movement leaves its reference on chain.</b> <code>executeTransfer</code> emits <code>IntentExecuted(intentHash, from, to, amount, executor, ref)</code>.</li>
@@ -86,7 +86,7 @@
   <div class="prose">
     <h2>Who configures it, and where it sits</h2>
     <p>Nobody: there is nothing to set, no zero to read, and no state before or after. It refuses plain transfers from the moment it is on a token's list and stops when it is taken off, which is the hook's <code>setRules</code> under the token's <code>DEFAULT_ADMIN_ROLE</code>.</p>
-    <p>The demo deployment does not list it, and neither does any other profile in <code>ignition/profiles.ts</code> at this commit, so it has no set position. A product asks for it by naming <code>executedOnlyRule</code> in its <code>rules</code>, and the <code>Core</code> module then deploys it. A test does this with an <code>IntentToken</code> listing <code>credentialRule</code> then <code>executedOnlyRule</code>, with an <code>IntentExecutor</code>.</p>
+    <p>The demo deployment does not list it, and neither does any other profile in <code>ignition/profiles.ts</code>, so it has no set position. A product asks for it by naming <code>executedOnlyRule</code> in its <code>rules</code>, and the <code>Core</code> module then deploys it. A test does this with an <code>IntentToken</code> listing <code>credentialRule</code> then <code>executedOnlyRule</code>, with an <code>IntentExecutor</code>.</p>
   </div>
 </section>
 
@@ -136,7 +136,7 @@
       <li><b>It does not check the reference.</b> The rule does not read <code>ref</code>, and the intent's own checks do not require it to be non-zero or to match anything. The holder's signature covers it, and that is all. Tying a reference to a real message is for the issuer's executor and its systems off chain.</li>
       <li><b>It does not cover every movement.</b> Forced moves, mints and burns pass and carry no reference. <code>IntentExecuted</code> is not emitted for them.</li>
       <li><b>It does not choose the executor.</b> Whoever holds <code>EXECUTOR_ROLE</code> on the token can submit intents that name no executor. Those grants are the token's admin's to make.</li>
-      <li><b>It does not hold movements to hours.</b> That is <a href="SettlementWindowRule.html"><code>SettlementWindowRule</code></a>, which judges <code>EXECUTED</code> alone. Together the two would put a holder's movements inside the window; no profile lists them together at this commit.</li>
+      <li><b>It does not hold movements to hours.</b> That is <a href="SettlementWindowRule.html"><code>SettlementWindowRule</code></a>, which judges <code>EXECUTED</code> alone. Together the two would put a holder's movements inside the window; no profile lists them together.</li>
     </ul>
   </div>
 </section>

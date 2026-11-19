@@ -3,14 +3,14 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { network } from "hardhat";
-import { type Address, encodeAbiParameters, encodeFunctionData, getAddress, isAddressEqual, keccak256, maxUint256, parseSignature, toHex, zeroAddress, zeroHash } from "viem";
+import { type Address, encodeAbiParameters, encodeFunctionData, getAddress, hashTypedData, isAddressEqual, keccak256, maxUint256, parseSignature, toHex, zeroAddress, zeroHash } from "viem";
 
 import { fundOpenModule } from "../../ignition/modules/FundOpen.js";
 import { productModule } from "../../ignition/modules/Product.js";
 import { QUALS } from "../../ignition/modules/roles.js";
 import { coreHas, corePartsModule, partsHandoverModule } from "../../ignition/parts.js";
 import { DEFAULT_POLICY, DEMO_SIGNERS, missingParts, partsOf, PROFILES, type Product, type Profile } from "../../ignition/profiles.js";
-import { assertHandedOver, deployProduct, deployProfile, deployStack, deverify, EXIT_TYPES, INTENT_TYPES, PAR, REASONS, RECEIVE_AUTHORIZATION_TYPES, settlePeriod, settleThroughDesk, verify } from "./fixtures.js";
+import { assertHandedOver, deployProduct, deployProfile, deployStack, deverify, EXIT_TYPES, INTENT_TYPES, ORDER_TYPES, PAR, REASONS, RECEIVE_AUTHORIZATION_TYPES, settlePeriod, settleThroughDesk, verify } from "./fixtures.js";
 
 const PLAIN = ["credentialRule", "holderRestrictionRule"] as const;
 const CORE = ["credentialRegistry", "credentialRule", "holderRestrictionRule", "hook", "proxyDeployer", "recoveryTimelock", "registry", "timelock"];
@@ -747,6 +747,43 @@ describe("adding to a running core", async function () {
     assert.equal(await vault.read.balanceOf([a]), 0n);
     assert.equal(await usdc.read.balanceOf([a]), assets);
     assert.equal(await usdc.read.balanceOf([relayer.address]), 0n);
+  });
+
+  it("an order settlement joins a running core alone, handed over like the other executors, and a maker's order signed with viem is the one it hashes", async function () {
+    const s = await deployProfile(connection, PROFILES.cash, { cashSupplyCap: 1_000_000n });
+    assert.equal(s.orderSettlement, undefined);
+    assert.deepEqual(await s.addParts({ products: [], orderSettlement: true }), ["orderSettlement"]);
+    await assertHandedOver(s);
+    await assert.rejects(assertHandedOver({ ...s, orderSettlement: undefined }), /no order settlement/);
+
+    const venue = s.orderSettlement!;
+    const cash = await viem.getContractAt("IntentToken", s.products.cash.address);
+    assert.equal(await venue.read.hasRole([await venue.read.OPERATOR_ROLE(), s.wallets.operator.account.address]), true);
+    assert.equal(await venue.read.hasRole([await venue.read.RECOVERY_ROLE(), s.recoveryTimelock.address]), true);
+    assert.equal(await venue.read.hasRole([zeroHash, s.timelock.address]), true);
+    assert.equal(await venue.read.hasRole([zeroHash, s.wallets.deployer.account.address]), false);
+    // It holds no role on the token: makers give it allowances.
+    assert.equal(await cash.read.hasRole([await cash.read.EXECUTOR_ROLE(), venue.address]), false);
+
+    const alice = s.holders.alice;
+    const order = {
+      maker: alice.account.address,
+      giveToken: cash.address,
+      giveId: 0n,
+      giveAmount: 500n,
+      takeToken: s.hook.address,
+      takeId: 7n,
+      takeAmount: 3n,
+      giveIs1155: false,
+      takeIs1155: true,
+      taker: zeroAddress,
+      allOrNothing: false,
+      nonce: zeroHash,
+      validAfter: 0n,
+      deadline: 1n << 40n,
+    };
+    const domain = { name: "OrderSettlement", version: "1", chainId: await s.publicClient.getChainId(), verifyingContract: venue.address };
+    assert.equal(await venue.read.orderHash([order]), hashTypedData({ domain, types: ORDER_TYPES, primaryType: "Order", message: order }));
   });
 
   it("a whole deployment that asks for a signed entry has one, and the check refuses a stack that lost it", async function () {

@@ -93,7 +93,7 @@
 <section id="order">
   <div class="prose">
     <h2>Where it sits, and who lists it</h2>
-    <p>The demo deployment does not list it, and neither does any other profile in <code>ignition/profiles.ts</code> at this commit, so it has no set position. A product asks for it by naming <code>supplyCapRule</code> in its <code>rules</code>. The <code>Core</code> module then deploys it, and the council attests it before the product can list it. A test does this with a <code>GatedToken</code> listing <code>credentialRule</code> then <code>supplyCapRule</code>.</p>
+    <p>The demo deployment does not list it. One profile in <code>ignition/profiles.ts</code> does: <code>cash</code>, second in its list after the credential check, so that a cap bounds what the minter of the deployment's money can issue. A product asks for it by naming <code>supplyCapRule</code> in its <code>rules</code>. The <code>Core</code> module then deploys it, and the council attests it before the product can list it. A test does this with a <code>GatedToken</code> listing <code>credentialRule</code> then <code>supplyCapRule</code>.</p>
   </div>
 </section>
 
@@ -146,7 +146,7 @@
       <li><b>It is not a rate limit.</b> A stolen minter key can still mint in one call up to whatever room is left under the cap.</li>
       <li><b>It caps the supply, not the total ever minted.</b> The rule reads <code>totalSupply()</code> at the moment of the mint, so units burned free room for further mints.</li>
       <li><b>It takes nothing back.</b> Lowering a cap below the supply stops further mints and leaves existing balances as they are.</li>
-      <li><b><code>FORCED</code> is exempt.</b> An enforcement mint is not judged. At this commit <code>Gated7540Vault.recoverClaimable</code> is the only function that makes one, so on a <code>GatedToken</code> or an <code>IntentToken</code> no such route exists.</li>
+      <li><b><code>FORCED</code> is exempt.</b> An enforcement mint is not judged. <code>Gated7540Vault.recoverClaimable</code> is the only function that makes one, so on a <code>GatedToken</code> or an <code>IntentToken</code> no such route exists.</li>
       <li><b>A zero-amount mint can pass.</b> With the supply at or below the cap, including an unset cap at zero supply, a mint of 0 passes this rule. It creates nothing.</li>
     </ul>
   </div>

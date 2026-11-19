@@ -55,7 +55,7 @@ The token reverts a refused mint with `ERC8473PolicyRejected(ABOVE_SUPPLY_CAP)`,
 <a id="order"></a>
 ## Where it sits, and who lists it
 
-The demo deployment does not list it, and neither does any other profile in `ignition/profiles.ts` at this commit, so it has no set position. A product asks for it by naming `supplyCapRule` in its `rules`. The `Core` module then deploys it, and the council attests it before the product can list it. A test does this with a `GatedToken` listing `credentialRule` then `supplyCapRule`.
+The demo deployment does not list it. One profile in `ignition/profiles.ts` does: `cash`, second in its list after the credential check, so that a cap bounds what the minter of the deployment's money can issue. A product asks for it by naming `supplyCapRule` in its `rules`. The `Core` module then deploys it, and the council attests it before the product can list it. A test does this with a `GatedToken` listing `credentialRule` then `supplyCapRule`.
 
 <a id="vaults"></a>
 ## Why it is for tokens and not for vaults
@@ -94,7 +94,7 @@ Both vault templates decide whether a receiver is allowed in by asking the rules
 - **It is not a rate limit.** A stolen minter key can still mint in one call up to whatever room is left under the cap.
 - **It caps the supply, not the total ever minted.** The rule reads `totalSupply()` at the moment of the mint, so units burned free room for further mints.
 - **It takes nothing back.** Lowering a cap below the supply stops further mints and leaves existing balances as they are.
-- **`FORCED` is exempt.** An enforcement mint is not judged. At this commit `Gated7540Vault.recoverClaimable` is the only function that makes one, so on a `GatedToken` or an `IntentToken` no such route exists.
+- **`FORCED` is exempt.** An enforcement mint is not judged. `Gated7540Vault.recoverClaimable` is the only function that makes one, so on a `GatedToken` or an `IntentToken` no such route exists.
 - **A zero-amount mint can pass.** With the supply at or below the cap, including an unset cap at zero supply, a mint of 0 passes this rule. It creates nothing.
 
 <a id="connected"></a>

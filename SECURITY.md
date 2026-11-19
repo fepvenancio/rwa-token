@@ -36,7 +36,7 @@ In scope, all under `contracts/` (`.t.sol` files and `contracts/test/` are test 
 | Credentials | `identity/CredentialRegistry` (immutable, not a proxy, not attested; the `CredentialRule` codehash covers its address, not its code) |
 | Fund | `fund/Fund` (not a proxy, not attested; the `FundHoldersRule` codehash covers its address, not its code) |
 | Governance | `governance/PolicyRegistry`, `governance/GovernanceTimelock` (the main timelock: OZ `TimelockController` plus a revoke-`CANCELLER_ROLE`-only `RECOVERY_ROLE`) |
-| Settlement | `intents/IntentExecutor`, `intents/DvPExecutor` (neither is a proxy, and neither is attested: each token authorises an executor by granting it `EXECUTOR_ROLE`), `intents/SignedEntry` (immutable, no roles: a vault judges it as any other payer), `intents/SignedExit` (immutable, no roles: it moves a holder's shares on that holder's signature and permit, and claims for a controller that made it an operator) |
+| Settlement | `intents/IntentExecutor`, `intents/DvPExecutor` (neither is a proxy, and neither is attested: each token authorises an executor by granting it `EXECUTOR_ROLE`), `intents/OrderSettlement` (not a proxy, not attested, and with no role on any token: makers give it allowances and sign orders), `intents/SignedEntry` (immutable, no roles: a vault judges it as any other payer), `intents/SignedExit` (immutable, no roles: it moves a holder's shares on that holder's signature and permit, and claims for a controller that made it an operator) |
 | Deployment | `deploy/ProxyDeployer`, `deploy/TokenProxy` |
 | Portfolio | `portfolio/Portfolio`, `portfolio/ERC4626Adapter`, `portfolio/GuardedAccount` (immutable, attested as `PORTFOLIO` and `ADAPTER`), `portfolio/ERC20CallValidator`, `portfolio/ERC4626CallValidator` (attested as `VALIDATOR`) |
 | Pricing | `nav/NavDesk` (immutable, not attested: it acts by the `SETTLER_ROLE` it holds), `nav/FeeModel` (immutable, attested as `FEE_MODEL`) |
@@ -206,6 +206,18 @@ Further limits recorded during review:
   funding reverts the batch. The payment is tried, and taken back in the books if the asset refuses it. An asset that
   burns all the gas it is given still fails the whole transaction, and the asset is whatever the maker and the checker
   agreed on. Pinned by `Distributor.t.sol::Distributor_ClaimBatch`.
+- **`OrderSettlement` moves tokens under allowances, bounded by signed orders.** A maker that trades through it gives it
+  an allowance, or approval for all of a multi-token's ids, and signs orders. The contract is immutable and moves a
+  maker's tokens only as a signed order of that maker allows: to the other maker of the fill, never past the order's
+  amount, never for less than its limit rounded up, not after a cancel or the deadline. Within that, the operator
+  chooses which orders meet, in what amounts and at what price between the two limits; with no fee and no receiver but
+  the makers, the difference goes to one of the makers and never to the operator. It holds no role on any token, so a
+  token's policy judges each leg as a plain transfer between the two makers. Limits: a token that lists
+  `ExecutedOnlyRule` cannot trade here, and a settlement window does not apply to it; what is filled is kept for an
+  order's hash and what is cancelled for a maker's nonce, so two orders signed with one nonce both fill and one cancel
+  stops both; an ERC-20 that keeps part of a transfer is refused, at the cost of two balance reads for each leg; and
+  `canFill` checks no allowance, and no balance of a token that has no pre-flight of its own. Pinned by
+  `OrderSettlement.t.sol`, with a fuzz over sequences of fills of one order.
 - **`SignedExit` is trusted with more than it uses.** A controller makes it an operator on a 7540 so that anyone can
   deliver that controller's settled claims, and under ERC-7540 an operator is a full delegate: it could file requests
   and name any receiver. The contract is immutable and offers one function without a signature, `claimFor`, which
@@ -470,6 +482,7 @@ Inline suppressions (each carries its reason on the line above, in the source):
 | `Gated7540Vault` `requestDeposit` | `arbitrary-send-erc20` | `owner` is the caller or an approved operator. Fuzzed: a non-operator with a victim owner reverts and moves nothing. Removing the guard fails 2 tests |
 | `ProxyDeployer` `deploy` | `unused-return`, `reentrancy-events` | `initialize` returns nothing; success is checked by the post-init assertions. The event after it names a proxy this owner-only call created and initialised, so nothing in it is stale |
 | `DvPExecutor` `canExecuteDvPGated`, `canExecuteDvP3009` | `unused-return` | The token's `ok` is `reason == TRANSFER_OK`, so the reason carries it |
+| `OrderSettlement` `_settle`, `_move` | `reentrancy-events`, `low-level-calls`, `arbitrary-send-erc20` | `OrderFilled` follows the two legs: the entry point is guarded and what was filled is recorded before either token is called. The ERC-20 leg is a low-level `transferFrom` so that the token's own error can be reported with the fill's index and a token that returns nothing is accepted; the maker signed the order naming that token and amount, which is checked first |
 | `TokenProxy` `_unsafeAllowUninitialized` | `dead-code` | Called from `ERC1967Proxy`'s constructor; Slither does not trace it through the override |
 
 Aderyn 0.6.8 (Cyfrin) was a second CI gate from 2026-10-17 to 2026-11-14, when it was removed: Aderyn was retired
@@ -589,6 +602,7 @@ Each row is a bug deliberately planted, the tests that caught it, then the file 
 | Halmos, the fund's count by key (2026-11-19) | `rekey` always moving the count; the key kept when an address stops being counted; an exemption moving the count without the key | 2 of the 3 symbolic properties fail on each |
 | Bitmap nonces and `claimBatch` (2026-11-19) | a whole word spent by one nonce, in the mixin and in the signed entry; the word ignored; the nonce never marked; a refused payment left as claimed; a holder already paid paid again; a bad proof passed over; the token's refusal ignored | 3 and 2, 11, 11, 1, 4, 1 and 1 failing |
 | `SignedExit` (2026-11-19) | a deposit claim sent to the caller; a redemption's cash sent to the caller; the minimum not checked; the signature not checked; a request allowed to name another receiver; the nonce not spent; the cash sent to the holder whatever was signed; the deadline not checked | 3, 1, 1, 1, 1, 2, 2 and 1 failing |
+| `OrderSettlement` (2026-11-19) | the limit rounded down; the limit not checked; what an order filled not recorded; an order filled past its amount; the signature not checked; a cancelled order still filling; the named taker ignored; the received amount not checked; the second leg sent to its own maker; ids not compared when orders cross; all-or-nothing ignored; the deadline not checked; `settle` open to anyone; `settle` not paused | 1, 2, 8, 4, 1, 2, 1, 1, 18, 1, 1, 1, 1 and 1 failing |
 | `Gated721` (2026-11-05) | the burner's freeze exemption dropped; approval checked after the hook instead of before; `canTransfer` counting ownership; and, before the fix of the outside review's first point, a burn's pre-flight taking the holder as its operator | 1, 2, 1 and 3 failing |
 | Every product deployable alone or as a whole (2026-11-06) | a part already in the core not refused; an executor left with the deployer; no operator on an executor; the signed entry or the DvP executor left out of the parts; the distribution maker's grant missing or given to the checker; no checker without a desk; the distributor naming another address; `CoreHandover` skipping the parts | 10 planted, all caught |
 | Input checks in the deploy scripts (2026-11-07) | `CORE_HAS` naming nothing accepted, its entries not trimmed, an unknown key accepted, the credential registry or the implementation keys not known; executors allowed on any template or refused on a plain token only; decimals allowed on any template or refused on an intent token | 9 planted, all caught |

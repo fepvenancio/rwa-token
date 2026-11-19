@@ -68,7 +68,7 @@ The rule asks the token at call time whether the caller holds `DEFAULT_ADMIN_ROL
 <a id="order"></a>
 ## Where it sits, and who lists it
 
-One product lists it at this commit: the intent token of the demo deployment (`full`, through `RULE_ORDER`), fourth in its list, after the credential check, the minimum position and the holder restrictions, and before the fund's investor cap. The vaults have no executed transfers, and `assertUsable` in `ignition/profiles.ts` throws when a module is built that lists it on anything but an `IntentToken`. The hook itself would accept it on any token, where it would judge nothing.
+One product lists it: the intent token of the demo deployment (`full`, through `RULE_ORDER`), fourth in its list, after the credential check, the minimum position and the holder restrictions, and before the fund's investor cap. The vaults have no executed transfers, and `assertUsable` in `ignition/profiles.ts` throws when a module is built that lists it on anything but an `IntentToken`. The hook itself would accept it on any token, where it would judge nothing.
 
 <a id="functions"></a>
 ## What it can do
@@ -97,7 +97,7 @@ One product lists it at this commit: the intent token of the demo deployment (`f
 <a id="limits"></a>
 ## What it does not do
 
-- **It does not hold plain transfers to the hours.** On a token that lists this rule alone, a holder's `transfer` passes outside the window. [`ExecutedOnlyRule`](ExecutedOnlyRule.md) is the rule that refuses plain transfers. No profile lists the two together at this commit.
+- **It does not hold plain transfers to the hours.** On a token that lists this rule alone, a holder's `transfer` passes outside the window. So does a leg the [`OrderSettlement`](OrderSettlement.md) settles, which is a plain transfer under the maker's allowance. [`ExecutedOnlyRule`](ExecutedOnlyRule.md) is the rule that refuses plain transfers. No profile lists the two together.
 - **A window cannot be cleared.** `setWindow` refuses a `dayMask` of 0, so once a token has hours they can be changed but not removed. To stop applying the rule, the token's admin takes it out of the token's list on the hook.
 - **It cannot be open all day.** `open` and `close` must differ and both be below 86400, so a window leaves at least one second of each day closed. A token that wants no hours leaves the rule out.
 - **It has no holiday calendar.** A closed public holiday that falls on an enabled weekday is open as far as the rule knows.

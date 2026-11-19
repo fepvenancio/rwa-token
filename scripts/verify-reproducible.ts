@@ -49,6 +49,7 @@ const DEPLOYED = {
   GovernanceTimelock: "governance",
   IntentExecutor: "intents",
   DvPExecutor: "intents",
+  OrderSettlement: "intents",
   SignedEntry: "intents",
   SignedExit: "intents",
   NavDesk: "nav",

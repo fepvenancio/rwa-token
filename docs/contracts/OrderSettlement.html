@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>OrderSettlement · Gated Token Stack</title>
+<meta name="description" content="How OrderSettlement settles signed orders against each other, in whole or in parts and many in one transaction, under the makers' allowances, and what its checks and its pre-flight cover.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="../index.html">Gated Token Stack</a>
+  <a href="../index.html">Overview</a>
+  <a href="../index.html#contracts">Contracts</a>
+  <a href="../roles.html">Who can do what</a>
+  <a href="../movement.html">One movement</a>
+  <a href="../deployment.html">Deployment and governance</a>
+  <a href="../money.html">Where the money sits</a>
+</nav>
+<main class="page">
+
+<header class="top">
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Settlement and distribution</div>
+  <h1>OrderSettlement</h1>
+  <p class="lede">Settles signed orders against each other, in whole or in parts, many in one transaction. A maker signs what it gives at most and what it takes at least. An operator submits two orders that cross and how much each gives, and the two amounts move straight between the makers under the allowances they gave.</p>
+  <div class="facts">
+    <span class="fact"><b>contracts/intents/OrderSettlement.sol</b></span>
+    <span class="fact">immutable, <b>not a proxy</b></span>
+    <span class="fact">admin after hand-over: <b>the main timelock</b></span>
+    <span class="fact">not attested: it holds <b>no role on any token</b></span>
+  </div>
+</header>
+
+<section id="in-one-minute">
+  <div class="callout">
+    <h3>In one minute</h3>
+    <p>A maker is a party that signs an order: "I give up to this much of one token, and for all of it I take at least this much of another." The two amounts together are its limit price. The maker also gives this contract an allowance on the token it gives. An operator finds two orders that name each other's tokens, picks how much each maker gives, and submits them as a fill. The contract checks both signatures, that neither order is filled past its amount, and that each maker receives at least its limit for what it gives. Then it moves the first maker's amount to the second maker and the second's to the first. An order can fill in many parts, a batch holds many fills, and if any fill fails the whole batch is undone. The contract holds no role on any token and never holds a token. Each token sees a plain transfer, so its rules judge the two makers as on any transfer.</p>
+  </div>
+</section>
+
+<section id="order">
+  <div class="prose">
+    <h2>An order</h2>
+    <p>A maker signs an <code>Order</code> as EIP-712 typed data on this contract's domain: name <code>OrderSettlement</code>, version <code>1</code>, the chain id and this contract's address. <code>orderHash(order)</code> returns the hash the maker signs. The signature is checked with OpenZeppelin's <code>SignatureChecker</code>, so a maker that is a contract signs through ERC-1271.</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Field</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>maker</code></td><td>Who signs, gives and receives. An order names no other receiver.</td></tr>
+        <tr><td><code>giveToken</code>, <code>giveId</code>, <code>giveAmount</code></td><td>The token the maker gives, and the most it gives. <code>giveId</code> is zero for an ERC-20 and the token id for an ERC-1155.</td></tr>
+        <tr><td><code>takeToken</code>, <code>takeId</code>, <code>takeAmount</code></td><td>The token the maker takes, and the least it takes for all of <code>giveAmount</code>. <code>takeId</code> is zero for an ERC-20.</td></tr>
+        <tr><td><code>giveIs1155</code>, <code>takeIs1155</code></td><td>True when that side is an ERC-1155. An ERC-721 is not supported.</td></tr>
+        <tr><td><code>taker</code></td><td>The only counterparty allowed, or the zero address for anyone.</td></tr>
+        <tr><td><code>allOrNothing</code></td><td>True when the order fills in one fill for all of <code>giveAmount</code>, or not at all.</td></tr>
+        <tr><td><code>nonce</code></td><td>A value the maker chooses. It makes the order unique, and it is what <code>cancelOrder</code> spends.</td></tr>
+        <tr><td><code>validAfter</code></td><td>The first moment the order is valid, inclusive. Zero for no lower bound.</td></tr>
+        <tr><td><code>deadline</code></td><td>The last moment the order is valid, inclusive.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <p><code>giveAmount</code> and <code>takeAmount</code> are the maker's limit price. In the tests the seller gives 10 units of a security for at least 500 of cash, and the investor gives 500 of cash for at least 10 units. Nothing in an order says which side is cash: an order names two tokens, and any two can trade.</p>
+    <p>An order is measured by what it gives. <code>filled(orderHash)</code> is the amount of <code>giveToken</code> the maker has given so far, and the order is spent when that reaches <code>giveAmount</code>, whatever the maker received on the way.</p>
+  </div>
+</section>
+
+<section id="how">
+  <div class="prose">
+    <h2>How a fill settles</h2>
+    <p>There is one entry point, <code>settle(fills)</code>. It is called by an <code>OPERATOR_ROLE</code> holder, it is guarded against reentry, and it stops while the contract is paused. A <code>Fill</code> is two orders, <code>first</code> and <code>second</code>, their two signatures, and two amounts: <code>firstGives</code>, of the first order's <code>giveToken</code>, and <code>secondGives</code>, of the second's. A <em>leg</em> is one of the two transfers of a fill.</p>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="d" viewBox="0 0 780 384" role="img" aria-label="One fill of settle. An operator calls the contract with a batch of fills. It checks the role, the pause and each fill's checks, otherwise OrderSettlement_FillRefused with the index, the refusal and which order. It records what the fill gives of both orders in filled. The first leg moves firstGives of the first order's giveToken straight from the first maker to the second maker, otherwise OrderSettlement_TransferFailed with the index, false and the token's reason. The second leg moves secondGives of the second order's giveToken from the second maker to the first maker, otherwise OrderSettlement_TransferFailed with the index, true and the token's reason. Then the contract emits OrderFilled once for each order. Neither amount passes through the contract.">
+        <defs>
+          <marker id="os-arrow-tr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="t-transfer"/></marker>
+        </defs>
+        <rect class="b" x="40" y="14" width="120" height="40" rx="8"/>
+        <text x="100" y="39" class="bold" text-anchor="middle">First maker</text>
+        <rect class="act" x="300" y="14" width="180" height="40" rx="8"/>
+        <text x="390" y="39" class="bold" text-anchor="middle">OrderSettlement</text>
+        <rect class="b" x="620" y="14" width="120" height="40" rx="8"/>
+        <text x="680" y="39" class="bold" text-anchor="middle">Second maker</text>
+        <line class="life" x1="100" y1="54" x2="100" y2="376"/>
+        <line class="life" x1="390" y1="54" x2="390" y2="376"/>
+        <line class="life" x1="680" y1="54" x2="680" y2="376"/>
+
+        <rect class="b2" x="150" y="66" width="480" height="62" rx="6"/>
+        <text x="162" y="85" class="sm bold">1. An operator calls settle with a batch of fills</text>
+        <text x="162" y="102" class="sm">OPERATOR_ROLE, not paused, the fill passes its checks</text>
+        <text x="162" y="119" class="mono sm rej">else OrderSettlement_FillRefused(index, refusal, secondOrder)</text>
+
+        <rect class="b2" x="150" y="140" width="480" height="36" rx="6"/>
+        <text x="162" y="163" class="sm bold">2. filled rises by what the fill gives, for both orders</text>
+
+        <line class="ln c-transfer" x1="100" y1="222" x2="676" y2="222" marker-end="url(#os-arrow-tr)"/>
+        <text x="120" y="212" class="sm bold">3. First leg: firstGives of the first order's giveToken</text>
+        <text x="120" y="238" class="mono sm rej">else OrderSettlement_TransferFailed(index, false, reason)</text>
+
+        <line class="ln c-transfer" x1="680" y1="290" x2="104" y2="290" marker-end="url(#os-arrow-tr)"/>
+        <text x="120" y="280" class="sm bold">4. Second leg: secondGives of the second order's giveToken</text>
+        <text x="120" y="306" class="mono sm rej">else OrderSettlement_TransferFailed(index, true, reason)</text>
+
+        <rect class="act" x="250" y="330" width="280" height="36" rx="6"/>
+        <text x="390" y="353" class="sm bold" text-anchor="middle">5. emit OrderFilled, once for each order</text>
+      </svg>
+    </div>
+    <figcaption><b>Each amount goes straight from one maker to the other.</b> The contract calls <code>transferFrom</code> on an ERC-20 and <code>safeTransferFrom</code> on an ERC-1155, under the maker's allowance or approval for all. A gated token's hook sees each leg as a <span class="k k-transfer">TRANSFER</span>. A revert at any step undoes every step before it, and every earlier fill of the batch.</figcaption>
+  </figure>
+  <div class="prose">
+    <p>For each fill, in order:</p>
+  </div>
+  <ol class="steps">
+    <li><div><b>The checks.</b> The contract runs its own checks, <a href="#checks">below</a>, and reverts at the first that fails with <code>OrderSettlement_FillRefused(index, refusal, secondOrder)</code>. No token has been called yet.</div></li>
+    <li><div><b>What is filled.</b> <code>filled[orderHash]</code> rises by <code>firstGives</code> for the first order and by <code>secondGives</code> for the second. This is written before either token is called.</div></li>
+    <li><div><b>The first leg.</b> <code>firstGives</code> of the first order's <code>giveToken</code> moves from the first maker to the second maker.</div></li>
+    <li><div><b>The second leg.</b> <code>secondGives</code> of the second order's <code>giveToken</code> moves from the second maker to the first maker.</div></li>
+    <li><div><b>The events.</b> <code>OrderFilled(orderHash, maker, counterparty, given, received)</code>, once for each order.</div></li>
+  </ol>
+  <div class="prose">
+    <p>For an ERC-20 leg the contract reads the receiver's balance before and after, and reverts with <code>OrderSettlement_WrongAmountReceived(index, secondLeg, expected, received)</code> unless it rose by exactly the amount. So a token that keeps a fee on transfers cannot settle here: the maker would get less than its limit (<code>test_ATokenThatKeepsAFeeIsRefused</code>). An ERC-1155 leg has no such check.</p>
+  </div>
+</section>
+
+<section id="checks">
+  <div class="prose">
+    <h2>The checks, in order</h2>
+    <p><code>Refusal</code> is an enum whose members are in the order the checks run. The fill's two amounts come first. Then the three checks on an order's shape run on the first order and then on the second. Then the two checks on the pair. Then the eight checks on an order's state and terms run on the first order, all eight, and then on the second. <code>secondOrder</code> in the error is true when the check failed on the second order, and false for the first order or for the fill as a whole.</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th><code>Refusal</code></th><th>On</th><th>When</th></tr></thead>
+      <tbody>
+        <tr><td><code>ZERO_AMOUNT</code></td><td>the fill</td><td><code>firstGives</code> or <code>secondGives</code> is zero.</td></tr>
+        <tr><td><code>EMPTY_ORDER</code></td><td>each order</td><td>Its <code>giveAmount</code> or <code>takeAmount</code> is zero.</td></tr>
+        <tr><td><code>ID_ON_ERC20</code></td><td>each order</td><td>It names a token id other than zero on a side that is not an ERC-1155.</td></tr>
+        <tr><td><code>SAME_ASSET</code></td><td>each order</td><td>It gives and takes the same token and id.</td></tr>
+        <tr><td><code>SELF_FILL</code></td><td>the fill</td><td>Both orders are one maker's.</td></tr>
+        <tr><td><code>DO_NOT_CROSS</code></td><td>the fill</td><td>The two orders do not name each other's assets: each must give what the other takes, by token, id and kind. Another id of the same ERC-1155 is another asset. This check does not look at the prices.</td></tr>
+        <tr><td><code>EXPIRED</code></td><td>each order</td><td>The block's time is after its <code>deadline</code>.</td></tr>
+        <tr><td><code>NOT_YET_VALID</code></td><td>each order</td><td>The block's time is before its <code>validAfter</code>.</td></tr>
+        <tr><td><code>CANCELLED</code></td><td>each order</td><td>Its maker cancelled its nonce.</td></tr>
+        <tr><td><code>WRONG_TAKER</code></td><td>each order</td><td>It names a taker, and the other maker is not it.</td></tr>
+        <tr><td><code>BAD_SIGNATURE</code></td><td>each order</td><td>The signature does not verify for the maker and the order as submitted. An order changed after signing fails here (<code>test_AnOrderChangedAfterSigningIsRefused</code>).</td></tr>
+        <tr><td><code>OVERFILLED</code></td><td>each order</td><td>The fill gives more than <code>giveAmount</code> less what the order has filled.</td></tr>
+        <tr><td><code>NOT_WHOLE</code></td><td>each order</td><td>It is all or nothing, and the fill does not give exactly <code>giveAmount</code>.</td></tr>
+        <tr><td><code>BELOW_LIMIT</code></td><td>each order</td><td>Its maker would receive less than its limit for what it gives, <a href="#limit">below</a>.</td></tr>
+        <tr><td><code>TOKEN_REFUSES</code></td><td>a leg</td><td>Only <code>canFill</code> answers this. In <code>settle</code> the token's own error comes back in <code>OrderSettlement_TransferFailed</code>.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <p>Each test of a refusal asks <code>canFill</code> first and then expects the same refusal from <code>settle</code>, so the two agree on every row but the last (<code>OrderSettlement_DegenerateFills</code>, <code>OrderSettlement_Settle</code>, <code>OrderSettlement_Cancel</code>).</p>
+  </div>
+</section>
+
+<section id="limit">
+  <div class="prose">
+    <h2>The limit and its rounding</h2>
+    <p>A maker that gives <code>g</code> in a fill must receive at least this much, or the fill is refused with <code>BELOW_LIMIT</code>:</p>
+  </div>
+  <pre>Math.mulDiv(g, takeAmount, giveAmount, Math.Rounding.Ceil)</pre>
+  <div class="prose">
+    <p>That is the maker's price for <code>g</code>, rounded up. The check runs for both orders: the first maker gives <code>firstGives</code> and receives <code>secondGives</code>, and the second maker the reverse. Rounding is always against the counterparty, so no sequence of small fills pays a maker less than its price. The product is 512 bits wide, so no two amounts overflow it (<code>test_VeryLargeAmountsDoNotOverflowTheLimit</code>).</p>
+    <p><b>An example</b>, from <code>test_TheLimitIsRoundedAgainstTheCounterparty</code>. A seller gives 3 for at least 10, which is 3.33 for each one. A buyer gives 12 for at least 3. A fill where the seller gives 1 and receives 3 is refused: the seller's limit for 1 is 10 / 3 rounded up, which is 4. A fill where the seller gives 1 and receives 4 settles. The buyer's side passes too: it gives 4, and its limit for 4 is 4 × 3 / 12, which is 1.</p>
+    <p>A maker can receive more than its limit. The fuzz test <code>testFuzz_AnOrderIsNeverFilledPastItsAmountOrBelowItsLimit</code> fills one order in up to four parts of any size and checks that what the maker gave is at most its amount, and what it received is at least its limit for what it gave.</p>
+    <p>Two orders can name each other's assets and still have no fill: when the limits do not overlap, every pair of amounts is below one limit or the other.</p>
+  </div>
+</section>
+
+<section id="parts">
+  <div class="prose">
+    <h2>Partial fills, and all or nothing</h2>
+    <ul class="plain">
+      <li><b>An order fills in parts.</b> Each fill adds to <code>filled[orderHash]</code>, and a fill that would take the order past <code>giveAmount</code> is refused with <code>OVERFILLED</code> (<code>test_AnOrderFillsInPartsUpToItsAmountAndNeverPastIt</code>).</li>
+      <li><b>The two orders need not be the same size.</b> A larger order meets a smaller one and stays open for the rest, which a later fill against another order can take (<code>test_ALargerOrderStaysOpenForTheRest</code>).</li>
+      <li><b>All or nothing.</b> An order with <code>allOrNothing</code> set fills only in a fill that gives exactly its <code>giveAmount</code>; any other amount is refused with <code>NOT_WHOLE</code> (<code>test_AnAllOrNothingOrderFillsWholeOrNotAtAll</code>). The flag is about what the maker gives. What it receives is still bounded by its limit alone.</li>
+      <li><b>A fill does not spend the nonce.</b> What stops an order from filling twice is <code>filled</code>, kept for the order's hash. The nonce is spent by <code>cancelOrder</code> alone.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="batch">
+  <div class="prose">
+    <h2>A batch</h2>
+    <p><code>settle</code> takes an array of fills and runs them in order, in one transaction. A later fill of an order sees what the earlier fills of it filled, so one order can meet several others in one batch (<code>test_ABatchSettlesEveryFillAndALaterFillSeesTheEarlierOnes</code>). One fill that fails reverts the whole batch, and the error carries the fill's index (<code>test_OneFillThatFailsRevertsTheBatchAndNamesItsIndex</code>). An empty batch does nothing (<code>test_AnEmptyBatchDoesNothing</code>). The contract sets no limit on the length of a batch.</p>
+    <p>Fills are not netted. Each fill makes its own two transfers, even when one maker appears in many fills of the batch.</p>
+  </div>
+</section>
+
+<section id="cancel">
+  <div class="prose">
+    <h2>Cancelling</h2>
+    <p>A maker calls <code>cancelOrder(nonce)</code>. Every order it signed with that nonce fills no further, and what an order filled before stays (<code>test_ACancelledOrderFillsNoFurtherAndKeepsWhatItFilled</code>). The call works while the contract is paused (<code>test_CancellingWorksWhilePaused</code>). It marks the caller's own nonce, so another account's call does nothing to the maker's order, and a second call for the same nonce reverts with <code>OrderSettlement_NonceCancelled</code> (<code>test_OnlyTheMakerCancelsAndOnlyOnce</code>). A cancelled nonce costs one bit of storage: bit <code>nonce &amp; 0xff</code> of word <code>nonce &gt;&gt; 8</code>, kept per maker. Nothing un-cancels a nonce.</p>
+    <p><b>A nonce is not an order.</b> What is filled is kept for each order's hash, and what is cancelled for each maker's nonce. So two different orders a maker signs with one nonce can both fill, each up to its own amount, and one cancel stops both (<code>test_TwoOrdersWithOneNonceBothFillAndOneCancelStopsBoth</code>). A maker that wants one order to replace another signs both with the same nonce and cancels them together. Otherwise it gives each order its own nonce.</p>
+    <p>Taking the allowance back stops an order too: the token then refuses the maker's leg (<code>test_WithNoAllowanceTheTokenRefusesAndTheFillNamesTheLeg</code>). An order nobody fills lapses after its <code>deadline</code>.</p>
+  </div>
+</section>
+
+<section id="token">
+  <div class="prose">
+    <h2>What the token and its rules see</h2>
+    <p>The contract calls <code>transferFrom(maker, otherMaker, amount)</code> on an ERC-20 and <code>safeTransferFrom(maker, otherMaker, id, amount, '')</code> on an ERC-1155. A gated token builds a <span class="k k-transfer">TRANSFER</span> from that, with this contract as the operator, and asks its hook as for any transfer by a spender.</p>
+    <ul class="plain">
+      <li><b>The rules judge the two makers.</b> The sender and the receiver of each leg are the makers, and no shipped rule reads the operator. A maker the policy refuses stops the fill (<code>test_AMakerThePolicyRefusesStopsTheFillWithTheTokensOwnError</code>). The token's pause and frozen amounts apply as on any transfer.</li>
+      <li><b>The contract needs no credential.</b> It never holds a token, so it is never a sender or a receiver. The tests settle through the real <a href="CredentialRule.html">CredentialRule</a> with no credential for the contract.</li>
+      <li><b>A token that lists <a href="ExecutedOnlyRule.html">ExecutedOnlyRule</a> cannot trade here.</b> That rule refuses every <span class="k k-transfer">TRANSFER</span> with <code>KIND_NOT_ALLOWED</code>, and a leg here is one.</li>
+      <li><b><a href="SettlementWindowRule.html">SettlementWindowRule</a> does not apply here.</b> It judges <span class="k k-executed">EXECUTED</span> movements only. A product that wants signed intents and a window settles through the <a href="DvPExecutor.html">DvPExecutor</a>.</li>
+      <li><b>The allowance is the maker's.</b> On an ERC-20 the maker approves this contract for an amount. On an ERC-1155 it sets approval for all, which covers every token id of that contract. Either way the contract moves a maker's tokens only as a signed order of that maker allows.</li>
+      <li><b>Any gated ERC-20 or ERC-1155 can be a leg.</b> The tests settle an <code>IntentToken</code> against the cash token, shares of a <a href="Gated4626Vault.html">Gated4626Vault</a> against cash with no change to the vault (<code>test_SharesOfA4626SettleAgainstCash</code>), and a series of a <a href="Gated1155.html">Gated1155</a> against cash in parts (<code>test_ASeriesOfAGated1155SettlesAgainstCashInParts</code>).</li>
+    </ul>
+  </div>
+</section>
+
+<section id="errors">
+  <div class="prose">
+    <h2>When a leg fails</h2>
+    <p><code>OrderSettlement_TransferFailed(index, secondLeg, reason)</code> wraps what the token reverted with, so the operator knows which fill and which leg. <code>secondLeg</code> is false for the first maker's transfer and true for the second maker's. <code>reason</code> is the token's revert data, for example <code>ERC8473PolicyRejected(reason)</code> from a gated token's policy, or <code>ERC20InsufficientAllowance</code> from a maker that gave no allowance. The first leg runs first, so if both would fail the first is the one reported. A second leg that fails undoes the first.</p>
+    <p>An ERC-20 leg is a low-level call. A token that returns nothing is taken as done, as OpenZeppelin's <code>SafeERC20</code> takes it, and a token that returns anything but <code>true</code> fails the leg with what it returned as <code>reason</code>.</p>
+    <p>Not wrapped, so they arrive with their own error:</p>
+    <ul class="plain">
+      <li>The contract's own gates: <code>ReentrancyGuardReentrantCall</code>, <code>AccessControlUnauthorizedAccount</code>, <code>EnforcedPause</code>, in that order.</li>
+      <li><code>OrderSettlement_FillRefused</code> and <code>OrderSettlement_WrongAmountReceived</code>, which are the contract's own.</li>
+      <li>The two reads of the receiver's balance around an ERC-20 leg, which run outside the wrapped call. A token address with no code reverts there with empty revert data.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="preflight">
+  <div class="prose">
+    <h2>What the pre-flight returns</h2>
+    <p><code>canFill(fill)</code> takes one fill and returns <code>(refusal, secondOrder, tokenReason)</code>. Anyone can call it. It answers in this order, stopping at the first refusal:</p>
+  </div>
+  <ol class="steps">
+    <li><div><b>The contract's own checks</b>, the same code <code>settle</code> runs: a <code>Refusal</code> and which order, with no token reason.</div></li>
+    <li><div><b>The first leg's token</b>, if it has a pre-flight: <code>TOKEN_REFUSES</code>, <code>secondOrder</code> false, and the token's reason when it gives one.</div></li>
+    <li><div><b>The second leg's token</b>, the same way: <code>TOKEN_REFUSES</code>, <code>secondOrder</code> true.</div></li>
+    <li><div>Otherwise <code>NONE</code>.</div></li>
+  </ol>
+  <div class="prose">
+    <p>Which pre-flight a token is asked depends on what it answers through ERC-165:</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>The leg's token answers</th><th>It is asked</th><th>What that covers</th></tr></thead>
+      <tbody>
+        <tr><td><code>IPolicyGated</code>, for an ERC-20 leg; <code>IGated1155</code>, for an ERC-1155 leg</td><td><code>canTransferWithReason</code></td><td>The token's pause, the maker's unfrozen balance and its policy, with a reason code. An amount above the maker's balance reads <code>INSUFFICIENT_UNFROZEN</code> (<code>test_AnAmountAboveTheMakersBalanceReadsRefusedInThePreflight</code>).</td></tr>
+        <tr><td>Only ERC-7943: <code>IERC7943Fungible</code> or <code>IERC7943MultiToken</code></td><td><code>canTransfer</code></td><td>A yes or a no with no reason, so <code>tokenReason</code> is zero. ERC-7943 does not let this answer no for a balance check alone.</td></tr>
+        <tr><td>Neither</td><td>Nothing</td><td>Nothing: the leg reads as passing.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <p>What it cannot see:</p>
+    <ul class="plain">
+      <li><b>The operator and the pause.</b> It checks neither <code>OPERATOR_ROLE</code> nor whether this contract is paused.</li>
+      <li><b>Allowances.</b> It checks no allowance and no approval for all. A maker that gave none reads as passing, and <code>settle</code> reverts on its leg.</li>
+      <li><b>A token with no pre-flight.</b> Its balances, its pause and a fee it keeps are not seen.</li>
+      <li><b>The rest of a batch.</b> It answers for one fill against what is filled on chain. A later fill of a batch runs after the earlier ones.</li>
+      <li><b>One leg's effect on the other.</b> Both legs are asked against the state before either runs.</li>
+      <li><b>The next block.</b> A pre-flight answers for the latest block and a write lands in a later one, so at a time boundary the two can differ.</li>
+    </ul>
+    <p>Simulating <code>settle</code> itself from the operator's address shows the real outcome.</p>
+  </div>
+</section>
+
+<section id="operator">
+  <div class="prose">
+    <h2>What the operator can and cannot do</h2>
+  </div>
+  <div class="two">
+    <div class="prose">
+      <h3>It chooses</h3>
+      <ul class="plain">
+        <li>which orders meet;</li>
+        <li>how much each gives in a fill, up to what is left of each order;</li>
+        <li>the price, anywhere between the two limits, by the two amounts it submits (<code>test_TheOperatorChoosesAPriceBetweenTheTwoLimitsAndNoneOutsideThem</code>);</li>
+        <li>when to submit, and whether to submit at all.</li>
+      </ul>
+    </div>
+    <div class="prose">
+      <h3>It cannot</h3>
+      <ul class="plain">
+        <li>move anything outside a signed order, or change a field of one;</li>
+        <li>fill an order past its <code>giveAmount</code>;</li>
+        <li>give a maker less than its limit for what it gives;</li>
+        <li>send anything to anyone but the two makers;</li>
+        <li>fill an order after its maker cancelled it, after its deadline, or while the contract is paused.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="prose">
+    <p>There is no fee and no receiver but the makers. So whatever lies between two limits goes to one of the two makers, and never to the operator. Which maker gets it is the operator's choice. In that test the seller takes at least 50 of cash for each unit and the buyer pays at most 60: fills at 50, at 55 and at 60 all settle, and a fill whose cash is the smallest amount below the seller's limit or above the buyer's is refused with <code>BELOW_LIMIT</code>.</p>
+  </div>
+</section>
+
+<section id="dvp">
+  <div class="prose">
+    <h2>How it differs from DvPExecutor</h2>
+    <p>Both settle one asset against another in one transaction, with no way to run one side alone. They reach the token by different paths.</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th></th><th><a href="DvPExecutor.html">DvPExecutor</a></th><th>OrderSettlement</th></tr></thead>
+      <tbody>
+        <tr><td>A party signs</td><td>A transfer intent on its token's own domain, or an ERC-3009 authorization for the cash</td><td>An order on this contract's domain</td></tr>
+        <tr><td>The token is moved by</td><td><code>executeTransfer</code>, which checks the intent itself</td><td><code>transferFrom</code> or <code>safeTransferFrom</code>, under the maker's allowance or approval for all</td></tr>
+        <tr><td>The rules see</td><td><span class="k k-executed">EXECUTED</span></td><td><span class="k k-transfer">TRANSFER</span></td></tr>
+        <tr><td>It needs on the token</td><td><code>EXECUTOR_ROLE</code></td><td>No role</td></tr>
+        <tr><td>The security can be</td><td>A token with signed intents, an <code>IntentToken</code></td><td>An ERC-20 or an ERC-1155 that takes a plain transfer and moves exactly the amount</td></tr>
+        <tr><td>Amounts</td><td>Exactly the trade both parties signed, once</td><td>Any part of an order, up to its amount</td></tr>
+        <tr><td>Price</td><td>Fixed by the two signatures</td><td>Chosen by the operator between the two signed limits</td></tr>
+        <tr><td>One transaction holds</td><td>One trade</td><td>A batch of fills</td></tr>
+        <tr><td>A token with <code>ExecutedOnlyRule</code></td><td>Can trade</td><td>Cannot trade</td></tr>
+        <tr><td><code>SettlementWindowRule</code></td><td>Applies to each executed leg</td><td>Does not apply</td></tr>
+        <tr><td>A reference on chain</td><td>The intent's <code>ref</code>, in <code>IntentExecuted</code></td><td>None: an order has no reference field</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="roles">
+  <div class="prose">
+    <h2>Roles, pause and reentry</h2>
+    <dl class="kv">
+      <dt>OPERATOR_ROLE</dt><dd>Submits fills. Deployed: the account passed as <code>operator</code> to the hand-over, the same as on the other two executors.</dd>
+      <dt>GUARDIAN_ROLE</dt><dd>Pauses with no delay. Deployed: the guardian multisig, from the constructor.</dd>
+      <dt>DEFAULT_ADMIN_ROLE</dt><dd>Grants roles and unpauses. Deployed: the deployer until the hand-over, then the main timelock.</dd>
+      <dt>RECOVERY_ROLE</dt><dd><code>unpause()</code> and revoking <code>GUARDIAN_ROLE</code>, and nothing else (<code>test_RecoveryRevokesTheGuardianAndNoOtherRole</code>). Deployed: the recovery timelock.</dd>
+    </dl>
+    <p>The contract holds no role on any token, and no product grants it one. A profile asks for it with the flag <code>orderSettlement</code>, and <code>Core</code> then deploys one, under the part key <code>orderSettlement</code>, with the deployer as admin and the guardian. <code>CoreHandover</code> grants the operator and the recovery timelock their roles and hands the admin role to the main timelock, as for the other two executors. None of the profiles in <code>ignition/profiles.ts</code> sets the flag. For a core built without it, <code>CoreParts</code> adds it alone and <code>PartsHandover</code> hands it over the same way, which <code>test/nodejs/products.test.ts</code> does on a running <code>cash</code> core.</p>
+    <p>Pausing stops <code>settle</code> without touching the tokens. <code>cancelOrder</code> and <code>canFill</code> still work. <code>settle</code> carries OpenZeppelin's transient reentrancy guard, and what a fill gives is recorded before either token is called, so a token that calls back cannot fill an order twice. The read-only functions and <code>cancelOrder</code> are unguarded.</p>
+  </div>
+</section>
+
+<section id="functions">
+  <div class="prose"><h2>What it can do</h2></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>settle(fills)</code></td><td><code>OPERATOR_ROLE</code>, while not paused</td><td>Settles the fills in order, atomically. For each: the checks, what both orders have filled, the two legs, two <code>OrderFilled</code> events.</td></tr>
+        <tr><td><code>cancelOrder(nonce)</code></td><td>Anyone, for its own nonce, also while paused</td><td>Cancels every order the caller signed with that nonce and emits <code>OrderCancelled</code>. Reverts with <code>OrderSettlement_NonceCancelled</code> if already cancelled.</td></tr>
+        <tr><td><code>canFill(fill)</code></td><td>Anyone (read-only)</td><td>Pre-flight for one fill: <code>(refusal, secondOrder, tokenReason)</code>.</td></tr>
+        <tr><td><code>orderHash(order)</code></td><td>Anyone (read-only)</td><td>The EIP-712 hash a maker signs.</td></tr>
+        <tr><td><code>filled(orderHash)</code></td><td>Anyone (read-only)</td><td>How much of its <code>giveToken</code> an order has given so far.</td></tr>
+        <tr><td><code>nonceCancelled(maker, nonce)</code></td><td>Anyone (read-only)</td><td>Whether a maker cancelled a nonce.</td></tr>
+        <tr><td><code>pause()</code></td><td><code>GUARDIAN_ROLE</code></td><td>Stops <code>settle</code>. Reverts with <code>EnforcedPause</code> if already paused.</td></tr>
+        <tr><td><code>unpause()</code></td><td><code>DEFAULT_ADMIN_ROLE</code> or <code>RECOVERY_ROLE</code></td><td>Resumes settlement. Anyone else gets <code>AccessControlUnauthorizedAccount(caller, DEFAULT_ADMIN_ROLE)</code>. Reverts with <code>ExpectedPause</code> if not paused.</td></tr>
+        <tr><td><code>revokeRole(role, account)</code></td><td>The role's admin; <code>RECOVERY_ROLE</code> for <code>GUARDIAN_ROLE</code> as well</td><td>Removes a role.</td></tr>
+        <tr><td><code>grantRole(role, account)</code></td><td><code>DEFAULT_ADMIN_ROLE</code></td><td>Grants a role: operators, guardians and the recovery timelock.</td></tr>
+        <tr><td><code>renounceRole(role, account)</code></td><td>The account itself</td><td>OpenZeppelin <code>AccessControl</code>. The deployer gives up its admin role this way at hand-over.</td></tr>
+        <tr><td><code>hasRole</code>, <code>getRoleAdmin</code>, <code>paused</code>, <code>eip712Domain</code>, <code>OPERATOR_ROLE</code>, <code>GUARDIAN_ROLE</code>, <code>RECOVERY_ROLE</code>, <code>DEFAULT_ADMIN_ROLE</code></td><td>Anyone (read-only)</td><td>The state of the roles and the pause, and the signing domain.</td></tr>
+        <tr><td><code>supportsInterface(id)</code></td><td>Anyone (read-only)</td><td>ERC-165: <code>IOrderSettlement</code> and the <code>AccessControl</code> interfaces.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Error or event</th><th>When</th></tr></thead>
+      <tbody>
+        <tr><td><code>OrderFilled(orderHash, maker, counterparty, given, received)</code></td><td>Twice per settled fill, once for each order, after both legs.</td></tr>
+        <tr><td><code>OrderCancelled(maker, nonce)</code></td><td>A maker cancelled a nonce.</td></tr>
+        <tr><td><code>OrderSettlement_FillRefused(index, refusal, secondOrder)</code></td><td>A fill failed one of the contract's own checks.</td></tr>
+        <tr><td><code>OrderSettlement_TransferFailed(index, secondLeg, reason)</code></td><td>A token refused a leg.</td></tr>
+        <tr><td><code>OrderSettlement_WrongAmountReceived(index, secondLeg, expected, received)</code></td><td>An ERC-20 leg did not raise the receiver's balance by exactly the amount.</td></tr>
+        <tr><td><code>OrderSettlement_NonceCancelled()</code></td><td><code>cancelOrder</code> for a nonce the caller already cancelled.</td></tr>
+        <tr><td><code>OrderSettlement_ZeroAddress()</code></td><td>The constructor got a zero admin or guardian.</td></tr>
+        <tr><td><code>Paused</code>, <code>Unpaused</code>, <code>RoleGranted</code>, <code>RoleRevoked</code></td><td>Inherited from OpenZeppelin.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="why">
+  <div class="prose">
+    <h2>Why it is built this way</h2>
+    <ul class="plain">
+      <li><b>No role on the token.</b> The contract can move only what a maker both approved and signed for. A token's admin grants it nothing, so a token needs no change to trade here, and an intent token that should not trade here lists <code>ExecutedOnlyRule</code>.</li>
+      <li><b>The maker receives at its own address.</b> A third-party receiver would have to be judged by the token's policy, and this contract holds no policy.</li>
+      <li><b>The operator sets the price, inside both limits.</b> The contract cannot know which order was there first, so it cannot give the older order its price. With no fee and no other receiver, the difference stays with the makers.</li>
+      <li><b>Refused before the tokens are called.</b> A fill of nothing, an empty order, one maker on both sides and an order that gives what it takes are refused by name, and not later by a token with an error that says less.</li>
+      <li><b>Filled by hash, cancelled by nonce.</b> An order that fills in parts needs a running total, which is kept for its hash. A cancel needs one bit.</li>
+      <li><b>Little state, replaceable.</b> It stores its roles, its pause flag, what each order has filled and the nonces makers cancelled. It is a plain contract, and replacing it means deploying another and having makers approve and sign for that one.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="prose">
+    <h2>What it does not do</h2>
+    <ul class="plain">
+      <li><b>No matching.</b> It keeps no book and finds no counterparty. The operator matches orders off-chain and submits fills.</li>
+      <li><b>No fee.</b> A fill is two transfers between two makers. Nothing goes to the operator or to a venue.</li>
+      <li><b>No third-party receiver.</b> Each maker receives at the address that signed.</li>
+      <li><b>No ERC-721.</b> An order names an ERC-20 or an ERC-1155 on each side.</li>
+      <li><b>No netting.</b> A maker in many fills of a batch makes and receives a transfer in each.</li>
+      <li><b>No token that keeps a fee.</b> An ERC-20 leg must raise the receiver's balance by exactly the amount.</li>
+      <li><b>No best price.</b> The operator picks the price within the two limits, and which maker gets the difference. A maker's protection is its own limit.</li>
+      <li><b>It does not bound the allowance.</b> An allowance, or an approval for all on an ERC-1155, is what the maker trusts this contract with. The contract uses it only as the maker's signed orders allow, so the orders a maker has signed and not cancelled are the bound.</li>
+      <li><b>It does not protect the makers' timing.</b> An operator can hold an order back until its deadline passes, or fill it late in its window. The maker's controls are a short deadline, <code>validAfter</code> and cancelling.</li>
+      <li><b>No list of tokens.</b> Nothing on-chain says which tokens are genuine. A maker who signs an order that names a counterfeit token can be paid in it.</li>
+      <li><b>No settlement window and no reference.</b> A product that needs either settles signed intents through the <a href="DvPExecutor.html">DvPExecutor</a>.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="connected">
+  <div class="prose"><h2>Connected to</h2></div>
+  <div class="cards">
+    <a class="card" href="DvPExecutor.html"><span class="name">DvPExecutor</span><p>Settles one trade from two signed intents, as executed movements.</p></a>
+    <a class="card" href="IntentExecutor.html"><span class="name">IntentExecutor</span><p>The executor for intents without a payment, governed the same way.</p></a>
+    <a class="card" href="ExecutedOnlyRule.html"><span class="name">ExecutedOnlyRule</span><p>A token that lists it refuses every leg here.</p></a>
+    <a class="card" href="Gated1155.html"><span class="name">Gated1155</span><p>A series of it can be a leg, by token id.</p></a>
+    <a class="card" href="Gated4626Vault.html"><span class="name">Gated4626Vault</span><p>Its shares are an ERC-20 and trade here against cash.</p></a>
+    <a class="card" href="../roles.html"><span class="name">Who can do what</span><p>The operator, the guardian and the two timelocks on each executor.</p></a>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose">
+    <h2>Source and tests</h2>
+    <ul class="plain">
+      <li>Contract: <code>contracts/intents/OrderSettlement.sol</code>, interface <code>IOrderSettlement.sol</code></li>
+      <li>Tests: <code>OrderSettlement.t.sol</code> (the real contract on real tokens behind the credential registry, the rule and the hook: fills in whole and in parts, each refusal, cancelling, the roles and the pause, a refused maker, a fee-taking token, vault shares, a multi-token series, batches, and the fuzzed limit) and <code>test/nodejs/products.test.ts</code> (added to a running core, handed over, and an order's hash checked against viem's). The EIP-712 type <code>ORDER_TYPES</code> is in <code>test/nodejs/fixtures.ts</code>.</li>
+    </ul>
+  </div>
+</section>
+
+</main>
+</body>
+</html>
