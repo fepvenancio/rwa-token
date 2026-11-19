@@ -4291,6 +4291,169 @@ contracts identical. `md_check.py`: 44 pages, 0 problems.
 sentences and sizes corrected, so anything wrong there is wrong here. They were not opened in a browser on this
 branch. The footers name `01024e9` on `main`, the squash of this port (#49), re-pinned after the merge.
 
+## The multi-token template, `Gated1155` (planned and built on `main` 2026-11-19; the port to `paris` and the pages are not done)
+
+Source: the owner, 2026-11-19: "lets plan to build a Gated1155 I saw 7943 has a IERC7943MultiToken". Derived from the code at `38fdbc1` on `main`, ERC-7943's Final text, the ERC-8473 draft's movement rules and OpenZeppelin 5.6.1's `ERC1155Upgradeable`. The six decisions the first version of this plan left open are settled below, from the two standards.
+
+### What the standards ask
+
+- **ERC-7943, multi-token.** `IERC7943MultiToken` has six functions: `forcedTransfer(from, to, tokenId, amount)`, `setFrozenTokens(account, tokenId, amount)`, `getFrozenTokens(account, tokenId)`, `canSend(account)`, `canReceive(account)` and `canTransfer(from, to, tokenId, amount)`. Its id is `0x41c4fbad`, which the XOR of those six selectors confirms. Events `ForcedTransfer(from, to, tokenId, amount)` and `Frozen(account, tokenId, amount)`; error `ERC7943InsufficientUnfrozenBalance(account, tokenId, amount, unfrozen)`. The rules are the fungible ones for each token id: a frozen amount may exceed the balance, `canTransfer` validates the unfrozen amount and must not return false for a balance, and an enforcement action that takes frozen tokens lowers the frozen amount and emits `Frozen` before the transfer event. The base standard may be ERC-1155 or ERC-6909, and the text says nothing about batches or receiver callbacks. The plan was written from a summary of the page, so step 1 copies the interface from the Final text and pins the id.
+- **ERC-8473, batches (movement rule 10).** The items of a batch are processed in the order given, and for each item the token checks, changes balances, emits that item's transfer event and notifies the policy, all before the next item is checked. An ERC-1155 token therefore emits one `TransferSingle` for each item. One rejected item reverts the whole batch. Rule 7: `afterTransfer` completes before any call to the recipient.
+
+### What it reuses unchanged
+
+- **`PolicyGatedCoreUpgradeable`**: roles, guardian, pause and the recovery path, the policy pointer and `installPolicy`, the registry, the upgrade checks, the account-level answers, `_inferKind` and `_ask`. This is what the core was split out for.
+- **`ComplianceHook`**, **`PolicyRegistry`**, both timelocks, **`CredentialRegistry`**: they never read an amount or a token id.
+- **`TransferContext`**: `tokenId` is the id and `amount` the amount, with `data = abi.encode(fromBalance, toBalance)` for that id before the move. Brief §5 already names this use.
+- **`ProxyDeployer`**: it asks the new proxy for `registry()`, `policy()` and `symbol()`. ERC-1155 has no `symbol()`, so the template adds `name()` and `symbol()`, set at initialisation, as most ERC-1155 collections do.
+
+### The rules on a multi-token
+
+No shipped rule reads `ctx.tokenId`, and every rule keys its configuration and state by `ctx.token` alone. So on a `Gated1155` one rule list and one configuration judge every id alike.
+
+| Rule | On a `Gated1155` |
+|---|---|
+| `CredentialRule` | Works. Who may hold is decided for the contract, the same for every id |
+| `HolderRestrictionRule` | Works. A lockup or an address freeze covers a holder's every id |
+| `MinPositionRule` | Works for each id, since it reads the balances in `data`, but with one minimum for every id. Allowed, and a product whose ids have different units leaves it out |
+| `SupplyCapRule` | Refused by the profile check. It calls `totalSupply()`, which here is the sum over every id |
+| `FundHoldersRule` | Refused. `Fund.registerClass` asks ERC-165 for `IPolicyGated`, and the fund counts one balance for each class |
+| `SettlementWindowRule`, `ExecutedOnlyRule` | Refused, as on every template without intents |
+
+### The token
+
+`contracts/tokens/Gated1155.sol`, one concrete contract on OpenZeppelin's `ERC1155Upgradeable` and the core, with the guard `ReentrancyGuardTransient` on this line. No permit (ERC-1155 has none), no intents, no DvP, no vault over it.
+
+| Function | Who | Note |
+|---|---|---|
+| `mint(to, tokenId, amount)` | `MINTER_ROLE` | A `MINT` through the hook, then the receiver callback when `to` is a contract (D4) |
+| `burn(from, tokenId, amount)` | `BURNER_ROLE` | Enforcement, announced as `FORCED`: no approval, may take frozen tokens, not stopped by the pause. No holder burn, as on the other tokens |
+| `forcedTransfer(from, to, tokenId, amount)` | `AGENT_ROLE` | Takes frozen tokens as needed and never more than the balance; `Frozen` before `TransferSingle`; then the standard's `ForcedTransfer` and our `ForcedTransferBy`, which here carries the id too and so has its own topic |
+| `setFrozenTokens(account, tokenId, amount)` | `AGENT_ROLE` | An absolute frozen amount for each account and id; may exceed the balance |
+| `setURI(tokenId, uri)` | `AGENT_ROLE` | Metadata for one id; emits ERC-1155's `URI` |
+| `safeTransferFrom`, `safeBatchTransferFrom`, `setApprovalForAll` | holders and their operators | ERC-1155's own |
+| `canTransfer`, `canTransferWithReason`, `canSend`, `canReceive`, `getFrozenTokens` | anyone | As on the ERC-20 base, for one id |
+| pause, `installPolicy`, roles, upgrades, `multicall` | as on every template | From the core |
+
+No issuer batch functions: a role holder batches `mint`, `burn` or `forcedTransfer` with `multicall`, as on the other templates.
+
+**The movement path.** OpenZeppelin's `_update(from, to, ids, values)` applies a whole batch and then emits one `TransferBatch`, and its balances are private to it. The override loops over the items, and for each one calls a single `_move`, which is guarded against reentrancy:
+
+1. ERC-1155's own checks come first: approval in `safeTransferFrom` before `_update` is reached, and equal array lengths.
+2. Paused rejects every kind except `FORCED`.
+3. The amount must fit the unfrozen balance of that id, for every kind except `FORCED`. Within the balance but above the unfrozen part reverts with `ERC7943InsufficientUnfrozenBalance(account, tokenId, amount, unfrozen)`; above the balance reverts with ERC-1155's `ERC1155InsufficientBalance`.
+4. The hook, with the context above. A rejection is `ERC8473PolicyRejected(reason)`, and a policy that cannot be asked is `CHECK_UNAVAILABLE`.
+5. The move, by calling the parent's `_update` with that one item, which emits its `TransferSingle`.
+6. `afterTransfer`, if the hook wants it.
+
+An id that appears twice in a batch is two movements, each seeing the balances the earlier one left. An empty batch makes no movement and asks nobody. The receiver callback runs once after the last item, outside the guard, with the state final: `onERC1155Received` for one item and `onERC1155BatchReceived` for a batch, as OpenZeppelin calls them (D4).
+
+**Pre-flights.** `canTransferWithReason(from, to, tokenId, amount)` runs the write's path for one item minus the write, with the operator simulated as `from` and zero for a mint. `canTransfer` is the standard's bool with the fungible exception: an amount above the balance reads true when nothing is frozen on that id. No pre-flight takes a batch; an integrator asks about each item, and for a batch that names an id twice the later answers depend on the earlier moves.
+
+### Decisions, settled from the standards (2026-11-19)
+
+The owner, 2026-11-19: "read the ERC8473 and try to comply, find the best answers to keep the code following the same idea, and comply with finance laws". The draft was read in full at `667f261` of its repository, and ERC-1155's rules from a summary of its page, which step 1 checks against the text. The answers:
+
+- **D1. One policy for the contract.** Neither standard leaves room for anything else at account level: ERC-7943's `canSend(account)` and `canReceive(account)` and the draft's `checkSend(token, account)` and `checkReceive(token, account)` take no token id, so who may hold cannot differ by id and still be told to an integrator. Every shipped rule already keys by the token alone, so the hook and the rules stay as they are. An id is a series of one instrument under the same eligibility terms. Instruments with different investors, selling restrictions or holder limits are separate contracts.
+- **D2. Supply and a URI for each id.** `ERC1155SupplyUpgradeable` and `ERC1155URIStorageUpgradeable`. Step 5 of the agreed order reconciles on-chain supply and positions with the issuer's ledger every day, and that needs the issued amount of each series readable on-chain, not rebuilt from events. Supply is updated inside the same item's move, so it is current when `afterTransfer` runs (token rule 14).
+- **D3. Batches item by item.** The draft's token rule 10 requires it, and ERC-1155 allows several `TransferSingle` events for one batch and requires the array order. Not a choice.
+- **D4. Receiver callbacks on every path into a contract.** ERC-1155 calls a mint a specialised transfer that must follow the receiver rules, and says a non-standard transfer function must still call the hook on a receiver that implements it. So `mint` and `forcedTransfer` make the callback, as OpenZeppelin's `_mint` and `_safeTransferFrom` do, and a contract without the receiver interface is refused. The draft's rule 7 is met because the callback comes after `afterTransfer`, outside the guard. A batch makes one `onERC1155BatchReceived` after its last item, which ERC-1155 recommends for a batch. A burn makes none. Not a choice either.
+- **D5. `main` first, then `paris`.** The port follows in the same work, before the pages, in its own pull request into `paris`. Only the guard and its initialiser differ.
+- **D6. Two new interface files**, `IERC7943MultiToken.sol` and `IGated1155.sol`. No existing interface or id changes and no new reason code. The owner's message above is read as the rule 4 instruction for these two files; the review of this plan is where to say otherwise.
+
+### Conformance to ERC-8473, point by point
+
+| The draft | `Gated1155` |
+|---|---|
+| Kinds, in order | `forcedTransfer` and the burner's `burn` are `FORCED`; `mint` is `MINT`; ERC-1155's two transfer functions are `TRANSFER` and can be nothing else. No `BURN` and no `EXECUTED` path exists: the template has no holder burn and no intents |
+| Context | `tokenId` and `amount` are the item's; `operator` is the caller; `data` is that id's two balances before the move, in the encoding the other templates use, so a shared rule reads the same words. The `data` argument of ERC-1155's transfer functions never reaches the policy: it goes to the receiver callback alone |
+| Token rules 1 and 2 | Nothing changes before the check except earlier items of the same batch, and nothing but the policy is called between the check and the move. The enforcement paths lower the frozen amount first, which the draft allows for `FORCED` |
+| Rules 4, 5 and 11 | From the core: one policy address for each movement, `CHECK_UNAVAILABLE` for a policy that cannot be asked, and no policy means no movement |
+| Rules 6 and 7 | `afterTransfer` after each item's `TransferSingle`, before the next item and before any receiver callback |
+| Rules 8 and 9 | The checks are static calls, and each item's `_move` holds the guard |
+| Rule 10 | The batch path above |
+| Rule 12 | The token's own checks are the pause and the frozen amount of that id, and neither reads the caller |
+| Rule 13 | An enforcement action lowers the frozen amount by exactly the frozen part it takes and emits `Frozen` before `TransferSingle`. The policy still judges the receiver |
+| Rule 14 | `balanceOf`, `totalSupply(id)` and `getFrozenTokens` do not revert in the middle of a batch |
+| Check rules 1 to 5 | `canSend` and `canReceive` from the core. `canTransfer` simulates a `TRANSFER`, a `MINT` or a `BURN` with `from` as the operator, is false when both addresses are zero, validates the unfrozen amount when something is frozen and does not fail for a balance. A `BURN` asked about is answered as a holder's would be, although no function here makes one, as on `Gated721` |
+| Installation rules | From the core, unchanged |
+| ERC-165 | `0x0505c8c9`, `0x41c4fbad`, ERC-1155 and its metadata extension |
+
+A zero amount and a transfer to oneself are movements, and the policy is asked about each. Nothing here needs a change to the draft.
+
+### What the law needs from this template
+
+A codebase is not compliant on its own (step 4 of the agreed order says so): a regulator judges the terms, the operators, the chain and the code together, and the points below are for counsel to confirm for each product. This is what the code gives them, and where it stops.
+
+- **Who may hold.** Every movement, issuance and enforcement included, asks `CredentialRule` about the receiver, for every id. No path delivers to an account that is not eligible.
+- **One contract, one set of terms.** Eligibility, lock-up and freezes are the contract's, not an id's. A product whose series differ in who may buy them, in where they may be sold or in their holding period uses one contract for each set of terms. The profile check cannot see this, so it is a rule for whoever designs the product.
+- **Holder limits.** No shipped rule caps the holders of an id or of the contract: `FundHoldersRule` counts across a fund's separate tokens and is refused here. An instrument with a legal limit on its number of holders must not be issued on `Gated1155` until a cap rule for it exists.
+- **Lock-ups.** `HolderRestrictionRule` locks a holder for every id at once. That is never looser than a lock-up on one series and can be stricter. A product with a holding period for each series uses one contract for each, or waits for a rule that reads the id.
+- **Freezes and orders.** An agent freezes an amount of one id for one holder, freezes an address for every id through the rule, forces a transfer of one id and burns one id, each with an event that names the account and, for a forced transfer, the agent. A sanctioned address can neither send nor receive any id.
+- **The register.** One event for each movement, in order, and the issued amount of each id on-chain, so the register and the daily reconciliation rebuild from the chain without interpreting batches. Whether the chain is the register or a copy of it is step 5's question, as for every template.
+- **Operator approvals.** `setApprovalForAll` lets a holder name an operator for all its ids. The operator's transfers are judged on the sender and the receiver like any other, and the policy must not judge the operator on a `TRANSFER` (policy requirement 6). The token does not restrict approvals: that would be a decision about who inside the template (rule 11). Under issuer custody (P24) the approvals are the custodian's to give.
+- **Personal data.** The URI of an id is public. It describes the series and must hold nothing about a holder.
+- **Payment data.** Originator and beneficiary details stay off-chain, as on the other templates: the draft forbids caller data in the context of a `TRANSFER`.
+
+### Deployment
+
+`Gated1155` joins `Template` and `IMPLEMENTATION_KEY` (`multiImpl`) in `ignition/profiles.ts`; `Core` deploys its implementation when a profile lists one; `Product` grants its minter and burner as it does a token's. Its `initialize(name, symbol, admin, guardian, registry, hook, rules)` takes the arguments `Gated721`'s takes. New profile `multi`: one `Gated1155` with `credentialRule` and `holderRestrictionRule`. The profile check refuses the four rules in the table. `assertHandedOver` and the post-deploy check cover it as they cover a token.
+
+### Tests, written first
+
+- `contracts/tokens/Gated1155.t.sol`, with a mocked hook: every role gate; mint, burn and transfer reach the hook with the zero addresses, the id, the amount and that id's balances in `data`; a rejection changes nothing; frozen amounts for each id (above the balance, a holder moves exactly the unfrozen part, enforcement lowers the frozen amount by exactly the frozen part taken, `Frozen` before `TransferSingle`); a freeze on one id leaves another id free; pause and the recovery path; `installPolicy` and upgrades refuse an unattested target and another template; pre-flight parity with the write, fuzzed with `bound`; ERC-165 ids from solc against `0x41c4fbad` and ERC-1155's.
+- Batches: the hook is asked once for each item in order, each with the balances the earlier items left; one `TransferSingle` for each item and no `TransferBatch`; a rejected third item reverts the first two; an id named twice; an empty batch; unequal arrays.
+- Callbacks: `mint`, `forcedTransfer` and both transfer functions call the receiver hook on a contract, after `afterTransfer`; a contract without the receiver interface is refused on each; a batch makes one batch callback; a burn makes none.
+- Reentrancy: a receiver that calls back from `onERC1155Received` and from `onERC1155BatchReceived`, and a rule that calls back during `afterTransfer` in the middle of a batch.
+- Invariants: for each id, the sum of balances equals `totalSupply(id)`, and a holder moves at most the unfrozen balance.
+- Integration: the real hook with `CredentialRule` and `HolderRestrictionRule`, deployed through `ProxyDeployer`, every refusal comparing the pre-flight with the write. Whether the fuzz of `canTransfer` against `canSend` and `canReceive` in `RuleSetIntegration.t.sol` extends to this template is decided there.
+- `test/nodejs/products.test.ts`: the `multi` profile deploys and passes the hand-over check, and the profile check throws on the refused rules.
+- `InterfaceFreeze.t.sol`, `ContractSizes.t.sol`, `scripts/verify-reproducible.ts`'s list, `validate:upgrades`. Halmos: the frozen-amount path for one id, if the existing harness extends to it without a new model.
+
+Planted bugs, each to be caught by a test: the unfrozen check skipped for the second item of a batch; `afterTransfer` called once after a batch and not after each item; `Frozen` emitted after `TransferSingle`; `canTransfer` returning false for a balance.
+
+### Steps
+
+1. Interfaces and the brief: `IERC7943MultiToken` copied from the Final text, `IGated1155`, their ids pinned, and CLAUDE.md §3, §4 and §5 naming the template. ERC-1155's rules on minting to a contract, on non-standard transfer functions and on a batch callback after single events are read in the text, and D4 is reopened if they differ from the summary. Verify: the freeze test fails before the pins and passes after.
+2. Tests first, against a stub that skips every check, with the failing run shown.
+3. `Gated1155`. Verify: `npx hardhat test`, both runners; the planted bugs; the size.
+4. Deployment: the profile, `Core`, `Product`, the fixtures and the lists. Verify: the `multi` profile passes the hand-over check.
+5. Gates: format, lint, typecheck, Slither, Halmos, `validate:upgrades`, `verify:reproducible`.
+6. The port to `paris`, in its own pull request into `paris`, never merged into `main`.
+7. The pages (`Gated1155`, the interface, and the pages that list the templates) with their Markdown copies, on each line, pinned to that line's merged commit.
+
+### Not in this work
+
+- Rules that read the id: a lock-up, a supply cap or a holder cap for each id. They can only add to `checkTransfer`; the account-level answers stay the contract's.
+- A reference to a legal order in the `data` of a `FORCED` movement, which the draft allows. No template passes one today.
+- Intents, DvP and vaults over a multi-token. `DvPExecutor` settles ERC-20 legs only.
+- ERC-6909 as the base. ERC-7943 allows it, and it is the lighter standard, with no callbacks and no batches; the owner asked for ERC-1155.
+- A fund whose classes are ids of one contract. `Fund` counts investors across separate tokens, and a class as an id would need the fund layer rewritten.
+
+### As built on `main` (2026-11-19)
+
+The owner approved the plan on 2026-11-19 ("Yes, start"). Steps 1 to 5 are done on this line; steps 6 and 7 are not.
+
+- **Step 1, the texts.** ERC-7943 and ERC-1155 were read in their own text. Two details differed from the summary the plan was written from, and the interface follows the text: `tokenId` is indexed in `ForcedTransfer` and in `Frozen`, and `ERC7943CannotTransfer` carries the amount. D4 stands: ERC-1155 says a mint is a specialised transfer that follows the receiver rules, and that a non-standard transfer function follows them too when the receiver implements the interface and SHOULD revert when it does not, which is what `mint` and `forcedTransfer` do. A batch may emit several `TransferSingle`, and the batch callback is the one the text recommends for a batch.
+- **Interfaces.** `IERC7943MultiToken` (`0x41c4fbad`, which solc computes from the file) and `IGated1155` (`0xc12446d8`: mint, burn, setURI, name, symbol, canTransferWithReason). Three new topics pinned. No existing id or topic moved. The freeze test failed on the unpinned values and passes with them.
+- **The token.** `contracts/tokens/Gated1155.sol`, 17,384 bytes as first built (the 15,700 first written here was wrong). As planned, with nothing added: `ERC1155SupplyUpgradeable`, `ERC1155URIStorageUpgradeable` and the core; `_update` loops the items through one guarded `_move`.
+- **Tests.** `Gated1155.t.sol`, 95 tests: 85 unit with a mocked or a recording policy, 2 invariants and 8 through the real hook, `CredentialRule` and `HolderRestrictionRule`, deployed by `ProxyDeployer`. Against a stub with no checks 56 of the first 94 failed. The fuzz of `canTransfer` against `canSend` and `canReceive` is in this file, for this template, and `RuleSetIntegration.t.sol` is unchanged.
+- **Planted bugs.** The items of a batch after the first moved without any check; `afterTransfer` for the last item of a batch only; the frozen amount lowered after the transfer event; `canTransfer` counting the balance: 7, 4, 3 and 3 tests fail.
+- **Deployment.** Template `Gated1155`, part `multiImpl`, profile `multi`. The profile check refuses `fundHoldersRule` and `supplyCapRule` on it, and `windowRule` and `executedOnlyRule` as on every template without intents; `minPositionRule` is allowed. `products.test.ts` deploys the profile, moves a batch and checks the refusals, and the test that deploys every profile covers its hand-over check.
+- **Not done.** Halmos has no property for this template: the existing harness models the proxied `IntentToken`, and a frozen-amount property here needs a model of its own. The port to `paris` (step 6) and the pages with their Markdown copies (step 7) follow.
+
+### Review of 2026-11-19
+
+The owner passed on a review of both pull requests the day they were opened. Each finding was checked against the code before anything changed.
+
+- **An empty batch reached the receiver. Confirmed, fixed.** `safeBatchTransferFrom` with no items ran no loop, so no pause and no policy were consulted, and OpenZeppelin then made the batch callback on the receiver, with the caller's data. Anyone, also while the token was paused, could make the token call a contract of their choice. The token now overrides `safeBatchTransferFrom`: OpenZeppelin's approval and zero-address checks, `_update`, and the batch callback only when the batch has at least one item. An empty batch still succeeds and still changes nothing; it now calls nobody. Two tests failed before the fix, on both lines: an empty batch from a stranger to a receiver contract, and the same while paused.
+- **A batch of one item got the single callback on `paris`. Confirmed, fixed by the same override.** OpenZeppelin 5.3.0 chooses the callback by the length of the batch, so a batch of one called `onERC1155Received`; 5.6.1 calls `onERC1155BatchReceived`, which is what ERC-1155 asks of `safeBatchTransferFrom`. The override names the batch callback itself, so the two lines behave alike and the source stays the same file. One test failed before the fix on `paris` and passed on `main`.
+- **D4 stands.** `mint` and `forcedTransfer` make the receiver callback, unlike `Gated721`, whose mint and forced transfer make none: ERC-1155 has no transfer without it. What follows for operations: a contract that is to receive this token by any path, a custody wallet or a recovery account included, must implement `IERC1155Receiver`, or the movement reverts.
+- **`SupplyCapRule` is refused by the profile check only.** `FundHoldersRule` is refused on-chain as well, because `Fund.registerClass` asks for `IPolicyGated`. Nothing on-chain refuses `SupplyCapRule`: the hook accepts any attested list, and `ERC1155SupplyUpgradeable` answers `totalSupply()` with the sum of every id, so a timelock `setRules` that listed the rule would cap that sum and not any one id. Not changed: the rule is not this template's, and a cap for each id is a new rule (see "Not in this work").
+- **Comments.** The core's NatSpec now names this template. `IERC8473Policy`'s comment on `tokenId` still names only the ERC-721: the file is frozen (rule 4) and waits for the owner's word.
+- **Sizes.** After the fix the token is 17,461 bytes on `main` and 17,861 on `paris`.
+- **Tests.** `Gated1155.t.sol` has 98 tests on both lines.
+
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
 2. Credential layer: none left. On 2026-10-30 the owner confirmed decisions 11, 12, 13, 15, 16 and 17 as built (17 at the measured +8,179 gas on a transfer). Decision 14 is moot, since `IdentityRule` was removed in the cleanup. Decisions 8 and 9 are recorded in the credential section's table.

@@ -23,7 +23,7 @@ import {ITemplated} from 'interfaces/ITemplated.sol';
  * @notice The part of every gated template that does not depend on what it counts: the roles, the guardian and the
  *         recovery path, pause, the hook pointer and its attestation, the registry, and the upgrade checks. A fungible
  *         template adds balances and frozen amounts (`PolicyGatedERC20Upgradeable`), an ERC-721 its tokens and their
- *         freezes (`Gated721`)
+ *         freezes (`Gated721`), an ERC-1155 its balances and frozen amounts for each token id (`Gated1155`)
  * @dev DEFAULT_ADMIN_ROLE is the timelock and administers every role. GUARDIAN_ROLE can only stop things: it pauses,
  *      and cannot unpause, change the hook, grant roles or upgrade
  */
