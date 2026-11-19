@@ -4758,15 +4758,19 @@ The maker receives at its own address. An order names no other receiver: a third
 - the first maker gives `x` and must receive at least `ceil(x × take / give)` of its own terms, so `y` must be at least that;
 - the second maker gives `y` and must receive at least `ceil(y × take / give)` of its terms, so `x` must be at least that.
 
+Both are `Math.mulDiv(amount, take, give, Math.Rounding.Ceil)`, whose product is 512 bits wide, so two 18-decimal amounts cannot overflow it.
+
+A fill is refused before any of that when it is degenerate: either amount zero; an order with a zero `giveAmount` or `takeAmount`; both orders from one maker, which would otherwise fail later on the balance check with the wrong error; an order that gives and takes the same token and id; or a token id that is not zero on a side that is not an ERC-1155.
+
 Rounding is always against the counterparty, so no sequence of small fills pays a maker less than its price. Then `filled[orderHash] += amount` for both, and two transfers: `x` from the first maker to the second, `y` from the second to the first. For an ERC-20 the executor checks that the receiver's balance rose by exactly the amount, as `DvPExecutor` does for cash, so a token that takes a fee on transfer cannot settle here.
 
 **What the token sees.** A plain `transferFrom`, or a `safeTransferFrom` of a `Gated1155`: a TRANSFER with the executor as operator. Every rule judges the two parties as on any transfer, and no rule reads the operator. So a token that lists `ExecutedOnlyRule` cannot trade here, and `SettlementWindowRule`, which judges EXECUTED only, does not apply: a product that wants signed intents and a window keeps `DvPExecutor`.
 
 **A batch.** `settle(Fill[])` runs the fills in order, atomically. A fill that fails reverts the batch with its index and the cause, as `IntentExecutor.executeBatch` does. A later fill of the same order sees what the earlier ones filled.
 
-**Cancelling.** `cancelOrder(nonce)` by the maker, any time; a cancelled order fills no further, and what it filled stays. Revoking the allowance stops it too.
+**Cancelling.** `cancelOrder(nonce)` by the maker, any time; a cancelled order fills no further, and what it filled stays. Revoking the allowance stops it too. What is filled is kept for each order's hash, and what is cancelled for each maker's nonce. So two different orders a maker signs with one nonce can both fill, each up to its own amount, and one `cancelOrder` cancels both: a maker that wants an order to replace another signs them with the same nonce and cancels, and otherwise gives each order its own.
 
-**A pre-flight.** `canFill(fill)` returns the first reason a fill would be refused by the executor's own checks, and for a token that answers `IERC7943Fungible` or `IERC7943MultiToken` through ERC-165 the token's own `canTransfer`. It does not check allowances or balances of a token that is not one of the stack's, and says so.
+**A pre-flight.** `canFill(fill)` returns the first reason a fill would be refused by the executor's own checks, and for one of the stack's tokens the token's own `canTransferWithReason`, which counts the balance and gives the reason; ERC-7943's plain `canTransfer` answers true above the balance when nothing is frozen and gives no reason, so it is the fallback only for a token that answers the standard's id and has no reasoned pre-flight. It does not check allowances or balances of a token that is not one of the stack's, and says so.
 
 **What an operator can and cannot do.** It chooses which orders meet, in what amounts, and at what price between the two limits; the difference between the limits goes where it chooses. It cannot move anything outside a signed order, past an order's amount, worse than an order's limit, to anyone but the two makers, or after a cancel, an expiry or a pause.
 
@@ -4781,9 +4785,11 @@ Rounding is always against the counterparty, so no sequence of small fills pays 
 | O5 | A receiver other than the maker | No. See above |
 | O6 | Vault shares against vault shares, or any two tokens | Allowed: an order names two tokens, and nothing says one is cash |
 
-**Kept if.** A fill, both orders new, costs no more gas than a `dvp: gated cash` trade in the benchmark (185,329 on `main`); a batch of 100 fills costs less for each fill than that; an order fills in parts up to its amount and never past it; a fill worse than a signed limit reverts; shares of both vaults and a `Gated1155` series each settle against the cash token of E4; every existing benchmark row within the 2% bar. Halmos: for any two fills of one order, the total given is at most `giveAmount` and the total received is at least the limit for what was given.
+**Kept if.** A fill, both orders new, costs no more gas than a `dvp: gated cash` trade in the benchmark (185,329 on `main`); a batch of 100 fills costs less for each fill than that; an order fills in parts up to its amount and never past it; a fill worse than a signed limit reverts; shares of both vaults and a `Gated1155` series each settle against the cash token of E4; every existing benchmark row within the 2% bar. A fuzzed invariant, not Halmos, which cannot reason about a symbolic `mulDiv` here: over any sequence of fills of one order, the total given is at most `giveAmount` and the total received is at least the limit for the total given.
 
 **Steps.** Interface and brief; tests first against a stub, shown failing; the executor; `Core` and `CoreParts` part `orderSettlement` with the profile's executor list; benchmark rows; planted bugs; the Halmos property; pages; gates; the port to `paris`.
+
+**Review of this design (2026-11-19).** The owner passed on a review that answers O1 to O6 as proposed and adds four notes, each checked and right, and each now in the text above: 512-bit limit arithmetic; the degenerate fills refused up front; what a nonce cancels against what a hash fills; and the reasoned pre-flight for the stack's own tokens. It also points out why O1 is safe with O2 and O5 as they are: with no fee and no receiver but the makers, whatever lies between two limits goes to one of the two makers and never to the operator. On E7 the same review recommends the escrow; that choice is still the owner's.
 
 ### Decisions and review, 2026-11-19
 
@@ -4812,4 +4818,4 @@ That the stack then runs a market at any given rate. The benchmark compares the 
 6. Entities in the credential registry: built on 2026-11-19 without N10. Still open: whether a second live attester for one address is expected, which would change how an entity is scoped.
 7. A review of both plans (2026-11-19) recommends: build both; keep R3 as written, with no recount; leave N10 out; put off the second attester. These are a reviewer's recommendations and decide nothing; items 5 and 6 stay the owner's.
 8. The ecosystem plan (2026-11-19): step 0 and the first pass (E1, E2, E3 with E13) are approved. Open: for E7, a scoped enforcement lego or an escrow; and counsel's view on omnibus accounts (E9).
-9. `OrderSettlement` (E8), design of 2026-11-19: O1 to O6, and whether to build it as designed.
+9. `OrderSettlement` (E8): O1 to O6 answered as proposed by the review the owner passed on; being built. E7: the review recommends the escrow; the owner has not chosen.
