@@ -4675,6 +4675,29 @@ The owner passed on the go-ahead for step 0 and the first pass on 2026-11-19. E3
 - **Gates.** `npx hardhat test`: 2227 passing (2027 solidity, 200 nodejs). Format, lint and typecheck clean, Slither 0 results, Halmos 22 of 22 on this branch, `validate:upgrades` 8 of 8, `verify:reproducible` 33 contracts identical.
 - **Not done.** No node test drives `claimBatch` through the deployed stack. The signing helpers still draw random nonces; numbering them is the client's choice. The port to `paris`.
 
+### The first pass on `paris` (2026-11-19): step 0, E1 and E2
+
+Carried here by cherry-pick with no conflict; where the text above says "this line" it means `main`, and its numbers are `main`'s. The contracts, the tests and the pages are the same files. This is the line the target runs, so its own base is recorded. The guard here is in storage, which is the two more slots written on most rows.
+
+| Flow | Calls | Slots written | Gas |
+|---|---|---|---|
+| transfer: between holders, 4 rules, fund class | 15 | 4 | 42,687 |
+| transfer: to a new holder, 4 rules, fund class | 19 | 6 | 91,965 |
+| intent: executeTransfer through IntentExecutor | 13 | 5 | 106,075 |
+| intent: executeTransfer, the nonce next to a used one | 13 | 5 | 106,075 |
+| dvp: gated cash | 22 | 12 | 196,083 |
+| dvp: erc-3009 cash | 22 | 12 | 203,938 |
+| 4626: deposit | 14 | 6 | 65,829 |
+| 4626: redeem | 14 | 6 | 45,929 |
+| 7540: requestDeposit | 10 | 6 | 135,796 |
+| 7540: settlePeriod, 1 investor | 5 | 11 | 61,357 |
+| 7540: settlePeriod, 100 investors | 5 | 11 | 61,368 |
+| 7540: claim deposit | 22 | 9 | 128,365 |
+| signed entry: 4626 with permit | 24 | 14 | 241,913 |
+| distribution: claim | 11 | 4 | 82,708 |
+
+After E1 and E2, on this line: an executed intent next to a used nonce costs 86,184 gas, from 106,075; a `claimBatch` of 100 holders costs 4,973,956 against 6,516,678 for 100 claims; no other row moved by more than 153 gas or by a call. `npx hardhat test`: 2228 passing (2028 solidity, 200 nodejs). Format, lint and typecheck clean, Slither 0 results, Halmos 22 of 22, `validate:upgrades` 8 of 8, `verify:reproducible` 33 contracts identical.
+
 ### Decisions and review, 2026-11-19
 
 The owner passed on a reviewer's answers and four notes the same day. The answers settle three questions; the notes were each checked against the code and are right, and the rows above carry them.
