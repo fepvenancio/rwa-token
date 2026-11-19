@@ -127,7 +127,3 @@ The constructor takes the admin and the first attester and refuses a zero addres
 
 - Contract: `contracts/governance/PolicyRegistry.sol`, interface `IPolicyRegistry.sol`
 - Tests: `PolicyRegistry.t.sol` (attest, revoke, kinds, empty hashes, shared code, role gates). The gates are tested where they live: `PolicyGatedERC20Upgradeable.t.sol`, `ComplianceHook.t.sol`, `Fund.t.sol`, `ProxyDeployer.t.sol`, `Portfolio.t.sol`, `GuardedAccount.t.sol`, `Gated4626VaultPortfolio.t.sol` and `NavDesk.t.sol`. Through the real deployment: `test/nodejs/deployment.test.ts` (an unattested implementation or rule stops the product), `governance.test.ts` (an upgrade to unattested code is refused at execution) and `legos.test.ts` (the post-deploy check fails after a revoke).
-
----
-
-Describes the contracts at commit `01024e9` on `main`.

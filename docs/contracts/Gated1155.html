@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gated1155 · Gated Token Stack</title>
+<meta name="description" content="The multi-token template: an ERC-1155 with a supply and a metadata URI per token id, judged by the same hook and rules as the other tokens, with a frozen amount per account and id.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="../index.html">Gated Token Stack</a>
+  <a href="../index.html">Overview</a>
+  <a href="../index.html#contracts">Contracts</a>
+  <a href="../roles.html">Who can do what</a>
+  <a href="../movement.html">One movement</a>
+  <a href="../deployment.html">Deployment and governance</a>
+  <a href="../money.html">Where the money sits</a>
+</nav>
+<main class="page">
+
+<header class="top">
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Token</div>
+  <h1>Gated1155</h1>
+  <p class="lede">The multi-token template. One contract holds many token ids, each with its own balances, supply and metadata URI. Every movement of an amount of an id asks the same policy hook and rules as the other templates before it happens.</p>
+  <div class="facts">
+    <span class="fact"><b>contracts/tokens/Gated1155.sol</b></span>
+    <span class="fact">upgradeable: <b>UUPS</b>, behind a <b>TokenProxy</b></span>
+    <span class="fact">admin: <b>the main timelock</b>, after hand-over</span>
+    <span class="fact">implementation attested as <b>IMPLEMENTATION</b></span>
+  </div>
+</header>
+
+<section id="in-one-minute">
+  <div class="callout wrap-any">
+    <h3>In one minute</h3>
+    <p>A product for several series of one instrument in one contract. Each series is a token id with its own supply, and all of them are under one set of eligibility terms.</p>
+    <p>It is an ERC-1155, with OpenZeppelin's supply and URI extensions, built on <a href="PolicyGatedCoreUpgradeable.html"><code>PolicyGatedCoreUpgradeable</code></a>, so its roles, guardian, pause, hook and upgrade checks are the same code as every other template's. One policy judges every id alike: who may hold, and each holder's lockup and freeze, come from the rules the product lists, and those rules do not read the token id. It also speaks ERC-7943's interface for multi-tokens: the agent can force an amount of an id to another holder and freeze an amount of one id for one account.</p>
+  </div>
+</section>
+
+<section id="how">
+  <div class="prose wrap-any">
+    <h2>How a movement is decided</h2>
+    <p>Transfers and mints reach OpenZeppelin's <code>_update</code>, which the token overrides to take the items one at a time. A forced transfer and the burner's <code>burn</code> go straight to the token's movement path, <code>_move</code>, as <span class="k k-forced">FORCED</span>. For each item the checks run in this order:</p>
+  </div>
+  <ol class="steps wrap-any">
+    <li><div><b>ERC-1155's own checks.</b> On a transfer, the caller must be the holder or approved for all of the holder's tokens (<code>ERC1155MissingApprovalForAll</code>), and the hook is not asked (<code>test_WhenTheCallerIsNotApproved_Erc1155RevertsBeforeTheHookIsAsked</code>). A zero receiver reverts with <code>ERC1155InvalidReceiver</code> and a zero sender with <code>ERC1155InvalidSender</code>. A batch whose two arrays differ in length reverts with <code>ERC1155InvalidArrayLength</code>.</div></li>
+    <li><div><b>Pause.</b> While paused, every kind except <span class="k k-forced">FORCED</span> is refused with <code>ERC8473PolicyRejected(PAUSED)</code>. That stops transfers, batches and mints. A forced transfer and the burner's <code>burn</code> pass (<code>test_WhenPaused_TransfersAndMintsAreRejectedAndTheEnforcementBurnPasses</code>, <code>test_WhenPaused_TheBatchIsRejected</code>).</div></li>
+    <li><div><b>The balance and the frozen amount.</b> The amount must fit in the sender's unfrozen balance of that id. An amount above the balance reverts with ERC-1155's <code>ERC1155InsufficientBalance</code>, and the hook is not asked (<code>test_WhenTheAmountIsAboveTheBalance_ItRevertsWithErc1155sErrorWithoutAskingTheHook</code>). An amount within the balance but above its unfrozen part reverts with <code>ERC7943InsufficientUnfrozenBalance(account, tokenId, amount, unfrozen)</code>. A <span class="k k-forced">FORCED</span> movement may take frozen tokens, never more than the balance. See <a href="#freeze">Freezes</a>.</div></li>
+    <li><div><b>The hook decides.</b> <code>checkTransfer(ctx)</code> returns <code>TRANSFER_OK</code> or a reason, and anything else reverts with <code>ERC8473PolicyRejected(reason)</code>. The call goes through <a href="PolicyGatedCoreUpgradeable.html#asking">the core's <code>_ask</code></a>: a hook that reverts, runs out of gas, answers fewer than 32 bytes or has no code gives the reason <code>CHECK_UNAVAILABLE</code>. A zero amount and a transfer to oneself are movements too, and the hook is asked about each (<code>test_WhenTheAmountIsZeroOrTheReceiverIsTheSender_ThePolicyIsStillAsked</code>).</div></li>
+    <li><div><b>The amount moves</b> with OpenZeppelin's logic, which updates the supply of the id and emits <code>TransferSingle</code>.</div></li>
+    <li><div><b>After the move,</b> <code>afterTransfer(ctx)</code> runs if the hook's <code>wantsAfterTransfer()</code> is true, which the shared hook's always is, inside the token's reentrancy guard: a hook or rule that starts another movement reverts with <code>ReentrancyGuardReentrantCall</code> (<code>test_WhenThePolicyCallsBackInTheMiddleOfABatch_TheGuardRefusesIt</code>). The supply of the id already counts the move when it runs (<code>test_WhenTheSupplyIsReadDuringAfterTransfer_ItAlreadyCountsTheMint</code>).</div></li>
+  </ol>
+</section>
+
+<section id="batch">
+  <div class="prose wrap-any">
+    <h2>A batch is its items in order</h2>
+    <p><code>safeBatchTransferFrom</code> takes the items in the order given. Each one is checked, moved, announced with its own <code>TransferSingle</code> and reported to the policy before the next one is checked. No <code>TransferBatch</code> is emitted (<code>test_WhenABatchMoves_ThePolicyIsAskedAboutEachItemInOrder</code>, <code>test_WhenABatchMoves_EachItemEmitsItsOwnTransferSingleAndNoTransferBatch</code>, <code>test_WhenABatchMoves_AfterTransferFollowsEachItemBeforeTheNextMoves</code>).</p>
+  </div>
+  <ul class="plain wrap-any">
+    <li><b>A later item sees what the earlier ones left.</b> An id named twice is two movements, and the second is judged against the balance after the first (<code>test_WhenAnIdIsNamedTwice_TheSecondItemSeesTheBalancesTheFirstLeft</code>, <code>test_WhenAnIdNamedTwiceExceedsTheBalance_TheSecondItemRevertsTheBatch</code>).</li>
+    <li><b>One refused item reverts the whole batch.</b> The items before it are undone (<code>test_WhenThePolicyRejectsALaterItem_TheEarlierItemsAreUndone</code>, <code>test_WhenALaterItemIsAboveItsUnfrozenBalance_TheBatchReverts</code>).</li>
+    <li><b>An empty batch moves nothing.</b> It asks no policy, emits nothing and calls nobody, also while paused (<code>test_WhenTheBatchIsEmpty_NobodyIsAskedAndNothingIsEmitted</code>, <code>test_WhenPaused_AnEmptyBatchCallsNobody</code>).</li>
+    <li><b>The issuer has no batch functions.</b> A role holder batches <code>mint</code>, <code>burn</code> or <code>forcedTransfer</code> with the core's <code>multicall</code>, and each call is a movement of its own.</li>
+  </ul>
+</section>
+
+<section id="callback">
+  <div class="prose wrap-any">
+    <h2>The receiver callback</h2>
+    <p>When the receiver is a contract, the token calls ERC-1155's receiver function on it after the movement, outside the reentrancy guard, with the balances final. It does so on every path into a contract: both transfer functions, <code>mint</code> and <code>forcedTransfer</code>. A contract that answers anything but acceptance, or has no <code>IERC1155Receiver</code> function to answer with, reverts the call with <code>ERC1155InvalidReceiver</code> (<code>test_WhenTheReceivingContractHasNoReceiverInterface_EveryPathRefusesIt</code>). A burn calls nobody.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Path</th><th>Callback</th><th>When</th></tr></thead>
+      <tbody>
+        <tr><td><code>safeTransferFrom</code></td><td><code>onERC1155Received</code>, with the caller's <code>data</code></td><td>After the item's <code>afterTransfer</code></td></tr>
+        <tr><td><code>safeBatchTransferFrom</code></td><td>One <code>onERC1155BatchReceived</code>, with the caller's <code>data</code>, also when the batch has one item. None for an empty batch</td><td>Once, after the last item's <code>afterTransfer</code></td></tr>
+        <tr><td><code>mint</code></td><td><code>onERC1155Received</code>, with empty data and the minter as operator</td><td>After the mint's <code>afterTransfer</code></td></tr>
+        <tr><td><code>forcedTransfer</code></td><td><code>onERC1155Received</code>, with empty data and the agent as operator</td><td>Last, after <code>ForcedTransfer</code> and <code>ForcedTransferBy</code></td></tr>
+        <tr><td><code>burn</code></td><td>None</td><td></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose wrap-any">
+    <p>The tests are in <code>Gated1155Unit_Callbacks</code>: <code>test_WhenAMintGoesToAContract_ItIsCalledAfterAfterTransfer</code>, <code>test_WhenAForcedTransferGoesToAContract_ItIsCalledAfterAfterTransfer</code>, <code>test_WhenABatchGoesToAContract_ItGetsOneBatchCallbackAfterTheLastItem</code>, <code>test_WhenABatchOfOneGoesToAContract_ItGetsTheBatchCallback</code> and <code>test_WhenAnEmptyBatchGoesToAContract_NoCallbackIsMade</code>. The token's own <code>safeBatchTransferFrom</code> decides the batch callback itself: an empty batch calls nobody, so no caller can make the token call a contract with data of its choosing.</p>
+    <p>A receiver that moves the tokens on from its callback takes the same path as anyone, and a refusal of that second move undoes both (<code>test_WhenTheReceiverForwardsFromItsCallback_ThePolicyJudgesThatMoveToo</code>, <code>test_WhenTheReceiverForwardsABatchFromItsCallback_EachItemIsJudgedAgain</code>). The <code>data</code> of a transfer goes to the receiver alone and never to the policy (<code>test_WhenTheTransferCarriesData_ItReachesTheReceiverAndNotThePolicy</code>).</p>
+  </div>
+</section>
+
+<section id="context">
+  <div class="prose wrap-any">
+    <h2>What the hook is told</h2>
+    <p>The same <code>TransferContext</code> as the other templates', one for each item, so the same hook and the same rule instances serve them all.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Field</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td><code>token</code></td><td>The multi-token's own address</td></tr>
+        <tr><td><code>from</code>, <code>to</code></td><td>Sender and receiver; zero on a mint and a burn respectively</td></tr>
+        <tr><td><code>tokenId</code></td><td>The token id of the item</td></tr>
+        <tr><td><code>amount</code></td><td>The amount of that id</td></tr>
+        <tr><td><code>operator</code></td><td>The caller: the holder or an approved operator, the minter, the burner, or the agent. In a pre-flight it is <code>from</code></td></tr>
+        <tr><td><code>kind</code></td><td><span class="k k-transfer">TRANSFER</span> from <code>safeTransferFrom</code> and <code>safeBatchTransferFrom</code>, <span class="k k-mint">MINT</span> from <code>mint</code>, <span class="k k-forced">FORCED</span> from <code>forcedTransfer</code> and <code>burn</code>. The template has no holder burn, so nothing moves as <span class="k k-burn">BURN</span>: that kind appears only in a pre-flight with a zero <code>to</code>. There is no <span class="k k-executed">EXECUTED</span>: the template has no signed intents.</td></tr>
+        <tr><td><code>data</code></td><td><code>abi.encode(fromBalance, toBalance)</code>: each side's balance of that id before the move, zero for the zero address</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose wrap-any">
+    <p>The tests compare the context with what each route sends: <code>test_WhenTheHolderTransfers_TheHookSeesATransferWithTheIdsBalances</code>, <code>test_WhenAnApprovedOperatorTransfers_TheOperatorIsInTheContext</code>, <code>test_WhenTheMinterMints_TheHookSeesAMintOfTheIdAndTheSupplyRises</code>, <code>test_WhenTheBurnerBurns_ThePolicySeesAForcedMovementToZeroAndTheSupplyFalls</code> and <code>test_WhenTheAgentForces_TheHookSeesAForcedMoveAndBothEventsCarryTheIdAndTheAmount</code>.</p>
+  </div>
+</section>
+
+<section id="rules">
+  <div class="prose wrap-any">
+    <h2>Which rules fit a multi-token</h2>
+    <p>No shipped rule reads <code>tokenId</code>, and each keys its settings and state by the token's address. So one rule list and one set of settings judge every id of the contract alike.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Rule</th><th>On a <code>Gated1155</code></th></tr></thead>
+      <tbody>
+        <tr><td><a href="CredentialRule.html"><code>CredentialRule</code></a></td><td>Works as on any token: who may receive, and that a sender may leave, the same for every id. The <code>multi</code> profile lists it.</td></tr>
+        <tr><td><a href="HolderRestrictionRule.html"><code>HolderRestrictionRule</code></a></td><td>Works as on any token: a holder's lockup or address freeze covers every id it holds (<code>test_WhenTheHolderIsLocked_ItCanSendNoIdAndTheAgentCanStillForce</code>). The <code>multi</code> profile lists it.</td></tr>
+        <tr><td><a href="MinPositionRule.html"><code>MinPositionRule</code></a></td><td>Allowed by the profile check. It reads the two balances in <code>data</code>, which here are balances of the item's id, so it judges the position in each id, with one minimum for all of them.</td></tr>
+        <tr><td><a href="FundHoldersRule.html"><code>FundHoldersRule</code></a></td><td>Refused by the profile check. A <code>Fund</code> registers only a token that reports <code>IPolicyGated</code>, which the multi-token does not, so on chain the rule would refuse every movement with <code>NOT_FUND_CLASS</code>. A list can add the rule only while the contract's total supply is zero.</td></tr>
+        <tr><td><a href="SupplyCapRule.html"><code>SupplyCapRule</code></a></td><td>Refused by the profile check, and only by it. The rule reads <code>totalSupply()</code>, which here is the sum over every id, so on chain it would cap the mints of all ids together.</td></tr>
+        <tr><td><a href="SettlementWindowRule.html"><code>SettlementWindowRule</code></a>, <a href="ExecutedOnlyRule.html"><code>ExecutedOnlyRule</code></a></td><td>Refused, as on every template without signed intents.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="freeze">
+  <div class="prose wrap-any">
+    <h2>Freezes</h2>
+    <p>ERC-7943's freeze for multi-tokens is an amount for one account and one token id. The agent sets it with <code>setFrozenTokens(account, tokenId, amount)</code>, which overwrites the previous value and emits <code>Frozen(account, tokenId, amount)</code> (<code>test_WhenTheAgentFreezes_ItEmitsFrozenAndOverwrites</code>). It may exceed the balance (<code>test_WhenTheAmountExceedsTheBalance_ItIsStillRecorded</code>). A freeze of one id leaves the account's other ids free (<code>test_WhenOneIdIsFrozen_AnotherIdIsFree</code>).</p>
+  </div>
+  <ul class="plain wrap-any">
+    <li><b>The holder and its operators</b> can move the unfrozen balance of an id and no more: the balance less the frozen amount, or nothing when the frozen amount is the larger (<code>test_WhenPartIsFrozen_TheHolderAndItsOperatorMoveExactlyTheUnfrozenPart</code>, <code>test_WhenTheFrozenAmountExceedsTheBalance_NothingMovesAndAnAmountAboveTheBalanceIsErc1155s</code>).</li>
+    <li><b>Enforcement takes frozen tokens as needed.</b> <code>forcedTransfer</code> and <code>burn</code> lower the frozen amount by exactly the part of the amount that was frozen, emitting <code>Frozen</code> with the new amount before <code>TransferSingle</code>, as ERC-7943 asks. An action that stays within the unfrozen balance leaves the frozen amount alone. If the hook then refuses, the whole call reverts and the frozen amount stays (<code>test_WhenTheBurnTakesFrozenTokens_TheFrozenAmountFallsByThePartTakenBeforeTheTransferEvent</code>, <code>test_WhenTheFrozenAmountExceedsTheBalance_ItLosesExactlyWhatLeaves</code>, <code>test_WhenTheBurnStaysWithinTheUnfrozenBalance_TheFrozenAmountStays</code>, <code>test_WhenTheHookRejects_TheBalanceAndTheFrozenAmountStay</code>).</li>
+    <li><b>The invariants</b> <code>invariant_AHolderMovesAtMostItsUnfrozenBalance</code> and <code>invariant_TheBalancesOfEachIdAddUpToItsSupply</code> drive random transfers, freezes, mints, forced transfers and burns over three ids. They check that a holder moves up to its unfrozen balance of an id and no more, that enforcement lowers the frozen amount by exactly the frozen part it takes, and that the balances of each id add up to its supply.</li>
+    <li><b>An address freeze is a different tool:</b> it is <code>HolderRestrictionRule</code>'s, in the hook, and stops an account sending or receiving any id. It does not stop enforcement out of the account: the rule exempts <span class="k k-forced">FORCED</span> on the sender's side. A frozen receiver cannot receive even by force (<code>test_WhenTheReceiverIsFrozenByTheRule_ItCannotReceiveEvenByForce</code>).</li>
+  </ul>
+</section>
+
+<section id="preflight">
+  <div class="prose wrap-any">
+    <h2>Asking before moving</h2>
+    <p><code>canTransferWithReason(from, to, tokenId, amount)</code> runs the checks of the path for one item without moving anything. A zero <code>from</code> reads as a mint and a zero <code>to</code> as a burn; both zero reads <code>ZERO_RECEIVER</code>, and the hook is not asked (<code>test_WhenBothAddressesAreZero_ItReadsFalseWithoutAskingTheHook</code>). The operator is <code>from</code>, which is the zero address for a mint, so the answer does not depend on who asks (<code>testFuzz_WhenAnyoneAsks_TheOperatorSimulatedIsTheSender</code>). No pre-flight simulates <span class="k k-forced">FORCED</span>, so none predicts <code>burn</code> or <code>forcedTransfer</code>. A burn asked about is answered as a holder's own burn would be, which the template does not have: a frozen amount or a holder's lockup refuses it, whoever asks, while <code>burn</code> itself still takes the tokens (<code>test_WhenTheBurnerAsksAboutBurningFrozenTokens_ItGetsTheHoldersAnswerAndTheBurnStillPasses</code>, <code>test_WhenTheHolderIsLocked_TheBurnerCanStillBurn</code>). <code>burn</code> of an amount within the balance succeeds exactly when the hook accepts the forced movement, frozen or not, paused or not (<code>testFuzz_TheEnforcementBurnFollowsThePolicyAlone</code>). Approval and the receiver callback are not judged. No pre-flight takes a batch: ask about each item, and when a batch names an id twice the later answers depend on the earlier moves.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Situation</th><th><code>canTransferWithReason</code></th><th><code>canTransfer</code></th></tr></thead>
+      <tbody>
+        <tr><td>The amount fits the unfrozen balance, hook accepts</td><td class="ok">true, <code>TRANSFER_OK</code></td><td class="ok">true</td></tr>
+        <tr><td>The amount is above the balance, and nothing of that id is frozen for <code>from</code></td><td class="no">false, <code>INSUFFICIENT_UNFROZEN</code></td><td class="ok">true, if nothing else refuses</td></tr>
+        <tr><td>The amount is above the unfrozen balance, and some of that id is frozen for <code>from</code></td><td class="no">false, <code>INSUFFICIENT_UNFROZEN</code></td><td class="no">false</td></tr>
+        <tr><td>Paused</td><td class="no">false, <code>PAUSED</code></td><td class="no">false</td></tr>
+        <tr><td>A rule refuses</td><td class="no">false, the rule's reason</td><td class="no">false</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose wrap-any">
+    <p><code>canTransfer</code> is ERC-7943's yes or no. The standard says it must not answer no for a balance check and must count the frozen amount. So with nothing frozen an amount above the balance reads true when the policy accepts it, and the write reverts with <code>ERC1155InsufficientBalance</code>; while part of the id is frozen, an amount above the unfrozen balance reads false (<code>test_WhenTheAmountIsAboveTheBalanceAndNothingIsFrozen_OnlyTheReasonedPreflightSaysSo</code>, <code>test_WhenPartOfTheIdIsFrozen_AnAmountAboveTheUnfrozenBalanceReadsFalse</code>, <code>testFuzz_CanTransferIsNeverFalseForABalance</code>). <code>testFuzz_ThePreflightAgreesWithTheWrite</code> fuzzes the sender, the amount, the frozen amount, the pause and the hook's answer, and compares <code>canTransferWithReason</code> with a real transfer.</p>
+    <p><code>canSend(account)</code> and <code>canReceive(account)</code> are the account questions. They take no token id, so they answer for the contract. They are true for the zero address, and the hook is not asked. For any other account they are false while paused, with no hook, or when the hook cannot be asked, and otherwise the hook's account answers. Through the shipped rules, <code>canTransfer</code> is never true while either account answer is false (<code>testFuzz_CanTransferIsNotTrueWhileAnAccountAnswerIsFalse</code>).</p>
+  </div>
+</section>
+
+<section id="functions">
+  <div class="prose wrap-any"><h2>What it can do</h2></div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>initialize(name, symbol, admin, guardian, registry, hook, _initialRules)</code></td><td>Once per proxy; <code>ProxyDeployer</code> runs it in the transaction that creates the proxy</td><td>Sets the name and symbol, then the core: roles, registry, hook and the rule list. See <a href="PolicyGatedCoreUpgradeable.html#setup">the core's setup</a>.</td></tr>
+        <tr><td><code>mint(to, tokenId, amount)</code></td><td><code>MINTER_ROLE</code></td><td>Creates an amount of the id for <code>to</code>, decided as <span class="k k-mint">MINT</span>. A zero receiver reverts with <code>ERC1155InvalidReceiver</code>. Emits <code>TransferSingle</code>, then calls a receiving contract.</td></tr>
+        <tr><td><code>burn(from, tokenId, amount)</code></td><td><code>BURNER_ROLE</code></td><td>Destroys an amount of the id without approval, taking frozen tokens as needed, also while paused. Decided as <span class="k k-forced">FORCED</span> with a zero receiver. A zero <code>from</code> reverts with <code>ERC1155InvalidSender</code>, and an amount above the balance with <code>ERC1155InsufficientBalance</code>, before the hook is asked.</td></tr>
+        <tr><td><code>forcedTransfer(from, to, tokenId, amount)</code></td><td><code>AGENT_ROLE</code></td><td>Moves an amount of the id without the holder's consent, also while paused, taking frozen tokens as needed. Decided as <span class="k k-forced">FORCED</span>, so the rules still judge the receiver. Emits <code>TransferSingle</code>, then <code>ForcedTransfer(from, to, tokenId, amount)</code> and <code>ForcedTransferBy(from, to, tokenId, amount, agent)</code>, then calls a receiving contract. Returns <code>true</code>.</td></tr>
+        <tr><td><code>setFrozenTokens(account, tokenId, amount)</code></td><td><code>AGENT_ROLE</code></td><td>Sets the frozen amount of one id for one account. Returns <code>true</code>. Works while paused.</td></tr>
+        <tr><td><code>setURI(tokenId, uri)</code></td><td><code>AGENT_ROLE</code></td><td>Replaces the metadata URI of one id and emits ERC-1155's <code>URI</code> for that id (<code>test_WhenTheAgentSetsTheUri_ItEmitsUriForThatIdAlone</code>).</td></tr>
+        <tr><td><code>safeTransferFrom</code>, <code>safeBatchTransferFrom</code></td><td>The holder, or an operator approved for all</td><td>ERC-1155's transfers, each item decided as <span class="k k-transfer">TRANSFER</span>.</td></tr>
+        <tr><td><code>setApprovalForAll</code></td><td>Any account, for itself</td><td>OpenZeppelin's ERC-1155. An approval moves nothing, so the hook is not asked.</td></tr>
+        <tr><td><code>getFrozenTokens(account, tokenId)</code>, <code>canTransfer</code>, <code>canTransferWithReason</code>, <code>canSend</code>, <code>canReceive</code></td><td>Anyone (read-only)</td><td>The frozen amount and the pre-flight answers above.</td></tr>
+        <tr><td><code>balanceOf</code>, <code>balanceOfBatch</code>, <code>isApprovedForAll</code>, <code>uri</code>, <code>totalSupply(id)</code>, <code>totalSupply()</code>, <code>exists</code></td><td>Anyone (read-only)</td><td>OpenZeppelin's ERC-1155 reads, with the supply of each id and of all ids together. <code>uri</code> is empty for an id whose URI was never set.</td></tr>
+        <tr><td><code>name()</code>, <code>symbol()</code></td><td>Anyone (read-only)</td><td>The collection's name and symbol, set at initialisation. ERC-1155 has neither; <code>ProxyDeployer</code> reads the symbol.</td></tr>
+        <tr><td><code>templateId()</code></td><td>Anyone (read-only)</td><td><code>keccak256('Gated1155')</code></td></tr>
+        <tr><td>Pause, hook, roles, upgrades, <code>multicall</code></td><td colspan="2">From <a href="PolicyGatedCoreUpgradeable.html#functions">the core</a>. An agent can freeze and force in one <code>multicall</code> (<code>test_WhenTheAgentBatchesCalls_MulticallRunsThemAsTheAgent</code>).</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose wrap-any">
+    <p class="small"><code>supportsInterface</code> answers true for <code>IGated1155</code> (<code>0xc12446d8</code>), <code>IERC7943MultiToken</code> (<code>0x41c4fbad</code>), <code>IPolicyGatedCore</code>, <code>IERC8473</code> (<code>0x0505c8c9</code>), ERC-1155, its metadata URI extension, <code>IAccessControl</code> and <code>IERC165</code>, and false for <code>IPolicyGated</code>, the fungible <code>0x3edbb4c4</code> and the NFT <code>0xbf1ef5fe</code> (<code>test_WhenQueried_ItSupportsItsInterfacesAndNotTheOtherTemplates</code>). <code>ForcedTransfer</code>, <code>ForcedTransferBy</code> and <code>Frozen</code> carry the token id and the amount, so none shares a topic with the other templates' events. The standard indexes the token id in <code>ForcedTransfer</code> and <code>Frozen</code>.</p>
+  </div>
+</section>
+
+<section id="errors">
+  <div class="prose wrap-any"><h2>What a refused movement reverts with</h2></div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Cause</th><th>Error</th></tr></thead>
+      <tbody>
+        <tr><td>The amount is above the sender's balance of the id</td><td>ERC-1155's <code>ERC1155InsufficientBalance(sender, balance, needed, tokenId)</code></td></tr>
+        <tr><td>The amount is within the balance but above its unfrozen part, on a movement that is not <span class="k k-forced">FORCED</span></td><td><code>ERC7943InsufficientUnfrozenBalance(account, tokenId, amount, unfrozen)</code></td></tr>
+        <tr><td>The pause, a rule's refusal, or a hook that cannot be asked</td><td><code>ERC8473PolicyRejected(reason)</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose wrap-any">
+    <p>A hook that answers <code>INSUFFICIENT_UNFROZEN</code> when the token finds no shortfall is a policy decision, and reverts with <code>ERC8473PolicyRejected</code> (<code>test_WhenTheHookBorrowsTheFrozenCodeWithNoShortfall_ItIsAPolicyRejection</code>). While paused, the pause is the first refusal, so a transfer above the balance reverts with <code>ERC8473PolicyRejected(PAUSED)</code>.</p>
+  </div>
+</section>
+
+<section id="why">
+  <div class="prose wrap-any">
+    <h2>Why it is built this way</h2>
+    <ul class="plain wrap-any">
+      <li><b>The same hook, not a second one.</b> One attested hook serves every token of a deployment, with a rule list per token. The rules read who, which kind and the balances in the context, so they serve a multi-token unchanged.</li>
+      <li><b>One policy for the contract.</b> The account questions of ERC-7943 and ERC-8473, <code>canSend</code>, <code>canReceive</code>, <code>checkSend</code> and <code>checkReceive</code>, take no token id, so who may hold cannot differ by id and still be told to an integrator.</li>
+      <li><b>Items one at a time.</b> ERC-8473 has a token check, move, announce and report each item of a batch before the next, and ERC-1155 allows a <code>TransferSingle</code> for each. A register rebuilt from the events reads one movement per event.</li>
+      <li><b>A supply for each id.</b> The issued amount of each series is readable on chain, and it is current when <code>afterTransfer</code> runs.</li>
+      <li><b>A callback on every path into a contract, after the policy.</b> ERC-1155 has a mint and a non-standard transfer follow its receiver rules, so <code>mint</code> and <code>forcedTransfer</code> make the callback too. It comes after <code>afterTransfer</code> and outside the guard.</li>
+      <li><b>Pre-flights that do not depend on who asks.</b> The operator simulated is <code>from</code>, zero for a mint, so every caller gets the same answer. Enforcement is not simulated: <code>burn</code> and <code>forcedTransfer</code> are the issuer's own actions.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="prose wrap-any">
+    <h2>What it does not do</h2>
+    <ul class="plain wrap-any">
+      <li><b>No terms per id.</b> Eligibility, lockup and address freeze are the contract's. Series that differ in who may hold them, or in their holding period, are separate contracts. No shipped rule reads the token id.</li>
+      <li><b>No cap on holders or on supply.</b> The profile check refuses <code>FundHoldersRule</code> and <code>SupplyCapRule</code> on this template, and no other shipped rule caps the holders or the supply of an id.</li>
+      <li><b>No signed transfers and no delivery versus payment.</b> An amount moves by a transaction of its holder or an approved operator, or by the agent.</li>
+      <li><b>No vault over it.</b> The vault templates issue ERC-20 shares over an ERC-20 asset.</li>
+      <li><b>No holder burn.</b> <code>burn</code> needs <code>BURNER_ROLE</code>.</li>
+      <li><b>No approval for one id, no <code>permit</code>, no royalties.</b> <code>setApprovalForAll</code> names an operator for all of a holder's ids, and the token does not restrict it.</li>
+      <li><b>The refusal of an unusable rule is off-chain.</b> <code>assertUsable</code> in <code>ignition/profiles.ts</code> stops it when the module is built. <code>ComplianceHook.setRules</code> judges no combination of attested rules, so a timelock operation could still list one, with the effects in <a href="#rules">the table above</a>.</li>
+      <li><b>It cannot be a fund class.</b> <code>Fund</code> registers fungible gated tokens only.</li>
+      <li><b>The metadata is off-chain.</b> The token stores a URI for each id and checks nothing about what it points to.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="connected">
+  <div class="prose wrap-any"><h2>Connected to</h2></div>
+  <div class="cards">
+    <a class="card" href="PolicyGatedCoreUpgradeable.html"><span class="name">PolicyGatedCoreUpgradeable</span><p>The roles, pause, hook and upgrade checks it shares.</p></a>
+    <a class="card" href="GatedToken.html"><span class="name">GatedToken</span><p>The plain fungible template on the same core.</p></a>
+    <a class="card" href="Gated721.html"><span class="name">Gated721</span><p>The NFT template on the same core.</p></a>
+    <a class="card" href="ComplianceHook.html"><span class="name">ComplianceHook</span><p>Runs this token's rules on every movement.</p></a>
+    <a class="card" href="CredentialRule.html"><span class="name">CredentialRule</span><p>Who may hold any id.</p></a>
+    <a class="card" href="HolderRestrictionRule.html"><span class="name">HolderRestrictionRule</span><p>Each holder's lockup and address freeze, for every id.</p></a>
+    <a class="card" href="ProxyDeployer.html"><span class="name">ProxyDeployer</span><p>Places the multi-token and checks it came up as expected.</p></a>
+    <a class="card" href="../deployment.html"><span class="name">Deployment and governance</span><p>The <code>multi</code> profile, and how a product is handed over.</p></a>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose wrap-any">
+    <h2>Source and tests</h2>
+    <ul class="plain wrap-any">
+      <li>Contract: <code>contracts/tokens/Gated1155.sol</code>; interfaces <code>IGated1155.sol</code>, <code>IERC7943MultiToken.sol</code>, <code>IPolicyGatedCore.sol</code></li>
+      <li>Deployment: <code>ignition/profiles.ts</code> (the <code>multi</code> profile, <code>assertUsable</code>), <code>ignition/modules/Product.ts</code></li>
+      <li>Tests: <code>Gated1155.t.sol</code> (unit tests with a mocked hook or a recording policy, the two invariants, and an integration on the real hook, <code>CredentialRule</code> and <code>HolderRestrictionRule</code> through <code>ProxyDeployer</code>), <code>InterfaceFreeze.t.sol</code> (the two interface ids and the three event topics), <code>test/nodejs/products.test.ts</code> (the deployed <code>multi</code> profile with a batch across two ids, the refused rules, and <code>minPositionRule</code> accepted)</li>
+    </ul>
+  </div>
+</section>
+
+</main>
+</body>
+</html>

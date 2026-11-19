@@ -4504,7 +4504,7 @@ The owner passed on the review's go-ahead for this plan on 2026-11-19, with R3 a
 
 ## Entities in the credential registry (plan, 2026-11-19, nothing built)
 
-Source: the same assessment, and the owner's "Yes, both". Derived from the code at `38fdbc1`. It reopens `ICredentialRegistry`, `IFund` and `IFundHoldersRule`, which rule 4 freezes: nothing here is built until the owner says so.
+Source: the same assessment, and the owner's "Yes, both". Derived from the code at `38fdbc1`. It reopens `ICredentialRegistry` and `IFund`, which rule 4 freezes: nothing here is built until the owner says so. `IFundHoldersRule` gains nothing, so its id does not move.
 
 ### What is missing
 
@@ -4518,7 +4518,7 @@ Source: the same assessment, and the owner's "Yes, both". Derived from the code 
 | N2 | An entity belongs to the attester that wrote it. The key an investor is counted under is the attester's id and the entity number together, 56 bits | Two attesters number their investors independently. With one live attester for an address, which is today's rule, the record's attester gives the scope |
 | N3 | The attester writes the entity with the credential: `set` takes it, and the signed `Credential` carries it, which changes `CREDENTIAL_TYPEHASH` | The party that verified the investor is the one that knows two wallets are the same investor. Signed, so a relayer cannot change it |
 | N4 | New view `entityKeyOf(subject)`, from the stored record whatever its standing. A lapsed or exit-only record keeps its entity | The count must not move because a credential expired |
-| N5 | A `Fund` is built with the registry it reads, or with none. With none it counts wallets, as today | A fund over an external registry names that one. Funds without a credential layer keep working |
+| N5 | A `Fund` is built with the registry it reads, or with none. With none it counts wallets, as today | A fund over an external registry names that one. Funds without a credential layer keep working. The constructor checks through ERC-165 that a registry it is given answers this version's `ICredentialRegistry` id, so a fund cannot be built over an older registry that has no `entityKeyOf` |
 | N6 | `Fund` counts distinct keys. For each key it keeps how many of its wallets hold a class, and each holding wallet remembers the key it was counted under, in the spare bits of its existing word | A wallet leaving must lower the key it raised, even if the registry has changed since. No new storage slot for a wallet; one counter for each entity |
 | N7 | A new investor is a receiver whose key has no wallet holding any class. A transfer between two wallets of one entity is never capped. At a full cap the net-zero case holds only when the sender's key has that one wallet and that wallet holds that one class | The cap is about investors |
 | N8 | `Fund.rekey(account)`, callable by anyone: when a holding wallet's key in the registry differs from the one it was counted under, it moves the wallet to the new key and corrects the count | An attester can link or unlink a wallet while it holds. The function only makes the fund agree with the registry, so it needs no role. Until it is called, a newly linked wallet is counted twice, which errs on the strict side, and an unlinked one is not counted separately, which a monitor on `CredentialSet` catches |
@@ -4566,11 +4566,21 @@ The way that works today costs nothing: the attester of record takes the second 
 5. Deployment: the `Fund` module's registry parameter, the profiles, the post-deploy check, the node tests.
 6. Gates, the measured gas written here, then the port to `paris`, then the pages on each line.
 
+## The pages, for `Gated1155` and `setRules` (2026-11-19)
+
+Step 7 of the multi-token plan and the last step of the `setRules` plan, on `main`. Not yet on `paris`.
+
+- **New page.** `docs/contracts/Gated1155.html`, on the model of the `Gated721` page, with three sections of its own: the batch, the receiver callback and the errors of a refused movement.
+- **Changed pages.** Twenty: the five root pages and fifteen contract pages. `Gated1155` and the `multi` profile appear wherever the templates and the profiles are listed, the overview's drawing has the sixth template, and every page that described `setRules`, the hook's `onInstall` or the fund rule's install check states the behaviour as it is now.
+- **How they were checked.** A subagent drafted them against the source; I read the new page whole and checked the claims it flagged as unsure against the contracts. Every test named on the pages exists. `md_check.py`: 45 pages, 0 problems. The pages carry no commit id: the owner had the footers that named one removed on 2026-11-19, with the one id in `SECURITY.md`.
+- **Left as found.** The pause table on the roles page lists `transfer` and `transferFrom` under "every product", which the two non-fungible templates do not have. Older than this work.
+- **Also here.** Two corrections to the entities plan above, from its second review: the registry check in `Fund`'s constructor (N5), and two reopened interfaces, not three.
+
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
 2. Credential layer: none left. On 2026-10-30 the owner confirmed decisions 11, 12, 13, 15, 16 and 17 as built (17 at the measured +8,179 gas on a transfer). Decision 14 is moot, since `IdentityRule` was removed in the cleanup. Decisions 8 and 9 are recorded in the credential section's table.
 3. Redemption gate and the second contract: built and landed in #24 and #25. Open from its review: dust in a fund everyone has left ends the performance fee. Fixed in #27; the pages at `bfb424e` describe it. What it leaves, dust left on purpose and the 4626's management fee on a small or low-decimal fund, is in `SECURITY.md`.
 4. The NFT template: answered 2026-11-05, A, and built (the core split and `Gated721`); its pages landed in #36.
 5. `setRules` tells the rules it adds: built on 2026-11-19 with R3 as written, no recount. Open: one sentence in `IComplianceHook`'s NatSpec for `setRules`, a frozen file.
-6. Entities in the credential registry (plan of 2026-11-19): whether to build it and reopen the three interfaces; N10, a block by entity at about 4,200 gas a transfer; and whether a second live attester for one address is expected.
+6. Entities in the credential registry (plan of 2026-11-19): whether to build it and reopen the two interfaces; N10, a block by entity at about 4,200 gas a transfer; and whether a second live attester for one address is expected.
 7. A review of both plans (2026-11-19) recommends: build both; keep R3 as written, with no recount; leave N10 out; put off the second attester. These are a reviewer's recommendations and decide nothing; items 5 and 6 stay the owner's.

@@ -129,7 +129,7 @@ The `Core` module deploys one `CredentialRegistry` and one rule reading it, if a
 | `policyOf(token)` | Anyone (read-only) | The token's policy; all zero when not set. |
 | `REGISTRY()` | Anyone (read-only) | The registry the rule reads, fixed at construction. The constructor refuses the zero address (`CredentialRule_ZeroAddress`). |
 | `after_(ctx)` | The hook of `ctx.token` | The empty default from [`BaseRule`](BaseRule.md). The hook does not call it, because `wantsAfter()` is false. |
-| `onInstall(token, previousPolicy)` | Anyone; the hook when a token installs it | The empty default from `BaseRule`: the rule keeps no state derived from movements. |
+| `onInstall(token, previousPolicy)` | Anyone; the hook when a token installs it, or when a `setRules` adds the rule to the token's list | The empty default from `BaseRule`: the rule keeps no state derived from movements. |
 | `ruleId()`, `wantsAfter()`, `supportsInterface(id)` | Anyone (read-only) | `keccak256('CredentialRule.v1')`; false; ERC-165 for `ICredentialRule`, `IComplianceRule` and `IERC165`. |
 
 <a id="why"></a>
@@ -164,7 +164,3 @@ The `Core` module deploys one `CredentialRegistry` and one rule reading it, if a
 
 - Contract: `contracts/hooks/rules/CredentialRule.sol`, interface `ICredentialRule.sol`, reason codes in `Errors.sol`
 - Tests: `CredentialRule.t.sol` (each leg, each kind, the enforcement burn, the policy tests, the token's own address, a fuzz model of the whole table, the account questions against `check`), `CredentialRuleIntegration.t.sol` (on a real token, with pre-flight parity, lapses, blocks and signed intents), `CredentialRuleVaults.t.sol` (both vaults), and `test/nodejs/credentials.test.ts` (through the real deployment)
-
----
-
-Describes the contracts at commit `01024e9` on `main`.

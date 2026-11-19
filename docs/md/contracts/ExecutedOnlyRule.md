@@ -60,7 +60,7 @@ The demo deployment does not list it, and neither does any other profile in `ign
 - **It is the template with `EXECUTED`.** `executeTransfer` comes from [`IntentSettledUpgradeable`](IntentSettledUpgradeable.md), which `IntentToken` inherits. On a [`GatedToken`](GatedToken.md), nothing can make an `EXECUTED` movement, so holders could not move tokens to each other at all.
 - **A vault's escrow is a plain transfer.** [`Gated7540Vault`](Gated7540Vault.md) moves shares into its escrow in `requestRedeem`, and back in `rejectRedeemRequest`, as a `TRANSFER`. On a vault's list this rule would refuse both, so no redemption could be requested.
 
-`assertUsable` in `ignition/profiles.ts` throws when a module is built that lists it on anything but an `IntentToken`. That check is in the deployment tooling. On chain, the hook accepts any attested rule on any token.
+`assertUsable` in `ignition/profiles.ts` throws when a module is built that lists it on anything but an `IntentToken`. That check is in the deployment tooling. On chain, the hook accepts any attested rule on any token, unless the rule itself refuses to go live.
 
 <a id="functions"></a>
 ## What it can do
@@ -70,7 +70,7 @@ The demo deployment does not list it, and neither does any other profile in `ign
 | `check(ctx)` | Anyone (read-only); the hook in practice | `KIND_NOT_ALLOWED` for a `TRANSFER`, otherwise `TRANSFER_OK`. |
 | `checkSend`, `checkReceive` | Anyone (read-only) | `TRANSFER_OK` for every account. |
 | `after_(ctx)` | The hook of `ctx.token` | The empty default. The hook does not call it, because `wantsAfter()` is false. |
-| `onInstall(token, previousPolicy)` | Anyone; the hook when a token installs it | The empty default: the rule keeps no state derived from movements. |
+| `onInstall(token, previousPolicy)` | Anyone; the hook when a token installs it, or when a `setRules` adds the rule to the token's list | The empty default: the rule keeps no state derived from movements. |
 | `ruleId()`, `wantsAfter()`, `supportsInterface(id)` | Anyone (read-only) | `keccak256('ExecutedOnlyRule.v1')`; false; ERC-165 for `IComplianceRule` and `IERC165`, the `BaseRule` answer. |
 
 `IExecutedOnlyRule` declares nothing beyond `IComplianceRule`. The rule has no events and no errors of its own.
@@ -105,7 +105,3 @@ The demo deployment does not list it, and neither does any other profile in `ign
 
 - Contract: `contracts/hooks/rules/ExecutedOnlyRule.sol`, interface `IExecutedOnlyRule.sol`, reason codes in `Errors.sol`
 - Tests: `ExecutedOnlyRule.t.sol` (a plain transfer refused at any amount, every other kind passing, and on a real hook and `IntentToken`: the pre-flight agreeing, a signed intent moving, a forced move passing) and `test/nodejs/legos.test.ts` (the rule through the modules, and the module refusing it on a plain token)
-
----
-
-Describes the contracts at commit `01024e9` on `main`.

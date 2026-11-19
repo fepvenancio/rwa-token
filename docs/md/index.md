@@ -6,9 +6,9 @@ Overview
 
 Tokens for fund shares and other real-world assets, where a policy decides who may hold them. Each token keeps its own books and its emergency powers, and asks a separate, replaceable set of compliance rules before a balance changes.
 
-- **39 contracts** in contracts/ (interfaces and test mocks aside)
+- **40 contracts** in contracts/ (interfaces and test mocks aside)
 - Solidity **0.8.30**, OpenZeppelin **5.6.1**
-- ERC-20, ERC-721, **ERC-7943**, ERC-8473, ERC-4626, ERC-7540
+- ERC-20, ERC-721, ERC-1155, **ERC-7943**, ERC-8473, ERC-4626, ERC-7540
 - licence: **UNLICENSED**, proprietary
 - **no external audit** yet
 
@@ -34,13 +34,13 @@ Everything else is a separate contract a product opts into. A product that is on
 
 Seven groups of contracts, each with one job. The tokens sit in the middle. Above them is what calls them on someone's behalf, and below them what they ask and where their money goes.
 
-> **Diagram.** How the contracts connect. Above the tokens: Distributor asks a token hasRole and canReceive. IntentExecutor and DvPExecutor call executeTransfer on IntentToken. SignedEntry calls deposit on Gated4626Vault and requestDeposit on Gated7540Vault. NavDesk calls closePeriod and settlePeriod on Gated7540Vault, and quote on FeeModel. The tokens are five templates. Four are fungible, GatedToken, IntentToken, Gated4626Vault and Gated7540Vault, on one base, PolicyGatedERC20Upgradeable; IntentToken adds the mixin IntentSettledUpgradeable and both vaults add GatedVaultBase. The fifth, Gated721, is an NFT. All five share PolicyGatedCoreUpgradeable, which holds the roles, the pause, the hook pointer and the upgrade checks. Each product is a TokenProxy over one template, placed by ProxyDeployer. Below the tokens: a token calls checkTransfer and afterTransfer on the shared ComplianceHook, which calls check and after\_ on the rules in the token's list: CredentialRule, MinPositionRule, HolderRestrictionRule, SettlementWindowRule, FundHoldersRule, SupplyCapRule and ExecutedOnlyRule, all extending BaseRule. CredentialRule calls profileOf on CredentialRegistry. FundHoldersRule calls admission, join and leave on Fund. A vault's money goes in and out of its Portfolio, which calls allocate and deallocate on ERC4626Adapter and GuardedAccount; GuardedAccount calls validate on ERC20CallValidator or ERC4626CallValidator. At the bottom, governance and deployment: PolicyRegistry, GovernanceTimelock as main and recovery timelock, ProxyDeployer and TokenProxy.
+> **Diagram.** How the contracts connect. Above the tokens: Distributor asks a token hasRole and canReceive. IntentExecutor and DvPExecutor call executeTransfer on IntentToken. SignedEntry calls deposit on Gated4626Vault and requestDeposit on Gated7540Vault. NavDesk calls closePeriod and settlePeriod on Gated7540Vault, and quote on FeeModel. The tokens are six templates. Four are fungible, GatedToken, IntentToken, Gated4626Vault and Gated7540Vault, on one base, PolicyGatedERC20Upgradeable; IntentToken adds the mixin IntentSettledUpgradeable and both vaults add GatedVaultBase. The fifth, Gated721, is an NFT, and the sixth, Gated1155, is a multi-token. All six share PolicyGatedCoreUpgradeable, which holds the roles, the pause, the hook pointer and the upgrade checks. Each product is a TokenProxy over one template, placed by ProxyDeployer. Below the tokens: a token calls checkTransfer and afterTransfer on the shared ComplianceHook, which calls check and after\_ on the rules in the token's list: CredentialRule, MinPositionRule, HolderRestrictionRule, SettlementWindowRule, FundHoldersRule, SupplyCapRule and ExecutedOnlyRule, all extending BaseRule. CredentialRule calls profileOf on CredentialRegistry. FundHoldersRule calls admission, join and leave on Fund. A vault's money goes in and out of its Portfolio, which calls allocate and deallocate on ERC4626Adapter and GuardedAccount; GuardedAccount calls validate on ERC20CallValidator or ERC4626CallValidator. At the bottom, governance and deployment: PolicyRegistry, GovernanceTimelock as main and recovery timelock, ProxyDeployer and TokenProxy.
 >
 > **The policy sits outside the token, and everything around it is opt-in.** Arrows are calls between contracts. The grid of rules shows no order: each token has its own ordered list, and lists only the rules its product needs. Not drawn: `Gated4626Management` and `Gated4626Common`, which run as part of the 4626 vault, and `Gated7540Settlement` and `Gated7540Common`, which run as part of the 7540 vault; `PolicyRegistry` is asked whenever attested code is installed, and never on a transfer; the main timelock holds the admin role on each token; `DvPExecutor` can also take cash from an ERC-3009 token outside the stack; `Distributor` serves one token, of any template, and `Legos` deploys it for a product that asks; `NavDesk` reads its vault's `Portfolio` for a value.
 
 | Layer | Contracts | What it does |
 |---|---|---|
-| Token | `PolicyGatedCoreUpgradeable`, `PolicyGatedERC20Upgradeable`, `IntentSettledUpgradeable`, `GatedToken`, `IntentToken`, `Gated721` | Keeps balances, roles, the pause, frozen amounts and forced transfers. Every balance change goes through one internal function, `_move`, which asks the hook. `GatedToken` is the fungible base alone. `IntentToken` adds the mixin that runs transfers a holder signed. `Gated721` is an NFT with a metadata URI per token. It shares the core with the others, so the roles, the pause, the hook and the upgrade checks are the same code. |
+| Token | `PolicyGatedCoreUpgradeable`, `PolicyGatedERC20Upgradeable`, `IntentSettledUpgradeable`, `GatedToken`, `IntentToken`, `Gated721`, `Gated1155` | Keeps balances, roles, the pause, frozen amounts and forced transfers. Every balance change goes through one internal function, `_move`, which asks the hook. `GatedToken` is the fungible base alone. `IntentToken` adds the mixin that runs transfers a holder signed. `Gated721` is an NFT with a metadata URI per token. `Gated1155` is a multi-token: many token ids in one contract, each with its own supply and URI. Both share the core with the others, so the roles, the pause, the hook and the upgrade checks are the same code. |
 | Vaults | `GatedVaultBase`, `Gated4626Vault`, `Gated4626Management`, `Gated4626Common`, `Gated7540Vault`, `Gated7540Settlement`, `Gated7540Common`, `NavDesk`, `FeeModel` | Vault shares are gated tokens too. The 4626 deposits and redeems at once, and hands its four management functions to a second contract its implementation creates. The 7540 deals in periods, one price for everyone in a period, and hands settlement and recovery to a second contract its implementation creates. `NavDesk` turns a reported value into that price and can hold a redemption gate, and `FeeModel` works out a fee for a desk or a 4626. |
 | Portfolio | `Portfolio`, `ERC4626Adapter`, `GuardedAccount`, `ERC20CallValidator`, `ERC4626CallValidator` | Where one vault's money may go. The portfolio holds the idle money and sends it to installed adapters, under caps on their allocation. An adapter is an on-chain vault position or a guarded account for a custodian or a strategy, whose calls are limited by validators. |
 | Policy | `ComplianceHook`, `BaseRule`, `CredentialRule`, `MinPositionRule`, `HolderRestrictionRule`, `SettlementWindowRule`, `FundHoldersRule`, `SupplyCapRule`, `ExecutedOnlyRule` | Decides whether a movement may happen. One hook for the whole deployment, an ordered list of at most 16 rules per token. Each rule returns a reason code. A token with no rules has every movement refused. |
@@ -73,13 +73,13 @@ Every balance change takes the same path: a transfer, a mint, a burn, a forced t
 <a id="glossary"></a>
 ## Glossary
 
-- **token**: A contract that holds balances and asks its hook before each movement. The stack has five templates: four ERC-20s, `GatedToken`, `IntentToken`, `Gated4626Vault` and `Gated7540Vault`, and one ERC-721, `Gated721`.
+- **token**: A contract that holds balances and asks its hook before each movement. The stack has six templates: four ERC-20s, `GatedToken`, `IntentToken`, `Gated4626Vault` and `Gated7540Vault`, one ERC-721, `Gated721`, and one ERC-1155, `Gated1155`.
 - **template**: One kind of token, with its own implementation and its own `templateId`. An upgrade to an implementation that reports another template is refused.
 - **mixin**: A contract that adds one ability to a template. `IntentSettledUpgradeable` adds signed intents, and `IntentToken` is the template that uses it.
 - **proxy**: A small contract that keeps a token's address and storage and runs the code of another contract, the implementation, for each call. Each token is a `TokenProxy` (OpenZeppelin's `ERC1967Proxy`). The upgrade function sits in the implementation (the UUPS pattern).
 - **implementation**: The shared code of one template, deployed once per core and used by each proxy of that template. Its constructor disables setup, so a proxy is what gets set up.
 - **product**: One token an issuer launches: a proxy over a template, with its own rule list and policy.
-- **profile**: A named combination of products in `ignition/profiles.ts`, from one plain token (`token`), one NFT (`nft`) or one intent token with both executors (`intent`) to the demo (`full`): an intent token and both vaults as three classes of one fund, with both executors. The demo has no desk, portfolio or fee model; `managed-fund` and `vault4626-invest` show those.
+- **profile**: A named combination of products in `ignition/profiles.ts`, from one plain token (`token`), one NFT (`nft`), one multi-token (`multi`) or one intent token with both executors (`intent`) to the demo (`full`): an intent token and both vaults as three classes of one fund, with both executors. The demo has no desk, portfolio or fee model; `managed-fund` and `vault4626-invest` show those.
 - **hook**: The contract a token asks before each balance change. Here it is `ComplianceHook`, one per deployment, holding an ordered rule list for each token.
 - **rule**: A small contract that answers one policy question about a movement with a reason code, such as `TRANSFER_OK` or `RECEIVER_FROZEN`. One instance serves each token whose list names it, and any setting it keeps is kept per token.
 - **reason code**: A `bytes32` answer, the hash of a name like `LOCKED_UP`. They are listed in `contracts/interfaces/Errors.sol` and on [One movement](movement.md).
@@ -124,6 +124,7 @@ One page per contract: what it is for, how it works, what it can do, and its tes
 - [GatedToken](contracts/GatedToken.md): The base and nothing else: a gated ERC-20 at the decimals its ledger uses, with no signed intents.
 - [IntentToken](contracts/IntentToken.md): A gated ERC-20 with signed intents, at the decimals its ledger uses.
 - [Gated721](contracts/Gated721.md): A gated NFT: a certificate or a note per token, judged by the same hook and rules, with a freeze per token.
+- [Gated1155](contracts/Gated1155.md): A gated multi-token: several series in one contract, each a token id with its own supply, judged by the same hook and rules, with a frozen amount per holder and id.
 
 ### Vaults
 
@@ -189,7 +190,3 @@ One page per contract: what it is for, how it works, what it can do, and its tes
 - Repository: `README.md` (setup and commands) and `SECURITY.md` (audit preparation)
 - Contracts: `contracts/`, interfaces in `contracts/interfaces/`
 - Deployment: `ignition/modules/` (`Core.ts`, `CoreHandover.ts`, `CoreParts.ts`, `PartsHandover.ts`, `Fund.ts`, `Legos.ts`, `Product.ts`, `FundOpen.ts` and `roles.ts`), the parts of a core in `ignition/parts.ts`, and the combinations in `ignition/profiles.ts`
-
----
-
-Describes the contracts at commit `01024e9` on `main`.

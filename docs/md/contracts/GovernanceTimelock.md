@@ -151,7 +151,3 @@ The constructor takes the delay, the proposers, the executors, an optional boots
 - Contract: `contracts/governance/GovernanceTimelock.sol`, interface `IGovernanceTimelock.sol`
 - Deployment: `ignition/modules/Core.ts` (both timelocks, the delay) and `CoreHandover.ts` (the guardian as canceller, `RECOVERY_ROLE` grants on the core, the hand-over)
 - Tests: `GovernanceTimelock.t.sol` (what `RECOVERY_ROLE` can and cannot do, and the floor at deployment and in `updateDelay`), `test/nodejs/governance.test.ts` (upgrades, cancels and recovery through the real timelocks), and `assertHandedOver` in `test/nodejs/fixtures.ts` (the post-deploy check)
-
----
-
-Describes the contracts at commit `01024e9` on `main`.

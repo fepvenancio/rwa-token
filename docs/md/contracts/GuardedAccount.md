@@ -118,7 +118,3 @@ A pause on the vault stops `execute`, after the role check (`test_WhileTheVaultI
 
 - Contract: `contracts/portfolio/GuardedAccount.sol`, interfaces `IGuardedAccount.sol` and `IAdapter.sol`
 - Tests: `GuardedAccount.t.sol` (a real portfolio and registry over a mock vault, including `test_ItRunsAStrategyThroughAnOutsideVaultAndKeepsTheShares`), and `test/nodejs/legos.test.ts` (the `managed-fund` profile, money to a custodian and back)
-
----
-
-Describes the contracts at commit `01024e9` on `main`.

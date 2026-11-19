@@ -223,7 +223,3 @@ The checks run in the order of the table, from `SignedEntry_Expired` to `SignedE
 - Contract: `contracts/intents/SignedEntry.sol`, interfaces `ISignedEntry.sol` and `IERC3009.sol`
 - Tests: `SignedEntry.t.sol` (both cash forms on real vaults, the window ends, replay, cancelling, the minimum, a contract wallet, the third-party check, and the two relayed exits) and `test/nodejs/products.test.ts` (a wallet signs both messages and a relayer submits them, on a deployed vault; one added to a running core and used; a whole deployment that asks for one, and the check refusing a stack that lost it)
 - Deployment: `ignition/parts.ts`, used by `Core.ts` and `CoreParts.ts`; the check in `assertHandedOver`, `test/nodejs/fixtures.ts`
-
----
-
-Describes the contracts at commit `01024e9` on `main`.

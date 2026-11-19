@@ -254,7 +254,3 @@ The previews are arithmetic only. They tell you what the formula gives, and the 
 
 - Contract: `contracts/vaults/Gated4626Vault.sol`, with `Gated4626Management.sol` and `Gated4626Common.sol`, interface `IGated4626Vault.sol`. The vault logic it inherits is OpenZeppelin's `ERC4626Upgradeable` from `@openzeppelin/contracts-upgradeable` 5.6.1.
 - Tests: `Gated4626Vault.t.sol` (a vault with no portfolio: unit tests with a mocked hook, integration tests with the real hook, lockups and a minimum position, the donation attack, and invariants), `Gated4626VaultPortfolio.t.sol` (a real portfolio, adapter and outside vault: plugging, counting, write-offs and fees), `Gated4626Management.t.sol` (the wiring, direct calls, the hand-off and upgrades), `GatedVaultBase.t.sol` (third parties behind the real rules), `CredentialRuleVaults.t.sol` (a lapsed holder redeems but cannot deposit), `FundIntegration.t.sol` (the vault as a fund class at a full cap), and `test/nodejs/vaults.test.ts` (a deposit and `withdraw(maxWithdraw)` from TypeScript)
-
----
-
-Describes the contracts at commit `01024e9` on `main`.

@@ -27,9 +27,9 @@
   <h1>Gated Token Stack</h1>
   <p class="lede">Tokens for fund shares and other real-world assets, where a policy decides who may hold them. Each token keeps its own books and its emergency powers, and asks a separate, replaceable set of compliance rules before a balance changes.</p>
   <div class="facts">
-    <span class="fact"><b>39 contracts</b> in contracts/ (interfaces and test mocks aside)</span>
+    <span class="fact"><b>40 contracts</b> in contracts/ (interfaces and test mocks aside)</span>
     <span class="fact">Solidity <b>0.8.30</b>, OpenZeppelin <b>5.6.1</b></span>
-    <span class="fact">ERC-20, ERC-721, <b>ERC-7943</b>, ERC-8473, ERC-4626, ERC-7540</span>
+    <span class="fact">ERC-20, ERC-721, ERC-1155, <b>ERC-7943</b>, ERC-8473, ERC-4626, ERC-7540</span>
     <span class="fact">licence: <b>UNLICENSED</b>, proprietary</span>
     <span class="fact"><b>no external audit</b> yet</span>
   </div>
@@ -59,7 +59,7 @@
   </div>
   <figure>
     <div class="fig-scroll">
-      <svg class="d" viewBox="0 0 780 666" role="img" aria-label="How the contracts connect. Above the tokens: Distributor asks a token hasRole and canReceive. IntentExecutor and DvPExecutor call executeTransfer on IntentToken. SignedEntry calls deposit on Gated4626Vault and requestDeposit on Gated7540Vault. NavDesk calls closePeriod and settlePeriod on Gated7540Vault, and quote on FeeModel. The tokens are five templates. Four are fungible, GatedToken, IntentToken, Gated4626Vault and Gated7540Vault, on one base, PolicyGatedERC20Upgradeable; IntentToken adds the mixin IntentSettledUpgradeable and both vaults add GatedVaultBase. The fifth, Gated721, is an NFT. All five share PolicyGatedCoreUpgradeable, which holds the roles, the pause, the hook pointer and the upgrade checks. Each product is a TokenProxy over one template, placed by ProxyDeployer. Below the tokens: a token calls checkTransfer and afterTransfer on the shared ComplianceHook, which calls check and after_ on the rules in the token's list: CredentialRule, MinPositionRule, HolderRestrictionRule, SettlementWindowRule, FundHoldersRule, SupplyCapRule and ExecutedOnlyRule, all extending BaseRule. CredentialRule calls profileOf on CredentialRegistry. FundHoldersRule calls admission, join and leave on Fund. A vault's money goes in and out of its Portfolio, which calls allocate and deallocate on ERC4626Adapter and GuardedAccount; GuardedAccount calls validate on ERC20CallValidator or ERC4626CallValidator. At the bottom, governance and deployment: PolicyRegistry, GovernanceTimelock as main and recovery timelock, ProxyDeployer and TokenProxy.">
+      <svg class="d" viewBox="0 0 780 700" role="img" aria-label="How the contracts connect. Above the tokens: Distributor asks a token hasRole and canReceive. IntentExecutor and DvPExecutor call executeTransfer on IntentToken. SignedEntry calls deposit on Gated4626Vault and requestDeposit on Gated7540Vault. NavDesk calls closePeriod and settlePeriod on Gated7540Vault, and quote on FeeModel. The tokens are six templates. Four are fungible, GatedToken, IntentToken, Gated4626Vault and Gated7540Vault, on one base, PolicyGatedERC20Upgradeable; IntentToken adds the mixin IntentSettledUpgradeable and both vaults add GatedVaultBase. The fifth, Gated721, is an NFT, and the sixth, Gated1155, is a multi-token. All six share PolicyGatedCoreUpgradeable, which holds the roles, the pause, the hook pointer and the upgrade checks. Each product is a TokenProxy over one template, placed by ProxyDeployer. Below the tokens: a token calls checkTransfer and afterTransfer on the shared ComplianceHook, which calls check and after_ on the rules in the token's list: CredentialRule, MinPositionRule, HolderRestrictionRule, SettlementWindowRule, FundHoldersRule, SupplyCapRule and ExecutedOnlyRule, all extending BaseRule. CredentialRule calls profileOf on CredentialRegistry. FundHoldersRule calls admission, join and leave on Fund. A vault's money goes in and out of its Portfolio, which calls allocate and deallocate on ERC4626Adapter and GuardedAccount; GuardedAccount calls validate on ERC20CallValidator or ERC4626CallValidator. At the bottom, governance and deployment: PolicyRegistry, GovernanceTimelock as main and recovery timelock, ProxyDeployer and TokenProxy.">
         <defs>
           <marker id="ov-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
         </defs>
@@ -114,7 +114,7 @@
         <text x="642" y="103" class="mono sm">settlePeriod</text>
 
         <!-- The tokens -->
-        <rect class="frame" x="12" y="106" width="756" height="182" rx="10"/>
+        <rect class="frame" x="12" y="106" width="756" height="216" rx="10"/>
 
         <rect class="b" x="26" y="118" width="130" height="48" rx="7"/>
         <text x="38" y="138" class="mono bold">GatedToken</text>
@@ -148,95 +148,100 @@
         <text x="606" y="233" class="mono bold">Gated721</text>
         <text x="606" y="250" class="m sm">an NFT on the core</text>
 
-        <text x="26" y="278" class="m sm">All five share PolicyGatedCoreUpgradeable: roles, pause, hook, upgrades. Each product is a TokenProxy.</text>
+        <rect class="b" x="594" y="266" width="160" height="46" rx="7"/>
+        <text x="606" y="285" class="mono bold">Gated1155</text>
+        <text x="606" y="302" class="m sm">a multi-token on the core</text>
+
+        <text x="26" y="284" class="m sm">All six share PolicyGatedCoreUpgradeable: roles, pause, hook, upgrades.</text>
+        <text x="26" y="300" class="m sm">Each product is a TokenProxy.</text>
 
         <!-- From the tokens downward -->
-        <line class="ln" x1="124" y1="288" x2="124" y2="363" marker-end="url(#ov-arrow)"/>
-        <text x="132" y="318" class="mono sm">checkTransfer, afterTransfer</text>
+        <line class="ln" x1="124" y1="322" x2="124" y2="397" marker-end="url(#ov-arrow)"/>
+        <text x="132" y="352" class="mono sm">checkTransfer, afterTransfer</text>
 
-        <line class="ln" x1="735" y1="288" x2="735" y2="363" marker-end="url(#ov-arrow)"/>
-        <text x="727" y="318" class="m sm" text-anchor="end">a vault's money, in and out</text>
+        <line class="ln" x1="735" y1="322" x2="735" y2="397" marker-end="url(#ov-arrow)"/>
+        <text x="727" y="352" class="m sm" text-anchor="end">a vault's money, in and out</text>
 
         <!-- Policy, identity, fund -->
-        <rect class="frame" x="12" y="340" width="548" height="236" rx="10"/>
-        <text x="26" y="358" class="m bold">Policy</text>
+        <rect class="frame" x="12" y="374" width="548" height="236" rx="10"/>
+        <text x="26" y="392" class="m bold">Policy</text>
 
-        <rect class="b" x="26" y="364" width="200" height="46" rx="7"/>
-        <text x="38" y="384" class="bold">ComplianceHook</text>
-        <text x="38" y="401" class="m sm">a rule list per token</text>
-        <text x="240" y="384" class="m sm">the first rule to say no wins</text>
-        <text x="240" y="401" class="m sm">every rule extends BaseRule</text>
+        <rect class="b" x="26" y="398" width="200" height="46" rx="7"/>
+        <text x="38" y="418" class="bold">ComplianceHook</text>
+        <text x="38" y="435" class="m sm">a rule list per token</text>
+        <text x="240" y="418" class="m sm">the first rule to say no wins</text>
+        <text x="240" y="435" class="m sm">every rule extends BaseRule</text>
 
-        <line class="ln" x1="108" y1="410" x2="108" y2="431" marker-end="url(#ov-arrow)"/>
-        <text x="116" y="425" class="mono sm">check, after_</text>
+        <line class="ln" x1="108" y1="444" x2="108" y2="465" marker-end="url(#ov-arrow)"/>
+        <text x="116" y="459" class="mono sm">check, after_</text>
 
-        <rect class="b2" x="26" y="432" width="170" height="26" rx="6"/>
-        <text x="36" y="450" class="mono">MinPositionRule</text>
-        <rect class="b2" x="26" y="464" width="170" height="26" rx="6"/>
-        <text x="36" y="482" class="mono">HolderRestrictionRule</text>
-        <rect class="b2" x="26" y="496" width="170" height="26" rx="6"/>
-        <text x="36" y="514" class="mono">SettlementWindowRule</text>
-        <rect class="b2" x="26" y="528" width="170" height="26" rx="6"/>
-        <text x="36" y="546" class="mono">SupplyCapRule</text>
+        <rect class="b2" x="26" y="466" width="170" height="26" rx="6"/>
+        <text x="36" y="484" class="mono">MinPositionRule</text>
+        <rect class="b2" x="26" y="498" width="170" height="26" rx="6"/>
+        <text x="36" y="516" class="mono">HolderRestrictionRule</text>
+        <rect class="b2" x="26" y="530" width="170" height="26" rx="6"/>
+        <text x="36" y="548" class="mono">SettlementWindowRule</text>
+        <rect class="b2" x="26" y="562" width="170" height="26" rx="6"/>
+        <text x="36" y="580" class="mono">SupplyCapRule</text>
 
-        <rect class="b2" x="202" y="432" width="170" height="26" rx="6"/>
-        <text x="212" y="450" class="mono">CredentialRule</text>
-        <rect class="b2" x="202" y="464" width="170" height="26" rx="6"/>
-        <text x="212" y="482" class="mono">ExecutedOnlyRule</text>
-        <rect class="b2" x="202" y="496" width="170" height="26" rx="6"/>
-        <text x="212" y="514" class="mono">FundHoldersRule</text>
+        <rect class="b2" x="202" y="466" width="170" height="26" rx="6"/>
+        <text x="212" y="484" class="mono">CredentialRule</text>
+        <rect class="b2" x="202" y="498" width="170" height="26" rx="6"/>
+        <text x="212" y="516" class="mono">ExecutedOnlyRule</text>
+        <rect class="b2" x="202" y="530" width="170" height="26" rx="6"/>
+        <text x="212" y="548" class="mono">FundHoldersRule</text>
 
-        <line class="ln" x1="372" y1="445" x2="411" y2="445" marker-end="url(#ov-arrow)"/>
-        <text x="391" y="427" class="mono sm" text-anchor="middle">profileOf</text>
-        <rect class="b2" x="412" y="432" width="138" height="44" rx="8"/>
-        <text x="418" y="451" class="bold">CredentialRegistry</text>
-        <text x="418" y="468" class="m sm">credential records</text>
+        <line class="ln" x1="372" y1="479" x2="411" y2="479" marker-end="url(#ov-arrow)"/>
+        <text x="391" y="461" class="mono sm" text-anchor="middle">profileOf</text>
+        <rect class="b2" x="412" y="466" width="138" height="44" rx="8"/>
+        <text x="418" y="485" class="bold">CredentialRegistry</text>
+        <text x="418" y="502" class="m sm">credential records</text>
 
-        <line class="ln" x1="372" y1="509" x2="411" y2="509" marker-end="url(#ov-arrow)"/>
-        <text x="372" y="540" class="mono sm" text-anchor="end">admission, join, leave</text>
-        <rect class="b2" x="412" y="490" width="138" height="60" rx="8"/>
-        <text x="418" y="508" class="bold">Fund</text>
-        <text x="418" y="525" class="m sm">share classes and</text>
-        <text x="418" y="540" class="m sm">the investor count</text>
+        <line class="ln" x1="372" y1="543" x2="411" y2="543" marker-end="url(#ov-arrow)"/>
+        <text x="372" y="574" class="mono sm" text-anchor="end">admission, join, leave</text>
+        <rect class="b2" x="412" y="524" width="138" height="60" rx="8"/>
+        <text x="418" y="542" class="bold">Fund</text>
+        <text x="418" y="559" class="m sm">share classes and</text>
+        <text x="418" y="574" class="m sm">the investor count</text>
 
         <!-- Portfolio -->
-        <rect class="frame" x="576" y="340" width="192" height="236" rx="10"/>
-        <text x="588" y="358" class="m bold">Where money may go</text>
+        <rect class="frame" x="576" y="374" width="192" height="236" rx="10"/>
+        <text x="588" y="392" class="m bold">Where money may go</text>
 
-        <rect class="b" x="588" y="364" width="168" height="40" rx="7"/>
-        <text x="600" y="381" class="bold">Portfolio</text>
-        <text x="600" y="396" class="m sm">one per vault</text>
+        <rect class="b" x="588" y="398" width="168" height="40" rx="7"/>
+        <text x="600" y="415" class="bold">Portfolio</text>
+        <text x="600" y="430" class="m sm">one per vault</text>
 
-        <line class="ln" x1="604" y1="404" x2="604" y2="425" marker-end="url(#ov-arrow)"/>
-        <text x="612" y="418" class="mono sm">allocate, deallocate</text>
+        <line class="ln" x1="604" y1="438" x2="604" y2="459" marker-end="url(#ov-arrow)"/>
+        <text x="612" y="452" class="mono sm">allocate, deallocate</text>
 
-        <rect class="b2" x="588" y="426" width="168" height="26" rx="6"/>
-        <text x="598" y="444" class="mono">ERC4626Adapter</text>
-        <rect class="b2" x="588" y="458" width="168" height="26" rx="6"/>
-        <text x="598" y="476" class="mono">GuardedAccount</text>
+        <rect class="b2" x="588" y="460" width="168" height="26" rx="6"/>
+        <text x="598" y="478" class="mono">ERC4626Adapter</text>
+        <rect class="b2" x="588" y="492" width="168" height="26" rx="6"/>
+        <text x="598" y="510" class="mono">GuardedAccount</text>
 
-        <line class="ln" x1="604" y1="484" x2="604" y2="505" marker-end="url(#ov-arrow)"/>
-        <text x="612" y="498" class="mono sm">validate</text>
+        <line class="ln" x1="604" y1="518" x2="604" y2="539" marker-end="url(#ov-arrow)"/>
+        <text x="612" y="532" class="mono sm">validate</text>
 
-        <rect class="b2" x="588" y="506" width="168" height="26" rx="6"/>
-        <text x="598" y="524" class="mono">ERC20CallValidator</text>
-        <rect class="b2" x="588" y="538" width="168" height="26" rx="6"/>
-        <text x="598" y="556" class="mono">ERC4626CallValidator</text>
+        <rect class="b2" x="588" y="540" width="168" height="26" rx="6"/>
+        <text x="598" y="558" class="mono">ERC20CallValidator</text>
+        <rect class="b2" x="588" y="572" width="168" height="26" rx="6"/>
+        <text x="598" y="590" class="mono">ERC4626CallValidator</text>
 
         <!-- Governance and deployment -->
-        <text x="12" y="600" class="m bold">Governance and deployment</text>
-        <rect class="b2" x="12" y="608" width="176" height="46" rx="8"/>
-        <text x="24" y="628" class="bold">PolicyRegistry</text>
-        <text x="24" y="645" class="m sm">attested code hashes</text>
-        <rect class="b2" x="200" y="608" width="196" height="46" rx="8"/>
-        <text x="212" y="628" class="bold">GovernanceTimelock</text>
-        <text x="212" y="645" class="m sm">main and recovery</text>
-        <rect class="b2" x="408" y="608" width="170" height="46" rx="8"/>
-        <text x="420" y="628" class="bold">ProxyDeployer</text>
-        <text x="420" y="645" class="m sm">places each token</text>
-        <rect class="b2" x="590" y="608" width="178" height="46" rx="8"/>
-        <text x="602" y="628" class="bold">TokenProxy</text>
-        <text x="602" y="645" class="m sm">the proxy each token is</text>
+        <text x="12" y="634" class="m bold">Governance and deployment</text>
+        <rect class="b2" x="12" y="642" width="176" height="46" rx="8"/>
+        <text x="24" y="662" class="bold">PolicyRegistry</text>
+        <text x="24" y="679" class="m sm">attested code hashes</text>
+        <rect class="b2" x="200" y="642" width="196" height="46" rx="8"/>
+        <text x="212" y="662" class="bold">GovernanceTimelock</text>
+        <text x="212" y="679" class="m sm">main and recovery</text>
+        <rect class="b2" x="408" y="642" width="170" height="46" rx="8"/>
+        <text x="420" y="662" class="bold">ProxyDeployer</text>
+        <text x="420" y="679" class="m sm">places each token</text>
+        <rect class="b2" x="590" y="642" width="178" height="46" rx="8"/>
+        <text x="602" y="662" class="bold">TokenProxy</text>
+        <text x="602" y="679" class="m sm">the proxy each token is</text>
       </svg>
     </div>
     <figcaption><b>The policy sits outside the token, and everything around it is opt-in.</b> Arrows are calls between contracts. The grid of rules shows no order: each token has its own ordered list, and lists only the rules its product needs. Not drawn: <code>Gated4626Management</code> and <code>Gated4626Common</code>, which run as part of the 4626 vault, and <code>Gated7540Settlement</code> and <code>Gated7540Common</code>, which run as part of the 7540 vault; <code>PolicyRegistry</code> is asked whenever attested code is installed, and never on a transfer; the main timelock holds the admin role on each token; <code>DvPExecutor</code> can also take cash from an ERC-3009 token outside the stack; <code>Distributor</code> serves one token, of any template, and <code>Legos</code> deploys it for a product that asks; <code>NavDesk</code> reads its vault's <code>Portfolio</code> for a value.</figcaption>
@@ -245,7 +250,7 @@
     <table>
       <thead><tr><th>Layer</th><th>Contracts</th><th>What it does</th></tr></thead>
       <tbody>
-        <tr><td>Token</td><td><code>PolicyGatedCoreUpgradeable</code>, <code>PolicyGatedERC20Upgradeable</code>, <code>IntentSettledUpgradeable</code>, <code>GatedToken</code>, <code>IntentToken</code>, <code>Gated721</code></td><td>Keeps balances, roles, the pause, frozen amounts and forced transfers. Every balance change goes through one internal function, <code>_move</code>, which asks the hook. <code>GatedToken</code> is the fungible base alone. <code>IntentToken</code> adds the mixin that runs transfers a holder signed. <code>Gated721</code> is an NFT with a metadata URI per token. It shares the core with the others, so the roles, the pause, the hook and the upgrade checks are the same code.</td></tr>
+        <tr><td>Token</td><td><code>PolicyGatedCoreUpgradeable</code>, <code>PolicyGatedERC20Upgradeable</code>, <code>IntentSettledUpgradeable</code>, <code>GatedToken</code>, <code>IntentToken</code>, <code>Gated721</code>, <code>Gated1155</code></td><td>Keeps balances, roles, the pause, frozen amounts and forced transfers. Every balance change goes through one internal function, <code>_move</code>, which asks the hook. <code>GatedToken</code> is the fungible base alone. <code>IntentToken</code> adds the mixin that runs transfers a holder signed. <code>Gated721</code> is an NFT with a metadata URI per token. <code>Gated1155</code> is a multi-token: many token ids in one contract, each with its own supply and URI. Both share the core with the others, so the roles, the pause, the hook and the upgrade checks are the same code.</td></tr>
         <tr><td>Vaults</td><td><code>GatedVaultBase</code>, <code>Gated4626Vault</code>, <code>Gated4626Management</code>, <code>Gated4626Common</code>, <code>Gated7540Vault</code>, <code>Gated7540Settlement</code>, <code>Gated7540Common</code>, <code>NavDesk</code>, <code>FeeModel</code></td><td>Vault shares are gated tokens too. The 4626 deposits and redeems at once, and hands its four management functions to a second contract its implementation creates. The 7540 deals in periods, one price for everyone in a period, and hands settlement and recovery to a second contract its implementation creates. <code>NavDesk</code> turns a reported value into that price and can hold a redemption gate, and <code>FeeModel</code> works out a fee for a desk or a 4626.</td></tr>
         <tr><td>Portfolio</td><td><code>Portfolio</code>, <code>ERC4626Adapter</code>, <code>GuardedAccount</code>, <code>ERC20CallValidator</code>, <code>ERC4626CallValidator</code></td><td>Where one vault's money may go. The portfolio holds the idle money and sends it to installed adapters, under caps on their allocation. An adapter is an on-chain vault position or a guarded account for a custodian or a strategy, whose calls are limited by validators.</td></tr>
         <tr><td>Policy</td><td><code>ComplianceHook</code>, <code>BaseRule</code>, <code>CredentialRule</code>, <code>MinPositionRule</code>, <code>HolderRestrictionRule</code>, <code>SettlementWindowRule</code>, <code>FundHoldersRule</code>, <code>SupplyCapRule</code>, <code>ExecutedOnlyRule</code></td><td>Decides whether a movement may happen. One hook for the whole deployment, an ordered list of at most 16 rules per token. Each rule returns a reason code. A token with no rules has every movement refused.</td></tr>
@@ -339,13 +344,13 @@
     <h2>Glossary</h2>
   </div>
   <dl class="kv">
-    <dt>token</dt><dd>A contract that holds balances and asks its hook before each movement. The stack has five templates: four ERC-20s, <code>GatedToken</code>, <code>IntentToken</code>, <code>Gated4626Vault</code> and <code>Gated7540Vault</code>, and one ERC-721, <code>Gated721</code>.</dd>
+    <dt>token</dt><dd>A contract that holds balances and asks its hook before each movement. The stack has six templates: four ERC-20s, <code>GatedToken</code>, <code>IntentToken</code>, <code>Gated4626Vault</code> and <code>Gated7540Vault</code>, one ERC-721, <code>Gated721</code>, and one ERC-1155, <code>Gated1155</code>.</dd>
     <dt>template</dt><dd>One kind of token, with its own implementation and its own <code>templateId</code>. An upgrade to an implementation that reports another template is refused.</dd>
     <dt>mixin</dt><dd>A contract that adds one ability to a template. <code>IntentSettledUpgradeable</code> adds signed intents, and <code>IntentToken</code> is the template that uses it.</dd>
     <dt>proxy</dt><dd>A small contract that keeps a token's address and storage and runs the code of another contract, the implementation, for each call. Each token is a <code>TokenProxy</code> (OpenZeppelin's <code>ERC1967Proxy</code>). The upgrade function sits in the implementation (the UUPS pattern).</dd>
     <dt>implementation</dt><dd>The shared code of one template, deployed once per core and used by each proxy of that template. Its constructor disables setup, so a proxy is what gets set up.</dd>
     <dt>product</dt><dd>One token an issuer launches: a proxy over a template, with its own rule list and policy.</dd>
-    <dt>profile</dt><dd>A named combination of products in <code>ignition/profiles.ts</code>, from one plain token (<code>token</code>), one NFT (<code>nft</code>) or one intent token with both executors (<code>intent</code>) to the demo (<code>full</code>): an intent token and both vaults as three classes of one fund, with both executors. The demo has no desk, portfolio or fee model; <code>managed-fund</code> and <code>vault4626-invest</code> show those.</dd>
+    <dt>profile</dt><dd>A named combination of products in <code>ignition/profiles.ts</code>, from one plain token (<code>token</code>), one NFT (<code>nft</code>), one multi-token (<code>multi</code>) or one intent token with both executors (<code>intent</code>) to the demo (<code>full</code>): an intent token and both vaults as three classes of one fund, with both executors. The demo has no desk, portfolio or fee model; <code>managed-fund</code> and <code>vault4626-invest</code> show those.</dd>
     <dt>hook</dt><dd>The contract a token asks before each balance change. Here it is <code>ComplianceHook</code>, one per deployment, holding an ordered rule list for each token.</dd>
     <dt>rule</dt><dd>A small contract that answers one policy question about a movement with a reason code, such as <code>TRANSFER_OK</code> or <code>RECEIVER_FROZEN</code>. One instance serves each token whose list names it, and any setting it keeps is kept per token.</dd>
     <dt>reason code</dt><dd>A <code>bytes32</code> answer, the hash of a name like <code>LOCKED_UP</code>. They are listed in <code>contracts/interfaces/Errors.sol</code> and on <a href="movement.html">One movement</a>.</dd>
@@ -393,6 +398,7 @@
       <a class="card" href="contracts/GatedToken.html"><span class="name">GatedToken</span><p>The base and nothing else: a gated ERC-20 at the decimals its ledger uses, with no signed intents.</p></a>
       <a class="card" href="contracts/IntentToken.html"><span class="name">IntentToken</span><p>A gated ERC-20 with signed intents, at the decimals its ledger uses.</p></a>
       <a class="card" href="contracts/Gated721.html"><span class="name">Gated721</span><p>A gated NFT: a certificate or a note per token, judged by the same hook and rules, with a freeze per token.</p></a>
+      <a class="card" href="contracts/Gated1155.html"><span class="name">Gated1155</span><p>A gated multi-token: several series in one contract, each a token id with its own supply, judged by the same hook and rules, with a frozen amount per holder and id.</p></a>
     </div>
   </div>
   <div class="group">
@@ -480,7 +486,6 @@
   </div>
 </section>
 
-<footer>Describes the contracts at commit <code>01024e9</code> on <code>main</code>.</footer>
 </main>
 </body>
 </html>

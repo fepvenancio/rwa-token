@@ -235,7 +235,3 @@ Pausing the executor stops both entry points without touching the tokens. Both e
 
 - Contract: `contracts/intents/DvPExecutor.sol`, interfaces `IDvPExecutor.sol` and `IERC3009.sol`
 - Tests: `DvPExecutor.t.sol` (unit tests with mocked tokens; integration tests for both forms, the counterfeit token, fees, deadlines, reentry, and the fund cap across two classes) and `test/nodejs/dvp.test.ts` (trades through the deployed stack). The signing helpers `signGatedTrade`, `sign3009Trade` and `dvpNonce` are in `test/nodejs/fixtures.ts`.
-
----
-
-Describes the contracts at commit `01024e9` on `main`.
