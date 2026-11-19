@@ -781,7 +781,6 @@ contract Gated1155Unit_Callbacks is Gated1155UnitTest {
 
   /// @dev Nothing moved and no policy was asked, so the token calls nobody: a stranger cannot make it call a contract
   function test_WhenAnEmptyBatchGoesToAContract_NoCallbackIsMade() external {
-    address _stranger = makeAddr('stranger');
     vm.expectCall(address(_receiver), abi.encodeWithSelector(IERC1155Receiver.onERC1155BatchReceived.selector), 0);
     vm.prank(_stranger);
     _token.safeBatchTransferFrom(_stranger, address(_receiver), new uint256[](0), new uint256[](0), 'anything');
@@ -791,7 +790,6 @@ contract Gated1155Unit_Callbacks is Gated1155UnitTest {
 
   function test_WhenPaused_AnEmptyBatchCallsNobody() external {
     _pause();
-    address _stranger = makeAddr('stranger');
     vm.expectCall(address(_receiver), abi.encodeWithSelector(IERC1155Receiver.onERC1155BatchReceived.selector), 0);
     vm.prank(_stranger);
     _token.safeBatchTransferFrom(_stranger, address(_receiver), new uint256[](0), new uint256[](0), 'anything');
