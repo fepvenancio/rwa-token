@@ -5,6 +5,7 @@
   "license": "UNLICENSED",
   "type": "module",
   "scripts": {
+    "bench": "node scripts/bench.ts",
     "build": "hardhat build",
     "fmt:check": "forge fmt --check contracts",
     "lint:sol": "solhint --max-warnings 0 'contracts/**/*.sol'",
