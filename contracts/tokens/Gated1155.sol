@@ -210,6 +210,31 @@ contract Gated1155 is ERC1155SupplyUpgradeable, ERC1155URIStorageUpgradeable, Po
     _ok = _reason == Reasons.TRANSFER_OK;
   }
 
+  /**
+   * @inheritdoc ERC1155Upgradeable
+   * @dev OpenZeppelin's checks, with the receiver callback decided here so that it does not depend on the library's
+   *      version: a batch that moved at least one item makes the batch callback, also when it has one item, and an
+   *      empty batch moves nothing, asks no policy and calls nobody, so nobody can make the token call a contract with
+   *      data of their choosing
+   */
+  function safeBatchTransferFrom(
+    address _from,
+    address _to,
+    uint256[] memory _ids,
+    uint256[] memory _values,
+    bytes memory _data
+  ) public override {
+    address _operator = _msgSender();
+    if (_from != _operator && !isApprovedForAll(_from, _operator)) {
+      revert ERC1155MissingApprovalForAll(_operator, _from);
+    }
+    if (_to == address(0)) revert ERC1155InvalidReceiver(address(0));
+    if (_from == address(0)) revert ERC1155InvalidSender(address(0));
+    _update(_from, _to, _ids, _values);
+    // Last, with the state final and outside the guard, as OpenZeppelin makes it.
+    if (_ids.length != 0) ERC1155Utils.checkOnERC1155BatchReceived(_operator, _from, _to, _ids, _values, _data);
+  }
+
   /// @inheritdoc ERC1155Upgradeable
   function supportsInterface(
     bytes4 _interfaceId

@@ -4293,7 +4293,7 @@ branch. The footers name `01024e9` on `main`, the squash of this port (#49), re-
 
 ## The multi-token template, `Gated1155` (planned and built on `main` 2026-11-19; the port to `paris` and the pages are not done)
 
-Source: the owner, 2026-11-19: "lets plan to build a Gated1155 I saw 7943 has a IERC7943MultiToken". Derived from the code at `38fdbc1` on `main`, ERC-7943's Final text, the ERC-8473 draft's movement rules and OpenZeppelin 5.6.1's `ERC1155Upgradeable`. Nothing is built. The six decisions the first version of this plan left open are settled below, from the two standards.
+Source: the owner, 2026-11-19: "lets plan to build a Gated1155 I saw 7943 has a IERC7943MultiToken". Derived from the code at `38fdbc1` on `main`, ERC-7943's Final text, the ERC-8473 draft's movement rules and OpenZeppelin 5.6.1's `ERC1155Upgradeable`. The six decisions the first version of this plan left open are settled below, from the two standards.
 
 ### What the standards ask
 
@@ -4436,11 +4436,23 @@ The owner approved the plan on 2026-11-19 ("Yes, start"). Steps 1 to 5 are done 
 
 - **Step 1, the texts.** ERC-7943 and ERC-1155 were read in their own text. Two details differed from the summary the plan was written from, and the interface follows the text: `tokenId` is indexed in `ForcedTransfer` and in `Frozen`, and `ERC7943CannotTransfer` carries the amount. D4 stands: ERC-1155 says a mint is a specialised transfer that follows the receiver rules, and that a non-standard transfer function follows them too when the receiver implements the interface and SHOULD revert when it does not, which is what `mint` and `forcedTransfer` do. A batch may emit several `TransferSingle`, and the batch callback is the one the text recommends for a batch.
 - **Interfaces.** `IERC7943MultiToken` (`0x41c4fbad`, which solc computes from the file) and `IGated1155` (`0xc12446d8`: mint, burn, setURI, name, symbol, canTransferWithReason). Three new topics pinned. No existing id or topic moved. The freeze test failed on the unpinned values and passes with them.
-- **The token.** `contracts/tokens/Gated1155.sol`, 15,700 bytes. As planned, with nothing added: `ERC1155SupplyUpgradeable`, `ERC1155URIStorageUpgradeable` and the core; `_update` loops the items through one guarded `_move`.
+- **The token.** `contracts/tokens/Gated1155.sol`, 17,384 bytes as first built (the 15,700 first written here was wrong). As planned, with nothing added: `ERC1155SupplyUpgradeable`, `ERC1155URIStorageUpgradeable` and the core; `_update` loops the items through one guarded `_move`.
 - **Tests.** `Gated1155.t.sol`, 95 tests: 85 unit with a mocked or a recording policy, 2 invariants and 8 through the real hook, `CredentialRule` and `HolderRestrictionRule`, deployed by `ProxyDeployer`. Against a stub with no checks 56 of the first 94 failed. The fuzz of `canTransfer` against `canSend` and `canReceive` is in this file, for this template, and `RuleSetIntegration.t.sol` is unchanged.
 - **Planted bugs.** The items of a batch after the first moved without any check; `afterTransfer` for the last item of a batch only; the frozen amount lowered after the transfer event; `canTransfer` counting the balance: 7, 4, 3 and 3 tests fail.
 - **Deployment.** Template `Gated1155`, part `multiImpl`, profile `multi`. The profile check refuses `fundHoldersRule` and `supplyCapRule` on it, and `windowRule` and `executedOnlyRule` as on every template without intents; `minPositionRule` is allowed. `products.test.ts` deploys the profile, moves a batch and checks the refusals, and the test that deploys every profile covers its hand-over check.
 - **Not done.** Halmos has no property for this template: the existing harness models the proxied `IntentToken`, and a frozen-amount property here needs a model of its own. The port to `paris` (step 6) and the pages with their Markdown copies (step 7) follow.
+
+### Review of 2026-11-19
+
+The owner passed on a review of both pull requests the day they were opened. Each finding was checked against the code before anything changed.
+
+- **An empty batch reached the receiver. Confirmed, fixed.** `safeBatchTransferFrom` with no items ran no loop, so no pause and no policy were consulted, and OpenZeppelin then made the batch callback on the receiver, with the caller's data. Anyone, also while the token was paused, could make the token call a contract of their choice. The token now overrides `safeBatchTransferFrom`: OpenZeppelin's approval and zero-address checks, `_update`, and the batch callback only when the batch has at least one item. An empty batch still succeeds and still changes nothing; it now calls nobody. Two tests failed before the fix, on both lines: an empty batch from a stranger to a receiver contract, and the same while paused.
+- **A batch of one item got the single callback on `paris`. Confirmed, fixed by the same override.** OpenZeppelin 5.3.0 chooses the callback by the length of the batch, so a batch of one called `onERC1155Received`; 5.6.1 calls `onERC1155BatchReceived`, which is what ERC-1155 asks of `safeBatchTransferFrom`. The override names the batch callback itself, so the two lines behave alike and the source stays the same file. One test failed before the fix on `paris` and passed on `main`.
+- **D4 stands.** `mint` and `forcedTransfer` make the receiver callback, unlike `Gated721`, whose mint and forced transfer make none: ERC-1155 has no transfer without it. What follows for operations: a contract that is to receive this token by any path, a custody wallet or a recovery account included, must implement `IERC1155Receiver`, or the movement reverts.
+- **`SupplyCapRule` is refused by the profile check only.** `FundHoldersRule` is refused on-chain as well, because `Fund.registerClass` asks for `IPolicyGated`. Nothing on-chain refuses `SupplyCapRule`: the hook accepts any attested list, and `ERC1155SupplyUpgradeable` answers `totalSupply()` with the sum of every id, so a timelock `setRules` that listed the rule would cap that sum and not any one id. Not changed: the rule is not this template's, and a cap for each id is a new rule (see "Not in this work").
+- **Comments.** The core's NatSpec now names this template. `IERC8473Policy`'s comment on `tokenId` still names only the ERC-721: the file is frozen (rule 4) and waits for the owner's word.
+- **Sizes.** After the fix the token is 17,461 bytes on `main` and 17,861 on `paris`.
+- **Tests.** `Gated1155.t.sol` has 98 tests on both lines.
 
 ## Open questions for the owner
 1. One stack per issuer, legos, and vaults that invest: no code waits on an answer. Counsel's view on P27 and the issuer's country belong to the legal work in step 5, and only a different view on P27 would reopen a contract.
