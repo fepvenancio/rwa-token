@@ -4616,14 +4616,27 @@ A second note from the owner the same day fixed the target: one operator runs ev
 
 No change is kept on an argument alone. Step 0 of this plan is a benchmark every later change is held to.
 
-1. **A benchmark file**, `contracts/test/Bench.t.sol`, that runs fixed flows and records for each the calls, the storage slots written and the gas. Not a gate at first: it prints a table, and the table is copied here.
+1. **A benchmark file**, `contracts/test/Bench.t.sol`, that runs fixed flows and records for each the calls, the storage slots written and the gas. Not a gate at first: `npm run bench` prints a table, and the table is copied here. Built on 2026-11-19.
 2. **The flows:** a transfer between holders and to a new holder (four rules, a fund class); an executed intent; a trade through `DvPExecutor` in both forms; a 4626 deposit and redeem; a 7540 request, settlement of a period with 1 and with 100 investors, and a claim; a signed entry; a distribution claim.
-3. **The base, measured so far:**
+3. **The base,** from `npm run bench` on `main` at the commit that added it (Cancun, the default test profile). Each flow's preparation runs in the same transaction, so what it touched is warm; the numbers compare two versions of the stack and are not what a first transaction costs.
 
 | Flow | Calls | Slots written | Gas |
 |---|---|---|---|
-| Transfer between two holders, four rules, a fund class | 15 | 2 | 39,425 |
-| Transfer to a new holder, same | 19 | 4 | 88,671 |
+| transfer: between holders, 4 rules, fund class | 15 | 2 | 39,329 |
+| transfer: to a new holder, 4 rules, fund class | 19 | 4 | 88,575 |
+| intent: executeTransfer through IntentExecutor | 13 | 3 | 102,004 |
+| dvp: gated cash | 22 | 6 | 185,329 |
+| dvp: erc-3009 cash | 22 | 8 | 196,503 |
+| 4626: deposit | 14 | 4 | 62,140 |
+| 4626: redeem | 14 | 4 | 42,220 |
+| 7540: requestDeposit | 10 | 6 | 135,290 |
+| 7540: settlePeriod, 1 investor | 5 | 11 | 60,521 |
+| 7540: settlePeriod, 100 investors | 5 | 11 | 60,532 |
+| 7540: claim deposit | 22 | 7 | 124,720 |
+| signed entry: 4626 with permit | 24 | 12 | 240,115 |
+| distribution: claim | 11 | 4 | 82,403 |
+
+   The first two rows were first measured by hand at 39,425 and 88,671; the file reads its addresses into locals before it starts counting, which is the 96 gas between them. The fixtures are the existing integration ones: rows 1, 2 and 13 run on the real credential and fund rules, and rows 3 to 11 on the fixtures' identity mock in place of the credential rule, so their totals are a little below a production list's. Settling a period costs the same for 1 investor and for 100.
 
 4. **The rule for each change:** it names the flow it improves and by how much before it is built; it is kept only if the number is met; no other flow may get worse by more than 2% in gas or by one call, unless the change says so and why; and every existing gate stays green: the suites, the invariants, Halmos, Slither, sizes, upgrade safety, the reproducible build, with planted bugs for the new code.
 5. **What the benchmark cannot say:** throughput on Besu. A change justified by throughput (E11 below) needs a run on a Besu network before it is kept.
