@@ -34,6 +34,7 @@ import {GuardedAccount} from 'contracts/portfolio/GuardedAccount.sol';
 import {Portfolio} from 'contracts/portfolio/Portfolio.sol';
 import {MockAsset} from 'contracts/test/MockAsset.sol';
 import {MockERC4626Target} from 'contracts/test/MockERC4626Target.sol';
+import {Gated1155} from 'contracts/tokens/Gated1155.sol';
 import {Gated721} from 'contracts/tokens/Gated721.sol';
 import {GatedToken} from 'contracts/tokens/GatedToken.sol';
 import {IntentToken} from 'contracts/tokens/IntentToken.sol';
@@ -59,6 +60,7 @@ contract ContractSizesTest is Test {
     _assertFits('GatedToken', address(new GatedToken()));
     _assertFits('IntentToken', address(new IntentToken()));
     _assertFits('Gated721', address(new Gated721()));
+    _assertFits('Gated1155', address(new Gated1155()));
     Gated4626Vault _syncVault = new Gated4626Vault();
     _assertFits('Gated4626Vault', address(_syncVault));
     assertGt(_syncVault.MANAGEMENT_LOGIC().code.length, 0, 'Gated4626Management has no code');

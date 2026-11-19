@@ -10,7 +10,7 @@ export type RuleKey =
   | "fundHoldersRule"
   | "supplyCapRule"
   | "executedOnlyRule";
-export type Template = "GatedToken" | "IntentToken" | "Gated721" | "Gated4626Vault" | "Gated7540Vault";
+export type Template = "GatedToken" | "IntentToken" | "Gated721" | "Gated1155" | "Gated4626Vault" | "Gated7540Vault";
 /** `ICredentialRule.Policy`: the qualification bits a receiver needs, and the attesters this token trusts. */
 export type Policy = { requireAll: number; requireAny: number; forbidAny: number; attesters: bigint };
 
@@ -88,6 +88,7 @@ export const IMPLEMENTATION_KEY: Record<Template, string> = {
   GatedToken: "gatedImpl",
   IntentToken: "intentImpl",
   Gated721: "nftImpl",
+  Gated1155: "multiImpl",
   Gated4626Vault: "fundImpl",
   Gated7540Vault: "asyncFundImpl",
 };
@@ -101,6 +102,12 @@ const RULES_NEEDING_INTENTS: readonly RuleKey[] = ["windowRule", "executedOnlyRu
  */
 const RULES_NOT_FOR_NFTS: readonly RuleKey[] = ["minPositionRule", "fundHoldersRule", "supplyCapRule"];
 
+/**
+ * Rules an ERC-1155 cannot use: the supply cap reads `totalSupply()`, which there is the sum over every token id, and a
+ * fund counts one balance for each class, which a contract of many ids does not have.
+ */
+const RULES_NOT_FOR_MULTI_TOKENS: readonly RuleKey[] = ["fundHoldersRule", "supplyCapRule"];
+
 /** A supply cap would refuse the large mint a vault's `maxDeposit` probes with, so it would read zero for everybody. */
 const RULES_FOR_TOKENS_ONLY: readonly RuleKey[] = ["supplyCapRule"];
 
@@ -111,6 +118,9 @@ export function assertUsable(product: Product) {
       throw new Error(`${product.key}: ${product.template} cannot use ${rule}`);
     }
     if (RULES_NOT_FOR_NFTS.includes(rule) && product.template === "Gated721") {
+      throw new Error(`${product.key}: ${product.template} cannot use ${rule}`);
+    }
+    if (RULES_NOT_FOR_MULTI_TOKENS.includes(rule) && product.template === "Gated1155") {
       throw new Error(`${product.key}: ${product.template} cannot use ${rule}`);
     }
   }
@@ -209,6 +219,15 @@ export const PROFILES = {
     id: "nft",
     singleSigners: DEMO_SIGNERS,
     products: [{ key: "nft", template: "Gated721", name: "Gated Note", symbol: "gNOTE", rules: PLAIN_RULES }],
+  },
+  /**
+   * One multi-token, alone: several series of one instrument in one contract, each a token id with its own supply, under
+   * one set of eligibility terms. Series that differ in who may hold them are separate contracts.
+   */
+  multi: {
+    id: "multi",
+    singleSigners: DEMO_SIGNERS,
+    products: [{ key: "multi", template: "Gated1155", name: "Gated Series", symbol: "gSER", rules: PLAIN_RULES }],
   },
   /** One intent token, alone: holder-signed movements through either executor. */
   intent: {

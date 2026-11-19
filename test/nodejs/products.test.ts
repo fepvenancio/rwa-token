@@ -70,6 +70,34 @@ describe("one product alone: the core and that product, and nothing else", async
     );
   });
 
+  it("a multi-token", async function () {
+    const s = await networkHelpers.loadFixture(async function multi() {
+      return deployProfile(connection, PROFILES.multi);
+    });
+    assert.deepEqual(Object.keys(s.components).sort(), [...CORE, "multiImpl"].sort());
+    assert.equal(s.fund, undefined);
+
+    const series = await viem.getContractAt("Gated1155", s.products.multi.address);
+    const [alice, bob, eve] = [s.holders.alice, s.holders.bob, s.holders.eve];
+    assert.equal(await series.read.supportsInterface(["0x41c4fbad"]), true);
+    assert.equal(await series.read.symbol(), "gSER");
+    await verify(s, alice);
+    await verify(s, bob);
+    await series.write.mint([alice.account.address, 1n, 100n], { account: s.wallets.minter.account });
+    await series.write.mint([alice.account.address, 2n, 50n], { account: s.wallets.minter.account });
+    await series.write.safeBatchTransferFrom([alice.account.address, bob.account.address, [1n, 2n], [30n, 20n], "0x"], { account: alice.account });
+    assert.equal(await series.read.balanceOf([bob.account.address, 1n]), 30n);
+    assert.equal(await series.read.balanceOf([bob.account.address, 2n]), 20n);
+    assert.equal(await series.read.totalSupply([1n]), 100n);
+    assert.deepEqual(await series.read.canTransferWithReason([bob.account.address, eve.account.address, 1n, 30n]), [false, REASONS.RECEIVER_NOT_VERIFIED]);
+    await viem.assertions.revertWithCustomErrorWithArgs(
+      series.write.safeTransferFrom([bob.account.address, eve.account.address, 1n, 30n, "0x"], { account: bob.account }),
+      series,
+      "ERC8473PolicyRejected",
+      [REASONS.RECEIVER_NOT_VERIFIED],
+    );
+  });
+
   it("an intent token, with both executors", async function () {
     const s = await networkHelpers.loadFixture(async function intent() {
       return deployProfile(connection, PROFILES.intent);
@@ -208,6 +236,12 @@ describe("one core, many products", async function () {
       const note: Product = { key: "n", template: "Gated721", name: "N", symbol: "N", rules: ["credentialRule", rule], fund: "main" };
       assert.throws(() => productModule(note), new RegExp(`n: Gated721 cannot use ${rule}`));
     }
+    for (const rule of ["fundHoldersRule", "supplyCapRule", "windowRule", "executedOnlyRule"] as const) {
+      const series: Product = { key: "m", template: "Gated1155", name: "M", symbol: "M", rules: ["credentialRule", rule], fund: "main" };
+      assert.throws(() => productModule(series), new RegExp(`m: Gated1155 cannot use ${rule}`));
+    }
+    const withMinimum: Product = { key: "m", template: "Gated1155", name: "M", symbol: "M", rules: ["credentialRule", "minPositionRule"] };
+    assert.doesNotThrow(() => productModule(withMinimum));
   });
 });
 

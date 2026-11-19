@@ -31,6 +31,7 @@ const ATTESTED = {
   GatedToken: "tokens",
   IntentToken: "tokens",
   Gated721: "tokens",
+  Gated1155: "tokens",
   Gated4626Vault: "vaults",
   Gated7540Vault: "vaults",
   Portfolio: "portfolio",

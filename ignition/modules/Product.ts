@@ -133,7 +133,7 @@ export function productModule(product: Product) {
       grant("upgrader", ROLES.UPGRADER, timelock),
       grant("recovery", ROLES.RECOVERY, p("recoveryTimelock")),
     ];
-    if (product.template === "GatedToken" || product.template === "IntentToken" || product.template === "Gated721") {
+    if (product.template === "GatedToken" || product.template === "IntentToken" || product.template === "Gated721" || product.template === "Gated1155") {
       granted.push(grant("minter", ROLES.MINTER, p("minter")), grant("burner", ROLES.BURNER, p("burner")));
     }
     if (product.template === "Gated7540Vault") granted.push(grant("settler", ROLES.SETTLER, desk ?? p("settler")));
