@@ -21,12 +21,14 @@ import {IERC7540Operator} from 'interfaces/IERC7540Operator.sol';
 import {IERC7540Redeem} from 'interfaces/IERC7540Redeem.sol';
 import {IERC7575} from 'interfaces/IERC7575.sol';
 import {IERC7943Fungible} from 'interfaces/IERC7943Fungible.sol';
+import {IERC7943MultiToken} from 'interfaces/IERC7943MultiToken.sol';
 import {IERC7943NonFungible} from 'interfaces/IERC7943NonFungible.sol';
 import {IERC8473} from 'interfaces/IERC8473.sol';
 import {IERC8473Policy} from 'interfaces/IERC8473Policy.sol';
 import {IFeeModel} from 'interfaces/IFeeModel.sol';
 import {IFund} from 'interfaces/IFund.sol';
 import {IFundHoldersRule} from 'interfaces/IFundHoldersRule.sol';
+import {IGated1155} from 'interfaces/IGated1155.sol';
 import {IGated4626Vault} from 'interfaces/IGated4626Vault.sol';
 import {IGated721} from 'interfaces/IGated721.sol';
 import {IGated7540Vault} from 'interfaces/IGated7540Vault.sol';
@@ -101,6 +103,10 @@ contract InterfaceFreezeTest is Test {
     // `IGated721` is mint, burn, setTokenURI and canTransferWithReason
     assertEq(type(IERC7943NonFungible).interfaceId, bytes4(0xbf1ef5fe), 'IERC7943NonFungible');
     assertEq(type(IGated721).interfaceId, bytes4(0x94f4fff1), 'IGated721');
+    // Added 2026-11-19 on owner instruction, for the ERC-1155 template. ERC-7943's multi-token id is the standard's own;
+    // `IGated1155` is mint, burn, setURI, name, symbol and canTransferWithReason
+    assertEq(type(IERC7943MultiToken).interfaceId, bytes4(0x41c4fbad), 'IERC7943MultiToken');
+    assertEq(type(IGated1155).interfaceId, bytes4(0xc12446d8), 'IGated1155');
     // Re-pinned in S1 of the review items (2026-10-24) on owner instruction (RD1 to RD3): `TransferContext` lost `ref` and
     // `deadline`, `IERC8473Policy` and `IComplianceRule` gained `checkSend` and `checkReceive`, and `IComplianceHook` became
     // the shared hook (per-token `setRules`, `rules` and `ruleCount`; no `ADMIN` or `TOKEN`). Ids computed from the
@@ -202,6 +208,13 @@ contract InterfaceFreezeTest is Test {
       IERC7943NonFungible.ForcedTransfer.selector, 0x7b3ce50c216d2ccf9919c6b9f1bfb33f0350a33010f188750b4af38e00448138
     );
     assertEq(IERC7943NonFungible.Frozen.selector, 0x110a31ef32e319c921a388ad15b3fcbf2dd8f62ab35795b611151ab36ed5b2af);
+    // The ERC-1155 template's events, added 2026-11-19. Each carries the token id and the amount, so none shares a
+    // topic with the other templates' events; the standard indexes the token id in both of its own
+    assertEq(IGated1155.ForcedTransferBy.selector, 0xab6db92ce99b5d4965106f89d75749c9c926aa977a2299956703b39e231e2a05);
+    assertEq(
+      IERC7943MultiToken.ForcedTransfer.selector, 0xa7f01abbf5b7ec7bac7fb74feb5c1f54af9e430f18a33681c1b9149875339a45
+    );
+    assertEq(IERC7943MultiToken.Frozen.selector, 0x7b0c29e799ed468266b4d070c03070137a95cb869c5eb7c18063fb7b1a7a09c5);
     assertEq(IERC8473.PolicyChanged.selector, 0x9fb4639eb3115274c0dca1893a5ffb376a717d9268b31846835ac71bcce5470b);
     assertEq(
       ITransferIntent.IntentExecuted.selector, 0xbfb47f4ecbd3340a56ddfb40a6e422e8805e7c3f5f2563dd89154d3da6c8aee8
