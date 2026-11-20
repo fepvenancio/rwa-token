@@ -279,7 +279,7 @@ both rounded down</pre>
 <section id="example">
   <div class="prose wrap-any">
     <h2>One investor, from request to claim</h2>
-    <p>Alice invests in period 2 and leaves in period 3. The asset has 6 decimals, so the shares have 12. Figures below are in whole units and show every digit, so that the rounding is visible. "Assets held" is the vault's balance of the asset. Every figure is the contract's own output for these calls, run against the code at this commit. No limit applies: <code>type(uint256).max</code> as <code>redeemLimit</code> takes all of a period's redemptions.</p>
+    <p>Alice invests in period 2 and leaves in period 3. The asset has 6 decimals, so the shares have 12. Figures below are in whole units and show every digit, so that the rounding is visible. "Assets held" is the vault's balance of the asset. Every figure is the contract's own output for these calls, run against the code. No limit applies: <code>type(uint256).max</code> as <code>redeemLimit</code> takes all of a period's redemptions.</p>
     <p><b>Before.</b> In period 1 Bob deposited 1,000,000 into an empty vault at a value of 0, and bought 1,000,000 shares. <code>dealingState()</code> reads open 2, settled 1, nothing unclaimed.</p>
   </div>
   <div class="table-wrap">

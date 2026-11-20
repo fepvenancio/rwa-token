@@ -115,6 +115,25 @@ const LEGO_ABI = parseAbi([
 ]);
 const SAFE_ABI = parseAbi(["function getThreshold() view returns (uint256)"]);
 const DISTRIBUTOR_ABI = parseAbi(["function TOKEN() view returns (address)"]);
+/** `OrderSettlement`'s EIP-712 type, as a maker signs it. */
+export const ORDER_TYPES = {
+  Order: [
+    { name: "maker", type: "address" },
+    { name: "giveToken", type: "address" },
+    { name: "giveId", type: "uint256" },
+    { name: "giveAmount", type: "uint256" },
+    { name: "takeToken", type: "address" },
+    { name: "takeId", type: "uint256" },
+    { name: "takeAmount", type: "uint256" },
+    { name: "giveIs1155", type: "bool" },
+    { name: "takeIs1155", type: "bool" },
+    { name: "taker", type: "address" },
+    { name: "allOrNothing", type: "bool" },
+    { name: "nonce", type: "bytes32" },
+    { name: "validAfter", type: "uint256" },
+    { name: "deadline", type: "uint256" },
+  ],
+} as const;
 /** `SignedExit`'s EIP-712 type, as a holder signs it. */
 export const EXIT_TYPES = {
   Exit: [
@@ -213,7 +232,7 @@ export async function deployUntilProducts(connection: NetworkConnection) {
 
 export type Stack = Awaited<ReturnType<typeof deployStack>>;
 export type ProfileStack = Awaited<ReturnType<typeof deployProfile>>;
-type HandedOverKeys = "legos" | "parameters" | "profile" | "publicClient" | "wallets" | "timelock" | "recoveryTimelock" | "registry" | "hook" | "proxyDeployer" | "credentials" | "funds" | "executor" | "dvpExecutor" | "signedEntry" | "signedExit" | "rules" | "deployed";
+type HandedOverKeys = "legos" | "parameters" | "profile" | "publicClient" | "wallets" | "timelock" | "recoveryTimelock" | "registry" | "hook" | "proxyDeployer" | "credentials" | "funds" | "executor" | "dvpExecutor" | "orderSettlement" | "signedEntry" | "signedExit" | "rules" | "deployed";
 type Parameters_ = Record<string, Address | bigint | number>;
 
 /** `Core`, then the council step. Returns what the later stages need, and a function that runs them. */
@@ -279,6 +298,7 @@ async function stages(connection: NetworkConnection, profile: Profile) {
         : undefined,
     executor: has("executor") ? await viem.getContractAt("IntentExecutor", components.executor.address) : undefined,
     dvpExecutor: has("dvpExecutor") ? await viem.getContractAt("DvPExecutor", components.dvpExecutor.address) : undefined,
+    orderSettlement: has("orderSettlement") ? await viem.getContractAt("OrderSettlement", components.orderSettlement.address) : undefined,
     signedEntry: has("signedEntry") ? await viem.getContractAt("SignedEntry", components.signedEntry.address) : undefined,
     signedExit: has("signedExit") ? await viem.getContractAt("SignedExit", components.signedExit.address) : undefined,
     rules: await attachRules(),
@@ -295,7 +315,7 @@ async function stages(connection: NetworkConnection, profile: Profile) {
     supplyCapRule: has("supplyCapRule") ? await viem.getContractAt("SupplyCapRule", components.supplyCapRule.address) : undefined,
     executedOnlyRule: has("executedOnlyRule") ? await viem.getContractAt("ExecutedOnlyRule", components.executedOnlyRule.address) : undefined,
   });
-  let { credentials, executor, dvpExecutor, signedEntry, signedExit, rules } = await attachParts();
+  let { credentials, executor, dvpExecutor, orderSettlement, signedEntry, signedExit, rules } = await attachParts();
 
   const attest = async (target: Address, kind: number, uri: string) => {
     const code = await publicClient.getCode({ address: target });
@@ -377,7 +397,7 @@ async function stages(connection: NetworkConnection, profile: Profile) {
       if (p.credentialRule === undefined) throw new Error("an external credential registry needs the credentialRule parameter");
       externalRule = p.credentialRule as Address;
       await attest(externalRule, ATTEST.RULE, `ipfs://rule-review/${externalRule}`);
-      ({ credentials, executor, dvpExecutor, signedEntry, signedExit, rules } = await attachParts());
+      ({ credentials, executor, dvpExecutor, orderSettlement, signedEntry, signedExit, rules } = await attachParts());
     }
 
     // Each fund, with the council attesting its rule: a class cannot list the rule before that.
@@ -482,7 +502,7 @@ async function stages(connection: NetworkConnection, profile: Profile) {
      * Adds to the running core what these products, or a signed entry, need and it lacks, as an issuer would: `CoreParts`,
      * the council's attestations, then `PartsHandover`. The stack then reads the new parts. Returns the parts added.
      */
-    const addParts = async (wanted: Pick<Profile, "products" | "signedEntry" | "signedExit">) => {
+    const addParts = async (wanted: Pick<Profile, "products" | "signedEntry" | "signedExit" | "orderSettlement">) => {
       const present = Object.keys(components);
       const parts = missingParts({ ...wanted, credentials: profile.credentials }, present);
       const module = corePartsModule(parts, present);
@@ -494,17 +514,19 @@ async function stages(connection: NetworkConnection, profile: Profile) {
       await attestParts(Object.keys(added));
       const partsHandover = partsHandoverModule(parts);
       await ignition.deploy(partsHandover, { parameters: { [partsHandover.id]: p } });
-      ({ credentials, executor, dvpExecutor, signedEntry, signedExit, rules } = await attachParts());
+      ({ credentials, executor, dvpExecutor, orderSettlement, signedEntry, signedExit, rules } = await attachParts());
       if (rules.windowRule !== undefined) p.windowDays = await rules.windowRule.read.MON_TO_FRI();
       Object.assign(stack, {
         credentials,
         executor,
         dvpExecutor,
+        orderSettlement,
         signedEntry,
         signedExit,
         rules: { ...rules, fundHoldersRule: stack.rules.fundHoldersRule },
         profile: {
           ...stack.profile,
+          orderSettlement: stack.profile.orderSettlement === true || wanted.orderSettlement === true,
           signedEntry: stack.profile.signedEntry === true || wanted.signedEntry === true,
           signedExit: stack.profile.signedExit === true || wanted.signedExit === true,
         },
@@ -546,6 +568,7 @@ async function stages(connection: NetworkConnection, profile: Profile) {
       fund: firstFund?.fund,
       executor,
       dvpExecutor,
+      orderSettlement,
       signedEntry,
       signedExit,
       rules: { ...rules, fundHoldersRule: firstFund?.rule },
@@ -619,7 +642,7 @@ export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
   const named = s.parameters as Record<string, Address>;
   const external = s.profile.credentials === "external";
   const tokens = s.deployed.map(({ contract }) => contract);
-  const executors = [s.executor, s.dvpExecutor].filter((c) => c !== undefined);
+  const executors = [s.executor, s.dvpExecutor, s.orderSettlement].filter((c) => c !== undefined);
   type Gated = { address: Address; abi: unknown };
   /** Every role id the contract exposes through a `*_ROLE()` getter, so a role added later is covered. */
   const rolesOf = async (c: Gated) => {
@@ -715,6 +738,33 @@ export async function assertHandedOver(s: Pick<ProfileStack, HandedOverKeys>) {
       await s.signedEntry.read.entryHash([sample]),
       hashTypedData({ domain, types: ENTRY_TYPES, primaryType: "Entry", message: sample }),
       "the signed entry hashes entries for another domain",
+    );
+  }
+  // The order settlement: the release's code, and a sample order's hash is the one a maker signs for this chain and address.
+  if (s.profile.orderSettlement === true || s.orderSettlement !== undefined) {
+    assert.ok(s.orderSettlement !== undefined, "the profile asks for an order settlement and the stack has no order settlement");
+    assert.ok(await isRelease(s.orderSettlement.address, "OrderSettlement"), `the order settlement ${s.orderSettlement.address} is not the release's`);
+    const sample = {
+      maker: s.orderSettlement.address,
+      giveToken: s.orderSettlement.address,
+      giveId: 0n,
+      giveAmount: 1n,
+      takeToken: s.orderSettlement.address,
+      takeId: 0n,
+      takeAmount: 1n,
+      giveIs1155: false,
+      takeIs1155: false,
+      taker: zeroAddress,
+      allOrNothing: false,
+      nonce: zeroHash,
+      validAfter: 0n,
+      deadline: 1n,
+    };
+    const domain = { name: "OrderSettlement", version: "1", chainId: await s.publicClient.getChainId(), verifyingContract: s.orderSettlement.address };
+    assert.equal(
+      await s.orderSettlement.read.orderHash([sample]),
+      hashTypedData({ domain, types: ORDER_TYPES, primaryType: "Order", message: sample }),
+      "the order settlement hashes orders for another domain",
     );
   }
   // The signed exit, the same way: a sample exit's hash must be the one a holder signs for this chain and this address.

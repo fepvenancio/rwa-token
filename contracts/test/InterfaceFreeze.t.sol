@@ -40,6 +40,7 @@ import {IIntentExecutor} from 'interfaces/IIntentExecutor.sol';
 import {IIntentExecutorBatch} from 'interfaces/IIntentExecutorBatch.sol';
 import {IMinPositionRule} from 'interfaces/IMinPositionRule.sol';
 import {INavDesk} from 'interfaces/INavDesk.sol';
+import {IOrderSettlement} from 'interfaces/IOrderSettlement.sol';
 import {IPolicyGated} from 'interfaces/IPolicyGated.sol';
 import {IPolicyGatedCore} from 'interfaces/IPolicyGatedCore.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
@@ -161,6 +162,7 @@ contract InterfaceFreezeTest is Test {
     // Re-pinned 2026-11-02 on owner instruction: the redemption gate, which adds a field to the struct `hashOf` takes
     // (was 0x6d2f4b62)
     assertEq(type(INavDesk).interfaceId, bytes4(0x17066f0f), 'INavDesk');
+    assertEq(type(IOrderSettlement).interfaceId, bytes4(0xb48f6d63), 'IOrderSettlement');
     assertEq(type(ISignedEntry).interfaceId, bytes4(0x05cc4f78), 'ISignedEntry');
     assertEq(type(ISignedExit).interfaceId, bytes4(0x5ef9720f), 'ISignedExit');
     assertEq(type(ISupplyCapRule).interfaceId, bytes4(0x52c89ff1), 'ISupplyCapRule');
@@ -269,6 +271,10 @@ contract InterfaceFreezeTest is Test {
     );
     assertEq(ISignedEntry.EntryCancelled.selector, 0x112e0bf83077a00b180a2c526e1e40fd2b7ce442cc2bfb9c6d3510870ddf0e96);
     assertEq(ISignedEntry.EntryExecuted.selector, 0xb98db96ae7f09fd2003f14676b3a4f20fb1592e2f5adb29d28d14c116a594be0);
+    assertEq(IOrderSettlement.OrderFilled.selector, 0xe8b3c84beb36a2f51c5efbfb92e599d4dcb314a518fbc8a768dc09d1f0b357a0);
+    assertEq(
+      IOrderSettlement.OrderCancelled.selector, 0x35974c4230d53fb4c6e8553fd900c88ba92747dbc689a79bcd6ba755cb936985
+    );
     assertEq(ISignedExit.ExitCancelled.selector, 0xb39402fa1eca50462d7ae5a044687d738d2ce9ba59021554879d2e31a965ed38);
     assertEq(ISignedExit.ExitExecuted.selector, 0x8b2329fbf60adbfc308eb570691f34d1b443248839347d2a331a57db9abbbee5);
     assertEq(ISignedExit.ClaimDelivered.selector, 0x4fab0c6687d4c04acba77523929cdbf7aeec6c266f3faff7b1b0ec904bbee0aa);

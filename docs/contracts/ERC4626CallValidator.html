@@ -36,7 +36,7 @@
 <section id="in-one-minute">
   <div class="callout wrap-any">
     <h3>In one minute</h3>
-    <p>This lets a <a href="GuardedAccount.html">GuardedAccount</a> run a strategy through an outside ERC-4626 vault without being able to send the shares or the money anywhere else. It has no settings: each permission names the vault, and this contract compares the receiver and the owner with the account making the call. With no settings there is one code hash, so one attestation covers every copy. At this commit no deployment profile deploys it, and <code>test_ItRunsAStrategyThroughAnOutsideVaultAndKeepsTheShares</code> shows it in use.</p>
+    <p>This lets a <a href="GuardedAccount.html">GuardedAccount</a> run a strategy through an outside ERC-4626 vault without being able to send the shares or the money anywhere else. It has no settings: each permission names the vault, and this contract compares the receiver and the owner with the account making the call. With no settings there is one code hash, so one attestation covers every copy. No deployment profile deploys it, and <code>test_ItRunsAStrategyThroughAnOutsideVaultAndKeepsTheShares</code> shows it in use.</p>
   </div>
 </section>
 
@@ -57,7 +57,7 @@
         <tr><td>Any other function, such as <code>transfer</code> or <code>approve</code></td><td class="c no">false</td><td><code>test_AnyOtherFunctionIsRefused</code></td></tr>
         <tr><td>One of the four functions at any other length, including extra bytes after a valid call</td><td class="c no">false</td><td><code>test_AWrongLengthIsRefused</code></td></tr>
         <tr><td>Too short to hold a selector, or empty</td><td class="c no">false, with no revert</td><td><code>test_AWrongLengthIsRefused</code></td></tr>
-        <tr><td>The right selector and length, with non-zero bits in the unused upper part of an address word</td><td class="c no">reverts</td><td>None at this commit</td></tr>
+        <tr><td>The right selector and length, with non-zero bits in the unused upper part of an address word</td><td class="c no">reverts</td><td>None</td></tr>
       </tbody>
     </table>
   </div>

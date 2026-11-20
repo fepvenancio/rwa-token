@@ -9,6 +9,7 @@ import {console} from 'forge-std/console.sol';
 
 import {IComplianceRule} from 'interfaces/IComplianceRule.sol';
 import {IDvPExecutor} from 'interfaces/IDvPExecutor.sol';
+import {IOrderSettlement} from 'interfaces/IOrderSettlement.sol';
 import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 import {ISignedEntry} from 'interfaces/ISignedEntry.sol';
 import {ISignedExit} from 'interfaces/ISignedExit.sol';
@@ -22,6 +23,7 @@ import {RuleSetIntegrationTest} from 'contracts/hooks/rules/RuleSetIntegration.t
 import {DvPExecutor} from 'contracts/intents/DvPExecutor.sol';
 import {DvPExecutorIntegrationTest} from 'contracts/intents/DvPExecutor.t.sol';
 import {IntentExecutor} from 'contracts/intents/IntentExecutor.sol';
+import {OrderSettlementTest} from 'contracts/intents/OrderSettlement.t.sol';
 import {SignedEntryTest} from 'contracts/intents/SignedEntry.t.sol';
 import {SignedExitTest} from 'contracts/intents/SignedExit.t.sol';
 import {MockAsset} from 'contracts/test/MockAsset.sol';
@@ -484,5 +486,40 @@ contract Bench_SignedExit is SignedExitTest, BenchReport {
     _exits.claimFor(_target, _controllers);
     _gas -= gasleft();
     _report('7540: claimFor, 10 controllers', _gas);
+  }
+}
+
+contract Bench_Orders is OrderSettlementTest, BenchReport {
+  /// @dev One fill of two orders nobody has filled yet: a security against the cash token, both behind the credential rule
+  function test_OneFill() external {
+    IOrderSettlement.Fill[] memory _fills = _one(_fill(_sell(10), _buy(10), 10 * _UNIT, 10 * _PRICE));
+    address _operator = _relayer;
+
+    vm.startStateDiffRecording();
+    vm.prank(_operator);
+    uint256 _gas = gasleft();
+    _venue.settle(_fills);
+    _gas -= gasleft();
+    _report('orders: one fill, both orders new', _gas);
+  }
+
+  /// @dev A hundred fills in one batch, each of two orders of its own, between the same two makers
+  function test_AHundredFills() external {
+    IOrderSettlement.Fill[] memory _fills = new IOrderSettlement.Fill[](100);
+    for (uint256 _i; _i < 100; ++_i) {
+      IOrderSettlement.Order memory _s = _sell(1);
+      IOrderSettlement.Order memory _b = _buy(1);
+      _s.nonce = bytes32(0x1000 + _i);
+      _b.nonce = bytes32(0x2000 + _i);
+      _fills[_i] = _fill(_s, _b, _UNIT, _PRICE);
+    }
+    address _operator = _relayer;
+
+    vm.startStateDiffRecording();
+    vm.prank(_operator);
+    uint256 _gas = gasleft();
+    _venue.settle(_fills);
+    _gas -= gasleft();
+    _report('orders: 100 fills in one batch', _gas);
   }
 }

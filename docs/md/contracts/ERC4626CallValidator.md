@@ -14,7 +14,7 @@ Judges a vault call for a [GuardedAccount](GuardedAccount.md): `deposit`, `mint`
 
 > ### In one minute
 >
-> This lets a [GuardedAccount](GuardedAccount.md) run a strategy through an outside ERC-4626 vault without being able to send the shares or the money anywhere else. It has no settings: each permission names the vault, and this contract compares the receiver and the owner with the account making the call. With no settings there is one code hash, so one attestation covers every copy. At this commit no deployment profile deploys it, and `test_ItRunsAStrategyThroughAnOutsideVaultAndKeepsTheShares` shows it in use.
+> This lets a [GuardedAccount](GuardedAccount.md) run a strategy through an outside ERC-4626 vault without being able to send the shares or the money anywhere else. It has no settings: each permission names the vault, and this contract compares the receiver and the owner with the account making the call. With no settings there is one code hash, so one attestation covers every copy. No deployment profile deploys it, and `test_ItRunsAStrategyThroughAnOutsideVaultAndKeepsTheShares` shows it in use.
 
 <a id="how"></a>
 ## What it accepts and refuses
@@ -31,7 +31,7 @@ Judges a vault call for a [GuardedAccount](GuardedAccount.md): `deposit`, `mint`
 | Any other function, such as `transfer` or `approve` | false | `test_AnyOtherFunctionIsRefused` |
 | One of the four functions at any other length, including extra bytes after a valid call | false | `test_AWrongLengthIsRefused` |
 | Too short to hold a selector, or empty | false, with no revert | `test_AWrongLengthIsRefused` |
-| The right selector and length, with non-zero bits in the unused upper part of an address word | reverts | None at this commit |
+| The right selector and length, with non-zero bits in the unused upper part of an address word | reverts | None |
 
 The last row is the one case that does not return false. The call reaches the decoder, which refuses a malformed address by reverting with no data, and `GuardedAccount.execute` reverts with that in place of `GuardedAccount_CallRefused`. Nothing runs either way.
 

@@ -31,7 +31,7 @@ Judges a token call for a [GuardedAccount](GuardedAccount.md): a `transfer` to o
 | Another function of the same shape, such as `increaseAllowance` or `mint` | false | `test_AnyOtherFunctionWithTheSameShapeIsRefused` |
 | Any length but 68 bytes, including extra bytes after a valid call | false | `testFuzz_AnyOtherLengthIsRefused`, `test_ExtraDataIsRefused` |
 | Too short to hold a selector, or empty | false, with no revert | `test_TooShortIsRefusedRatherThanReverting` |
-| 68 bytes and the right selector, with non-zero bits in the unused upper part of the address word | reverts | None at this commit |
+| 68 bytes and the right selector, with non-zero bits in the unused upper part of the address word | reverts | None |
 
 The last row is the one case that does not return false. The call has the right length and selector, so it reaches the decoder, and the decoder refuses a malformed address by reverting with no data. `GuardedAccount.execute` then reverts with that empty revert in place of `GuardedAccount_CallRefused`. Nothing runs either way.
 

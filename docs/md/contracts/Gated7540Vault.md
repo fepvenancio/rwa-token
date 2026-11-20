@@ -110,7 +110,7 @@ A zero input reverts with `Gated7540Vault_ZeroAmount` on all four, and a claim a
 <a id="example"></a>
 ## One investor, from request to claim
 
-Alice invests in period 2 and leaves in period 3. The asset has 6 decimals, so the shares have 12. Figures below are in whole units and show every digit, so that the rounding is visible. "Assets held" is the vault's balance of the asset. Every figure is the contract's own output for these calls, run against the code at this commit. No limit applies: `type(uint256).max` as `redeemLimit` takes all of a period's redemptions.
+Alice invests in period 2 and leaves in period 3. The asset has 6 decimals, so the shares have 12. Figures below are in whole units and show every digit, so that the rounding is visible. "Assets held" is the vault's balance of the asset. Every figure is the contract's own output for these calls, run against the code. No limit applies: `type(uint256).max` as `redeemLimit` takes all of a period's redemptions.
 
 **Before.** In period 1 Bob deposited 1,000,000 into an empty vault at a value of 0, and bought 1,000,000 shares. `dealingState()` reads open 2, settled 1, nothing unclaimed.
 
