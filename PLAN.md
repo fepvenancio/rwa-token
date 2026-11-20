@@ -4795,7 +4795,7 @@ Rounding is always against the counterparty, so no sequence of small fills pays 
 | orders: one fill, both orders new | 28 | 6 | 191,072 |
 | orders: 100 fills in one batch | 2,701 | 600 | 12,742,759 |
 
-  A fill in a batch of a hundred costs 127,428 gas, 31% less than a DvP trade, and no existing row moved. A single first fill costs 3% more than a DvP trade, so "no more gas than a `dvp: gated cash` trade" is not met. The difference is one thing, measured: the check that an ERC-20 receiver's balance rose by exactly the amount, two balance reads for each leg. Without it the same fill costs 185,245 gas in 20 calls, under the bar. The check is kept as built, because it is what refuses a token that keeps part of a transfer and nothing else here would. **Open for the owner (O7):** keep the check and accept the 3% on a lone fill, or drop it on a chain where every token is the operator's own.
+  A fill in a batch of a hundred costs 127,428 gas, 31% less than a DvP trade, and no existing row moved. A single first fill costs 3% more than a DvP trade, so "no more gas than a `dvp: gated cash` trade" is not met. The difference is one thing, measured: the check that an ERC-20 receiver's balance rose by exactly the amount, two balance reads for each leg. Without it the same fill costs 185,245 gas in 20 calls, under the bar. The check is kept as built, because it is what refuses a token that keeps part of a transfer and nothing else here would. **O7, decided on 2026-11-20:** the check stays and the 3% on a lone fill is accepted.
 - **Gates.** `npx hardhat test`: 2300 passing (2097 solidity, 203 nodejs), before one test and one check were added and run on their own. Format, lint and typecheck clean, Slither 0 results, Halmos 25 of 25, `validate:upgrades` 8 of 8, `verify:reproducible` 35 contracts identical.
 - **Pages.** A page for `OrderSettlement` and ten pages changed. The same change removes nine "at this commit" phrases left on the pages and corrects two sentences the cash profile had made false: the hook's page and the supply cap's page said no profile lists `SupplyCapRule`.
 - **Not done.** The fuzzed property stands in for a Halmos one, as planned. A fill of a 7540's shares is not tested on its own; they are an ERC-20 as a 4626's are.
@@ -4813,9 +4813,132 @@ The owner passed on a reviewer's answers and four notes the same day. The answer
 - **Go-ahead:** step 0, then the first pass: E1, E2, and E3 with E13.
 - **The notes:** the seizure in E7 (redesigned above); a gated cash token refusing one holder in E2; skipping one controller in E13 and pinning that the keeper only claims to the controller; `Gated1155` and `ExecutedOnlyRule` in E8; and a wrong reference in step 0, corrected.
 
+### Decisions of 2026-11-20
+
+The owner passed on a note on 2026-11-20 with three answers. The merges it also names wait for the owner's own word.
+
+- **O7:** the received-amount check in `OrderSettlement` stays, and a lone first fill at 3% above its bar is accepted. Batches are the intended use and are 31% under it, and the check is what lets the contract take any ERC-20 and not only the stack's own.
+- **The third pass is E14,** the control plane. Its design is below.
+- **E7 is the escrow,** `LienVault`, so that no contract holds `AGENT_ROLE` on a token. Its design is below, with what the escrow costs, which the row above gave in one sentence and is more than that.
+
+Both designs are for review. Nothing in them is built.
+
+### E14 in detail: the control plane (design, 2026-11-20, nothing built)
+
+No contract changes, so no interface is reopened and no benchmark row can move. What is built is TypeScript under `scripts/`, with viem and Node and no new dependency.
+
+**What exists.** The post-deploy check is `assertHandedOver` in `test/nodejs/fixtures.ts`, about 400 lines. It takes a stack that a test deployed in the same process: contract objects, the profile, the parameters and the test wallets, and it stops at the first failed assertion. Nothing runs it against a deployed network. No keeper and no reconciler exists.
+
+**1. The check, against a live network.**
+
+- The check moves out of the fixtures into `scripts/lib/check.ts`, unchanged in what it asserts. It collects every failure and returns the list, where today it throws on the first: a person reading a failed check on a live stack needs all of them at once.
+- `assertHandedOver` stays in the fixtures as a wrapper that fails a test when the list is not empty, so every node test that calls it today runs the same code the command runs. No assertion is dropped or weakened in the move; the review checks that by the planted faults the node tests already carry (a stack that lost its signed exit, a role on a single key, a broken class), which must still fail.
+- A loader builds the check's input for a live stack: the addresses from the Ignition deployment folder, the profile by name, the parameters file the deployment used, and the named accounts from those parameters. The check reads the test wallets for addresses only, so the loader needs no key.
+- The command: `npm run check -- --network <name> --deployment <id> --profile <name> --parameters <file>`. Read-only. It prints each failure on a line and exits 0 when there is none, 1 when there is any, and 2 when its input cannot be used (no such deployment, a profile that does not match what is deployed).
+
+**2. Keepers.** Each is one file under `scripts/keepers/` with one function that reads the chain and returns the calls to send, and a thin command that sends them. Each runs once and exits; what schedules it is the operator's. Each reads before it sends, so a second run right after the first sends nothing, and two copies running at once waste a transaction and break nothing.
+
+| Keeper | Sends | When | Who may call it on-chain |
+|---|---|---|---|
+| `rekey` | `Fund.rekey(account)` | an account holds a class and `countedKeyOf(account)` is not the registry's `entityKeyOf(account)`; candidates come from `CredentialSet` since the last run | anyone |
+| `dealing` | `NavDesk.closePeriod()`, `NavDesk.execute()` | `periodLength` has passed; a proposal is accepted and its cooldown is over | anyone |
+| `fees` | `Gated4626Vault.collectFees()` | fees are owed and idle money can pay some | anyone |
+| `payout` | `Distributor.claimBatch(id, …)` in chunks | a distribution is approved, from the list its root was built from, leaving out rows already claimed | anyone |
+| `claims` | `SignedExit.claimFor(vault, controllers)` in chunks | after `PeriodSettled`, for controllers with something claimable that made the contract their operator | anyone |
+
+  Every one of these functions is open to anyone, checked in the interfaces. So the keeper's key holds no role on anything, and the most a stolen one can do is send these same calls. That is stated in the pages and pinned in each keeper's test. The key is read through `hardhat-keystore` (rule 8).
+
+  No keeper proposes or accepts a price, approves a distribution, or writes a credential: those are people, two of them where the contract asks for two.
+
+  Chunk sizes are parameters. From the benchmark, 100 rows of `claimBatch` cost 4.9 million gas and ten controllers of `claimFor` 0.66 million, so the defaults are 100 and 50; the chain's block limit is the operator's.
+
+**3. The reconciler.** One read-only command, `npm run reconcile`, that prints what it finds and exits non-zero on any mismatch:
+
+- each cash token's `totalSupply()` against the ledger's figure, read from a JSON file the operator's ledger writes (`{ token: supply }`); the ledger itself is outside this repository;
+- each fund: `holderCount()` at or below `holderCap()`, and `firstBrokenClass()` the zero address;
+- each 7540: the vault's balance of its asset at least pending deposits plus claimable redemption cash, which is the audit `settlePeriod` runs, read between settlements;
+- each distributor: a distribution past its expiry with money still in it;
+- when E7 exists: each `LienVault`'s balance of a token at least what its liens book.
+
+**Tests.** Node tests on a deployed profile, one for each keeper: the state that calls for it, one run, the one effect; the list of transactions it sent holds only the selectors and targets of its row; a second run sends nothing. The reconciler: a clean stack reads clean, and each mismatch is planted and named. The check: the loader's object passes on a stack deployed by Ignition, and one test starts a local node, deploys, and runs the command as a process against an intact stack and a broken one, for the exit codes. If that last test adds more than a minute to the suite it is run in CI only.
+
+**Pages.** `deployment.html` gains the command where it describes the post-deploy check, and a new page describes the keepers and the reconciler: what each sends, that none holds a role, and what happens when one stops (nothing is lost: every call can be sent late, and by anyone).
+
+**Decisions for the owner.**
+
+| # | Question | Proposed |
+|---|---|---|
+| K1 | A keeper that runs once, or a process that stays up | Once. A scheduler is the operator's, and a process that stays up needs supervision this repository should not own |
+| K2 | How the ledger's figure arrives | A JSON file. A connector to a ledger is not in this repository |
+| K3 | Dependencies | None new: viem and Node |
+| K4 | Where a failure goes | Standard output and the exit code. Alerting is the operator's |
+
+**Kept if.** The check runs against a deployed stack from the command line and fails on each fault the node tests plant; each keeper is shown doing its one job, sending nothing else, and nothing on a second run; no assertion of today's check is lost; every gate stays green. No benchmark row: no contract changes.
+
+**Steps.** The check moved and returning a list, with the node tests unchanged and passing; the loader and the command; the five keepers, each test first; the reconciler; pages; gates; the port to `paris`, which should be a plain cherry-pick as no contract differs.
+
+### E7 in detail: `LienVault`, the escrow (design, 2026-11-20, nothing built)
+
+The row for E7 above left two designs. The owner's note of 2026-11-20 takes the escrow. This is that design, and it starts with what the choice costs, because three of the costs were not in the row.
+
+**What it is.** An immutable contract with no role table. A holder moves tokens into it under a lien that names a beneficiary. While they are there, only the beneficiary decides: it releases them back to the holder, or takes them. The vault holds no role on any token and is installed nowhere, so it is not attested. On each token it is an ordinary holder and needs a credential on that token's policy, as a vault that holds gated cash does. No rule, no reason code, no change to a token, and no interface reopened: one new interface, `ILienVault`.
+
+**What the escrow gives over the scoped agent.**
+
+- No `AGENT_ROLE` on a contract. A fault in the lego can lose only what was pledged into it, never a holder's unpledged tokens.
+- A transfer costs nothing more: no rule is listed, so no existing flow can move.
+- `maxRedeem` and every pre-flight are exact with no change: pledged tokens are not in the holder's balance.
+- A pledge cannot be undone by the holder, by construction and not by a rule's bookkeeping.
+
+**What it costs. Each is real, and none is fixed by this design alone.**
+
+1. **The vault is the holder of record.** A distribution's list is built off-chain from balances at the record date, so its builder has to read the vault's liens and credit each pledgor, or the vault would be paid. The contract gives the view for that; the look-through itself is a step in the operator's process and is nowhere enforced on-chain.
+2. **A fund's count.** `FundHoldersRule` sees the vault as an account. If the fund exempts it, as it must for the vault not to take a slot, a holder that pledges its whole position leaves the count while it still owns the position, and a new investor can take its place; when the lien is released at a full fund, the holder is a new investor and the release is refused with `MAX_HOLDERS` until a slot is free. If the fund does not exempt it, every pledgor together counts once. Either way the count on-chain is of holders of record and can be below the number of owners. The scoped agent has no such gap, because pledged tokens never leave the holder. This is the same question as an omnibus account (E9), and for a fund with a statutory cap it is counsel's. Proposed: exempt the vault, state the limit, and have the reconciler report every counted fund's pledgors that hold no class outside the vault, so the operator sees the true number.
+3. **A locked holder cannot pledge.** A pledge is a plain transfer, and `HolderRestrictionRule` refuses one from a holder inside its lockup. Under the scoped agent a locked holder could pledge, since nothing moves. A lockup is when a holder is most likely to want to borrow against a position.
+4. **A token that takes only signed intents cannot be pledged.** `ExecutedOnlyRule` refuses the plain transfer in and out. Not supported in this version.
+5. **Enforcement reaches a pooled balance.** The vault's balance of a token is every pledgor's together, as a 7540's escrow is. The token's `forcedTransfer` out of the vault, or a frozen amount set on it, cannot name a pledgor, and the vault cannot stop the token's agent as the 7540 does for its own escrow. So the vault has its own entry point for that, below, and the agent's runbook says to use it. A forced transfer straight out of the vault would leave liens the balance no longer covers; the reconciler's last line is the check for that.
+6. **A minimum position.** The vault has to be exempt from `MinPositionRule` on each token, as any pooling account. A pledge that would leave the holder with dust is refused by the rule, correctly. A lien smaller than the minimum cannot be seized by a beneficiary that holds nothing, which nobody can know when the lien is made.
+
+**The contract.**
+
+| Function | Who | What |
+|---|---|---|
+| `pledge(token, amount, beneficiary)` | the holder | Pulls `amount` under the holder's allowance, checks the vault's balance rose by exactly that, opens a lien and returns its id |
+| `increase(lienId, amount)` | the lien's pledgor | Adds to it, the same way |
+| `release(lienId, amount)` | the beneficiary | Sends `amount` back to the pledgor, a plain transfer the token's policy judges |
+| `seize(lienId, amount)` | the beneficiary | Sends `amount` to the beneficiary, a plain transfer the token's policy judges |
+| `assign(lienId, newBeneficiary)` | the beneficiary | Hands the lien to another account |
+| `recover(lienId, to)` | the token's `AGENT_ROLE`, asked at call time | Sends what the lien holds to `to` and closes it: the enforcement path for one pledgor's tokens |
+| `lienOf(lienId)`, `pledgedOf(token, pledgor)`, `totalPledged(token)` | views | For the list builder, the reconciler and a lender |
+
+- A lien is `{ token, pledgor, beneficiary, amount }` under an id from a counter. A holder can have many, to one lender or to several; each is touched only by its own beneficiary.
+- **Seizing needs nothing but the beneficiary's call.** A default is a fact off-chain, and the vault cannot judge it. The holder trusts the beneficiary with the pledged amount and no more, which is what a pledge with control is. A date after which seizure opens would say nothing about a default.
+- **Nothing here is forced.** `release` and `seize` are plain transfers, so the pause, a freeze, a credential and the minimum all apply to the receiver. A beneficiary the policy no longer admits cannot seize; `assign` is its way out, to an account that is admitted. A pledgor the policy no longer admits cannot be released to; the tokens stay until it is admitted again or the agent recovers them.
+- **`recover` asks the token** whether the caller holds its `AGENT_ROLE`, as the legos ask the vault. For a token with no such role the call fails, so the function does nothing there. It moves by a plain transfer too, so `to` passes the policy.
+- **ERC-20 only in this version.** A `Gated1155` series as collateral needs the receiver callbacks and an id in the lien; it is the same contract with one more branch and can follow.
+- A reentrancy guard on every function that moves tokens. No pause of its own: the token's pause already stops every movement in and out.
+- No signed path. On this chain a wallet's own transaction costs nothing, so the holder sends an `approve` to the token and then `pledge` itself.
+
+**Decisions for the owner.**
+
+| # | Question | Proposed |
+|---|---|---|
+| L1 | The fund's count (cost 2) | Exempt the vault, state the limit, report it in the reconciler. To confirm with counsel before a fund with a statutory cap lists the vault |
+| L2 | A locked holder (cost 3) | Accept: it cannot pledge. If that is not acceptable, the escrow is the wrong design for that product and the scoped agent is the one that works |
+| L3 | Who may seize | The beneficiary alone, at any time |
+| L4 | `assign` | Yes |
+| L5 | `Gated1155` series | Later |
+| L6 | One vault for the core, or one for each token | One for the core, as `SignedEntry`: a part `lienVault` and a profile flag |
+
+**Tests, written first.** On real tokens behind the real credential registry, rules and hook: two lenders with liens on one holder, neither able to touch the other's; the holder unable to move, redeem or reclaim pledged tokens; release and seizure in parts and never past the amount; a payment from the holder to its lender leaving the lien as it was; each caller that is not the one named, refused; a beneficiary the policy refuses unable to seize, and able after `assign`; a release to a frozen pledgor refused and the tokens kept; `recover` by the agent, by anyone else, and on a token with no roles; a token that keeps a fee refused at `pledge`; a token that calls back; 4626 and 7540 shares pledged, with `maxRedeem` exact; a fund class with the vault exempt, showing cost 2 as it is: the count falls on a full pledge and a release at a full fund is refused; a locked holder refused, showing cost 3. An invariant: for every token, the vault's balance is at least `totalPledged(token)`, and `totalPledged` is the sum of its liens, over any sequence of calls. That invariant is small enough for a Halmos property as well.
+
+**Kept if.** Two lenders hold liens on one holder and neither can touch the other's; the holder cannot move pledged tokens and cannot stop a seizure, and can move the rest; a payment from the holder to its lender leaves the lien as it was; no existing benchmark row moves by a single gas, since no token and no rule changes; three rows are added as a base: a pledge, a release and a seizure.
+
+**Steps.** The owner's answers to L1 to L6; interface and brief; tests first against a stub, shown failing; the contract; the part and the profile flag, with the post-deploy check; benchmark rows; planted bugs; the Halmos property; the reconciler's line; pages; gates; the port to `paris`.
+
 ### Interfaces this would reopen
 
-`IDistributor` (E2). New interfaces only for E3, E7 and E8. E1, E4, E5, E6, E13 and E14 reopen none.
+`IDistributor` (E2). New interfaces only for E3, E7 (`ILienVault`; with the escrow there is no rule and no reason code) and E8. E1, E4, E5, E6, E13 and E14 reopen none.
 
 ### What this plan does not claim
 
@@ -4829,5 +4952,7 @@ That the stack then runs a market at any given rate. The benchmark compares the 
 5. `setRules` tells the rules it adds: built on 2026-11-19 with R3 as written, no recount. Open: one sentence in `IComplianceHook`'s NatSpec for `setRules`, a frozen file.
 6. Entities in the credential registry: built on 2026-11-19 without N10. Still open: whether a second live attester for one address is expected, which would change how an entity is scoped.
 7. A review of both plans (2026-11-19) recommends: build both; keep R3 as written, with no recount; leave N10 out; put off the second attester. These are a reviewer's recommendations and decide nothing; items 5 and 6 stay the owner's.
-8. The ecosystem plan (2026-11-19): step 0 and the first pass (E1, E2, E3 with E13) are approved. Open: for E7, a scoped enforcement lego or an escrow; and counsel's view on omnibus accounts (E9).
-9. `OrderSettlement` (E8): built with O1 to O6 as proposed. Open: O7, whether to keep the received-amount check that puts a lone fill 3% above its bar. E7: the review recommends the escrow; the owner has not chosen.
+8. The ecosystem plan (2026-11-19): step 0 and the first pass (E1, E2, E3 with E13) are approved. E7 is the escrow by the note of 2026-11-20 (item 11). Open: counsel's view on omnibus accounts (E9).
+9. `OrderSettlement` (E8): built with O1 to O6 as proposed, and O7 decided on 2026-11-20: the received-amount check stays.
+10. The control plane (E14), designed on 2026-11-20: K1 to K4.
+11. `LienVault` (E7), the escrow, designed on 2026-11-20: L1 to L6. L1, the fund's count, and L2, a locked holder, are costs of the escrow the earlier row did not state; L1 is also counsel's for a fund with a statutory cap.
