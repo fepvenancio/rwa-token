@@ -70,7 +70,7 @@ After the hand-overs, the main timelock holds these, and each power runs only as
 |---|---|---|
 | Each product | `DEFAULT_ADMIN_ROLE` (from the end of `Product`), and `UPGRADER_ROLE` | Grant and revoke the product's roles, `unpause`, `installPolicy`, upgrade to an attested implementation of the same template, change the token's rule list on the hook (`setRules`) and the settings that rules keep under the token's admin, such as `setPolicy`. On a 4626 vault, `setPortfolio` and `setFeeModel`. |
 | A vault's legos, through the vault's role | Nothing of their own: `Portfolio`, `GuardedAccount` and `NavDesk` ask the vault | Add or remove an adapter, raise caps, migrate a portfolio; set a permission on a guarded account; change a desk's settings and fee model, and `adopt` on a successor desk. |
-| `IntentExecutor`, `DvPExecutor` | `DEFAULT_ADMIN_ROLE` | Grant and revoke `OPERATOR_ROLE` and `GUARDIAN_ROLE`, `unpause`. |
+| `IntentExecutor`, `DvPExecutor`, `OrderSettlement` | `DEFAULT_ADMIN_ROLE` | Grant and revoke `OPERATOR_ROLE` and `GUARDIAN_ROLE`, `unpause`. |
 | `PolicyRegistry` | `DEFAULT_ADMIN_ROLE`, from the constructor | Decide who holds `ATTESTER_ROLE`. Attesting itself is the council's. |
 | `CredentialRegistry` | `DEFAULT_ADMIN_ROLE` | Manage attesters and the guardian, kill or revive an attester, clear a guardian block. |
 | Each `Fund` | Ownership, from the end of `FundOpen` | Register a later class, set the fund's rule, investor cap and exemptions. |
@@ -88,7 +88,7 @@ The recovery timelock is the same contract, with the same delay and governance a
 | Where | `RECOVERY_ROLE` allows | Granted by |
 |---|---|---|
 | Each product | `unpause()`, and `revokeRole(GUARDIAN_ROLE, account)` | `Product` |
-| `IntentExecutor`, `DvPExecutor` | `unpause()`, and `revokeRole(GUARDIAN_ROLE, account)` | `CoreHandover` |
+| `IntentExecutor`, `DvPExecutor`, `OrderSettlement` | `unpause()`, and `revokeRole(GUARDIAN_ROLE, account)` | `CoreHandover` |
 | `CredentialRegistry` | `revokeRole(GUARDIAN_ROLE, account)`, `clearGuardianBlock(subject)`, `reviveAttester(id)` | `CoreHandover` |
 | Main timelock | `revokeRole(CANCELLER_ROLE, account)` | The constructor, from `Core` |
 

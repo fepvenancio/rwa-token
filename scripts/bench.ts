@@ -13,6 +13,8 @@ const FLOWS = [
   "intent: executeTransfer, the nonce next to a used one",
   "dvp: gated cash",
   "dvp: erc-3009 cash",
+  "orders: one fill, both orders new",
+  "orders: 100 fills in one batch",
   "4626: deposit",
   "4626: redeem",
   "7540: requestDeposit",

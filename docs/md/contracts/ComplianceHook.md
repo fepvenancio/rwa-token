@@ -50,7 +50,7 @@ Each product names its list in `ignition/profiles.ts`. The demo deployment is th
 | `vault4626`, `vault4626-invest` | `Gated4626Vault` | CredentialRule, HolderRestrictionRule | none |
 | `vault7540`, `managed-fund` | `Gated7540Vault` | CredentialRule, HolderRestrictionRule | none |
 
-[`SupplyCapRule`](SupplyCapRule.md) and [`ExecutedOnlyRule`](ExecutedOnlyRule.md) are in no profile at this commit. A product asks for them by naming `supplyCapRule` or `executedOnlyRule` in its `rules`, as a profile in `test/nodejs/legos.test.ts` does.
+[`SupplyCapRule`](SupplyCapRule.md) and [`ExecutedOnlyRule`](ExecutedOnlyRule.md) are for a product that asks for them. The `cash` profile lists `SupplyCapRule`, and no profile lists `ExecutedOnlyRule`. A product asks for them by naming `supplyCapRule` or `executedOnlyRule` in its `rules`, as a profile in `test/nodejs/legos.test.ts` does.
 
 Where the rules sit is a choice with a reason. `MinPositionRule` comes right after the credential check so that, when a minimum is set, the rules after it see real positions. The vaults have no window rule because they have no executed transfers. The fund rule comes last. Because the first refusal wins, the order also decides which reason a caller sees: a sender with no credential who is also locked up gets `SENDER_NOT_ELIGIBLE`, not `LOCKED_UP`.
 

@@ -24,7 +24,7 @@ Every privileged power in the system is a named role on a named contract, the ow
 
 Two kinds of power. Above the line, everything goes through a timelock: governance proposes, waits out the delay, then executes, and the target contract sees the timelock as the caller. Below the line, each account acts directly and at once, but only within its narrow job.
 
-> **Diagram.** Authority map. Above the line: the governance multisig schedules and executes on the recovery timelock and on the main timelock. The recovery timelock can unpause products and executors, revoke GUARDIAN_ROLE on those and on the credential registry, clear a guardian block, revive an attester, and revoke CANCELLER_ROLE on the main timelock. The main timelock is admin of each product, the executors, both registries and itself, the only upgrader of products, owner of each fund once it has opened, and the admin that the hook, the rules, a portfolio, a desk and a guarded account ask for. The guardian can cancel pending operations on the main timelock. Below the line, acting at once: the guardian pauses and blocks and can bring money back and lower limits; the security council attests and revokes code; the KYC attester writes credentials; the operations account deploys products; the agent forces transfers, freezes amounts, sets lockups and address freezes; the minter and burner mint and burn on token templates, the NFT and the multi-token included; the operator submits through the executors; the settler, a desk, closes and settles periods; the reporter and checker propose, accept and cancel a price; the allocator allocates and makes guarded calls; the distribution maker and checker propose and approve distributions.
+> **Diagram.** Authority map. Above the line: the governance multisig schedules and executes on the recovery timelock and on the main timelock. The recovery timelock can unpause products and executors, revoke GUARDIAN_ROLE on those and on the credential registry, clear a guardian block, revive an attester, and revoke CANCELLER_ROLE on the main timelock. The main timelock is admin of each product, the executors, both registries and itself, the only upgrader of products, owner of each fund once it has opened, and the admin that the hook, the rules, a portfolio, a desk and a guarded account ask for. The guardian can cancel pending operations on the main timelock. Below the line, acting at once: the guardian pauses and blocks and can bring money back and lower limits; the security council attests and revokes code; the KYC attester writes credentials; the operations account deploys products; the agent forces transfers, freezes amounts, sets lockups and address freezes; the minter and burner mint and burn on token templates, the NFT and the multi-token included; the operator submits through the executors and the order settlement; the settler, a desk, closes and settles periods; the reporter and checker propose, accept and cancel a price; the allocator allocates and makes guarded calls; the distribution maker and checker propose and approve distributions.
 >
 > **Above the line power waits. Below it power acts at once but is narrow.** The red dashed line is the guardian's one power over the main timelock: it can cancel any operation that has not run yet. Holders act on their own balances directly and are not drawn.
 
@@ -55,7 +55,7 @@ These are the holders that the Ignition modules set up. "Multisig" here says wha
 | Agent (the issuer's compliance desk) | each product | `AGENT_ROLE` | `Product` |
 | Minter, burner (the issuer) | each `GatedToken`, `IntentToken`, `Gated721` and `Gated1155` | `MINTER_ROLE`, `BURNER_ROLE` | `Product`. No module grants them on a vault. |
 | `IntentExecutor`, `DvPExecutor` | each `IntentToken` that names them | `EXECUTOR_ROLE` | `Product` |
-| Operator (an issuer or relayer key) | each executor | `OPERATOR_ROLE` | `CoreHandover` |
+| Operator (an issuer or relayer key) | each executor, and the `OrderSettlement` if the core has one | `OPERATOR_ROLE` | `CoreHandover` |
 | A `NavDesk`, or the `settler` account where there is none | each `Gated7540Vault` | `SETTLER_ROLE` | `Product`. With no desk the account sets any price alone, which only the `full` test profile does. |
 | Reporter, checker (fund administration, and a second function) | each vault with a desk | `REPORTER_ROLE`, `CHECKER_ROLE` | `Product` |
 | Allocator (the fund manager) | each vault with a portfolio | `ALLOCATOR_ROLE` | `Product` |
@@ -145,6 +145,11 @@ These have no role table of their own, and none is a proxy. Each names its vault
 |  | `GUARDIAN_ROLE` | `pause()` |
 |  | `DEFAULT_ADMIN_ROLE` or `RECOVERY_ROLE` | `unpause()`. Anyone else gets `AccessControlUnauthorizedAccount(caller, DEFAULT_ADMIN_ROLE)`. |
 |  | `DEFAULT_ADMIN_ROLE` | Grant and revoke roles. `RECOVERY_ROLE` may also revoke `GUARDIAN_ROLE`, and nothing else. |
+| [`OrderSettlement`](contracts/OrderSettlement.md) | `OPERATOR_ROLE` | Submit: `settle(fills)`, a batch of fills of orders the makers signed. Only while it is not paused (`EnforcedPause`). It holds no role on any token: each leg is a TRANSFER under the maker's allowance. |
+|  | `GUARDIAN_ROLE` | `pause()` |
+|  | `DEFAULT_ADMIN_ROLE` or `RECOVERY_ROLE` | `unpause()`. Anyone else gets `AccessControlUnauthorizedAccount(caller, DEFAULT_ADMIN_ROLE)`. |
+|  | `DEFAULT_ADMIN_ROLE` | Grant and revoke roles. `RECOVERY_ROLE` may also revoke `GUARDIAN_ROLE`, and nothing else. |
+|  | Any account | `cancelOrder(nonce)` for its own nonces, also while paused. A maker's own `approve` or `setApprovalForAll` on a token is what lets a fill move its tokens. |
 | [`PolicyRegistry`](contracts/PolicyRegistry.md) | `ATTESTER_ROLE` | `attest(codehash, kind, uri)`, `revoke(codehash)`. No delay. |
 |  | `DEFAULT_ADMIN_ROLE` | Manage the attesters. |
 | [`CredentialRegistry`](contracts/CredentialRegistry.md) | An attester in its list that is not killed | `set(subject, validUntil, quals, entity)`, within the bits it may assert, over an empty address, a record it wrote or a killed attester's record. The entity names the investor the address belongs to, in the attester's own numbering, and a fund built over the registry counts investors by it. `setStatus` only on a record it wrote. |
@@ -177,7 +182,7 @@ Every power the guardian has is a way to stop something or reduce it, and all of
 | Call | On | What it stops | Undone by |
 |---|---|---|---|
 | `pause()` | Each product | Every balance movement except FORCED ones. Each product has its own pause. | `unpause()`: main or recovery timelock |
-| `pause()` | `IntentExecutor`, `DvPExecutor` | The operator's submissions through that executor. | `unpause()`: main or recovery timelock |
+| `pause()` | `IntentExecutor`, `DvPExecutor`, `OrderSettlement` | The operator's submissions through that executor. | `unpause()`: main or recovery timelock |
 | `cancel(id)` | Main timelock | Any operation not yet executed, including one whose delay has passed. Holds `CANCELLER_ROLE`. | Governance schedules it again, or removes the right through [recovery](#recovery) |
 | `blockSubject(subject)` | `CredentialRegistry` | An address, under `CredentialRule`. It cannot send or receive. Only an enforcement move can take tokens out of it, a forced transfer or the burner's burn, and nothing can deliver tokens to it, not even a forced transfer. | `clearGuardianBlock`: main or recovery timelock |
 | `killAttester(id)` | `CredentialRegistry` | An attester. Every credential it wrote reads as exit-only: the holder can leave but not receive. | `reviveAttester`: main or recovery timelock |
@@ -268,8 +273,11 @@ A product's pause is one check at the start of every balance movement, before th
 |  | `claimFor` | does not revert and delivers nothing: the vault refuses each claim, which is skipped with `ClaimSkipped` and stays with the vault |
 | An executor paused | `IntentExecutor.execute`, `executeBatch` | reverts `EnforcedPause()` |
 |  | `DvPExecutor.executeDvPGated`, `executeDvP3009` | reverts `EnforcedPause()`; the two pre-flights answer `PAUSED` |
+|  | `OrderSettlement.settle` | reverts `EnforcedPause()`; `canFill` does not check the pause |
+|  | `OrderSettlement.cancelOrder` | works |
 | A token paused, its executor not | `IntentExecutor.execute`, `executeBatch` | `execute` passes the token's `ERC8473PolicyRejected(PAUSED)` through unchanged; `executeBatch` wraps it in `IntentExecutor_BatchItemFailed(index, reason)` |
 |  | `DvPExecutor` trades | reverts `DvPExecutor_LegFailed(leg, reason)`, with the token's revert data as `reason` |
+|  | `OrderSettlement` fills | reverts `OrderSettlement_TransferFailed(index, secondLeg, reason)`, with the token's revert data as `reason` |
 
 The registries, the hook, the rules, the funds and `ProxyDeployer` have no pause, so a product can launch and its settings can change while another is paused. In the credential registry the guardian's equivalent is blocking an address or killing an attester. [The incident runbook](deployment.md#incident) puts the pause, the agent's enforcement and the resume in order.
 
@@ -314,5 +322,5 @@ The registries, the hook, the rules, the funds and `ProxyDeployer` have no pause
 
 - Role grants: `Core.ts`, `CoreHandover.ts`, `PartsHandover.ts` and `handOverParts` in `ignition/parts.ts`, `Product.ts`, `FundOpen.ts`; role ids in `roles.ts`; exceptions in `profiles.ts`
 - Hand-over check: `assertHandedOver` in `test/nodejs/fixtures.ts`
-- Role gates in code: `PolicyGatedCoreUpgradeable.sol`, `PolicyGatedERC20Upgradeable.sol`, `IntentSettledUpgradeable.sol`, `Gated721.sol`, `Gated1155.sol`, `Gated4626Vault.sol`, `Gated4626Management.sol`, `Gated7540Vault.sol`, `Gated7540Settlement.sol`, `PolicyRegistry.sol`, `GovernanceTimelock.sol`, `CredentialRegistry.sol`, `IntentExecutor.sol`, `DvPExecutor.sol`, `Portfolio.sol`, `GuardedAccount.sol`, `NavDesk.sol`, `Distributor.sol`, `ComplianceHook.sol`, and the rules' setters, which ask the token's roles
+- Role gates in code: `PolicyGatedCoreUpgradeable.sol`, `PolicyGatedERC20Upgradeable.sol`, `IntentSettledUpgradeable.sol`, `Gated721.sol`, `Gated1155.sol`, `Gated4626Vault.sol`, `Gated4626Management.sol`, `Gated7540Vault.sol`, `Gated7540Settlement.sol`, `PolicyRegistry.sol`, `GovernanceTimelock.sol`, `CredentialRegistry.sol`, `IntentExecutor.sol`, `DvPExecutor.sol`, `OrderSettlement.sol`, `Portfolio.sol`, `GuardedAccount.sol`, `NavDesk.sol`, `Distributor.sol`, `ComplianceHook.sol`, and the rules' setters, which ask the token's roles
 - Tests: `test/nodejs/governance.test.ts` (the delay, the guardian's veto and the recovery batch), `test/nodejs/legos.test.ts` (what the hand-over check refuses), `GovernanceTimelock.t.sol`, and behaviour while paused in `Gated7540Vault.t.sol`, `Gated4626Vault.t.sol`, `NavDesk.t.sol`, `Portfolio.t.sol` and `GuardedAccount.t.sol`
