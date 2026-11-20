@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import {ERC4626Upgradeable} from '@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol';
 import {IERC4626} from '@openzeppelin/contracts/interfaces/IERC4626.sol';
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {Test} from 'forge-std/Test.sol';
@@ -17,6 +18,7 @@ import {CredentialRule} from 'contracts/hooks/rules/CredentialRule.sol';
 import {CredentialRegistry} from 'contracts/identity/CredentialRegistry.sol';
 import {FeeModel} from 'contracts/nav/FeeModel.sol';
 import {ERC4626Adapter} from 'contracts/portfolio/ERC4626Adapter.sol';
+import {Gated4626Adapter} from 'contracts/portfolio/Gated4626Adapter.sol';
 import {Portfolio} from 'contracts/portfolio/Portfolio.sol';
 import {MockAsset} from 'contracts/test/MockAsset.sol';
 import {MockERC4626Target} from 'contracts/test/MockERC4626Target.sol';
@@ -25,7 +27,7 @@ import {Gated4626Vault} from 'contracts/vaults/Gated4626Vault.sol';
 /**
  * @notice A master fund and two feeder classes, from the parts that exist. The master is a `Gated4626Vault` whose
  *         portfolio invests in an outside vault. Each class is a `Gated4626Vault` whose portfolio holds one
- *         `ERC4626Adapter` into the master. This test contract is every vault's admin and the attester
+ *         `Gated4626Adapter` into the master. This test contract is every vault's admin and the attester
  */
 abstract contract MasterFeederTest is Test {
   struct Class {
@@ -80,11 +82,11 @@ abstract contract MasterFeederTest is Test {
 
     // The master admits funds only: its holders are the classes' adapters.
     _target = new MockERC4626Target(IERC20(address(_asset)));
-    (_master, _masterPortfolio, _masterAdapter) = _newVault('gMASTER', Quals.FUND, IERC4626(address(_target)));
+    (_master, _masterPortfolio, _masterAdapter) = _newVault('gMASTER', Quals.FUND, IERC4626(address(_target)), false);
 
     // Each class has its own policy: class A admits anyone identified, class B professionals only.
-    _a = _newClass('gFEED-A', Quals.KYC);
-    _b = _newClass('gFEED-B', Quals.KYC | Quals.PROFESSIONAL);
+    _a = _newClass('gFEED-A', Quals.KYC, true);
+    _b = _newClass('gFEED-B', Quals.KYC | Quals.PROFESSIONAL, true);
     _creds.set(_alice, _FOREVER, Quals.KYC, 0);
     _creds.set(_bob, _FOREVER, Quals.KYC | Quals.PROFESSIONAL, 0);
 
@@ -102,7 +104,8 @@ abstract contract MasterFeederTest is Test {
   function _newVault(
     string memory _symbol,
     uint32 _requireAll,
-    IERC4626 _into
+    IERC4626 _into,
+    bool _intoAMaster
   ) internal returns (Gated4626Vault _vault, Portfolio _portfolio, ERC4626Adapter _adapter) {
     IComplianceRule[] memory _rules = new IComplianceRule[](1);
     _rules[0] = _rule;
@@ -134,7 +137,9 @@ abstract contract MasterFeederTest is Test {
     _registry.attest(address(_portfolio).codehash, IPolicyRegistry.AttestKind.PORTFOLIO, '');
     _vault.setPortfolio(address(_portfolio), _RATE);
 
-    _adapter = new ERC4626Adapter(address(_portfolio), _into, bytes32(0));
+    _adapter = _intoAMaster
+      ? ERC4626Adapter(address(new Gated4626Adapter(address(_portfolio), _into, bytes32(0))))
+      : new ERC4626Adapter(address(_portfolio), _into, bytes32(0));
     _registry.attest(address(_adapter).codehash, IPolicyRegistry.AttestKind.ADAPTER, '');
     _portfolio.addAdapter(address(_adapter));
     _portfolio.setCaps(_adapter.RISK_ID(), type(uint120).max, 10_000);
@@ -145,9 +150,11 @@ abstract contract MasterFeederTest is Test {
   /// @dev A class over the master. Its adapter holds the master's shares and its portfolio receives the master's cash
   function _newClass(
     string memory _symbol,
-    uint32 _requireAll
+    uint32 _requireAll,
+    bool _gatedAdapter
   ) internal returns (Class memory _class) {
-    (_class.vault, _class.portfolio, _class.adapter) = _newVault(_symbol, _requireAll, IERC4626(address(_master)));
+    (_class.vault, _class.portfolio, _class.adapter) =
+      _newVault(_symbol, _requireAll, IERC4626(address(_master)), _gatedAdapter);
     _creds.set(address(_class.adapter), _FOREVER, Quals.FUND, 0);
     _creds.set(address(_class.portfolio), _FOREVER, Quals.FUND, 0);
   }
@@ -379,27 +386,143 @@ contract MasterFeeder_Price is MasterFeederTest {
     assertApproxEqRel(_asset.balanceOf(_alice) - _before, 400e6, 1e12, 'and its holders still leave');
   }
 
-  /// @dev The gap this test found. While the outside vault cannot be read the master holds its price and stops
-  ///      dealing, but its `previewRedeem` still answers, so the class's adapter reads as fresh and the class goes on
-  ///      dealing at a price the master itself will not deal at. Money that arrives is idle, and idle money is paid out
-  function test_WhileTheMasterCannotPriceAClassStillDeals() external {
-    _target.lose(2000e6); // half is lost, and then the outside vault cannot be read: nobody has counted the loss
+  /// @dev The outside vault loses half and then cannot be read: the master holds its price and stops, and so does a class
+  function test_WhileTheMasterCannotPriceAClassStopsDealing() external {
+    _deposit(_a, _alice, 100e6); // idle money in the class, which needs nothing from the master to be paid out
+    _target.lose(2000e6);
     _target.setBroken(true);
     assertEq(_master.maxDeposit(address(_a.adapter)), 0, 'the master has stopped');
     assertEq(_master.maxRedeem(address(_a.adapter)), 0);
-    assertTrue(_a.adapter.fresh());
-    assertTrue(_a.portfolio.priceFresh());
+    assertFalse(_a.adapter.fresh());
+    assertFalse(_a.portfolio.priceFresh());
 
-    _creds.set(_bob, _FOREVER, Quals.KYC | Quals.PROFESSIONAL, 0);
-    uint256 _before = _asset.balanceOf(_alice);
-    _deposit(_a, _bob, _IN); // a newcomer, at the price before the loss
-    uint256 _max = _a.vault.maxRedeem(_alice);
+    uint256 _held = _a.vault.totalAssets();
+    assertApproxEqAbs(_held, 1100e6, 2, 'it holds its price');
+    assertEq(_a.vault.maxDeposit(_alice), 0);
+    assertEq(_a.vault.maxRedeem(_alice), 0, 'idle money is not paid out at that price');
+    vm.expectPartialRevert(ERC4626Upgradeable.ERC4626ExceededMaxDeposit.selector);
     vm.prank(_alice);
-    _a.vault.redeem(_max, _alice, _alice);
+    _a.vault.deposit(1, _alice);
+    vm.expectPartialRevert(ERC4626Upgradeable.ERC4626ExceededMaxRedeem.selector);
+    vm.prank(_alice);
+    _a.vault.redeem(1, _alice, _alice);
+
+    _target.setBroken(false);
+    assertApproxEqAbs(_a.vault.totalAssets(), 600e6, 2, 'and deals again at the price after the loss');
+    assertEq(_a.vault.maxDeposit(_alice), type(uint256).max);
+    assertGt(_a.vault.maxRedeem(_alice), 0);
+  }
+
+  /// @dev What the plain adapter does over a master, and why a class does not use it: the master's `previewRedeem`
+  ///      still answers, so the class goes on dealing. A newcomer pays the old price and an earlier holder leaves whole
+  function test_WithThePlainAdapterAClassWouldStillDeal() external {
+    Class memory _plain = _newClass('gFEED-C', Quals.KYC, false);
+    vm.prank(_alice);
+    _asset.approve(address(_plain.vault), type(uint256).max);
+    vm.prank(_bob);
+    _asset.approve(address(_plain.vault), type(uint256).max);
+    vm.prank(_alice);
+    _plain.vault.deposit(_IN, _alice);
+    vm.prank(_allocator);
+    _plain.portfolio.allocate(address(_plain.adapter), _IN, 0);
+    _invest();
+
+    _target.lose(2500e6); // half is lost, and then the outside vault cannot be read: nobody has counted the loss
+    _target.setBroken(true);
+    assertEq(_master.maxDeposit(address(_plain.adapter)), 0, 'the master has stopped');
+    assertTrue(_plain.adapter.fresh());
+
+    uint256 _before = _asset.balanceOf(_alice);
+    vm.prank(_bob);
+    _plain.vault.deposit(_IN, _bob); // a newcomer, at the price before the loss
+    uint256 _max = _plain.vault.maxRedeem(_alice);
+    vm.prank(_alice);
+    _plain.vault.redeem(_max, _alice, _alice);
     assertApproxEqAbs(_asset.balanceOf(_alice) - _before, _IN, 2, 'and an earlier holder leaves whole, on his money');
 
     _target.setBroken(false);
-    assertApproxEqRel(_a.vault.convertToAssets(_a.vault.balanceOf(_bob)), 500e6, 1e12, 'who bears her loss');
+    assertApproxEqRel(_plain.vault.convertToAssets(_plain.vault.balanceOf(_bob)), 500e6, 1e12, 'who bears her loss');
+  }
+
+  /// @dev The guardian pauses the master over a price: no class deals at that price from its idle money
+  function test_WhileTheMasterIsPausedAClassStopsDealing() external {
+    _deposit(_a, _alice, 100e6);
+    vm.prank(_guardian);
+    _master.pause();
+    assertFalse(_a.adapter.fresh());
+    assertEq(_a.vault.maxDeposit(_alice), 0);
+    assertEq(_a.vault.maxRedeem(_alice), 0);
+    assertEq(_b.vault.maxDeposit(_bob), 0);
+    assertFalse(_a.vault.paused(), 'nobody paused the class');
+
+    _master.unpause();
+    assertEq(_a.vault.maxDeposit(_alice), type(uint256).max);
+    assertGt(_a.vault.maxRedeem(_alice), 0);
+  }
+
+  /// @dev The master reads nothing and writes nothing down. A class with a unit of idle money must not count that as
+  ///      a fall and close for good
+  function test_WhileTheMasterReadsNothingAClassWritesNothingDownEither() external {
+    _deposit(_a, _alice, 1e6);
+    uint256 _counted = _a.vault.lastCounted();
+    _target.lose(_asset.balanceOf(address(_target)));
+    assertEq(_master.totalAssets(), 0);
+    assertFalse(_master.exitOnly());
+    assertFalse(_a.adapter.fresh());
+
+    vm.prank(makeAddr('stranger'));
+    _a.vault.accrue();
+    assertEq(_a.vault.lastCounted(), _counted);
+    assertFalse(_a.vault.exitOnly());
+    assertEq(_a.vault.maxDeposit(_alice), 0);
+    assertEq(_a.vault.maxRedeem(_alice), 0);
+
+    _earn(4000e6);
+    assertFalse(_a.vault.exitOnly());
+    assertEq(_a.vault.maxDeposit(_alice), type(uint256).max);
+    assertApproxEqAbs(_a.vault.totalAssets(), _counted, 3, 'the value is back');
+  }
+
+  /// @dev The master's portfolio is read on every call: a class stops in the gap of a replacement and follows the new one
+  function test_AClassFollowsItsMasterToANewPortfolio() external {
+    uint256 _back = _masterAdapter.liquid();
+    vm.prank(_allocator);
+    _masterPortfolio.deallocate(address(_masterAdapter), _back);
+    _target.lose(_asset.balanceOf(address(_target)));
+    _masterPortfolio.removeAdapter(address(_masterAdapter));
+    Portfolio _next = new Portfolio(address(_master), IERC20(address(_asset)), false);
+    _masterPortfolio.migrateTo(address(_next));
+    assertFalse(_a.adapter.fresh(), 'the old portfolio gives no price');
+    assertEq(_a.vault.maxDeposit(_alice), 0);
+
+    _master.setPortfolio(address(_next), _RATE);
+    assertTrue(_a.adapter.fresh());
+    assertEq(_a.vault.maxDeposit(_alice), type(uint256).max);
+    assertApproxEqAbs(_a.vault.totalAssets(), _IN, 3);
+  }
+
+  /// @dev A limit, pinned: a write-off closes the master's deposits whatever its size, and a class sees only the fall.
+  ///      The adapter cannot say "no deposits" without also stopping redemptions, so whoever writes off closes the classes
+  function test_ASmallWriteOffClosesTheMasterAndNotItsClasses() external {
+    MockERC4626Target _second = new MockERC4626Target(IERC20(address(_asset)));
+    ERC4626Adapter _secondAdapter = new ERC4626Adapter(address(_masterPortfolio), _second, bytes32(0));
+    _registry.attest(address(_secondAdapter).codehash, IPolicyRegistry.AttestKind.ADAPTER, '');
+    _masterPortfolio.addAdapter(address(_secondAdapter));
+    _masterPortfolio.setCaps(_secondAdapter.RISK_ID(), type(uint120).max, 10_000);
+    _deposit(_a, _alice, 400e6);
+    vm.startPrank(_allocator);
+    _a.portfolio.allocate(address(_a.adapter), 400e6, 0);
+    _masterPortfolio.allocate(address(_secondAdapter), 400e6, 0);
+    vm.stopPrank();
+
+    _second.setBroken(true);
+    _masterPortfolio.writeOffAdapter(address(_secondAdapter));
+    assertTrue(_master.exitOnly());
+    assertEq(_master.maxDeposit(address(_a.adapter)), 0);
+    assertTrue(_a.adapter.fresh(), 'or the holders of a class could not leave');
+    assertFalse(_a.vault.exitOnly());
+    assertEq(_a.vault.maxDeposit(_alice), type(uint256).max, 'a class still takes deposits, which stay idle');
+    assertGt(_a.vault.maxRedeem(_alice), 0);
   }
 }
 

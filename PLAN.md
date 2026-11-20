@@ -5013,6 +5013,33 @@ The candidate named in the row, a master that deals in periods, was not tested: 
 
 **Gates.** `npx hardhat test`: 2329 passing (2114 solidity, 215 nodejs). No contract changed, so Slither, Halmos, upgrade safety and the reproducible build were not rerun.
 
+### E6: M1 to M3 answered, and `Gated4626Adapter` (2026-11-20)
+
+The owner passed on a review of the test and the three questions. It answers M1, M2 and M3 as proposed and adds four notes on M1. Each was checked against the code, and all four hold.
+
+**M1, the adapter, with the notes.** `Gated4626Adapter` is `ERC4626Adapter` with one function overridden: `fresh()` is also false while the target, a `Gated4626Vault`, does not deal. It reopens no interface. `ERC4626Adapter` changes in two words so it can be inherited: `fresh()` becomes `public virtual`, and its one-word read takes the address to ask. The target does not deal when:
+
+1. **Its portfolio gives no fresh price** (the proposal).
+2. **It is paused** (note 1). The proposal missed this: a paused master still answers `previewRedeem`, so a class would have gone on dealing from its idle money at the price the guardian paused over. With the note, pausing the master stops every class in the same block.
+3. **It reads nothing** (note 2): `lastCounted() != 0`, `totalSupply() >= 1e6` and its portfolio's `pricedValue() <= feesOwed()`, the second arm of the vault's own `_dealingStopped`, read through existing views. Without it a class with one unit of idle money counts the master's zero as a fall of more than half and closes for good, while the master itself writes nothing down.
+
+A target with no portfolio deals unless it is paused. Every read is the non-reverting one-word read the adapter already has, and a read that fails is "does not deal". The target's portfolio is read on every call and never stored (note 3), so a master that replaces its portfolio takes its classes with it.
+
+**Two limits, recorded and not coded:**
+
+- **A master closed by a small write-off does not close its classes** (note 4). `writeOffAdapter` on a master leaves the master exit-only whatever the size, while a class sees only the fall and closes only above half. The adapter must not answer this with `fresh() == false`: that would stop redemptions too, and holders must be able to leave. `IAdapter` has no word for "no deposits", and this plan reopens no interface. So it is a rule for the operator: the timelock operation that writes off an adapter on a master also closes deposits on its classes. The test pins that the class still takes deposits.
+- **The third condition copies a rule of the vault.** The adapter is immutable and the vault is not. An upgrade that changes when a `Gated4626Vault` stops dealing needs a new adapter, attested and swapped in each class.
+
+**M2, the lag:** no code. When the `accrue()` keeper is built it counts the master before its classes in one run, so a class counts against the master's new value.
+
+**M3, the profile and the pages:** after the adapter. The profile does not ship with `ERC4626Adapter` into a master. The post-deploy check verifies both credentials on the master for each class, the adapter's and the portfolio's, because `maxRedeem` cannot show a missing one.
+
+**Steps:** the adapter's tests and the turned gap test, failing; the adapter; its size line; then, each its own step, the `Legos` module's choice of adapter with the profile and the check, the pages, and the port to `paris`.
+
+**As built, the first step.** `contracts/portfolio/Gated4626Adapter.sol` and its 19 unit tests over a mocked vault and portfolio; 14 of them failed against a stub that only inherited. `MasterFeeder.t.sol` now builds its classes on the new adapter, 21 tests: the gap test is turned round (the class holds its price and stops, then deals at the price after the loss), the old behaviour is kept as a test over a class built on the plain adapter, and four cases are new, a paused master, a master that reads nothing while the class has idle money, a master that replaces its portfolio, and the small write-off limit. With the override taken out, four of them fail. `ContractSizes.t.sol` has its line.
+
+**Gates.** `npx hardhat test`: 2356 passing (2138 solidity, 218 nodejs). Solhint and `forge fmt` clean. Slither: 0 results. Not run: Halmos, upgrade safety (the adapter is not a proxy) and the reproducible build. Not measured: what the four extra reads add to a class's deposit and redemption. Not built: the `Legos` choice of adapter, the profile, the check of the two credentials, the pages, the port to `paris`.
+
 ### Interfaces this would reopen
 
 `IDistributor` (E2). New interfaces only for E3, E7 (`ILienVault`; with the escrow there is no rule and no reason code) and E8. E1, E4, E5, E6, E13 and E14 reopen none.
@@ -5033,4 +5060,4 @@ That the stack then runs a market at any given rate. The benchmark compares the 
 9. `OrderSettlement` (E8): built with O1 to O6 as proposed, and O7 decided on 2026-11-20: the received-amount check stays.
 10. The control plane (E14): K1 to K4 answered as proposed on 2026-11-20, and built.
 11. `LienVault` (E7), the escrow: L1 to L6 answered as proposed on 2026-11-20, with two additions recorded above. Not built; it follows E6. Still counsel's: L1, the count of a fund with a statutory cap that lists the vault.
-12. Master and feeder (E6): the test is written and found one gap, a class that deals while its master cannot price. Open: M1 to M3 in "E6, the test first".
+12. Master and feeder (E6): the test found one gap, a class that deals while its master cannot price. M1 to M3 were answered as proposed on 2026-11-20, with four notes on the adapter. Open: nothing for the owner; the profile, the check and the pages are not built.

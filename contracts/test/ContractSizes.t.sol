@@ -32,6 +32,7 @@ import {NavDesk} from 'contracts/nav/NavDesk.sol';
 import {ERC20CallValidator} from 'contracts/portfolio/ERC20CallValidator.sol';
 import {ERC4626Adapter} from 'contracts/portfolio/ERC4626Adapter.sol';
 import {ERC4626CallValidator} from 'contracts/portfolio/ERC4626CallValidator.sol';
+import {Gated4626Adapter} from 'contracts/portfolio/Gated4626Adapter.sol';
 import {GuardedAccount} from 'contracts/portfolio/GuardedAccount.sol';
 import {Portfolio} from 'contracts/portfolio/Portfolio.sol';
 import {MockAsset} from 'contracts/test/MockAsset.sol';
@@ -102,6 +103,7 @@ contract ContractSizesTest is Test {
     );
     MockERC4626Target _target = new MockERC4626Target(IERC20(address(_asset)));
     _assertFits('ERC4626Adapter', address(new ERC4626Adapter(address(this), _target, bytes32(0))));
+    _assertFits('Gated4626Adapter', address(new Gated4626Adapter(address(this), _target, bytes32(0))));
     _assertFits(
       'GovernanceTimelock',
       address(new GovernanceTimelock(1 days, new address[](0), new address[](0), address(this), address(this)))

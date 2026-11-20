@@ -79,13 +79,13 @@ contract ERC4626Adapter is IERC4626Adapter {
   }
 
   /// @inheritdoc IAdapter
-  function fresh() external view returns (bool _fresh) {
+  function fresh() public view virtual returns (bool _fresh) {
     (_fresh,) = _read();
   }
 
   /// @inheritdoc IAdapter
   function liquid() external view returns (uint256 _liquid) {
-    (, _liquid) = _ask(abi.encodeCall(IERC4626.maxWithdraw, (address(this))));
+    (, _liquid) = _ask(address(TARGET), abi.encodeCall(IERC4626.maxWithdraw, (address(this))));
   }
 
   /// @inheritdoc IAdapter
@@ -113,26 +113,27 @@ contract ERC4626Adapter is IERC4626Adapter {
    */
   function _read() private view returns (bool _ok, uint256 _value) {
     uint256 _shares;
-    (_ok, _shares) = _ask(abi.encodeCall(IERC20.balanceOf, (address(this))));
-    if (_ok) (_ok, _value) = _ask(abi.encodeCall(IERC4626.previewRedeem, (_shares)));
+    (_ok, _shares) = _ask(address(TARGET), abi.encodeCall(IERC20.balanceOf, (address(this))));
+    if (_ok) (_ok, _value) = _ask(address(TARGET), abi.encodeCall(IERC4626.previewRedeem, (_shares)));
   }
 
   /**
-   * @notice Asks the target for one number, treating any failure as no answer
-   * @dev Low level, because a `try` does not catch a target with no code or one that returns too little: the decoding
+   * @notice Asks a contract for one number, treating any failure as no answer
+   * @dev Low level, because a `try` does not catch a contract with no code or one that returns too little: the decoding
    *      reverts here. It reads the first word and copies nothing else
+   * @param _to The contract asked: the target, or one the target names
    * @param _call The call
-   * @return _ok True if the target answered with at least one word
+   * @return _ok True if it answered with at least one word
    * @return _answer The answer, zero when `_ok` is false
    */
   function _ask(
+    address _to,
     bytes memory _call
-  ) private view returns (bool _ok, uint256 _answer) {
-    address _target = address(TARGET);
+  ) internal view returns (bool _ok, uint256 _answer) {
     // Only the first word of the answer is copied, into the scratch space, so a target cannot make the read costly
     // with a long answer.
     assembly ('memory-safe') {
-      let _success := staticcall(gas(), _target, add(_call, 0x20), mload(_call), 0x00, 0x20)
+      let _success := staticcall(gas(), _to, add(_call, 0x20), mload(_call), 0x00, 0x20)
       _ok := and(_success, gt(returndatasize(), 0x1f))
       if _ok { _answer := mload(0x00) }
     }
