@@ -5110,6 +5110,8 @@ The owner's word to go on. No contract changes in this step.
 
 **Not done.** 7540 shares as collateral are not tested. The reconciler does not read entities. Nothing builds a distribution's list, so the look-through to pledgors is described and not coded. A `Gated1155` series cannot be pledged (L5, later).
 
+**E7 on this line (2026-11-20).** The two commits were carried from the other line by cherry-pick. One change in code: `LienVault` holds this line's storage reentrancy guard, where the other line's is transient, and the test names that guard's error. The test counts and the benchmark figures in the E7 sections above are the other line's. On this line `npx hardhat test`: 2395 passing (2164 solidity, 231 nodejs). Typecheck, Solhint and `forge fmt` clean, Slither 0 results, and the new Halmos property passes. Not run on this line: the benchmark, the reproducible build and the other Halmos suites.
+
 ### Interfaces this would reopen
 
 `IDistributor` (E2). New interfaces only for E3, E7 (`ILienVault`; with the escrow there is no rule and no reason code) and E8. E1, E4, E5, E6, E13 and E14 reopen none.
