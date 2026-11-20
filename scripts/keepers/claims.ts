@@ -8,7 +8,9 @@ const CONTROLLERS = 50;
 
 /**
  * `SignedExit.claimFor(vault, controllers)`, in chunks, for each 7540 vault: the controllers that filed a request since
- * `fromBlock`, have something settled to claim, and made the signed exit their operator. Each is first tried alone
+ * `fromBlock`, have something settled to claim, and made the signed exit their operator. A request settles later than
+ * it is filed, and under a redemption gate over several periods, so `fromBlock` is the vault's first block on every run
+ * and never where the last run stopped: a controller whose request lies before it is missed for good. Each is first tried alone
  * without sending it, and one whose claim the vault would refuse is left out and named. Open to anyone on-chain; a claim
  * goes to its controller and nowhere else.
  */

@@ -9,12 +9,12 @@ import { network } from "hardhat";
 import type { NetworkConnection } from "hardhat/types/network";
 import { encodeAbiParameters, getAddress, isAddressEqual, keccak256, maxUint256, toFunctionSelector, toHex, type Address, type Hex } from "viem";
 
-import { DEMO_SIGNERS, PROFILES, type Profile } from "../../ignition/profiles.js";
+import { classesOf, DEMO_SIGNERS, PROFILES, type Profile } from "../../ignition/profiles.js";
 import { handoverFailures } from "../../scripts/lib/check.js";
 import { checkCommand, keeperCommand, reconcileCommand, type Env } from "../../scripts/lib/commands.js";
 import { runKeeper, type PayoutList } from "../../scripts/lib/keeper.js";
 import { reconcile } from "../../scripts/lib/reconcile.js";
-import { loadStack, type StackFile } from "../../scripts/lib/stack.js";
+import { loadStack, StackFileError, type StackFile } from "../../scripts/lib/stack.js";
 import { deployProfile, deployStack, verify, type ProfileStack } from "./fixtures.js";
 
 const usd = (amount: bigint) => amount * 10n ** 6n;
@@ -90,7 +90,7 @@ describe("the post-deploy check, as a command", async function () {
     assert.equal(prose.code, 0, prose.text);
     const json = await ran(checkCommand, { STACK: saved(file), JSON: "1" }, connection);
     assert.equal(json.code, 0);
-    assert.deepEqual(JSON.parse(json.text), { ok: true, failures: [] });
+    assert.deepEqual(JSON.parse(json.text), { ok: true, failures: [], products: Object.keys(file.products), unplaced: [] });
   });
 
   it("names every part that fails, not only the first, and exits 1", async function () {
@@ -108,7 +108,7 @@ describe("the post-deploy check, as a command", async function () {
     for (const failure of failures) assert.ok(prose.text.includes(failure.split("\n")[0]), `the command left out: ${failure}`);
     const json = await ran(checkCommand, { STACK: saved(wrong), JSON: "1" }, connection);
     assert.equal(json.code, 1);
-    assert.deepEqual(JSON.parse(json.text), { ok: false, failures });
+    assert.deepEqual(JSON.parse(json.text), { ok: false, failures, products: Object.keys(file.products), unplaced: [] });
   });
 
   it("exits 2 on input it cannot use, and says why", async function () {
@@ -116,7 +116,17 @@ describe("the post-deploy check, as a command", async function () {
     const eve = s.holders.eve.account.address;
     const { timelock: _timelock, ...coreWithoutTimelock } = file.core;
     const { governance: _governance, ...accountsWithoutGovernance } = file.accounts;
+    const without = (key: string) => Object.fromEntries(Object.entries(file.core).filter(([name]) => name !== key));
+    const [fundKey] = Object.keys(file.funds!);
+    const [firstClass] = classesOf(s.profile, fundKey);
+    const { [firstClass]: _class, ...productsWithoutAClass } = file.products;
     const unusable: [Env, RegExp][] = [
+      // A file that leaves out what a placed product needs would have the check skip it, or fail on a missing value.
+      [{ STACK: saved({ ...file, core: without("credentialRule") }) }, /core\.credentialRule is missing/],
+      [{ STACK: saved({ ...file, core: without("credentialRegistry") }) }, /core\.credentialRegistry is missing/],
+      [{ STACK: saved({ ...file, core: without("executor") }) }, /core\.executor is missing/],
+      [{ STACK: saved({ ...file, funds: {} }) }, new RegExp(`funds\\.${fundKey} is missing`)],
+      [{ STACK: saved({ ...file, products: productsWithoutAClass }) }, new RegExp(`products\\.${firstClass} is missing: it is a class of`)],
       [{}, /STACK/],
       [{ STACK: join(directory, "missing.json") }, /cannot read/],
       [{ STACK: saved("{ not json") }, /not JSON/],
@@ -132,6 +142,22 @@ describe("the post-deploy check, as a command", async function () {
       assert.equal(code, 2, `${why}: ${text}`);
       assert.match(text, why);
     }
+  });
+});
+
+describe("the post-deploy check, on a stack with products still to place", async function () {
+  const connection = await network.create();
+
+  it("passes on the core alone, and says which products it did not check", async function () {
+    const s = await deployStack(connection);
+    const file: StackFile = { ...stackFileOf(s), products: {}, funds: {}, legos: {} };
+    const keys = s.profile.products.map((product) => product.key);
+    const json = await ran(checkCommand, { STACK: saved(file), JSON: "1" }, connection);
+    assert.deepEqual([json.code, JSON.parse(json.text)], [0, { ok: true, failures: [], products: [], unplaced: keys }]);
+    const prose = await ran(checkCommand, { STACK: saved(file) }, connection);
+    assert.equal(prose.code, 0);
+    assert.match(prose.text, new RegExp(`not placed, so not checked: ${keys.join(", ")}`));
+    assert.doesNotMatch(prose.text, /the stack is as its profile says/);
   });
 });
 
@@ -273,6 +299,30 @@ describe("the dealing keeper and the claims keeper", async function () {
   });
 });
 
+describe("the reconciler, on a 7540 vault", async function () {
+  const connection = await network.create();
+  const { viem, networkHelpers } = connection;
+
+  it("names a vault that holds less than the deposits waiting for a price", async function () {
+    const s = await deployProfile(connection, PROFILES.vault7540);
+    const file = stackFileOf(s);
+    const vault = await viem.getContractAt("Gated7540Vault", s.products.asyncFund.address);
+    const { alice, eve } = s.holders;
+    await verify(s, alice);
+    await s.asset.write.mint([alice.account.address, usd(100n)]);
+    await s.asset.write.approve([vault.address, maxUint256], { account: alice.account });
+    await vault.write.requestDeposit([usd(100n), alice.account.address, alice.account.address], { account: alice.account });
+    assert.deepEqual(await reconcile(connection, file), []);
+
+    await networkHelpers.impersonateAccount(vault.address);
+    await networkHelpers.setBalance(vault.address, 10n ** 18n);
+    await s.asset.write.transfer([eve.account.address, 1n], { account: vault.address });
+    const lines = await reconcile(connection, file);
+    assert.equal(lines.length, 1, lines.join("\n"));
+    assert.match(lines[0], new RegExp(`asyncFund holds ${usd(100n) - 1n} of its asset and ${usd(100n)} of deposits wait`));
+  });
+});
+
 describe("the fees keeper", async function () {
   const connection = await network.create();
   const { viem, networkHelpers } = connection;
@@ -305,6 +355,26 @@ describe("the fees keeper", async function () {
     assert.ok(isAddressEqual(sent[0].to, vault.address) && sent[0].selector === SELECTOR.collectFees);
 
     assert.deepEqual(await reconcile(connection, file), []);
+
+    // The outside vault cannot be read: no fresh price, so the vault has stopped dealing. Then it can again.
+    const portfolio = await viem.getContractAt("Portfolio", await vault.read.portfolio());
+    const [adapter] = await portfolio.read.adapters();
+    const target = await viem.getContractAt("MockERC4626Target", await (await viem.getContractAt("ERC4626Adapter", adapter)).read.TARGET());
+    await target.write.setBroken([true]);
+    const stale = await reconcile(connection, file);
+    assert.equal(stale.length, 1, stale.join("\n"));
+    assert.match(stale[0], /investFund: its portfolio gives no fresh price/);
+    await target.write.setBroken([false]);
+    assert.deepEqual(await reconcile(connection, file), []);
+
+    // More than half of what the portfolio holds is gone: the vault is exit-only.
+    await networkHelpers.impersonateAccount(portfolio.address);
+    await networkHelpers.setBalance(portfolio.address, 10n ** 18n);
+    const idle = await s.asset.read.balanceOf([portfolio.address]);
+    await s.asset.write.transfer([keeper.address, (idle * 6n) / 10n], { account: portfolio.address });
+    const closed = await reconcile(connection, file);
+    assert.equal(closed.length, 1, closed.join("\n"));
+    assert.match(closed[0], /investFund is exit-only/);
   });
 });
 
@@ -350,6 +420,11 @@ describe("the payout keeper, and a distribution in the reconciler", async functi
     const payout = (chunk: number) => runKeeper(connection, "payout", file, { account: keeper, list, chunk }, bond);
     assert.deepEqual((await payout(100)).sent, [], "not approved yet");
     await distributor.write.approve([1n], { account: s.wallets.checker.account });
+    // A proof that is not a list of 32-byte words is input that cannot be used, not a row to skip.
+    for (const proof of [["0x12"], [7], "0x"]) {
+      const bad = { ...list, rows: [{ ...list.rows[0], proof }] } as unknown as PayoutList;
+      await assert.rejects(runKeeper(connection, "payout", file, { account: keeper, list: bad }, bond), (error) => error instanceof StackFileError && /proof/.test(error.message));
+    }
 
     const since = await s.publicClient.getBlockNumber();
     const first = await payout(1);
@@ -376,13 +451,13 @@ describe("the payout keeper, and a distribution in the reconciler", async functi
     // again when it is swept.
     await distributor.write.propose([leafOf(a, usd(5n)), cash.address, usd(5n), now + 2n * 86_400n, funder.account.address], { account: s.wallets.distributionMaker.account });
     await distributor.write.approve([2n], { account: s.wallets.checker.account });
-    assert.deepEqual(await reconcile(connection, file, {}, {}, bond), []);
+    assert.deepEqual(await reconcile(connection, file, {}, bond), []);
     await networkHelpers.time.increaseTo(now + 2n * 86_400n + 1n);
-    const lines = await reconcile(connection, file, {}, { logChunk: 13n }, bond);
+    const lines = await reconcile(connection, file, {}, bond);
     assert.equal(lines.length, 1);
     assert.match(lines[0], /distribution 2 .* past its expiry .* 5000000/);
     await distributor.write.sweep([2n]);
-    assert.deepEqual(await reconcile(connection, file, {}, {}, bond), []);
+    assert.deepEqual(await reconcile(connection, file, {}, bond), []);
   });
 });
 
@@ -429,5 +504,19 @@ describe("the reconciler", async function () {
     const lines = await reconcile(connection, file);
     assert.equal(lines.length, 1);
     assert.match(lines[0], /counts 2 investors, above its cap of 1/);
+  });
+
+  it("names a class that no longer lists its fund's rule", async function () {
+    const { s, file } = await networkHelpers.loadFixture(held);
+    const [fundKey] = Object.keys(file.funds!);
+    const fundRule = file.funds![fundKey].rule;
+    const rules = await s.hook.read.rules([s.token.address]);
+    assert.ok(rules.some((rule) => isAddressEqual(rule, fundRule)));
+    await networkHelpers.impersonateAccount(s.timelock.address);
+    await networkHelpers.setBalance(s.timelock.address, 10n ** 18n);
+    await s.hook.write.setRules([s.token.address, rules.filter((rule) => !isAddressEqual(rule, fundRule))], { account: s.timelock.address });
+    const lines = await reconcile(connection, file);
+    assert.equal(lines.length, 1, lines.join("\n"));
+    assert.match(lines[0], new RegExp(`fund ${fundKey}: the class ${s.token.address} no longer lists the fund's rule`, "i"));
   });
 });

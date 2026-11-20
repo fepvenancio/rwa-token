@@ -95,9 +95,16 @@ export function profileOf(file: StackFile, given?: Profile): { profile: Profile;
   return { profile, placed };
 }
 
+/** The products of the profile that a stack file does not place, so that no command reads them. */
+export const unplacedOf = (file: StackFile, given?: Profile): string[] =>
+  profileOf(file, given).profile.products.map((product) => product.key).filter((key) => file.products[key] === undefined);
+
 /**
  * Attaches a stack file's contracts on a connection, as the post-deploy check reads them. Refuses a file that names a
- * profile or a product the repository does not have, or an address with no contract at it.
+ * profile or a product the repository does not have, or an address with no contract at it. Refuses also a file that
+ * leaves out what a product it places needs: a rule the product lists, an executor it names, its fund, the credential
+ * registry its credential rule reads, or a class of a fund it lists. A part left out would be a part the check does not
+ * read. A product the file does not place is not an error: `unplacedOf` names those.
  */
 export async function loadStack(connection: NetworkConnection, file: StackFile, given?: Profile): Promise<Stack> {
   const { viem } = connection;
@@ -106,6 +113,23 @@ export async function loadStack(connection: NetworkConnection, file: StackFile, 
   const external = profile.credentials === "external";
   const { core } = file;
   const parameters = file.parameters ?? {};
+
+  const need = (key: string, why: string) => {
+    if (core[key] === undefined) throw new StackFileError(`core.${key} is missing: ${why}`);
+  };
+  for (const { product } of placed) {
+    for (const rule of product.rules) {
+      if (rule !== "fundHoldersRule" && !(rule === "credentialRule" && external)) need(rule, `products.${product.key} lists it`);
+    }
+    for (const kind of product.executors ?? []) need(kind === "intent" ? "executor" : "dvpExecutor", `products.${product.key} names it`);
+    if (product.fund !== undefined && file.funds?.[product.fund] === undefined) throw new StackFileError(`funds.${product.fund} is missing: products.${product.key} is a class of it`);
+  }
+  if (!external && core.credentialRule !== undefined) need("credentialRegistry", "core.credentialRule reads it");
+  for (const key of Object.keys(file.funds ?? {})) {
+    for (const name of classesOf(profile, key)) {
+      if (file.products[name] === undefined) throw new StackFileError(`products.${name} is missing: it is a class of funds.${key}`);
+    }
+  }
 
   const named: [string, Address][] = [
     ...Object.entries(core).map(([key, address]): [string, Address] => [`core.${key}`, address]),

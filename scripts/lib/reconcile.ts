@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: UNLICENSED
 // The reconciler: reads a deployed stack and names what does not add up. It sends nothing.
 import type { NetworkConnection } from "hardhat/types/network";
-import { erc20Abi, isAddress, isAddressEqual, zeroAddress } from "viem";
+import { erc20Abi, isAddress, isAddressEqual, zeroAddress, zeroHash } from "viem";
 
 import type { Profile } from "../../ignition/profiles.js";
-import { inRanges, LOG_CHUNK } from "./keeper.js";
 import { profileOf, StackFileError, wholeNumber, type StackFile } from "./stack.js";
 
 /** The ledger's figure for each cash token's supply, by the token's address. */
@@ -18,13 +17,14 @@ export type Ledger = Record<string, string | number>;
  * - a 7540 vault that holds less of its asset than the deposits still waiting for a price. What it owes on settled
  *   redemptions is not readable from outside and is not counted here; `settlePeriod` checks both on every settlement;
  * - an instant vault with a portfolio that is exit-only, or whose portfolio gives no fresh price, so it has stopped dealing;
- * - a distribution past its expiry with money still in it, which `sweep` returns to its funder.
+ * - a distribution past its expiry with money still in it, which `sweep` returns to its funder. A distributor numbers
+ *   its distributions from 1 and none has an empty root, so they are read one by one until the first that has, and no
+ *   log is read: a first block set too late cannot hide one.
  */
 export async function reconcile(
   connection: NetworkConnection,
   file: StackFile,
   ledger: Ledger = {},
-  options: { fromBlock?: bigint; logChunk?: bigint } = {},
   given?: Profile,
 ): Promise<string[]> {
   const { viem } = connection;
@@ -67,11 +67,9 @@ export async function reconcile(
     const distributorAddress = file.legos?.[product.key]?.distributor;
     if (distributorAddress !== undefined) {
       const distributor = await viem.getContractAt("Distributor", distributorAddress);
-      const proposed = await inRanges(options.fromBlock ?? 0n, latest.number, options.logChunk ?? LOG_CHUNK, (fromBlock, toBlock) =>
-        publicClient.getContractEvents({ address: distributor.address, abi: distributor.abi, eventName: "DistributionProposed", fromBlock, toBlock }),
-      );
-      for (const id of new Set(proposed.map((log) => log.args._id!))) {
+      for (let id = 1n; ; id++) {
         const d = await distributor.read.distributionOf([id]);
+        if (d.root === zeroHash) break;
         if (d.approved && latest.timestamp > d.expiry && d.total > d.claimed) {
           lines.push(`distribution ${id} of ${product.key} is past its expiry with ${d.total - d.claimed} unclaimed: sweep returns it to its funder`);
         }
