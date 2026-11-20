@@ -5079,6 +5079,26 @@ Two things turned out differently from the note above:
 
 **Not done.** The gas the adapter's four extra reads add to a class's deposit and redemption is still not measured. `loadStack` does not refuse a file that has `core.credentialRegistry` and no `core.credentialRule`, which the second review noted as not blocking. No test deploys a 7540 as a feeder class, and the profile type does not refuse one.
 
+### E7, `LienVault`: as built, the contract (2026-11-20)
+
+The owner's word to start. The design above stands, with the two review notes, and what follows is what the first step fixed that the design left open.
+
+- **Where it lives:** `contracts/escrow/LienVault.sol`, with `ILienVault` in the interfaces. A new interface; none is reopened.
+- **A lien that holds nothing is closed and deleted.** After a full release, seizure or recovery its id answers `LienVault_NoLien`, and `lienOf` reads all zero. Ids are never reused: `lienCount()` is how many were ever opened, so a list builder reads 1 to that.
+- **The vault itself is refused as a beneficiary and as a recovery account,** with the zero address (note 1). Neither could ever act on a lien.
+- **`recover` asks the token first, then checks `_to`.** A caller that is not the token's agent learns nothing about the arguments. It always takes the whole lien.
+- **State before the transfer, and a guard on every function.** Each function books the change, emits, and only then moves tokens, and all six hold the reentrancy guard, `assign` included.
+- **A pledge to oneself is allowed.** The holder is then its own beneficiary and can release at will. It harms nobody and refusing it would be a rule about who.
+- **Errors:** `LienVault_InvalidValue`, `LienVault_NoLien`, `LienVault_Unauthorized`, `LienVault_ExceedsLien`, `LienVault_WrongAmountReceived`. **Events:** `LienOpened`, `LienIncreased`, `LienReleased`, `LienSeized`, `LienAssigned`, `LienRecovered`.
+
+**Tests, first.** 22 in `LienVault.t.sol` on a real `GatedToken` behind the real credential registry, `CredentialRule`, `HolderRestrictionRule` and hook; 21 failed against a stub. They cover the design's list except three: 7540 shares (4626 shares are covered, and a 7540's share token is the same base), the fund's count with the vault exempt (cost 2), and a minimum position (cost 6). The last two need a fund and the profile, and come with the deployment step. The invariant passed against the empty stub, so it was checked by planting bugs.
+
+**Planted bugs.** Five, one at a time: the total not lowered, a seizure that books nothing, `recover` without the role, no check of the amount received, and no guard on `seize`. The first four failed 3, 2, 3 and 1 tests. The fifth failed none: the first callback test re-entered as the token, which the vault refuses with or without a guard. The test was rewritten so the token is the lien's beneficiary and re-enters `seize` from inside its own seizure, and it then fails without the guard.
+
+**Gates.** `npx hardhat test`: 2385 passing (2160 solidity, 225 nodejs). Solhint and `forge fmt` clean. Slither: 0 results. `InterfaceFreeze.t.sol` pins `ILienVault` (`0xc6d42512`) and its six event topics, and `ContractSizes.t.sol` has its line. Not run: Halmos and the reproducible build, which the contract is not listed in yet.
+
+**Not built.** The part `lienVault` and the profile flag, the post-deploy check, the reconciler's line, the benchmark rows, the Halmos property, the tests of costs 2 and 6, the pages, and the port to `paris`.
+
 ### Interfaces this would reopen
 
 `IDistributor` (E2). New interfaces only for E3, E7 (`ILienVault`; with the escrow there is no rule and no reason code) and E8. E1, E4, E5, E6, E13 and E14 reopen none.
@@ -5098,5 +5118,5 @@ That the stack then runs a market at any given rate. The benchmark compares the 
 8. The ecosystem plan (2026-11-19): step 0 and the first pass (E1, E2, E3 with E13) are approved. E7 is the escrow by the note of 2026-11-20 (item 11). Open: counsel's view on omnibus accounts (E9).
 9. `OrderSettlement` (E8): built with O1 to O6 as proposed, and O7 decided on 2026-11-20: the received-amount check stays.
 10. The control plane (E14): K1 to K4 answered as proposed on 2026-11-20, and built.
-11. `LienVault` (E7), the escrow: L1 to L6 answered as proposed on 2026-11-20, with two additions recorded above. Not built; it follows E6. Still counsel's: L1, the count of a fund with a statutory cap that lists the vault.
+11. `LienVault` (E7), the escrow: L1 to L6 answered as proposed on 2026-11-20, with two additions recorded above. The contract and its tests are built; its deployment, check, reconciler line and pages are not. Still counsel's: L1, the count of a fund with a statutory cap that lists the vault.
 12. Master and feeder (E6): the test found one gap, a class that deals while its master cannot price. M1 to M3 were answered as proposed on 2026-11-20, with four notes on the adapter. The profile, the check of the two credentials, the `accrue` keeper and the pages are built. Open: nothing for the owner.

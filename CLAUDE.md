@@ -25,6 +25,7 @@ Separate contracts, separate concerns:
 6. SignedEntry — lets an investor with its own wallet enter a vault with one signature, while a relayer pays the gas. No vault changes: it is an ordinary third-party payer, so a vault's policy decides whether to accept it. Immutable, no roles, no money between calls. One per issuer, deployed by `Core` or `CoreParts` when a profile asks for it. Its mirror, `SignedExit`, lets a holder leave on signatures alone, and delivers a 7540's settled claims to a controller that allowed it (§7).
 7. NavDesk — turns a reported value into an approved price for one 7540 vault, on a schedule. Immutable, no money and no role table: it holds the vault's `SETTLER_ROLE` and asks the vault for the rest. It also holds the redemption gate's level, and works out each period's limit from it. `FeeModel` (immutable, no storage, one view) computes the fee for a desk or a 4626.
 8. Distributor — pays one token's holders a funded distribution, from a Merkle root of `(holder, amount)` built off-chain at the record date. A maker proposes it, a different checker approves it and the approval pulls the funding; a holder claims with a proof, or anyone pays many holders at once with `claimBatch`, which passes over a holder that cannot be paid now (already paid, refused by the token, or refused by the asset) and reverts only for the submitter's own errors, and what is left returns to the funder after an expiry. Immutable, one per token, no role table: it asks the token at call time. The token gains no snapshots. `Legos` deploys it for a product that asks for one, and `Product` grants its maker and its checker.
+9. LienVault — an escrow for pledged tokens. A holder moves tokens into it under a lien that names a beneficiary, who alone releases them back or takes them. Immutable, one per issuer, no role table and no role on any token: on each token it is an ordinary holder with a credential, every movement is a plain transfer the policy judges, and a token's `AGENT_ROLE`, asked at call time, can `recover` one lien to an account the policy admits. It is the holder of record of what it holds, so a distribution's list and a fund's count read its liens.
 
 ## 2. Non-negotiable rules
 
@@ -58,7 +59,7 @@ Separate contracts, separate concerns:
 
 ```
 contracts/
-  interfaces/   IPolicyGatedCore.sol  IPolicyGated.sol  IERC7943Fungible.sol  IERC7943NonFungible.sol  IERC7943MultiToken.sol  IGated721.sol  IGated1155.sol  ITemplated.sol  IERC8473.sol  IERC8473Policy.sol  IComplianceHook.sol  IComplianceRule.sol  IPolicyRegistry.sol  ITransferIntent.sol  IIntentExecutor.sol  IIntentExecutorBatch.sol  IDvPExecutor.sol  IOrderSettlement.sol  IERC3009.sol  Errors.sol  (+ one per rule, the two vaults, IGatedVaultBase, IFund, INavDesk, IFeeModel, ISignedEntry, ISignedExit, IDistributor, IPortfolio, IGuardedAccount, ICallValidator, IERC20CallValidator, IAdapter, IERC4626Adapter, IProxyDeployer, IGovernanceTimelock, IIdentityRegistry, ICredentialRegistry, ICredentialRule, Quals and the ERC-7540 and ERC-7575 interfaces)
+  interfaces/   IPolicyGatedCore.sol  IPolicyGated.sol  IERC7943Fungible.sol  IERC7943NonFungible.sol  IERC7943MultiToken.sol  IGated721.sol  IGated1155.sol  ITemplated.sol  IERC8473.sol  IERC8473Policy.sol  IComplianceHook.sol  IComplianceRule.sol  IPolicyRegistry.sol  ITransferIntent.sol  IIntentExecutor.sol  IIntentExecutorBatch.sol  IDvPExecutor.sol  IOrderSettlement.sol  IERC3009.sol  Errors.sol  (+ one per rule, the two vaults, IGatedVaultBase, IFund, INavDesk, IFeeModel, ISignedEntry, ISignedExit, IDistributor, ILienVault, IPortfolio, IGuardedAccount, ICallValidator, IERC20CallValidator, IAdapter, IERC4626Adapter, IProxyDeployer, IGovernanceTimelock, IIdentityRegistry, ICredentialRegistry, ICredentialRule, Quals and the ERC-7540 and ERC-7575 interfaces)
   base/         PolicyGatedCoreUpgradeable.sol  PolicyGatedERC20Upgradeable.sol  PolicyGatedERC20Upgradeable.t.sol
   governance/   PolicyRegistry.sol  GovernanceTimelock.sol  (+ .t.sol)
   identity/     CredentialRegistry.sol  CredentialRegistry.t.sol
@@ -66,6 +67,7 @@ contracts/
   portfolio/    Portfolio.sol  ERC4626Adapter.sol  Gated4626Adapter.sol  GuardedAccount.sol  ERC20CallValidator.sol  ERC4626CallValidator.sol  (+ .t.sol)
   nav/          NavDesk.sol  FeeModel.sol  (+ .t.sol)
   distribution/ Distributor.sol  Distributor.t.sol
+  escrow/       LienVault.sol  LienVault.t.sol
   mixins/       IntentSettledUpgradeable.sol  IntentSettledUpgradeable.t.sol
   tokens/       GatedToken.sol  IntentToken.sol  Gated721.sol  Gated1155.sol  (+ .t.sol)
   vaults/       GatedVaultBase.sol  Gated4626Vault.sol  Gated4626Common.sol  Gated4626Management.sol  Gated7540Vault.sol  Gated7540Common.sol  Gated7540Settlement.sol  (+ .t.sol)
