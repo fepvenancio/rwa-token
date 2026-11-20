@@ -17,7 +17,8 @@ export const hasLegos = (product: Product) =>
  * grants it, which the hand-over check pins.
  *
  * An attested lego's constructor arguments are in its codehash. A portfolio's caps and adapters and a guarded account's
- * permissions are set after it, and no attestation covers them. A desk with no portfolio names
+ * permissions are set after it, and no attestation covers them. A target that names a product of the profile gets a
+ * `Gated4626Adapter`, and its `target_<key>` parameter is that product's address. A desk with no portfolio names
  * its custodian's account here; one with a portfolio is told so by `Product`, while the operations account is the admin.
  *
  * A `Distributor` names its token the same way, through the `product` parameter, on any template. It is not attested: it
@@ -42,8 +43,10 @@ export function legosModule(product: Product) {
         });
         legos[`validator_${key}`] = m.contract("ERC20CallValidator", [p(`custodian_${key}`), maxPerCall], { id: `validator_${key}` });
       }
-      for (const { key } of product.portfolio.targets ?? []) {
-        legos[`adapter_${key}`] = m.contract("ERC4626Adapter", [portfolio, p(`target_${key}`), zeroHash], { id: `adapter_${key}` });
+      for (const { key, product: master } of product.portfolio.targets ?? []) {
+        // Into a vault of this issuer, the adapter that stops when that vault does. The plain one would go on dealing.
+        const template = master === undefined ? "ERC4626Adapter" : "Gated4626Adapter";
+        legos[`adapter_${key}`] = m.contract(template, [portfolio, p(`target_${key}`), zeroHash], { id: `adapter_${key}` });
       }
     }
     if (product.nav !== undefined) {

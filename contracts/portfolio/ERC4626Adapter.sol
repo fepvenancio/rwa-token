@@ -80,13 +80,8 @@ contract ERC4626Adapter is IERC4626Adapter {
   }
 
   /// @inheritdoc IAdapter
-  function fresh() external view returns (bool _fresh) {
-    (_fresh,) = _read();
-  }
-
-  /// @inheritdoc IAdapter
   function liquid() external view returns (uint256 _liquid) {
-    (, _liquid) = _ask(abi.encodeCall(IERC4626.maxWithdraw, (address(this))));
+    (, _liquid) = _ask(address(TARGET), abi.encodeCall(IERC4626.maxWithdraw, (address(this))));
   }
 
   /// @inheritdoc IAdapter
@@ -107,6 +102,31 @@ contract ERC4626Adapter is IERC4626Adapter {
     _reported = false;
   }
 
+  /// @inheritdoc IAdapter
+  function fresh() public view virtual returns (bool _fresh) {
+    (_fresh,) = _read();
+  }
+
+  /**
+   * @notice Asks a contract for one number, treating any failure as no answer
+   * @dev Low level, because a `try` does not catch a contract with no code or one that returns too little: the decoding
+   *      reverts here. It reads the first word and copies nothing else
+   * @param _to The contract asked: the target, or one the target names
+   * @param _call The call
+   * @return _ok True if it answered with at least one word
+   * @return _answer The answer, zero when `_ok` is false
+   */
+  function _ask(
+    address _to,
+    bytes memory _call
+  ) internal view returns (bool _ok, uint256 _answer) {
+    // The second word of the scratch space is not needed.
+    // slither-disable-next-line unused-return
+    (bool _success, bytes32 _word,) = LowLevelCall.staticcallReturn64Bytes(_to, _call);
+    _ok = _success && LowLevelCall.returnDataSize() >= 32;
+    if (_ok) _answer = uint256(_word);
+  }
+
   /**
    * @notice Reads the position, treating a failed read as no answer rather than as a loss
    * @return _ok True if both reads succeeded
@@ -114,25 +134,7 @@ contract ERC4626Adapter is IERC4626Adapter {
    */
   function _read() private view returns (bool _ok, uint256 _value) {
     uint256 _shares;
-    (_ok, _shares) = _ask(abi.encodeCall(IERC20.balanceOf, (address(this))));
-    if (_ok) (_ok, _value) = _ask(abi.encodeCall(IERC4626.previewRedeem, (_shares)));
-  }
-
-  /**
-   * @notice Asks the target for one number, treating any failure as no answer
-   * @dev Low level, because a `try` does not catch a target with no code or one that returns too little: the decoding
-   *      reverts here. It reads the first word and copies nothing else
-   * @param _call The call
-   * @return _ok True if the target answered with at least one word
-   * @return _answer The answer, zero when `_ok` is false
-   */
-  function _ask(
-    bytes memory _call
-  ) private view returns (bool _ok, uint256 _answer) {
-    // The second word of the scratch space is not needed.
-    // slither-disable-next-line unused-return
-    (bool _success, bytes32 _word,) = LowLevelCall.staticcallReturn64Bytes(address(TARGET), _call);
-    _ok = _success && LowLevelCall.returnDataSize() >= 32;
-    if (_ok) _answer = uint256(_word);
+    (_ok, _shares) = _ask(address(TARGET), abi.encodeCall(IERC20.balanceOf, (address(this))));
+    if (_ok) (_ok, _value) = _ask(address(TARGET), abi.encodeCall(IERC4626.previewRedeem, (_shares)));
   }
 }

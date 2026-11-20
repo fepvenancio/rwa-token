@@ -6,6 +6,7 @@ import type { NetworkConnection } from "hardhat/types/network";
 import { BaseError, type Abi, type Account, type Address } from "viem";
 
 import type { Product, Profile } from "../../ignition/profiles.js";
+import { accrue } from "../keepers/accrue.js";
 import { claims } from "../keepers/claims.js";
 import { dealing } from "../keepers/dealing.js";
 import { fees } from "../keepers/fees.js";
@@ -51,7 +52,7 @@ export type Context = {
   now: bigint;
 };
 
-export const KEEPERS = { rekey, dealing, fees, payout, claims } as const;
+export const KEEPERS = { rekey, dealing, fees, accrue, payout, claims } as const;
 export type KeeperName = keyof typeof KEEPERS;
 
 /** The default span of one log query: small enough for a node that limits `eth_getLogs`. */
@@ -82,7 +83,7 @@ export function chunksOf<T>(list: readonly T[], size: number): T[][] {
 /**
  * Runs one keeper once: asks it what to send, tries each call without sending it, and sends those that would succeed, one
  * after the other, waiting for each. A call that would revert is left out and named. A second run right after the first
- * finds nothing to send.
+ * finds nothing to send, except for `accrue` on a vault that charges a management fee.
  */
 export async function runKeeper(connection: NetworkConnection, name: KeeperName, file: StackFile, options: KeeperOptions = {}, given?: Profile): Promise<Run> {
   const { viem } = connection;

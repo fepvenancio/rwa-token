@@ -124,6 +124,7 @@ These have no role table of their own, and none is a proxy. Each names its vault
 |  | `DEFAULT_ADMIN_ROLE` or `GUARDIAN_ROLE` | `revokePermission` |
 |  | Its portfolio | `allocate`, `deallocate` |
 | [`ERC4626Adapter`](contracts/ERC4626Adapter.md) | Its portfolio | `allocate`, `deallocate` (`ERC4626Adapter_OnlyPortfolio`). It asks the vault for nothing. |
+| [`Gated4626Adapter`](contracts/Gated4626Adapter.md) | Its portfolio | The same two, by the same code. It reads its target, a master vault, and holds no role on it. |
 | [`NavDesk`](contracts/NavDesk.md)<br>asks its vault; `NavDesk_Unauthorized` | `DEFAULT_ADMIN_ROLE` | `setSettings`, `setFeeModel`, `setRedemptionGate`, `adopt`. |
 |  | `REPORTER_ROLE` | `propose` |
 |  | `CHECKER_ROLE` | `accept`, but not a proposal the same account made (`NavDesk_SelfAccept`). `cancel`. |

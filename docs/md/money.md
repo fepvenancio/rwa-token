@@ -393,6 +393,7 @@ The list is a claim, like a NAV report: the root proves which list two people ap
 - [FeeModel](contracts/FeeModel.md): Works out management and performance fees.
 - [Portfolio](contracts/Portfolio.md): Where one vault's money may go.
 - [ERC4626Adapter](contracts/ERC4626Adapter.md): A priced position in an outside vault.
+- [Gated4626Adapter](contracts/Gated4626Adapter.md): A feeder class's position in its master vault.
 - [GuardedAccount](contracts/GuardedAccount.md): A custodian or a strategy, reported, with default deny.
 - [DvPExecutor](contracts/DvPExecutor.md): Atomic settlement of a security against cash.
 - [SignedEntry](contracts/SignedEntry.md): Entering a vault with signatures.
