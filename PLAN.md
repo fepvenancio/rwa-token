@@ -4955,7 +4955,8 @@ The owner approved it on 2026-11-20 ("Yes, build E14"). No contract changed: it 
 - **Pages.** The deployment page describes the command, the stack file and the exit codes, and has a new section for the keepers and the reconciler, with the Markdown copy. It is a section and not a new page: a new top-level page would change the navigation of all 47. The new section was not looked at in a browser.
 - **Against the benchmark.** No row: no contract changed.
 - **Gates.** `npx hardhat test`: 2313 passing (2098 solidity, 215 nodejs). Typecheck clean. Slither, Halmos, upgrade safety and the reproducible build were not rerun locally: no Solidity file changed.
-- **Not done.** No CI job runs the check against a live chain. A keeper for `accrue()` on a 4626, so fees are collected only once something has counted them. The port to `paris`.
+- **On this line.** The port is the same two commits, with one conflict in the brief, resolved by keeping this line's wording and adding the sentence. `npx hardhat test`: 2314 passing (2099 solidity, 215 nodejs). Typecheck clean. The planted faults and the run against a local node were done on `main` only; the scripts are the same files.
+- **Not done.** No CI job runs the check against a live chain. A keeper for `accrue()` on a 4626, so fees are collected only once something has counted them.
 
 ### Review of both designs, 2026-11-20
 
