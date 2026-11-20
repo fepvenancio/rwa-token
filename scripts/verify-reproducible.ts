@@ -36,6 +36,7 @@ const ATTESTED = {
   Gated7540Vault: "vaults",
   Portfolio: "portfolio",
   ERC4626Adapter: "portfolio",
+  Gated4626Adapter: "portfolio",
   GuardedAccount: "portfolio",
   ERC20CallValidator: "portfolio",
   ERC4626CallValidator: "portfolio",

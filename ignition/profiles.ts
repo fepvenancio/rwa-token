@@ -18,8 +18,14 @@ export type Policy = { requireAll: number; requireAny: number; forbidAny: number
 export type Caps = { absoluteCap: bigint; relativeCapBps: bigint };
 /** A `GuardedAccount` with one permission: the asset's `transfer` to one custodian. Reported, so behind a 7540 only. */
 export type Custodian = Caps & { key: string; maxPerCall: bigint };
-/** An `ERC4626Adapter` over an outside vault. */
-export type Target = Caps & { key: string };
+/**
+ * A vault the portfolio invests in. With no `product` it is an outside vault, named by the `target_<key>` parameter and
+ * held through an `ERC4626Adapter`. With `product`, the key of an earlier `Gated4626Vault` of the same profile, it is a
+ * master of this issuer and this product is one of its feeder classes: the adapter is a `Gated4626Adapter`, which stops
+ * with its master, and `target_<key>` is that product's address. The master's policy must then accept two accounts of
+ * the class as holders, its adapter and its portfolio, which the attester credentials and the hand-over check reads.
+ */
+export type Target = Caps & { key: string; product?: string };
 /** A `FeeModel`'s terms. */
 export type Fees = { managementBps: bigint; performanceBps: bigint; hurdleBps: bigint; softHurdle: boolean };
 /** A `NavDesk`'s schedule, in seconds, and the redemption gate's level, in basis points, which each product takes from its own documents. */
@@ -142,6 +148,9 @@ export function assertUsable(product: Product) {
       throw new Error(`${product.key}: a custodian's value is reported, and a stale price on an instant vault is free money`);
     }
     if (product.portfolio.maxRateBps === undefined) throw new Error(`${product.key}: plugging a portfolio must set a rate limit`);
+  }
+  for (const target of product.portfolio?.targets ?? []) {
+    if (target.product === product.key) throw new Error(`${product.key}: a vault cannot invest in itself`);
   }
   if (product.fees !== undefined) {
     const priced = product.template === "Gated7540Vault" ? product.nav !== undefined : product.portfolio !== undefined;
@@ -315,6 +324,46 @@ export const PROFILES = {
           targets: [{ key: "onChainVault", absoluteCap: 1_000_000_000_000n, relativeCapBps: 10_000n }],
           maxRateBps: 1_000n,
         },
+        fees: { managementBps: 50n, performanceBps: 1_000n, hurdleBps: 0n, softHurdle: false },
+      },
+    ],
+  },
+  /**
+   * A master and two feeder classes on one asset. The master invests in an outside vault and admits funds only: each
+   * class's adapter and portfolio hold a `FUND` credential. A class has its own investors, by its own policy, and its own
+   * fees, and keeps nothing itself: its portfolio's one adapter is into the master. The three rate limits are equal, so a
+   * class never counts a gain its master has not. The allocator moves a class's money into the master and back.
+   */
+  "master-feeder": {
+    id: "masterFeeder",
+    singleSigners: DEMO_SIGNERS,
+    products: [
+      {
+        key: "master",
+        template: "Gated4626Vault",
+        name: "Master Fund",
+        symbol: "mMSTR",
+        rules: PLAIN_RULES,
+        policy: { requireAll: QUALS.FUND, requireAny: 0, forbidAny: 0, attesters: 1n },
+        portfolio: { targets: [{ key: "onChainVault", absoluteCap: 1_000_000_000_000n, relativeCapBps: 10_000n }], maxRateBps: 1_000n },
+      },
+      {
+        key: "retailClass",
+        template: "Gated4626Vault",
+        name: "Feeder Class R",
+        symbol: "fCLSR",
+        rules: PLAIN_RULES,
+        portfolio: { targets: [{ key: "master", product: "master", absoluteCap: 1_000_000_000_000n, relativeCapBps: 10_000n }], maxRateBps: 1_000n },
+        fees: { managementBps: 100n, performanceBps: 0n, hurdleBps: 0n, softHurdle: false },
+      },
+      {
+        key: "professionalClass",
+        template: "Gated4626Vault",
+        name: "Feeder Class P",
+        symbol: "fCLSP",
+        rules: PLAIN_RULES,
+        policy: { requireAll: QUALS.KYC | QUALS.PROFESSIONAL, requireAny: 0, forbidAny: 0, attesters: 1n },
+        portfolio: { targets: [{ key: "master", product: "master", absoluteCap: 1_000_000_000_000n, relativeCapBps: 10_000n }], maxRateBps: 1_000n },
         fees: { managementBps: 50n, performanceBps: 1_000n, hurdleBps: 0n, softHurdle: false },
       },
     ],

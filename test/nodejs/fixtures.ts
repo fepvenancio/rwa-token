@@ -368,7 +368,7 @@ async function stages(connection: NetworkConnection, profile: Profile) {
       const targets = await Promise.all(
         (product.portfolio?.targets ?? []).map(async (t) => [
           `target_${t.key}`,
-          p[`target_${t.key}`] ?? (await viem.deployContract("MockERC4626Target", [assetAddress])).address,
+          p[`target_${t.key}`] ?? (t.product !== undefined ? placed[t.product].address : (await viem.deployContract("MockERC4626Target", [assetAddress])).address),
         ]),
       );
       const built = await ignition.deploy(module, {
@@ -427,6 +427,15 @@ async function stages(connection: NetworkConnection, profile: Profile) {
       if (product.template === "Gated7540Vault" && product.assetProduct !== undefined && credentials !== undefined) {
         const validUntil = (await publicClient.getBlock()).timestamp + DEMO_VALIDITY;
         await credentials.write.set([contract.address, validUntil, QUALS.KYC | QUALS.INFRA, 0], { account: kyc.account });
+      }
+      // A feeder class: its adapter holds the master's shares and its portfolio receives the cash of a redemption, so the
+      // master's attester credentials both.
+      if ((product.portfolio?.targets ?? []).some((t) => t.product !== undefined) && credentials !== undefined) {
+        const validUntil = (await publicClient.getBlock()).timestamp + DEMO_VALIDITY;
+        for (const [key, target] of Object.entries(built)) {
+          const feeds = (product.portfolio?.targets ?? []).some((t) => t.product !== undefined && key === `adapter_${t.key}`);
+          if (key === "portfolio" || feeds) await credentials.write.set([target, validUntil, QUALS.KYC | QUALS.FUND, 0], { account: kyc.account });
+        }
       }
       placed[product.key] = contract;
       return contract;

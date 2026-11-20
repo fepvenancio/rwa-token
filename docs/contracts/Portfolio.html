@@ -173,7 +173,7 @@
       <thead><tr><th></th><th>Priced</th><th>Reported</th></tr></thead>
       <tbody>
         <tr><td><code>reported()</code> says</td><td>false</td><td>true</td></tr>
-        <tr><td>Shipped example</td><td><a href="ERC4626Adapter.html">ERC4626Adapter</a></td><td><a href="GuardedAccount.html">GuardedAccount</a></td></tr>
+        <tr><td>Shipped example</td><td><a href="ERC4626Adapter.html">ERC4626Adapter</a>, <a href="Gated4626Adapter.html">Gated4626Adapter</a></td><td><a href="GuardedAccount.html">GuardedAccount</a></td></tr>
         <tr><td>Where its value comes from</td><td>Its <code>value()</code></td><td>The report a <a href="NavDesk.html">NavDesk</a> reporter proposes and a checker accepts</td></tr>
         <tr><td>In <code>pricedValue()</code></td><td>Yes</td><td>No</td></tr>
         <tr><td>In <code>priceFresh()</code></td><td>Yes: an unreadable one makes it false</td><td>No</td></tr>
@@ -381,6 +381,7 @@
     <a class="card" href="Gated7540Vault.html"><span class="name">Gated7540Vault</span><p>Sends net inflow here at settlement and pulls net outflow through its allowance.</p></a>
     <a class="card" href="NavDesk.html"><span class="name">NavDesk</span><p>Names this portfolio as the cash account and adds its on-chain value to the reported one.</p></a>
     <a class="card" href="ERC4626Adapter.html"><span class="name">ERC4626Adapter</span><p>The priced adapter: a position in one on-chain vault.</p></a>
+    <a class="card" href="Gated4626Adapter.html"><span class="name">Gated4626Adapter</span><p>The priced adapter for a vault of the same issuer.</p></a>
     <a class="card" href="GuardedAccount.html"><span class="name">GuardedAccount</span><p>The reported adapter: a custodian or a strategy, by permission.</p></a>
     <a class="card" href="PolicyRegistry.html"><span class="name">PolicyRegistry</span><p>Where adapters and successors must be attested, as the vault names it.</p></a>
     <a class="card" href="../money.html"><span class="name">Where the money sits</span><p>The whole path of the money across the stack.</p></a>

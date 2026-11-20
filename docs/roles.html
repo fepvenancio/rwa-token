@@ -328,6 +328,7 @@
         <tr><td><code>DEFAULT_ADMIN_ROLE</code> or <code>GUARDIAN_ROLE</code></td><td><code>revokePermission</code></td></tr>
         <tr><td>Its portfolio</td><td><code>allocate</code>, <code>deallocate</code></td></tr>
         <tr><td><a href="contracts/ERC4626Adapter.html"><code>ERC4626Adapter</code></a></td><td>Its portfolio</td><td><code>allocate</code>, <code>deallocate</code> (<code>ERC4626Adapter_OnlyPortfolio</code>). It asks the vault for nothing.</td></tr>
+        <tr><td><a href="contracts/Gated4626Adapter.html"><code>Gated4626Adapter</code></a></td><td>Its portfolio</td><td>The same two, by the same code. It reads its target, a master vault, and holds no role on it.</td></tr>
         <tr><td rowspan="6"><a href="contracts/NavDesk.html"><code>NavDesk</code></a><br><span class="small">asks its vault; <code>NavDesk_Unauthorized</code></span></td><td><code>DEFAULT_ADMIN_ROLE</code></td><td><code>setSettings</code>, <code>setFeeModel</code>, <code>setRedemptionGate</code>, <code>adopt</code>.</td></tr>
         <tr><td><code>REPORTER_ROLE</code></td><td><code>propose</code></td></tr>
         <tr><td><code>CHECKER_ROLE</code></td><td><code>accept</code>, but not a proposal the same account made (<code>NavDesk_SelfAccept</code>). <code>cancel</code>.</td></tr>

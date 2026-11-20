@@ -6,7 +6,8 @@ import type { Context, Plan } from "../lib/keeper.js";
 /**
  * `Gated4626Vault.collectFees()`, for each instant vault with a fee model that has fees counted as owed and idle money in
  * its portfolio to pay some of them. Open to anyone on-chain; the money goes to the recipient the attested fee model
- * names. It does not count the value itself: fees are counted by the next deposit, withdrawal or `accrue()`.
+ * names. It does not count the value itself: fees are counted by the next deposit, withdrawal or `accrue()`,
+ * which the `accrue` keeper sends.
  */
 export async function fees({ connection, placed }: Context): Promise<Plan> {
   const { viem } = connection;
