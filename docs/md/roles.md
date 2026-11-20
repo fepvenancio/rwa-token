@@ -9,7 +9,7 @@ Every privileged power in the system is a named role on a named contract, the ow
 - holders set by **ignition/modules**
 - delay: **24 hours** by default, floor **1 hour**, on both timelocks
 - guardian: **stop-only**
-- checked by **assertHandedOver** in test/nodejs/fixtures.ts
+- checked by **npm run check** (scripts/lib/check.ts)
 
 [In one minute](#in-one-minute) · [Authority map](#map) · [Who holds what](#holders) · [On tokens and vaults](#tokens) · [Legos](#legos) · [On the other contracts](#others) · [The guardian](#guardian) · [The recovery path](#recovery) · [The delay](#delay) · [During a pause](#pause) · [Why](#why) · [Limits](#limits)
 
@@ -65,7 +65,7 @@ Until `CoreHandover` finishes, the deployer administers the credential registry,
 
 ### Who must not hold a sensitive role on a single key
 
-The post-deploy check `assertHandedOver` refuses `MINTER_ROLE`, `BURNER_ROLE`, `AGENT_ROLE` and `SETTLER_ROLE` on an account that does not answer `getThreshold()` with 2 or more, as a Safe that requires at least two signatures does. A profile can name any of the four in `singleSigners` to except it, for example for an MPC custody wallet whose policy engine does the same job. All eight shipped profiles name all four, because they are demo stacks, so a real deployment has to state its own. This is the check's rule, not the contracts': a token accepts any holder its admin grants. The check does not read a Safe's signers, and CI runs it on a local chain only. [What it asserts, and who runs it](deployment.md#check).
+The post-deploy check refuses `MINTER_ROLE`, `BURNER_ROLE`, `AGENT_ROLE` and `SETTLER_ROLE` on an account that does not answer `getThreshold()` with 2 or more, as a Safe that requires at least two signatures does. A profile can name any of the four in `singleSigners` to except it, for example for an MPC custody wallet whose policy engine does the same job. All eight shipped profiles name all four, because they are demo stacks, so a real deployment has to state its own. This is the check's rule, not the contracts': a token accepts any holder its admin grants. The check does not read a Safe's signers, and CI runs it on a local chain only. [What it asserts, and who runs it](deployment.md#check).
 
 <a id="tokens"></a>
 ## On tokens and vaults
@@ -321,6 +321,6 @@ The registries, the hook, the rules, the funds and `ProxyDeployer` have no pause
 ## Source and tests
 
 - Role grants: `Core.ts`, `CoreHandover.ts`, `PartsHandover.ts` and `handOverParts` in `ignition/parts.ts`, `Product.ts`, `FundOpen.ts`; role ids in `roles.ts`; exceptions in `profiles.ts`
-- Hand-over check: `assertHandedOver` in `test/nodejs/fixtures.ts`
+- Hand-over check: `handoverFailures` in `scripts/lib/check.ts`, run by `npm run check` and by the fixture's `assertHandedOver`
 - Role gates in code: `PolicyGatedCoreUpgradeable.sol`, `PolicyGatedERC20Upgradeable.sol`, `IntentSettledUpgradeable.sol`, `Gated721.sol`, `Gated1155.sol`, `Gated4626Vault.sol`, `Gated4626Management.sol`, `Gated7540Vault.sol`, `Gated7540Settlement.sol`, `PolicyRegistry.sol`, `GovernanceTimelock.sol`, `CredentialRegistry.sol`, `IntentExecutor.sol`, `DvPExecutor.sol`, `OrderSettlement.sol`, `Portfolio.sol`, `GuardedAccount.sol`, `NavDesk.sol`, `Distributor.sol`, `ComplianceHook.sol`, and the rules' setters, which ask the token's roles
 - Tests: `test/nodejs/governance.test.ts` (the delay, the guardian's veto and the recovery batch), `test/nodejs/legos.test.ts` (what the hand-over check refuses), `GovernanceTimelock.t.sol`, and behaviour while paused in `Gated7540Vault.t.sol`, `Gated4626Vault.t.sol`, `NavDesk.t.sol`, `Portfolio.t.sol` and `GuardedAccount.t.sol`

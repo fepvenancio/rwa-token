@@ -311,8 +311,9 @@ Further limits recorded during review:
   over attested code and touches nothing that exists. A stolen operations key can still place a token over an attested
   implementation with its own admin, and can use up a symbol. It cannot change an existing product, and such a token is
   not one the issuer published: holders and integrators should take addresses from the issuer's list. The post-deploy
-  check is the fixture `assertHandedOver`, which every test deployment runs; nothing yet points it at a live network, so
-  running it on each real product needs its own tooling. Recovery from a stolen key is a new `ProxyDeployer`, which changes where later tokens land.
+  check (`scripts/lib/check.ts`) runs on every test deployment through the fixture's `assertHandedOver`, and against a
+  live network with `npm run check`, which reads the addresses from a stack file the operator keeps; it sees only the
+  products and the accounts that file lists, and no CI job runs it against a chain in production. Recovery from a stolen key is a new `ProxyDeployer`, which changes where later tokens land.
 - **Revoking an attestation does not affect live tokens.** Attestation is checked at install and upgrade time only.
   The guardian pauses while the timelock removes the component.
 - **`totalAssets` of the 7540 vault is indicative** (all shares at the last settlement's value); `preview*` revert, as
