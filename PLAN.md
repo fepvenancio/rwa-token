@@ -5075,6 +5075,8 @@ Two things turned out differently from the note above:
 - **The order of the counts changes no figure.** A class reads its master through `previewRedeem`, which already includes what the master would count now, so a class counted before its master counts the same value. The keeper still sends the master first. What closes the lag of M2 is counting both on one schedule, and the page says that.
 - **The keeper skips a vault with no fresh price before it compares the two figures,** because a vault that holds its price reads the two as equal, and the skip would never be named.
 
+**Gates.** `npx hardhat test`: 2363 passing (2138 solidity, 225 nodejs). Typecheck and Solhint clean. The reproducible build: 36 contracts identical across two production builds, the default profile and forge, with `Gated4626Adapter` in the attested list. Halmos: every property passes. No contract changed in this step, so Slither stands at the 0 results of the adapter's step.
+
 **Not done.** The gas the adapter's four extra reads add to a class's deposit and redemption is still not measured. `loadStack` does not refuse a file that has `core.credentialRegistry` and no `core.credentialRule`, which the second review noted as not blocking. No test deploys a 7540 as a feeder class, and the profile type does not refuse one.
 
 ### Interfaces this would reopen
