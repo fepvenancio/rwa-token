@@ -79,11 +79,6 @@ contract ERC4626Adapter is IERC4626Adapter {
   }
 
   /// @inheritdoc IAdapter
-  function fresh() public view virtual returns (bool _fresh) {
-    (_fresh,) = _read();
-  }
-
-  /// @inheritdoc IAdapter
   function liquid() external view returns (uint256 _liquid) {
     (, _liquid) = _ask(address(TARGET), abi.encodeCall(IERC4626.maxWithdraw, (address(this))));
   }
@@ -106,15 +101,9 @@ contract ERC4626Adapter is IERC4626Adapter {
     _reported = false;
   }
 
-  /**
-   * @notice Reads the position, treating a failed read as no answer rather than as a loss
-   * @return _ok True if both reads succeeded
-   * @return _value The position's value in assets, zero when `_ok` is false
-   */
-  function _read() private view returns (bool _ok, uint256 _value) {
-    uint256 _shares;
-    (_ok, _shares) = _ask(address(TARGET), abi.encodeCall(IERC20.balanceOf, (address(this))));
-    if (_ok) (_ok, _value) = _ask(address(TARGET), abi.encodeCall(IERC4626.previewRedeem, (_shares)));
+  /// @inheritdoc IAdapter
+  function fresh() public view virtual returns (bool _fresh) {
+    (_fresh,) = _read();
   }
 
   /**
@@ -137,5 +126,16 @@ contract ERC4626Adapter is IERC4626Adapter {
       _ok := and(_success, gt(returndatasize(), 0x1f))
       if _ok { _answer := mload(0x00) }
     }
+  }
+
+  /**
+   * @notice Reads the position, treating a failed read as no answer rather than as a loss
+   * @return _ok True if both reads succeeded
+   * @return _value The position's value in assets, zero when `_ok` is false
+   */
+  function _read() private view returns (bool _ok, uint256 _value) {
+    uint256 _shares;
+    (_ok, _shares) = _ask(address(TARGET), abi.encodeCall(IERC20.balanceOf, (address(this))));
+    if (_ok) (_ok, _value) = _ask(address(TARGET), abi.encodeCall(IERC4626.previewRedeem, (_shares)));
   }
 }
