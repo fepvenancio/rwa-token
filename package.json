@@ -7,8 +7,11 @@
   "scripts": {
     "bench": "node scripts/bench.ts",
     "build": "hardhat build",
+    "check": "hardhat run scripts/check.ts",
+    "keeper": "hardhat run scripts/keeper.ts",
     "fmt:check": "forge fmt --check contracts",
     "lint:sol": "solhint --max-warnings 0 'contracts/**/*.sol'",
+    "reconcile": "hardhat run scripts/reconcile.ts",
     "slither": "forge clean && forge build --build-info --skip test 'contracts/test/**' && slither . --ignore-compile",
     "test": "hardhat test",
     "test:halmos": "halmos --forge-build-out forge-out --match-contract 'Halmos$' --solver-timeout-assertion 0",

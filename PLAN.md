@@ -4943,6 +4943,38 @@ The row for E7 above left two designs. The owner's note of 2026-11-20 takes the 
 
 **Steps.** The owner's answers to L1 to L6; interface and brief; tests first against a stub, shown failing; the contract; the part and the profile flag, with the post-deploy check; benchmark rows; planted bugs; the Halmos property; the reconciler's line; pages; gates; the port to `paris`.
 
+### The third pass, as built on `main` (2026-11-20): E14, the control plane
+
+The owner approved it on 2026-11-20 ("Yes, build E14"). No contract changed: it is TypeScript under `scripts/`, with viem and Node and no new dependency.
+
+- **The check.** `handoverFailures` in `scripts/lib/check.ts` is the fixture's check, moved with every assertion as it was. It now runs in parts and returns a line for each part that failed. The fixture's `assertHandedOver` is a wrapper that fails a test unless the list is empty, so the 43 places the node tests call it, the planted faults among them, run the code the command runs; all 203 node tests passed unchanged after the move.
+- **Different from the design, three things.**
+  1. **A part names its first fault, not every fault.** Inside a part the assertions still stop at the first, because later lines read what earlier ones established. Two faults in two parts are both named; two in one part, the first. If the recovery timelock is not the timelock's code the check stops there, as before.
+  2. **A stack file, not Ignition's journal.** The journal names its entries after contracts (`Core_full#GovernanceTimelock`), not after the keys the modules return and the later modules take. The operator already carries those keys from stage to stage as parameters, so the command reads one JSON file of them: the profile's name, the named accounts, the core, the funds, the products, the legos and the parameters.
+  3. **Settings in the environment, not flags.** `hardhat run` passes a script no arguments of its own, and the modules already take `PROFILE`, `PRODUCT` and `FUND` this way. So `STACK=stack.json npm run check -- --network <name>`, and `JSON=1` for the JSON output the review asked for.
+- **The commands.** `npm run check`, `npm run keeper` (`KEEPER=rekey|dealing|fees|payout|claims`) and `npm run reconcile`. Exit codes: 0, 1 when the stack is not as it should be, 2 on input that cannot be used. A keeper exits 0 whatever it sent.
+- **Keepers.** One file each under `scripts/keepers/`, a function that reads the chain and returns the calls that are due. The runner tries each call without sending it, sends those that would succeed and names the rest. `rekey` and `claims` read logs in ranges of 5,000 blocks from `FROM_BLOCK`, as the review asked. `payout` and `claims` try each row or controller alone first, so one the contract would pass over never reaches a transaction and a second run does not send it again.
+- **The reconciler.** As designed, with the review's two lines for a 4626 with a portfolio. **One line is weaker than designed:** a 7540 has no view of what it owes on settled redemptions not yet claimed, so the reconciler compares the vault's balance with the deposits waiting for a price and no more. Reading the rest needs a view on the vault, which is a contract change and was not made.
+- **Tests.** `test/nodejs/control.test.ts`, 12 tests, all failing against stubs first ("not built"). The check passes from a stack file and as a command, names faults in three different parts at once, and exits 2 on nine kinds of unusable input. Each keeper: the state that calls for it, the one effect, the transactions its account sent read back from the blocks (targets and selectors), and nothing on a second run. The reconciler: a clean stack, a wrong supply, a fund above its cap, an expired distribution with money in it and the same one after a sweep.
+- **Run as processes.** Against a local node over HTTP, with the demo stack deployed on it: `npm run check` printed that the stack is as its profile says and exited 0; with a wrong operations account it named the fault and exited 1, in prose and as JSON; with a missing file it exited 2; the reconciler and two keepers ran and exited 0. Done by hand, once; no test starts a node.
+- **Planted faults,** thirteen, each failing at least one test: a part that swallows its failure; an address with no code accepted; a rekey for a key that did not move, and for an account that holds no class; an execution tried inside the cooldown; a close tried over a closed period; fees collected when none is owed; a paid row sent again; a refused row sent anyway; a claim tried for a controller that did not allow it; a cap read one too high; a swept distribution still reported; a failed check exiting 0. Three of them first passed, because the runner's own try caught what the keeper should not have proposed; the tests now assert that a run leaves nothing out when nothing is due.
+- **Not planted, so not shown by a test:** a broken class, a 7540 short of its pending deposits, an exit-only vault and a stale price in the reconciler. Each is one comparison of a view; the clean case of each runs.
+- **Pages.** The deployment page describes the command, the stack file and the exit codes, and has a new section for the keepers and the reconciler, with the Markdown copy. It is a section and not a new page: a new top-level page would change the navigation of all 47. The new section was not looked at in a browser.
+- **Against the benchmark.** No row: no contract changed.
+- **Gates.** `npx hardhat test`: 2313 passing (2098 solidity, 215 nodejs). Typecheck clean. Slither, Halmos, upgrade safety and the reproducible build were not rerun locally: no Solidity file changed.
+- **Not done.** No CI job runs the check against a live chain. A keeper for `accrue()` on a 4626, so fees are collected only once something has counted them. The port to `paris`.
+
+### Review of both designs, 2026-11-20
+
+The owner passed on a review of the two designs the same day. It answers K1 to K4 and L1 to L6 as proposed, and adds five notes. Each was checked against the code.
+
+- **E14, three additions, all built:** log queries in ranges with a first block, because a node may refuse a wide `eth_getLogs`; JSON output on the check and the reconciler; and `exitOnly()` and the portfolio's `priceFresh()` in the reconciler for a 4626 with a portfolio. One correction to the note: `priceFresh()` is the portfolio's function and not the vault's, so the reconciler reads it there.
+- **E7, two additions, for when it is built:**
+  1. Every function that changes a lien refuses a zero address and a zero amount: `pledge`, `increase`, `release`, `seize`, `assign` and `recover`. A zero `newBeneficiary` in `assign` would leave a lien nobody can release or seize, so that one matters most.
+  2. `recover` moves by a plain transfer and not a forced one, as the vault holds no `AGENT_ROLE`. So it needs the token unpaused and a receiver the policy admits. The review says it works when the pledgor or the beneficiary is frozen or blocked: that is right, because neither is a party to that transfer, the vault sends and `to` receives. To state in the interface and the page.
+- **L2, a locked holder.** Accepted: it cannot pledge. The review gives a legal reason, that a lockup restricts a seizure anyway. That is a question for counsel and is not relied on here; the reason recorded is the one in the design, no `AGENT_ROLE` on a contract.
+- **Order.** E14 now, then E6 (master and feeder, test first), then E7.
+
 ### Interfaces this would reopen
 
 `IDistributor` (E2). New interfaces only for E3, E7 (`ILienVault`; with the escrow there is no rule and no reason code) and E8. E1, E4, E5, E6, E13 and E14 reopen none.
@@ -4961,5 +4993,5 @@ That the stack then runs a market at any given rate. The benchmark compares the 
 7. A review of both plans (2026-11-19) recommends: build both; keep R3 as written, with no recount; leave N10 out; put off the second attester. These are a reviewer's recommendations and decide nothing; items 5 and 6 stay the owner's.
 8. The ecosystem plan (2026-11-19): step 0 and the first pass (E1, E2, E3 with E13) are approved. E7 is the escrow by the note of 2026-11-20 (item 11). Open: counsel's view on omnibus accounts (E9).
 9. `OrderSettlement` (E8): built with O1 to O6 as proposed, and O7 decided on 2026-11-20: the received-amount check stays.
-10. The control plane (E14), designed on 2026-11-20: K1 to K4.
-11. `LienVault` (E7), the escrow, designed on 2026-11-20: L1 to L6. L1, the fund's count, and L2, a locked holder, are costs of the escrow the earlier row did not state; L1 is also counsel's for a fund with a statutory cap.
+10. The control plane (E14): K1 to K4 answered as proposed on 2026-11-20, and built.
+11. `LienVault` (E7), the escrow: L1 to L6 answered as proposed on 2026-11-20, with two additions recorded above. Not built; it follows E6. Still counsel's: L1, the count of a fund with a statutory cap that lists the vault.
