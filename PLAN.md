@@ -5071,6 +5071,8 @@ Two things turned out differently from the note above:
 
 **Not done.** The gas the adapter's four extra reads add to a class's deposit and redemption is still not measured. `loadStack` does not refuse a file that has `core.credentialRegistry` and no `core.credentialRule`, which the second review noted as not blocking. No test deploys a 7540 as a feeder class, and the profile type does not refuse one.
 
+**E6 on this line (2026-11-20).** The four commits were carried from the other line by cherry-pick. One conflict in code: `ERC4626Adapter`'s one-word read keeps this line's own assembly, now taking the address to ask and `internal`, where the other line uses a library this line's OpenZeppelin does not have. The test counts in the E6 sections above are the other line's. On this line `npx hardhat test`: 2364 passing (2139 solidity, 225 nodejs). Typecheck, Solhint and `forge fmt` clean, Slither 0 results, and every Halmos property passes. The reproducible build was not run on this line.
+
 ### Interfaces this would reopen
 
 `IDistributor` (E2). New interfaces only for E3, E7 (`ILienVault`; with the escrow there is no rule and no reason code) and E8. E1, E4, E5, E6, E13 and E14 reopen none.
