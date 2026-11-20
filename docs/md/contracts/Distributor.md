@@ -88,7 +88,7 @@ A caller without the role gets `Distributor_Unauthorized(_caller)`.
 ## Why it is built this way
 
 - **The record is off-chain and the root on-chain.** The token needs no checkpoints, so it stays small and a transfer costs the same whether or not the token pays distributions. The price of that is that the record is a claim made by the people who approve it.
-- **The approval pulls the funding.** Once a distribution can be claimed, the money for it is in the contract.
+- **The approval pulls the funding.** Once a distribution can be claimed, the money for it is in the contract. When the asset is itself a gated token, the contract is a holder of it between the approval and the claims, so it needs a credential on that token, as the funder does (`IntentTokenAsCash.t.sol`).
 - **Each distribution keeps its own count.** Distributions in one asset share a balance, and `claimed` cannot pass `total`, so a list that sums too high cannot take another distribution's money.
 - **Anyone can submit a claim.** A relayer or the issuer can pay the gas for a holder, and the money still goes only to the holder.
 - **The token's policy decides who may be paid.** Asking `canReceive` means a frozen or unverified address is not paid while that holds, without this contract knowing any rule.

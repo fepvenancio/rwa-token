@@ -241,6 +241,27 @@ export const PROFILES = {
     singleSigners: DEMO_SIGNERS,
     products: [{ key: "intent", template: "IntentToken", ...TOKENS.intent, rules: PLAIN_RULES, executors: ["intent", "dvp"] }],
   },
+  /**
+   * The money of a deployment: an intent token with six decimals, a credential rule and a cap on its supply, which bounds
+   * what a minter key can create. Both executors, so it settles a trade as the cash leg and moves by signed intent. It does
+   * not list `executedOnlyRule`: a plain transfer is how a vault, the signed entry, a distributor and a fund's cash
+   * account take and pay it, and each of those holds it and so needs a credential. The cap is the `cashSupplyCap` parameter.
+   */
+  cash: {
+    id: "cash",
+    singleSigners: DEMO_SIGNERS,
+    products: [
+      {
+        key: "cash",
+        template: "IntentToken",
+        name: "Settlement Cash",
+        symbol: "sCASH",
+        decimals: 6,
+        rules: ["credentialRule", "supplyCapRule"],
+        executors: ["intent", "dvp"],
+      },
+    ],
+  },
   /** One instant vault, alone. */
   vault4626: {
     id: "vault4626",
