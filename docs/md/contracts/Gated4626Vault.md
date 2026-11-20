@@ -243,6 +243,7 @@ The previews are arithmetic only. They tell you what the formula gives, and the 
 - [PolicyGatedERC20Upgradeable](PolicyGatedERC20Upgradeable.md): The base token the shares are: roles, freezes, pause and the hook path.
 - [Portfolio](Portfolio.md): Where the money goes when one is plugged, and who may move it.
 - [ERC4626Adapter](ERC4626Adapter.md): How a portfolio holds a position in another on-chain vault.
+- [Gated4626Adapter](Gated4626Adapter.md): How one of these vaults invests in another as its feeder class.
 - [FeeModel](FeeModel.md): The quote behind each fee.
 - [ComplianceHook](ComplianceHook.md): Runs the vault's rule list on every share movement and every probe.
 - [SignedEntry](SignedEntry.md): Enters a vault from an investor's two signed messages, the entry and the cash, with a relayer paying the gas.

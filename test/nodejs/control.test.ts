@@ -24,6 +24,7 @@ const SELECTOR = {
   closePeriod: toFunctionSelector("closePeriod()"),
   execute: toFunctionSelector("execute()"),
   collectFees: toFunctionSelector("collectFees()"),
+  accrue: toFunctionSelector("accrue()"),
   claimBatch: toFunctionSelector("claimBatch(uint256,address[],uint256[],bytes32[][])"),
   claimFor: toFunctionSelector("claimFor(address,address[])"),
 };
@@ -375,6 +376,56 @@ describe("the fees keeper", async function () {
     const closed = await reconcile(connection, file);
     assert.equal(closed.length, 1, closed.join("\n"));
     assert.match(closed[0], /investFund is exit-only/);
+  });
+});
+
+describe("the accrue keeper", async function () {
+  const connection = await network.create();
+  const { viem, networkHelpers } = connection;
+
+  it("counts a master before its classes, and only a vault whose value has moved", async function () {
+    const s = await deployProfile(connection, PROFILES["master-feeder"]);
+    // The classes first in the file: the keeper orders by who invests in whom, not by the file.
+    const whole = stackFileOf(s);
+    const file: StackFile = { ...whole, products: Object.fromEntries(Object.entries(whole.products).reverse()) };
+    const master = await viem.getContractAt("Gated4626Vault", s.products.master.address);
+    const retail = await viem.getContractAt("Gated4626Vault", s.products.retailClass.address);
+    const keeper = s.holders.eve.account;
+    const allocator = s.wallets.allocator.account;
+    const alice = s.holders.alice;
+    const accrue = async () => (await runKeeper(connection, "accrue", file, { account: keeper })).sent.map((call) => call.address.toLowerCase());
+    await verify(s, alice);
+    await s.asset.write.mint([alice.account.address, usd(1000n)]);
+    await s.asset.write.approve([retail.address, maxUint256], { account: alice.account });
+    await retail.write.deposit([usd(1000n), alice.account.address], { account: alice.account });
+    const classPortfolio = await viem.getContractAt("Portfolio", s.legos.retailClass.portfolio);
+    await classPortfolio.write.allocate([s.legos.retailClass.adapter_master, usd(1000n), 0n], { account: allocator });
+    const masterPortfolio = await viem.getContractAt("Portfolio", s.legos.master.portfolio);
+    const outside = await viem.getContractAt("ERC4626Adapter", s.legos.master.adapter_onChainVault);
+    await masterPortfolio.write.allocate([outside.address, usd(1000n), 0n], { account: allocator });
+
+    // A gain of 5% in the outside vault, and a year for the limit to let it through.
+    await s.asset.write.mint([await outside.read.TARGET(), usd(50n)]);
+    await networkHelpers.time.increase(YEAR);
+    const before = await retail.read.lastCounted();
+    const since = await s.publicClient.getBlockNumber();
+    assert.deepEqual(await accrue(), [master.address.toLowerCase(), retail.address.toLowerCase()]);
+    const sent = await sentBy(s, keeper.address, since);
+    assert.deepEqual(sent.map((tx) => [tx.to.toLowerCase(), tx.selector]), [[master.address.toLowerCase(), SELECTOR.accrue], [retail.address.toLowerCase(), SELECTOR.accrue]]);
+    assert.ok((await master.read.lastCounted()) > usd(1049n), "the master did not count its gain");
+    assert.ok((await retail.read.lastCounted()) > before + usd(30n), "the class counted before its master");
+
+    // The master charges no fee, so nothing has moved for it; the empty class has nothing to count.
+    const again = await accrue();
+    assert.ok(!again.includes(master.address.toLowerCase()), "the master was counted twice");
+    assert.ok(!again.includes(s.products.professionalClass.address.toLowerCase()));
+
+    // A vault that has stopped dealing is left out, by name.
+    await master.write.pause({ account: s.wallets.guardian.account });
+    await networkHelpers.time.increase(YEAR);
+    const run = await runKeeper(connection, "accrue", file, { account: keeper });
+    assert.deepEqual(run.sent, []);
+    assert.ok(run.skipped.some((line) => /count retailClass: its portfolio gives no fresh price/.test(line)), run.skipped.join("\n"));
   });
 });
 

@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gated4626Adapter · Gated Token Stack</title>
+<meta name="description" content="How a feeder class holds its position in a master Gated4626Vault, through an adapter that stops being fresh when the master stops dealing.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="../index.html">Gated Token Stack</a>
+  <a href="../index.html">Overview</a>
+  <a href="../index.html#contracts">Contracts</a>
+  <a href="../roles.html">Who can do what</a>
+  <a href="../movement.html">One movement</a>
+  <a href="../deployment.html">Deployment and governance</a>
+  <a href="../money.html">Where the money sits</a>
+</nav>
+<main class="page">
+
+<header class="top wrap-any">
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Portfolio</div>
+  <h1>Gated4626Adapter</h1>
+  <p class="lede">An <a href="ERC4626Adapter.html">ERC4626Adapter</a> for a target that is a <a href="Gated4626Vault.html">Gated4626Vault</a> of the same issuer. It is fresh only while that vault deals, so a fund that invests through it stops when the fund it invests in stops.</p>
+  <div class="facts">
+    <span class="fact"><b>contracts/portfolio/Gated4626Adapter.sol</b></span>
+    <span class="fact">immutable, <b>not a proxy</b></span>
+    <span class="fact">attested as <b>ADAPTER</b></span>
+    <span class="fact"><b>priced</b>: <b>reported()</b> is false</span>
+    <span class="fact">one function overridden: <b>fresh()</b></span>
+  </div>
+</header>
+
+<section id="in-one-minute">
+  <div class="callout wrap-any">
+    <h3>In one minute</h3>
+    <p>A fund can be built in two levels. One vault, the master, holds the investments. Other vaults, its feeder classes, each have their own investors and their own fees, and keep nothing themselves: a class's <a href="Portfolio.html">Portfolio</a> has one adapter, into the master. The plain adapter is wrong for that. A master that cannot price its own portfolio holds its last price and stops dealing, but it still answers <code>previewRedeem</code> with that held price, so the plain adapter reads it as fresh and the class goes on taking deposits and paying redemptions at a price the master itself will not deal at. This adapter asks the master whether it deals, and is not fresh when it does not. Everything else is the plain adapter's code.</p>
+  </div>
+</section>
+
+<section id="how">
+  <div class="prose wrap-any">
+    <h2>When it is fresh</h2>
+    <p><code>fresh()</code> is the plain adapter's answer, that the position can be priced, and also that the target deals. The target is read with five views it already has, and its portfolio with two. Each read is one that cannot revert, and a read that fails counts as "does not deal".</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>The target</th><th>Fresh</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>Is paused</td><td>false (<code>test_WhenTheTargetIsPaused_ItIsNotFresh</code>)</td><td>A paused vault still answers <code>previewRedeem</code>. Without this a class would deal from its idle money at the price the guardian paused over.</td></tr>
+        <tr><td>Has a portfolio whose <code>priceFresh()</code> is false</td><td>false (<code>test_WhenTheTargetsPortfolioGivesNoFreshPrice_ItIsNotFresh</code>)</td><td>The target holds its last price and has stopped dealing.</td></tr>
+        <tr><td>Reads nothing: it has counted a value, it has at least <code>1e6</code> share units, and its portfolio's <code>pricedValue()</code> is no more than its <code>feesOwed()</code></td><td>false (<code>test_WhenTheTargetReadsNothing_ItIsNotFresh</code>)</td><td>The target writes nothing down while this lasts. A class that read it as a loss would close its deposits for good over a value that can come back.</td></tr>
+        <tr><td>Has no portfolio and is not paused</td><td>true (<code>test_WhenTheTargetHasNoPortfolio_ItIsFresh</code>)</td><td>A vault that keeps its own money always has a price.</td></tr>
+        <tr><td>Cannot answer one of the reads, or names a portfolio with no code</td><td>false (the six tests of <code>Gated4626AdapterUnit_FailedReads</code>)</td><td>No answer is not a reason to deal.</td></tr>
+        <tr><td>Anything else</td><td>true</td><td><code>testFuzz_ItIsFreshExactlyWhenTheTargetDeals</code> runs the whole table against random answers.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose wrap-any">
+    <p>The target's portfolio is asked for on every call and never stored, so a master that replaces its portfolio takes its classes with it, and in the gap between the two calls of a replacement the classes stop (<code>test_ItFollowsTheTargetToANewPortfolio</code>, <code>test_AClassFollowsItsMasterToANewPortfolio</code>).</p>
+    <p>What not being fresh does is the portfolio's and the vault's business, as for any adapter: the class's <code>priceFresh()</code> is false, so the class holds its last counted value, its <code>max*</code> views read zero and deposits and withdrawals revert, until the master deals again.</p>
+  </div>
+</section>
+
+<section id="feeder">
+  <div class="prose wrap-any">
+    <h2>A class and its master</h2>
+    <ul class="plain">
+      <li><b>Two credentials on the master.</b> The master's shares are gated like any other. The adapter holds them, so the master's policy must accept the adapter. A redemption pays the class's portfolio, which is not the shares' owner, and a master refuses a third-party receiver its policy does not accept, so it must accept the portfolio too. A class with the first and not the second can invest and cannot leave, and <code>maxRedeem</code> does not show it (<code>test_AClassWhoseAdapterTheMasterDoesNotAdmitCannotInvest</code>, <code>test_AClassWhosePortfolioTheMasterDoesNotAdmitCannotLeave</code>). The <a href="../deployment.html#check">post-deploy check</a> reads both.</li>
+      <li><b>The price follows the master.</b> A gain reaches every class in proportion and a loss reaches them at once (<code>test_AGainInTheMasterReachesBothPricesInProportion</code>, <code>test_ALossInTheMasterReachesBothAtOnce</code>). Each class has its own rate limit on counted gains. With equal limits a class never runs ahead of its master. One counted less often trails it by the compounding until the gain is all counted, which the <code>accrue</code> <a href="../deployment.html#operations">keeper</a> keeps small.</li>
+      <li><b>Fees are each class's own.</b> A class's <a href="FeeModel.html">FeeModel</a> charges on that class's counted value, and one class's fee does not touch another's price (<code>test_OneClasssFeeDoesNotTouchTheOther</code>). The fee is paid from the class's idle money, so the allocator first brings that much back from the master (<code>test_AFeeIsPaidFromMoneyBroughtBackFromTheMaster</code>).</li>
+      <li><b>Leaving is one call.</b> With the adapter as the class portfolio's liquidity adapter, a holder's <code>redeem</code> on the class pulls from the master in the same transaction (<code>test_AnInvestorLeavesThroughTheMasterInOneCall</code>).</li>
+    </ul>
+  </div>
+</section>
+
+<section id="functions">
+  <div class="prose wrap-any"><h2>What it can do</h2></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>fresh()</code></td><td>Anyone (read-only)</td><td>Whether the position can be priced and the target deals.</td></tr>
+        <tr><td>Everything else</td><td>As on <a href="ERC4626Adapter.html#functions">ERC4626Adapter</a></td><td>The same code: <code>allocate</code>, <code>deallocate</code>, <code>value()</code>, <code>liquid()</code>, the risk ids and the settings (<code>test_ItIsAnERC4626AdapterInEverythingElse</code>). Its <code>RISK_ID</code> is the plain adapter's for the same target.</td></tr>
+        <tr><td>The constructor</td><td>The deployer</td><td>Takes <code>(_portfolio, _target, _sharedRiskId)</code>, as the plain adapter does.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose wrap-any"><p>Its code hash is not the plain adapter's, so the council attests it separately (<code>test_ItsCodeIsNotThePlainAdapters</code>).</p></div>
+</section>
+
+<section id="limits">
+  <div class="prose wrap-any">
+    <h2>What it does not do</h2>
+    <ul class="plain">
+      <li><b>It does not close a class when a small write-off closes its master.</b> A master whose portfolio writes off an adapter is exit-only for good, whatever the size. A class sees only the fall in price, and closes its own deposits only when that is more than half. The adapter cannot say "no deposits": not being fresh would stop redemptions too, and holders must be able to leave. So it is a rule for the operator: the timelock batch that writes off an adapter on a master also sets each class's <a href="CredentialRule.html">CredentialRule</a> policy to one that trusts no attester. That admits no receiver, so no deposit, and still lets every holder redeem (<code>test_ASmallWriteOffClosesTheMasterAndNotItsClasses</code> pins that the class still takes them).</li>
+      <li><b>It does not follow a change in the vault's rule.</b> The third row of the table copies the vault's own condition for a read of nothing. The adapter is immutable and the vault can be upgraded, so an upgrade that changes when a <code>Gated4626Vault</code> stops dealing needs a new adapter, attested and swapped into each class.</li>
+      <li><b>It does not check that its target is a <code>Gated4626Vault</code>.</b> A target without those views fails the reads, and the adapter is never fresh. The council's attestation and the post-deploy check are what tie it to a master.</li>
+      <li><b>It does not make a class a holder the master counts specially.</b> To the master the adapter is one holder among others.</li>
+      <li><b>Everything the plain adapter does not do</b> holds here too: it does not judge the target's price, and it does not look at its own vault's pause.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="connected">
+  <div class="prose wrap-any"><h2>Connected to</h2></div>
+  <div class="cards">
+    <a class="card" href="ERC4626Adapter.html"><span class="name">ERC4626Adapter</span><p>The adapter it inherits, for a target outside the issuer's stack.</p></a>
+    <a class="card" href="Gated4626Vault.html"><span class="name">Gated4626Vault</span><p>Both the master it reads and the class that invests through it.</p></a>
+    <a class="card" href="Portfolio.html"><span class="name">Portfolio</span><p>The class's portfolio, which moves money through it, and the master's, whose price it asks about.</p></a>
+    <a class="card" href="PolicyRegistry.html"><span class="name">PolicyRegistry</span><p>Where its code hash must be attested as <code>ADAPTER</code>.</p></a>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose wrap-any">
+    <h2>Source and tests</h2>
+    <ul class="plain">
+      <li>Contract: <code>contracts/portfolio/Gated4626Adapter.sol</code>, over <code>ERC4626Adapter.sol</code>; no interface of its own</li>
+      <li>Tests: <code>Gated4626Adapter.t.sol</code> (a mocked vault and portfolio), <code>contracts/vaults/MasterFeeder.t.sol</code> (a real master and two classes), and <code>test/nodejs/legos.test.ts</code> and <code>control.test.ts</code> for the <code>master-feeder</code> profile</li>
+    </ul>
+  </div>
+</section>
+
+</main>
+</body>
+</html>

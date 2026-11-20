@@ -65,6 +65,7 @@ It emits no events of its own. The portfolio's `Allocated` and `Deallocated` rec
 - **It does not promise `liquid()`.** That is what the target's `maxWithdraw` says. If the target delivers less, the `withdraw` or the portfolio's check reverts.
 - **It does not move anything else.** No function moves a balance of the asset held by the adapter itself, and `value()` does not count one, so the asset sent straight to it stays there. Target shares sent to it do count in `value()`. It has no function to claim rewards or move other tokens.
 - **It does not look at a pause.** The portfolio's `allocate` does that, and the adapter's `deallocate` runs whenever the portfolio asks.
+- **It does not know whether its target deals.** A [Gated4626Vault](Gated4626Vault.md) that has stopped dealing still answers `previewRedeem` with its held price, and this adapter reads that as fresh. A target that is a vault of the same issuer takes a [Gated4626Adapter](Gated4626Adapter.md), and the post-deploy check refuses this one there.
 
 <a id="connected"></a>
 ## Connected to
@@ -73,6 +74,7 @@ It emits no events of its own. The portfolio's `Allocated` and `Deallocated` rec
 - [Gated4626Vault](Gated4626Vault.md): An instant vault can invest only through priced adapters such as this.
 - [PolicyRegistry](PolicyRegistry.md): Where its code hash must be attested as `ADAPTER`.
 - [GuardedAccount](GuardedAccount.md): The other adapter: reported, for money that can sit off-chain.
+- [Gated4626Adapter](Gated4626Adapter.md): This adapter with one more condition on `fresh()`, for a master vault.
 
 <a id="source"></a>
 ## Source and tests

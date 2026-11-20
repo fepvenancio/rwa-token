@@ -26,6 +26,7 @@ const LEGO_ABI = parseAbi([
   "function MANAGEMENT_LOGIC() view returns (address)",
   "function redemptionGate() view returns (uint256)",
 ]);
+const FEEDER_ABI = parseAbi(["function TARGET() view returns (address)", "function canReceive(address) view returns (bool)"]);
 const SAFE_ABI = parseAbi(["function getThreshold() view returns (uint256)"]);
 const DISTRIBUTOR_ABI = parseAbi(["function TOKEN() view returns (address)"]);
 /** `OrderSettlement`'s EIP-712 type, as a maker signs it. */
@@ -114,6 +115,9 @@ const DAY = 86_400n;
  *   does, the reporter, the checker and the allocator are different accounts, the council attested what needs it, each
  *   custodian's account lets its attested validator judge the asset's `transfer`, up to the profile's amount, and every
  *   risk has the profile's caps;
+ * - a feeder class invests in its master through the release's `Gated4626Adapter`, and the master accepts the class's
+ *   adapter and its portfolio as holders (`canReceive`, so a paused master fails this too); an outside target's adapter
+ *   points at no product of the stack;
  * - MINTER_ROLE, BURNER_ROLE, AGENT_ROLE and a desk-less vault's SETTLER_ROLE sit with a Safe of at least two signers,
  *   unless the profile names the role as an exception;
  * - the recovery timelock holds exactly RECOVERY_ROLE on each product, the executors, the core's own credential registry and
@@ -528,7 +532,26 @@ export async function handoverFailures(s: Stack): Promise<string[]> {
           assert.equal(await readAs<bigint>(validator, "MAX_PER_CALL"), custodian.maxPerCall, `validator_${custodian.key} allows another amount per call`);
           await capsAre(account, custodian, `account_${custodian.key}`);
         }
-        for (const target of product.portfolio.targets ?? []) await capsAre(legos[`adapter_${target.key}`], target, `adapter_${target.key}`);
+        for (const target of product.portfolio.targets ?? []) {
+          const name = `adapter_${target.key}`;
+          const adapter = legos[name];
+          await capsAre(adapter, target, name);
+          const invested = await s.publicClient.readContract({ address: adapter, abi: FEEDER_ABI, functionName: "TARGET" });
+          if (target.product === undefined) {
+            // The plain adapter goes on reading a price from a vault of this stack that has stopped dealing.
+            const own = s.deployed.find((other) => isAddressEqual(other.contract.address, invested));
+            assert.equal(own, undefined, `${name} of ${product.key} invests in a product of the stack through a plain adapter`);
+            continue;
+          }
+          const master = s.deployed.find((other) => other.product.key === target.product);
+          assert.ok(master !== undefined && master.product.template === "Gated4626Vault", `${name} of ${product.key} names a master the stack has not placed as an instant vault`);
+          assert.ok(await isRelease(adapter, "Gated4626Adapter"), `${name} of ${product.key} is not the release's Gated4626Adapter`);
+          assert.ok(isAddressEqual(invested, master.contract.address), `${name} of ${product.key} invests in another vault than ${target.product}`);
+          // The adapter holds the master's shares and the portfolio receives the cash of a redemption. `maxRedeem` shows neither.
+          const accepts = (account: Address) => s.publicClient.readContract({ address: master.contract.address, abi: FEEDER_ABI, functionName: "canReceive", args: [account] });
+          assert.equal(await accepts(adapter), true, `${target.product} does not accept ${name} of ${product.key} as a holder`);
+          assert.equal(await accepts(portfolio), true, `${target.product} does not accept the portfolio of ${product.key} as a holder`);
+        }
       }
       if (product.distributor === true) {
         const { distributor } = legos;
