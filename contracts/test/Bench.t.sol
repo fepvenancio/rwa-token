@@ -16,6 +16,7 @@ import {ISignedExit} from 'interfaces/ISignedExit.sol';
 import {ITransferIntent} from 'interfaces/ITransferIntent.sol';
 
 import {Distributor} from 'contracts/distribution/Distributor.sol';
+import {LienVaultTest} from 'contracts/escrow/LienVault.t.sol';
 import {FundEntitiesTest} from 'contracts/fund/FundEntities.t.sol';
 import {HolderRestrictionRule} from 'contracts/hooks/rules/HolderRestrictionRule.sol';
 import {MinPositionRule} from 'contracts/hooks/rules/MinPositionRule.sol';
@@ -521,5 +522,47 @@ contract Bench_Orders is OrderSettlementTest, BenchReport {
     _venue.settle(_fills);
     _gas -= gasleft();
     _report('orders: 100 fills in one batch', _gas);
+  }
+}
+
+/// @notice The escrow on a token behind the credential rule and the holder restriction rule
+contract Bench_Liens is LienVaultTest, BenchReport {
+  /// @dev A holder's first pledge of this token: the vault's balance and both sums go from zero
+  function test_Pledge() external {
+    address _holder = _alice;
+    address _lender = _lenderOne;
+
+    vm.startStateDiffRecording();
+    vm.prank(_holder);
+    uint256 _gas = gasleft();
+    _vault.pledge(address(_token), 400e18, _lender);
+    _gas -= gasleft();
+    _report('lien: pledge', _gas);
+  }
+
+  /// @dev A release of part of a lien, back to a pledgor that still holds the token
+  function test_Release() external {
+    uint256 _lienId = _pledge(_lenderOne, 400e18);
+    address _lender = _lenderOne;
+
+    vm.startStateDiffRecording();
+    vm.prank(_lender);
+    uint256 _gas = gasleft();
+    _vault.release(_lienId, 100e18);
+    _gas -= gasleft();
+    _report('lien: release', _gas);
+  }
+
+  /// @dev A seizure of part of a lien, by a lender that holds none of the token yet
+  function test_Seize() external {
+    uint256 _lienId = _pledge(_lenderOne, 400e18);
+    address _lender = _lenderOne;
+
+    vm.startStateDiffRecording();
+    vm.prank(_lender);
+    uint256 _gas = gasleft();
+    _vault.seize(_lienId, 100e18);
+    _gas -= gasleft();
+    _report('lien: seize', _gas);
   }
 }

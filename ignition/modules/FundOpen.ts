@@ -5,13 +5,13 @@ import { activeFund, activeProfile, classesOf } from "../profiles.js";
 
 /**
  * Once per fund, run by the operations account once its first classes are placed: install the rule, set the cap, register
- * the classes in the order given (a chain, so the numbering never depends on scheduling), and hand the fund to the
- * timelock. Registration refuses a hook that does not list the rule and a token that has supply.
+ * the classes in the order given (a chain, so the numbering never depends on scheduling), exempt the profile's lien vault
+ * from the count if it has one (parameter `lienVault`), and hand the fund to the timelock. Registration refuses a hook that does not list the rule and a token that has supply.
  *
  * From here a later class or a rule change is a timelock operation, because either can change the room existing investors
  * have under the cap. A later class launches through `Product` like any other and is inert until the timelock registers it.
  */
-export function fundOpenModule(key: string, classes: readonly string[]) {
+export function fundOpenModule(key: string, classes: readonly string[], lienVault = false) {
   return buildModule(`FundOpen_${key}`, (m) => {
     const fund = m.contractAt("Fund", m.getParameter<string>("fundContract"));
     const ruleSet = m.call(fund, "setRule", [m.getParameter<string>("fundHoldersRule")]);
@@ -25,9 +25,12 @@ export function fundOpenModule(key: string, classes: readonly string[]) {
       });
       previous = [registration];
     }
+    // The escrow holds every pledgor's tokens together. Counted, it would take one slot for all of them; exempt, a holder
+    // that pledges its whole position leaves the count while it still owns it. The owner chose the second (L1).
+    if (lienVault) previous = [m.call(fund, "setExempt", [m.getParameter<string>("lienVault"), true], { after: previous })];
     m.call(fund, "transferOwnership", [m.getParameter<string>("timelock")], { after: previous });
     return {};
   });
 }
 
-export default fundOpenModule(activeFund(), classesOf(activeProfile(), activeFund()));
+export default fundOpenModule(activeFund(), classesOf(activeProfile(), activeFund()), activeProfile().lienVault === true);

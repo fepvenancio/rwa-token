@@ -3,7 +3,7 @@ import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
 
 import { toFunctionSelector, zeroAddress } from "viem";
 
-import { activeProduct, assertUsable, type Caps, DEFAULT_POLICY, type Product } from "../profiles.js";
+import { activeProduct, activeProfile, assertUsable, type Caps, DEFAULT_POLICY, type Product } from "../profiles.js";
 import { ROLES } from "./roles.js";
 
 /** The one function a custodian's `GuardedAccount` may call on the asset. */
@@ -17,7 +17,7 @@ const TRANSFER = toFunctionSelector("transfer(address,uint256)");
  * runs only for a token that came up as intended. Then:
  *
  * 1. Configure while the operations account is the token's admin: its credential policy, settlement window, minimum
- *    position and supply cap, each if the product lists that rule, and the legos `Legos` deployed and the council attested:
+ *    position (with the profile's lien vault exempt from it) and supply cap, each if the product lists that rule, and the legos `Legos` deployed and the council attested:
  *    the portfolio's adapters, caps and permissions, and the desk or the vault's plugs. A product never touches a fund, so
  *    its launch cannot fail on one: a class is inert, with every movement refused, until `FundOpen` or a timelock operation
  *    registers it.
@@ -28,7 +28,7 @@ const TRANSFER = toFunctionSelector("transfer(address,uint256)");
  * Outside this module: the KYC attester must credential every holder, a vault whose asset is gated needs a credential
  * that token's policy accepts, and a feeder class needs two on its master, for its adapter and for its portfolio.
  */
-export function productModule(product: Product) {
+export function productModule(product: Product, lienVault = false) {
   assertUsable(product);
 
   return buildModule(`Product_${product.key}`, (m) => {
@@ -72,6 +72,8 @@ export function productModule(product: Product) {
       configured.push(
         m.call(minPositionRule, "setMinPosition", [token, m.getParameter<bigint>("minPosition", 0n)], { after: [deployed] }),
       );
+      // The escrow pools every pledgor's tokens, so a minimum cannot judge it, as it cannot judge any pooling account.
+      if (lienVault) configured.push(m.call(minPositionRule, "setExempt", [token, p("lienVault"), true], { id: "lien_vault_exempt", after: [deployed] }));
     }
     if (product.rules.includes("supplyCapRule")) {
       const supplyCapRule = m.contractAt("SupplyCapRule", p("supplyCapRule"));
@@ -154,4 +156,4 @@ export function productModule(product: Product) {
   });
 }
 
-export default productModule(activeProduct());
+export default productModule(activeProduct(), activeProfile().lienVault === true);

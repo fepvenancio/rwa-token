@@ -5099,6 +5099,23 @@ The owner's word to start. The design above stands, with the two review notes, a
 
 **Not built.** The part `lienVault` and the profile flag, the post-deploy check, the reconciler's line, the benchmark rows, the Halmos property, the tests of costs 2 and 6, the pages, and the port to `paris`.
 
+### E7, `LienVault`: the part, the check and the reconciler (2026-11-20)
+
+The owner's word to go on. No contract changes in this step.
+
+- **The part.** `lienVault` is a part of a core and a profile flag, as `signedExit` is: `Core` deploys it for a profile that sets it, and `CoreParts` adds it to a running core. It has no admin, so no hand-over. No shipped profile sets it.
+- **The two exemptions are made by the modules.** `FundOpen` exempts the vault from the fund's count before it hands the fund to the timelock (L1), and `Product` exempts it from the minimum position of a product that lists that rule (cost 6), both through a `lienVault` parameter. A fund or a product added later to a stack with a lien vault gets the same from the same modules; a lien vault added later to a running stack needs a timelock operation for each existing fund and product, and the check says which are missing.
+- **The check.** The code is the release's, every fund exempts it, and every product that lists a minimum exempts it. It does not read whether the vault holds a credential on a token, as it does not for the signed entry.
+- **The reconciler, two lines.** A token of which the vault holds less than its liens book. And, for each fund, the accounts that hold its classes only through the vault, with the number of owners that makes. It reads liens by id, with no log. The second line counts accounts and not entities, so two addresses of one investor read as two.
+- **Benchmark.** Three rows, a base and not a comparison: a pledge 214,937 gas (14 calls, 9 writes), a release 30,257 (10, 5), a seizure to a lender that holds none 50,400 (10, 5). No token and no rule changed, so no other row can have moved; they were not printed again to show it.
+- **Halmos.** `LienVaultHalmos`: on a vault with two open liens, after any one call by either party, any of five functions with any arguments, the vault's balance, the token's sum, the pledgors' sums and the liens agree. The same property over two calls also passes, in 681 seconds, which would double that job, so the suite keeps one call and leaves sequences to the fuzzed invariant. `recover` is outside it, as the plain token it runs on has no role to ask; the fuzzed invariant covers it.
+- **Tests.** Six in `test/nodejs/lien.test.ts`, written first and failing: the part; the two exemptions and the check passing; the check refusing a missing vault, another contract in its place, a fund that counts it and a minimum that judges it; cost 2 as it is (three holders, one pledges all, the count reads two, a fourth is admitted, the release is refused with `MAX_HOLDERS`, the lender can still seize); cost 6 (a pledge leaving dust refused, a lien below the minimum not seizable by a lender that holds nothing); the reconciler's first line after a forced transfer out of the vault.
+- **Pages.** A page for the vault, its row among the core's parts, the check's line, the reconciler's line and a paragraph for the operator; 49 pages with Markdown copies.
+
+**Gates.** `npx hardhat test`: 2394 passing (2163 solidity, 231 nodejs). Typecheck, Solhint and `forge fmt` clean. Slither: 0 results. The reproducible build: 37 contracts identical, with `LienVault` listed among the deployed ones. Halmos: the new property passes in 43 seconds and fails with the total not lowered; the other suites were not run again, as nothing they cover changed.
+
+**Not done.** 7540 shares as collateral are not tested. The reconciler does not read entities. Nothing builds a distribution's list, so the look-through to pledgors is described and not coded. A `Gated1155` series cannot be pledged (L5, later).
+
 ### Interfaces this would reopen
 
 `IDistributor` (E2). New interfaces only for E3, E7 (`ILienVault`; with the escrow there is no rule and no reason code) and E8. E1, E4, E5, E6, E13 and E14 reopen none.
@@ -5118,5 +5135,5 @@ That the stack then runs a market at any given rate. The benchmark compares the 
 8. The ecosystem plan (2026-11-19): step 0 and the first pass (E1, E2, E3 with E13) are approved. E7 is the escrow by the note of 2026-11-20 (item 11). Open: counsel's view on omnibus accounts (E9).
 9. `OrderSettlement` (E8): built with O1 to O6 as proposed, and O7 decided on 2026-11-20: the received-amount check stays.
 10. The control plane (E14): K1 to K4 answered as proposed on 2026-11-20, and built.
-11. `LienVault` (E7), the escrow: L1 to L6 answered as proposed on 2026-11-20, with two additions recorded above. The contract and its tests are built; its deployment, check, reconciler line and pages are not. Still counsel's: L1, the count of a fund with a statutory cap that lists the vault.
+11. `LienVault` (E7), the escrow: L1 to L6 answered as proposed on 2026-11-20, with two additions recorded above. Built, with its part, check, reconciler lines and page. Still counsel's: L1, the count of a fund with a statutory cap that lists the vault.
 12. Master and feeder (E6): the test found one gap, a class that deals while its master cannot price. M1 to M3 were answered as proposed on 2026-11-20, with four notes on the adapter. The profile, the check of the two credentials, the `accrue` keeper and the pages are built. Open: nothing for the owner.

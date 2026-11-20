@@ -41,6 +41,7 @@ export function deployParts(m: IgnitionModuleBuilder, parts: readonly string[]) 
     else if (part === "orderSettlement") used.orderSettlement = m.contract("OrderSettlement", [deployer, guardian]);
     else if (part === "signedEntry") used.signedEntry = m.contract("SignedEntry");
     else if (part === "signedExit") used.signedExit = m.contract("SignedExit");
+    else if (part === "lienVault") used.lienVault = m.contract("LienVault");
     else throw new Error(`${part} is not a part of a core`);
   }
   return used;
@@ -114,8 +115,8 @@ export function handOverParts(m: IgnitionModuleBuilder, parts: readonly string[]
 
 /**
  * After `CoreParts` and the council's attestations, run by the account that ran `CoreParts`: the new parts' roles and their
- * hand-over to the timelock, as `CoreHandover` does for a whole deployment. Rules, implementations, the signed entry and the signed exit
- * have no admin, so they need nothing here.
+ * hand-over to the timelock, as `CoreHandover` does for a whole deployment. Rules, implementations, the signed entry, the signed exit
+ * and the lien vault have no admin, so they need nothing here.
  */
 export function partsHandoverModule(parts: readonly string[]) {
   if (parts.length === 0) throw new Error("nothing to hand over: no part was added");

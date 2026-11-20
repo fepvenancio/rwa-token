@@ -10,7 +10,7 @@ import { ROLES } from "../../ignition/modules/roles.js";
 import { DEFAULT_POLICY } from "../../ignition/profiles.js";
 import type { ProfileStack } from "../../test/nodejs/fixtures.js";
 
-type HandedOverKeys = "legos" | "parameters" | "profile" | "publicClient" | "timelock" | "recoveryTimelock" | "registry" | "hook" | "proxyDeployer" | "credentials" | "funds" | "executor" | "dvpExecutor" | "orderSettlement" | "signedEntry" | "signedExit" | "rules" | "deployed";
+type HandedOverKeys = "legos" | "parameters" | "profile" | "publicClient" | "timelock" | "recoveryTimelock" | "registry" | "hook" | "proxyDeployer" | "credentials" | "funds" | "executor" | "dvpExecutor" | "orderSettlement" | "signedEntry" | "signedExit" | "lienVault" | "rules" | "deployed";
 /**
  * What the check reads: the stack's contracts, its profile, the parameters it was deployed with, and the accounts the
  * deployment names, by name. Addresses only: the check signs nothing.
@@ -129,6 +129,9 @@ const DAY = 86_400n;
  *   `credentialGuardian` GUARDIAN_ROLE there, and no other role there is held by an account the stack knows or by either
  *   timelock;
  * - a profile that asks for a signed entry has one, whose code is the release's and whose EIP-712 domain is its own;
+ * - a profile that asks for a lien vault has one, whose code is the release's, which every fund exempts from its count and
+ *   every product that lists a minimum position exempts from it; whether it holds a credential on a token is the
+ *   attester's and is not read;
  * - a product's distributor is the release's code, names this product, and its maker and its checker are different
  *   accounts, each the only account the stack knows to hold its role on the token.
  */
@@ -320,6 +323,19 @@ export async function handoverFailures(s: Stack): Promise<string[]> {
         hashTypedData({ domain, types: EXIT_TYPES, primaryType: "Exit", message: sample }),
         "the signed exit hashes exits for another domain",
       );
+    }
+  });
+  // The lien vault has no immutable and no setting, so its code is all there is to compare. It is exempt from each
+  // fund's count (the owner's decision L1) and from each minimum position, as a pooling account must be.
+  await part("the lien vault", async () => {
+    if (s.profile.lienVault !== true && s.lienVault === undefined) return;
+    assert.ok(s.lienVault !== undefined, "the profile asks for a lien vault and the stack has none");
+    const liens = s.lienVault.address;
+    assert.ok(await isRelease(liens, "LienVault"), `the lien vault ${liens} is not the release's`);
+    for (const [key, { fund }] of Object.entries(s.funds)) assert.equal(await fund.read.isExempt([liens]), true, `the fund ${key} counts the lien vault`);
+    for (const { product, contract } of s.deployed) {
+      if (!product.rules.includes("minPositionRule")) continue;
+      assert.equal(await s.rules.minPositionRule!.read.isExempt([contract.address, liens]), true, `the minimum position of ${product.key} judges the lien vault`);
     }
   });
   // EXECUTOR_ROLE on an intent token: the executors it names and no account the stack knows about, so nothing can run a
