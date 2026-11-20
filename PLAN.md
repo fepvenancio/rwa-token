@@ -4969,6 +4969,17 @@ The owner passed on a review of the two designs the same day. It answers K1 to K
 - **L2, a locked holder.** Accepted: it cannot pledge. The review gives a legal reason, that a lockup restricts a seizure anyway. That is a question for counsel and is not relied on here; the reason recorded is the one in the design, no `AGENT_ROLE` on a contract.
 - **Order.** E14 now, then E6 (master and feeder, test first), then E7.
 
+### Review of the control plane as built, 2026-11-20
+
+The owner passed on a second review, of the code in the two pull requests. Each finding was checked against the code; all three hold, and each is fixed with a test written first. No contract changed.
+
+- **A, `FROM_BLOCK` as a moving cursor.** The page told an operator to pass the block the last run stopped at. For `claims` that loses a controller for good: a request filed before the cursor and settled after it is never read again. The reconciler had the same fault for distributions proposed before it. Fixed two ways. The reconciler reads no logs now: a distributor numbers its distributions from 1 and none has an empty root, so it reads them one by one. `claims` has no such view to read, so the code and the page say what `FROM_BLOCK` may be: fixed at the oldest 7540's first block for `claims`; for `rekey`, moved forward only past a run that left nothing out. `LOG_CHUNK` is the answer to a node that refuses a wide range.
+- **B, a stack file that leaves things out.** A file with no `funds`, no credential registry or no products made the check skip those parts and exit 0, and a file with some of them missing failed on a missing value with a message nobody could act on. `loadStack` now refuses, with exit 2, a file that leaves out what a placed product needs: a rule it lists, an executor it names, its fund, the registry its credential rule reads, a class of a listed fund. A product not placed yet is still allowed, as a core is checked before its products exist; the command names those products (`unplaced`), and does not print that the stack is as its profile says. Not taken from the review: refusing a file with no products.
+- **C, lines with no failing test, and proofs.** The four reconciler lines the build left unplanted now each have a test in which the line is reported: a class that dropped its fund's rule, a 7540 short of its waiting deposits, a stale price, an exit-only vault. All four passed as written, so the lines were right and untested. A payout list whose proof is not a list of 32-byte words is refused with exit 2.
+- **Kept as they are, and now stated on the page:** a keeper exits 0 when it left calls out, so its watcher reads `skipped`; a payout batch is tried whole, so a list that sums above the distribution's total leaves a batch out; the 7540 line counts waiting deposits only.
+- **Tests.** `control.test.ts` has 15 tests, from 12. Five of the new assertions failed before the fixes: the JSON's new fields twice, the incomplete file, the core alone, the proof.
+- **Gates.** `npx hardhat test`: 2317 passing (2099 solidity, 218 nodejs) on this line. Typecheck clean; 47 pages, no problems.
+
 ### Interfaces this would reopen
 
 `IDistributor` (E2). New interfaces only for E3, E7 (`ILienVault`; with the escrow there is no rule and no reason code) and E8. E1, E4, E5, E6, E13 and E14 reopen none.

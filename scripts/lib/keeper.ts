@@ -24,7 +24,13 @@ export type PayoutList = { distributor: Address; id: string | number; rows: { ho
 export type KeeperOptions = {
   /** Who sends. The connection's first account when left out. */
   account?: Account;
-  /** The first block to read logs from. A node may refuse a wide range, so a long-lived chain passes where the last run stopped. */
+  /**
+   * The first block `rekey` and `claims` read logs from; the queries are made in ranges of `logChunk`, so a wide span is
+   * not a reason to raise it. For `claims` it is fixed: the block the oldest 7540 vault was deployed in, because a
+   * request filed before it is never seen again, however much later it settles. For `rekey` it may move forward to the
+   * block a run started at, and only when that run left nothing out: a rekey left out is found again only from its
+   * credential's block.
+   */
   fromBlock?: bigint;
   /** How many blocks one log query covers. */
   logChunk?: bigint;

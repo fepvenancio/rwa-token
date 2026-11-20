@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
-import { isAddress, type Abi, type Address, type Hex } from "viem";
+import { isAddress, isHex, size, type Abi, type Address, type Hex } from "viem";
 
 import { chunksOf, reasonOf, type Context, type Plan } from "../lib/keeper.js";
 import { StackFileError, wholeNumber } from "../lib/stack.js";
@@ -11,7 +11,8 @@ const ROWS = 100;
  * `Distributor.claimBatch`, in chunks, for the rows of a distribution's list that are not paid yet and can be paid now.
  * Each unpaid row is first tried alone without sending it: a row the share token or the cash token refuses, or whose
  * proof does not match, is left out and named, so it cannot hold back the others and a second run does not send it
- * again. Open to anyone on-chain; each payment goes to its holder.
+ * again. A batch is tried whole before it is sent: when the distribution holds less than a batch needs, the batch is
+ * left out although each of its rows passed alone. Open to anyone on-chain; each payment goes to its holder.
  */
 export async function payout({ connection, options, account, now }: Context): Promise<Plan> {
   const { viem } = connection;
@@ -32,6 +33,7 @@ export async function payout({ connection, options, account, now }: Context): Pr
   const payable: { holder: Address; amount: bigint; proof: Hex[] }[] = [];
   for (const [index, row] of list.rows.entries()) {
     if (typeof row !== "object" || row === null || !isAddress(String(row.holder)) || !Array.isArray(row.proof)) throw new StackFileError(`row ${index} of the list needs a holder, an amount and a proof`);
+    if (!row.proof.every((word: unknown) => typeof word === "string" && isHex(word, { strict: true }) && size(word) === 32)) throw new StackFileError(`the proof of row ${index} is not a list of 32-byte words`);
     const amount = wholeNumber(row.amount, `the amount of row ${index}`);
     if (await distributor.read.hasClaimed([id, row.holder])) continue;
     try {

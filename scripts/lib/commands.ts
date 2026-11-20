@@ -10,7 +10,7 @@ import type { NetworkConnection } from "hardhat/types/network";
 import { handoverFailures } from "./check.js";
 import { KEEPERS, runKeeper, type KeeperName, type PayoutList } from "./keeper.js";
 import { reconcile, type Ledger } from "./reconcile.js";
-import { loadStack, parseStackFile, StackFileError, wholeNumber, type StackFile } from "./stack.js";
+import { loadStack, parseStackFile, StackFileError, unplacedOf, wholeNumber, type StackFile } from "./stack.js";
 
 /** What a command reads from the environment. */
 export type Env = Record<string, string | undefined>;
@@ -53,28 +53,35 @@ async function guarded(print: Print, body: () => Promise<number>): Promise<numbe
 
 /**
  * `npm run check`: the post-deploy check against the stack `STACK` names. Prints each part that failed, or with `JSON=1`
- * one object `{ ok, failures }`.
+ * one object `{ ok, failures, products, unplaced }`. It checks the products the file places and names the profile's
+ * products it does not, so a file that places few of them does not read as the whole stack passing.
  */
 export function checkCommand(env: Env, connection: NetworkConnection, print: Print): Promise<number> {
   return guarded(print, async () => {
-    const failures = await handoverFailures(await loadStack(connection, stackOf(env)));
-    if (wantsJson(env)) print(asJson({ ok: failures.length === 0, failures }));
-    else if (failures.length === 0) print("check: the stack is as its profile says");
-    else for (const failure of failures) print(`check: ${failure}`);
+    const file = stackOf(env);
+    const failures = await handoverFailures(await loadStack(connection, file));
+    const products = Object.keys(file.products);
+    const unplaced = unplacedOf(file);
+    if (wantsJson(env)) print(asJson({ ok: failures.length === 0, failures, products, unplaced }));
+    else {
+      for (const failure of failures) print(`check: ${failure}`);
+      if (unplaced.length !== 0) print(`check: not placed, so not checked: ${unplaced.join(", ")}`);
+      if (failures.length === 0) print(unplaced.length === 0 ? "check: the stack is as its profile says" : `check: what is placed is as its profile says (${products.length} of ${products.length + unplaced.length} products)`);
+    }
     return failures.length === 0 ? 0 : 1;
   });
 }
 
 /**
  * `npm run reconcile`: what does not add up on the stack `STACK` names, against the supplies in the file `LEDGER` names
- * when it is set. `FROM_BLOCK` and `LOG_CHUNK` bound its log queries. With `JSON=1`, one object `{ ok, mismatches }`.
+ * when it is set. It reads no logs. With `JSON=1`, one object `{ ok, mismatches }`.
  */
 export function reconcileCommand(env: Env, connection: NetworkConnection, print: Print): Promise<number> {
   return guarded(print, async () => {
     const file = stackOf(env);
     const ledger = env.LEDGER === undefined || env.LEDGER === "" ? {} : readJson(env.LEDGER, "LEDGER");
     if (typeof ledger !== "object" || ledger === null || Array.isArray(ledger)) throw new StackFileError("the ledger file is not an object");
-    const mismatches = await reconcile(connection, file, ledger as Ledger, { fromBlock: optional(env, "FROM_BLOCK"), logChunk: optional(env, "LOG_CHUNK") });
+    const mismatches = await reconcile(connection, file, ledger as Ledger);
     if (wantsJson(env)) print(asJson({ ok: mismatches.length === 0, mismatches }));
     else if (mismatches.length === 0) print("reconcile: nothing to report");
     else for (const mismatch of mismatches) print(`reconcile: ${mismatch}`);
@@ -84,9 +91,10 @@ export function reconcileCommand(env: Env, connection: NetworkConnection, print:
 
 /**
  * `npm run keeper`: one keeper, once, on the stack `STACK` names. `KEEPER` is `rekey`, `dealing`, `fees`, `payout` or
- * `claims`; `FROM_BLOCK` and `LOG_CHUNK` bound its log queries, `CHUNK` sets how many rows or controllers a transaction
- * carries, and `LIST` names a payout's list. It sends from the network's first account. With `JSON=1`, one object
- * `{ sent, skipped }`.
+ * `claims`; `FROM_BLOCK` and `LOG_CHUNK` bound the log queries of `rekey` and `claims` (see `KeeperOptions.fromBlock` for
+ * what `FROM_BLOCK` may be), `CHUNK` sets how many rows or controllers a transaction carries, and `LIST` names a
+ * payout's list. It sends from the network's first account. With `JSON=1`, one object `{ sent, skipped }`. It exits with
+ * 0 when it ran, also when it left calls out: whoever watches a keeper reads `skipped`.
  */
 export function keeperCommand(env: Env, connection: NetworkConnection, print: Print): Promise<number> {
   return guarded(print, async () => {
