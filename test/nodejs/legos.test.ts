@@ -8,7 +8,7 @@ import { encodeFunctionData, erc20Abi, isAddressEqual, keccak256, maxUint256, to
 import { productModule } from "../../ignition/modules/Product.js";
 import { ROLES } from "../../ignition/modules/roles.js";
 import { DEMO_SIGNERS, PROFILES, type Product, type Profile } from "../../ignition/profiles.js";
-import { assertHandedOver, deployProfile, PAR, REASONS, settleThroughDesk, verify } from "./fixtures.js";
+import { assertHandedOver, deployProfile, deverify, PAR, REASONS, settleThroughDesk, verify } from "./fixtures.js";
 
 const usd = (amount: bigint) => amount * 10n ** 6n;
 const DAY = 86_400n;
@@ -277,6 +277,85 @@ describe("an instant vault that invests through a portfolio", async function () 
   });
 });
 
+describe("a master and its feeder classes", async function () {
+  const connection = await network.create();
+  const { viem, networkHelpers } = connection;
+
+  async function fed() {
+    const s = await deployProfile(connection, PROFILES["master-feeder"]);
+    const master = await viem.getContractAt("Gated4626Vault", s.products.master.address);
+    const retail = await viem.getContractAt("Gated4626Vault", s.products.retailClass.address);
+    const professional = await viem.getContractAt("Gated4626Vault", s.products.professionalClass.address);
+    const portfolio = await viem.getContractAt("Portfolio", s.legos.retailClass.portfolio);
+    const adapter = await viem.getContractAt("Gated4626Adapter", s.legos.retailClass.adapter_master);
+    const alice = s.holders.alice;
+    await verify(s, alice);
+    await s.asset.write.mint([alice.account.address, usd(1000n)]);
+    await s.asset.write.approve([retail.address, maxUint256], { account: alice.account });
+    return { s, master, retail, professional, portfolio, adapter, alice, a: alice.account.address };
+  }
+
+  it("each class has its own fee model and a portfolio whose one adapter is the gated one, into the master", async function () {
+    const { s, master, retail, professional, adapter } = await networkHelpers.loadFixture(fed);
+    for (const key of ["retailClass", "professionalClass"] as const) {
+      assert.deepEqual(Object.keys(s.legos[key]).sort(), ["adapter_master", "feeModel", "portfolio"]);
+    }
+    assert.deepEqual(Object.keys(s.legos.master).sort(), ["adapter_onChainVault", "portfolio"]);
+    assert.ok(isAddressEqual(await adapter.read.TARGET(), master.address));
+    assert.notEqual((await retail.read.feeModel()).toLowerCase(), (await professional.read.feeModel()).toLowerCase());
+    // The gated adapter, not the plain one: it stops with its master.
+    assert.equal(await adapter.read.fresh(), true);
+    await master.write.pause({ account: s.wallets.guardian.account });
+    assert.equal(await adapter.read.fresh(), false);
+  });
+
+  it("an investor enters a class, the money reaches the master, and it leaves again in one call", async function () {
+    const { s, master, retail, professional, portfolio, adapter, alice, a } = await networkHelpers.loadFixture(fed);
+    const allocator = s.wallets.allocator.account;
+    // The master admits funds only, and the professional class asks for more than KYC.
+    assert.equal(await master.read.maxDeposit([a]), 0n);
+    assert.equal(await professional.read.maxDeposit([a]), 0n);
+
+    await retail.write.deposit([usd(1000n), a], { account: alice.account });
+    await portfolio.write.allocate([adapter.address, usd(1000n), 0n], { account: allocator });
+    await portfolio.write.setLiquidityAdapter([adapter.address], { account: allocator });
+    assert.equal(await s.asset.read.balanceOf([s.legos.master.portfolio]), usd(1000n));
+    assert.equal(await master.read.totalAssets(), usd(1000n));
+    assert.equal(await retail.read.totalAssets(), usd(1000n));
+
+    await retail.write.redeem([await retail.read.maxRedeem([a]), a, a], { account: alice.account });
+    assert.equal(await s.asset.read.balanceOf([a]), usd(1000n));
+    assert.equal(await master.read.totalSupply(), 0n);
+  });
+
+  it("the check refuses a class whose adapter or portfolio the master would not accept as a holder", async function () {
+    const { s } = await networkHelpers.loadFixture(fed);
+    await deverify(s, s.legos.retailClass.adapter_master);
+    await assert.rejects(assertHandedOver(s), /master does not accept adapter_master of retailClass/);
+  });
+
+  it("the check refuses it for the portfolio too", async function () {
+    const { s } = await networkHelpers.loadFixture(fed);
+    await deverify(s, s.legos.professionalClass.portfolio);
+    await assert.rejects(assertHandedOver(s), /master does not accept the portfolio of professionalClass/);
+  });
+
+  it("the check refuses a plain adapter into a product of the stack, and a gated one that is not", async function () {
+    const { s } = await networkHelpers.loadFixture(fed);
+    const plain = (product: Product): Product => ({
+      ...product,
+      portfolio: { ...product.portfolio, targets: product.portfolio?.targets?.map(({ key, absoluteCap, relativeCapBps }) => ({ key, absoluteCap, relativeCapBps })) },
+    });
+    const asPlain = s.deployed.map((d) => (d.product.key === "retailClass" ? { ...d, product: plain(d.product) } : d));
+    await assert.rejects(assertHandedOver({ ...s, deployed: asPlain }), /adapter_master of retailClass invests in a product of the stack through a plain adapter/);
+
+    const asGated = s.deployed.map((d) =>
+      d.product.key === "master" ? { ...d, product: { ...d.product, portfolio: { ...d.product.portfolio, targets: d.product.portfolio!.targets!.map((t) => ({ ...t, product: "retailClass" })) } } } : d,
+    );
+    await assert.rejects(assertHandedOver({ ...s, deployed: asGated }), /adapter_onChainVault of master is not the release's Gated4626Adapter/);
+  });
+});
+
 describe("the rules a profile can list", async function () {
   const connection = await network.create();
   const { viem, networkHelpers } = connection;
@@ -464,6 +543,11 @@ describe("a product that does not make sense does not build", function () {
       "a custodian behind an instant vault",
       { ...base, template: "Gated4626Vault", rules: ["credentialRule"], portfolio: { maxRateBps: 1n, custodians: [{ key: "c", maxPerCall: 1n, absoluteCap: 1n, relativeCapBps: 1n }] } },
       /a custodian's value is reported/,
+    ],
+    [
+      "a vault that invests in itself",
+      { ...base, template: "Gated4626Vault", rules: ["credentialRule"], portfolio: { maxRateBps: 1n, targets: [{ key: "t", product: "x", absoluteCap: 1n, relativeCapBps: 1n }] } },
+      /cannot invest in itself/,
     ],
     ["a portfolio on an instant vault with no rate limit", { ...base, template: "Gated4626Vault", rules: ["credentialRule"], portfolio: {} }, /must set a rate limit/],
     ["fees with nothing to price them", { ...base, template: "Gated4626Vault", rules: ["credentialRule"], fees: { managementBps: 1n, performanceBps: 0n, hurdleBps: 0n, softHurdle: false } }, /fees need/],

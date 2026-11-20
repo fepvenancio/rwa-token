@@ -107,6 +107,7 @@
       <li><b>It does not promise <code>liquid()</code>.</b> That is what the target's <code>maxWithdraw</code> says. If the target delivers less, the <code>withdraw</code> or the portfolio's check reverts.</li>
       <li><b>It does not move anything else.</b> No function moves a balance of the asset held by the adapter itself, and <code>value()</code> does not count one, so the asset sent straight to it stays there. Target shares sent to it do count in <code>value()</code>. It has no function to claim rewards or move other tokens.</li>
       <li><b>It does not look at a pause.</b> The portfolio's <code>allocate</code> does that, and the adapter's <code>deallocate</code> runs whenever the portfolio asks.</li>
+      <li><b>It does not know whether its target deals.</b> A <a href="Gated4626Vault.html">Gated4626Vault</a> that has stopped dealing still answers <code>previewRedeem</code> with its held price, and this adapter reads that as fresh. A target that is a vault of the same issuer takes a <a href="Gated4626Adapter.html">Gated4626Adapter</a>, and the post-deploy check refuses this one there.</li>
     </ul>
   </div>
 </section>
@@ -118,6 +119,7 @@
     <a class="card" href="Gated4626Vault.html"><span class="name">Gated4626Vault</span><p>An instant vault can invest only through priced adapters such as this.</p></a>
     <a class="card" href="PolicyRegistry.html"><span class="name">PolicyRegistry</span><p>Where its code hash must be attested as <code>ADAPTER</code>.</p></a>
     <a class="card" href="GuardedAccount.html"><span class="name">GuardedAccount</span><p>The other adapter: reported, for money that can sit off-chain.</p></a>
+    <a class="card" href="Gated4626Adapter.html"><span class="name">Gated4626Adapter</span><p>This adapter with one more condition on <code>fresh()</code>, for a master vault.</p></a>
   </div>
 </section>
 

@@ -68,7 +68,7 @@ An adapter says which kind it is through `reported()`. A priced adapter's value 
 |  | Priced | Reported |
 |---|---|---|
 | `reported()` says | false | true |
-| Shipped example | [ERC4626Adapter](ERC4626Adapter.md) | [GuardedAccount](GuardedAccount.md) |
+| Shipped example | [ERC4626Adapter](ERC4626Adapter.md), [Gated4626Adapter](Gated4626Adapter.md) | [GuardedAccount](GuardedAccount.md) |
 | Where its value comes from | Its `value()` | The report a [NavDesk](NavDesk.md) reporter proposes and a checker accepts |
 | In `pricedValue()` | Yes | No |
 | In `priceFresh()` | Yes: an unreadable one makes it false | No |
@@ -222,6 +222,7 @@ The hand-over check pins the allocator to one named account, different from the 
 - [Gated7540Vault](Gated7540Vault.md): Sends net inflow here at settlement and pulls net outflow through its allowance.
 - [NavDesk](NavDesk.md): Names this portfolio as the cash account and adds its on-chain value to the reported one.
 - [ERC4626Adapter](ERC4626Adapter.md): The priced adapter: a position in one on-chain vault.
+- [Gated4626Adapter](Gated4626Adapter.md): The priced adapter for a vault of the same issuer.
 - [GuardedAccount](GuardedAccount.md): The reported adapter: a custodian or a strategy, by permission.
 - [PolicyRegistry](PolicyRegistry.md): Where adapters and successors must be attested, as the vault names it.
 - [Where the money sits](../money.md): The whole path of the money across the stack.

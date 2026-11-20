@@ -25,8 +25,8 @@ const TRANSFER = toFunctionSelector("transfer(address,uint256)");
  *    `Distributor` grants its maker and its checker on the token, which the distributor asks at call time.
  * 3. Hand over: DEFAULT_ADMIN_ROLE to the timelock, and the operations account renounces.
  *
- * Outside this module: the KYC attester must credential every holder, and a vault whose asset is gated needs a credential
- * that token's policy accepts.
+ * Outside this module: the KYC attester must credential every holder, a vault whose asset is gated needs a credential
+ * that token's policy accepts, and a feeder class needs two on its master, for its adapter and for its portfolio.
  */
 export function productModule(product: Product) {
   assertUsable(product);
@@ -107,6 +107,7 @@ export function productModule(product: Product) {
           m.call(account, "setPermission", [p("asset"), TRANSFER, p(`validator_${custodian.key}`)], { id: `permit_${custodian.key}`, after: [deployed] }),
         );
       }
+      // A `Gated4626Adapter` is an `ERC4626Adapter`, and this module reads only `RISK_ID` from it.
       for (const target of product.portfolio?.targets ?? []) install("ERC4626Adapter", `adapter_${target.key}`, target);
     }
     if (desk !== undefined) {

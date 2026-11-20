@@ -90,8 +90,8 @@ export function reconcileCommand(env: Env, connection: NetworkConnection, print:
 }
 
 /**
- * `npm run keeper`: one keeper, once, on the stack `STACK` names. `KEEPER` is `rekey`, `dealing`, `fees`, `payout` or
- * `claims`; `FROM_BLOCK` and `LOG_CHUNK` bound the log queries of `rekey` and `claims` (see `KeeperOptions.fromBlock` for
+ * `npm run keeper`: one keeper, once, on the stack `STACK` names. `KEEPER` is `rekey`, `dealing`, `fees`, `accrue`, `payout`
+ * or `claims`; `FROM_BLOCK` and `LOG_CHUNK` bound the log queries of `rekey` and `claims` (see `KeeperOptions.fromBlock` for
  * what `FROM_BLOCK` may be), `CHUNK` sets how many rows or controllers a transaction carries, and `LIST` names a
  * payout's list. It sends from the network's first account. With `JSON=1`, one object `{ sent, skipped }`. It exits with
  * 0 when it ran, also when it left calls out: whoever watches a keeper reads `skipped`.

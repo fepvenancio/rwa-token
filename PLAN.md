@@ -4980,6 +4980,99 @@ The owner passed on a second review, of the code in the two pull requests. Each 
 - **Tests.** `control.test.ts` has 15 tests, from 12. Five of the new assertions failed before the fixes: the JSON's new fields twice, the incomplete file, the core alone, the proof.
 - **Gates.** `npx hardhat test`: 2317 passing (2099 solidity, 218 nodejs) on this line. Typecheck clean; 47 pages, no problems.
 
+### E6, the test first (2026-11-20)
+
+`contracts/vaults/MasterFeeder.t.sol` builds the structure from the parts that exist and changes no contract: a master `Gated4626Vault` whose portfolio invests in an outside vault, and two classes, each a `Gated4626Vault` whose portfolio holds one `ERC4626Adapter` into the master. One registry, one hook, one `CredentialRule`; the master admits `Quals.FUND` only, class A anyone identified, class B professionals. 16 tests.
+
+**What holds, with no code:**
+
+- **One place.** After the allocator's calls every unit sits in the outside vault. The classes' adapters are the master's only holders, in proportion to what each class put in.
+- **In proportion.** A gain in the master reaches both prices by the same ratio, and the classes together never count more than the master. A loss reaches both at once. A fall of more than half closes the master and each class, and holders still leave.
+- **Own fee, own policy.** Each class charges its own `FeeModel` (1% of the value on one, 20% of the gain on the other) and neither moves the other's price. The master charges nothing. Each class admits only its own investors, and no investor can enter the master.
+- **Leaving.** A holder redeems from a class in one call, through the master to the outside vault. A fuzzed round trip through both levels never profits.
+
+**What a deployment must do, which the test pins:**
+
+- **Two credentials on the master for each class.** The adapter holds the master's shares, so the master's policy must admit it. The adapter withdraws to its portfolio, a receiver other than the owner, so §7's third-party check judges the portfolio too. Without the second, a class can invest and cannot leave, and its `maxRedeem` does not say so.
+- **Fees wait for the allocator.** A class keeps no idle money, so `collectFees()` pays nothing until the allocator deallocates the amount from the master.
+- **Count a class as often as the master.** The limit on counted gains grows from the last count without compounding. With equal limits, a class counted less often than the master trails it by the compounding (3,600 against 3,630 after two years at 10% in the test) until the gain is all counted. It never runs ahead. An `accrue()` keeper, already listed as not done under E14, closes it.
+
+**The gap the test found.** While the outside vault cannot be read, the master holds its last price and stops dealing. Its `previewRedeem` still answers, so the class's adapter reads as fresh, and the class goes on dealing at a price the master itself will not deal at. Money that arrives stays idle in the class, and idle money is paid out. In `test_WhileTheMasterCannotPriceAClassStillDeals` the outside vault loses half and then cannot be read: a newcomer deposits 1,000 at the old price, an earlier holder redeems 1,000 whole from that money, and when the price returns the newcomer holds 500. On the master alone neither call would have gone through. `ERC4626Adapter` is right as it is for an outside vault: it cannot know that a target holds a price. The same holds for any target that can hold its price, not only a master of ours.
+
+The candidate named in the row, a master that deals in periods, was not tested: an `ERC4626Adapter` deposits and withdraws in one call and a 7540 has neither. A feeder over a 7540 master would hold a request, which is a reported position, and an instant class cannot take one.
+
+**Questions for the owner:**
+
+| # | Question | Proposed |
+|---|---|---|
+| M1 | How does a class stop when its master cannot price? | A new adapter, `Gated4626Adapter`: `ERC4626Adapter` whose `fresh()` is also false while the target's portfolio says `priceFresh()` is false. It reads `portfolio()` on the target and `priceFresh()` on that, both existing views, so it reopens no interface (it implements `IERC4626Adapter`). The class then holds its price and stops dealing exactly as the master does, and a guardian needs to do nothing. The alternative is operational: the guardian pauses each class when the reconciler reports the master's price stale. That depends on someone acting in time, and the harm is done in one block |
+| M2 | Does the limit's lag need code? | No. Count the classes with the master, by the `accrue()` keeper. Raising a class's limit above the master's would also close it and weakens the class's own protection against a donation |
+| M3 | A profile and pages now, or after M1? | After M1, so the profile deploys the adapter it should and the pages describe one structure. The profile is `master-feeder`: one master with a portfolio, two classes, the credentials above for each class, a `FeeModel` per class |
+
+**If M1 is yes, the steps:** tests first (`Gated4626Adapter.t.sol`: fresh follows the target's portfolio, a target with no portfolio reads as `ERC4626Adapter` does, a target that cannot be asked is not fresh; and the gap test above turned round, the class stopping with the master), then the contract, its size line, the `Legos` module's choice of adapter, the profile, the pages with their Markdown copies, and the port to `paris`.
+
+**Gates.** `npx hardhat test`: 2329 passing (2114 solidity, 215 nodejs). No contract changed, so Slither, Halmos, upgrade safety and the reproducible build were not rerun.
+
+### E6: M1 to M3 answered, and `Gated4626Adapter` (2026-11-20)
+
+The owner passed on a review of the test and the three questions. It answers M1, M2 and M3 as proposed and adds four notes on M1. Each was checked against the code, and all four hold.
+
+**M1, the adapter, with the notes.** `Gated4626Adapter` is `ERC4626Adapter` with one function overridden: `fresh()` is also false while the target, a `Gated4626Vault`, does not deal. It reopens no interface. `ERC4626Adapter` changes in two words so it can be inherited: `fresh()` becomes `public virtual`, and its one-word read takes the address to ask. The target does not deal when:
+
+1. **Its portfolio gives no fresh price** (the proposal).
+2. **It is paused** (note 1). The proposal missed this: a paused master still answers `previewRedeem`, so a class would have gone on dealing from its idle money at the price the guardian paused over. With the note, pausing the master stops every class in the same block.
+3. **It reads nothing** (note 2): `lastCounted() != 0`, `totalSupply() >= 1e6` and its portfolio's `pricedValue() <= feesOwed()`, the second arm of the vault's own `_dealingStopped`, read through existing views. Without it a class with one unit of idle money counts the master's zero as a fall of more than half and closes for good, while the master itself writes nothing down.
+
+A target with no portfolio deals unless it is paused. Every read is the non-reverting one-word read the adapter already has, and a read that fails is "does not deal". The target's portfolio is read on every call and never stored (note 3), so a master that replaces its portfolio takes its classes with it.
+
+**Two limits, recorded and not coded:**
+
+- **A master closed by a small write-off does not close its classes** (note 4). `writeOffAdapter` on a master leaves the master exit-only whatever the size, while a class sees only the fall and closes only above half. The adapter must not answer this with `fresh() == false`: that would stop redemptions too, and holders must be able to leave. `IAdapter` has no word for "no deposits", and this plan reopens no interface. So it is a rule for the operator: the timelock operation that writes off an adapter on a master also closes deposits on its classes, by setting each class's `CredentialRule` policy to one that trusts no attester (`setPolicy(class, 0, 0, 0, 0)`), which admits no receiver and still lets every holder redeem. The test pins that the class still takes deposits.
+- **The third condition copies a rule of the vault.** The adapter is immutable and the vault is not. An upgrade that changes when a `Gated4626Vault` stops dealing needs a new adapter, attested and swapped in each class.
+
+**M2, the lag:** no code. When the `accrue()` keeper is built it counts the master before its classes in one run, so a class counts against the master's new value.
+
+**M3, the profile and the pages:** after the adapter. The profile does not ship with `ERC4626Adapter` into a master. The post-deploy check verifies both credentials on the master for each class, the adapter's and the portfolio's, because `maxRedeem` cannot show a missing one.
+
+**Steps:** the adapter's tests and the turned gap test, failing; the adapter; its size line; then, each its own step, the `Legos` module's choice of adapter with the profile and the check, the pages, and the port to `paris`.
+
+**As built, the first step.** `contracts/portfolio/Gated4626Adapter.sol` and its 19 unit tests over a mocked vault and portfolio; 14 of them failed against a stub that only inherited. `MasterFeeder.t.sol` now builds its classes on the new adapter, 21 tests: the gap test is turned round (the class holds its price and stops, then deals at the price after the loss), the old behaviour is kept as a test over a class built on the plain adapter, and four cases are new, a paused master, a master that reads nothing while the class has idle money, a master that replaces its portfolio, and the small write-off limit. With the override taken out, four of them fail. `ContractSizes.t.sol` has its line.
+
+**Gates.** `npx hardhat test`: 2356 passing (2138 solidity, 218 nodejs). Solhint and `forge fmt` clean. Slither: 0 results. Not run: Halmos, upgrade safety (the adapter is not a proxy) and the reproducible build. Not measured: what the four extra reads add to a class's deposit and redemption. Not built: the `Legos` choice of adapter, the profile, the check of the two credentials, the pages, the port to `paris`.
+
+**A correction.** The adapter's first commit said Solhint was clean. It was not: the linter had two warnings, the order of `fresh()` in `ERC4626Adapter` and an unused import. The next commit fixed both, and a third of the same kind, and the gates line above is true from that commit on.
+
+### E6: the profile, the check and the `accrue` keeper (2026-11-20)
+
+A second review read the three commits and found one thing missing: the reproducible-build script does not list `Gated4626Adapter`. It also asks for the `accrue` keeper with this step. No contract changes here.
+
+**The profile.** A `Target` may name `product`, the key of an earlier product of the same profile, a `Gated4626Vault`. `Legos` then deploys a `Gated4626Adapter` for it, and an `ERC4626Adapter` for a target that names none. The parameter stays `target_<key>`. `master-feeder` is one master and two classes on one asset:
+
+| Product | Who may hold it | Portfolio | Fees |
+|---|---|---|---|
+| `master` | `FUND`: its classes' adapters and portfolios | One outside vault, limit 10% a year | None |
+| `retailClass` | `KYC` | The master, same limit | 1% management |
+| `professionalClass` | `KYC` and `PROFESSIONAL` | The master, same limit | 0.5% management, 10% performance |
+
+The limits are equal, so a class never runs ahead of its master.
+
+**The check.** For a target that names a product: the adapter is the release's `Gated4626Adapter`, its `TARGET()` is that product, and the master's `canReceive` is true for the adapter and for the class's portfolio. The adapter holds the master's shares and the portfolio receives the cash of a redemption, and `maxRedeem` cannot show a missing one. For a target that names none: its `TARGET()` is no product of the stack, so the plain adapter never points at a master. The attester issues the two credentials, outside the modules, as it does for a vault whose asset is gated.
+
+**The keeper.** `accrue` sends `accrue()` to each instant vault with a portfolio whose price is fresh and whose `totalAssets()` is not its `lastCounted()`. It orders them so that a vault another invests in comes first, and `runKeeper` tries each call after the one before it has landed, so a class counts against its master's new value (M2). With a management fee the two figures differ in almost every block, so this keeper's schedule is how often the fund is counted; it is the one keeper a second run of which may send again.
+
+**Steps:** tests first, failing; `Target.product` and `Legos`; the profile; the check; the keeper; the build script's list; the pages; the gates; the port to `paris`.
+
+**As built.** Seven tests were written first and failed: five on the profile in `legos.test.ts`, one build refusal (a vault that invests in itself) and the keeper's in `control.test.ts`. Then `Target.product` and the refusal in `ignition/profiles.ts`, the `master-feeder` profile, the choice of adapter in `Legos`, the feeder lines of the check in `scripts/lib/check.ts`, `scripts/keepers/accrue.ts`, and `Gated4626Adapter` in the build script's attested list. The test fixture credentials each class's adapter and portfolio, as the attester would. The pages: a page for `Gated4626Adapter`, the profile, the check's line, the keeper and a paragraph for whoever operates a master on the deployment page, and the lists that name the adapters; 48 pages with their Markdown copies.
+
+Two things turned out differently from the note above:
+
+- **The order of the counts changes no figure.** A class reads its master through `previewRedeem`, which already includes what the master would count now, so a class counted before its master counts the same value. The keeper still sends the master first. What closes the lag of M2 is counting both on one schedule, and the page says that.
+- **The keeper skips a vault with no fresh price before it compares the two figures,** because a vault that holds its price reads the two as equal, and the skip would never be named.
+
+**Not done.** The gas the adapter's four extra reads add to a class's deposit and redemption is still not measured. `loadStack` does not refuse a file that has `core.credentialRegistry` and no `core.credentialRule`, which the second review noted as not blocking. No test deploys a 7540 as a feeder class, and the profile type does not refuse one.
+
+**E6 on this line (2026-11-20).** The four commits were carried from the other line by cherry-pick. One conflict in code: `ERC4626Adapter`'s one-word read keeps this line's own assembly, now taking the address to ask and `internal`, where the other line uses a library this line's OpenZeppelin does not have. The test counts in the E6 sections above are the other line's. On this line `npx hardhat test`: 2364 passing (2139 solidity, 225 nodejs). Typecheck, Solhint and `forge fmt` clean, Slither 0 results, and every Halmos property passes. The reproducible build was not run on this line.
+
 ### Interfaces this would reopen
 
 `IDistributor` (E2). New interfaces only for E3, E7 (`ILienVault`; with the escrow there is no rule and no reason code) and E8. E1, E4, E5, E6, E13 and E14 reopen none.
@@ -5000,3 +5093,4 @@ That the stack then runs a market at any given rate. The benchmark compares the 
 9. `OrderSettlement` (E8): built with O1 to O6 as proposed, and O7 decided on 2026-11-20: the received-amount check stays.
 10. The control plane (E14): K1 to K4 answered as proposed on 2026-11-20, and built.
 11. `LienVault` (E7), the escrow: L1 to L6 answered as proposed on 2026-11-20, with two additions recorded above. Not built; it follows E6. Still counsel's: L1, the count of a fund with a statutory cap that lists the vault.
+12. Master and feeder (E6): the test found one gap, a class that deals while its master cannot price. M1 to M3 were answered as proposed on 2026-11-20, with four notes on the adapter. The profile, the check of the two credentials, the `accrue` keeper and the pages are built. Open: nothing for the owner.
