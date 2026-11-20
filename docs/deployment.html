@@ -32,7 +32,7 @@
     <span class="fact">per product: <b>Legos, Product</b></span>
     <span class="fact">a part a running core lacks: <b>CoreParts, PartsHandover</b></span>
     <span class="fact">delay: <b>24 hours</b> by default, floor 1 hour</span>
-    <span class="fact">post-deploy check: <b>assertHandedOver</b></span>
+    <span class="fact">post-deploy check: <b>npm run check</b></span>
   </div>
 </header>
 
@@ -48,6 +48,7 @@
   <a href="#rule-order">Rule lists</a>
   <a href="#profiles">Profiles</a>
   <a href="#check">Post-deploy check</a>
+  <a href="#operations">Keepers and reconciler</a>
   <a href="#changes">Changing policy</a>
   <a href="#watching">Watching</a>
   <a href="#incident">Incident runbook</a>
@@ -153,7 +154,7 @@
         <text x="76" y="742" class="m sm" text-anchor="middle">read-only</text>
         <rect class="b" x="156" y="696" width="612" height="64" rx="8"/>
         <text x="172" y="716" class="bold">9. Post-deploy check</text>
-        <text x="172" y="734" class="sm">assertHandedOver reads the chain and throws on anything not as the profile says.</text>
+        <text x="172" y="734" class="sm">The post-deploy check reads the chain and names anything not as the profile says.</text>
         <text x="172" y="750" class="sm">CI runs it on a local chain. On a live chain an operator has to run it</text>
       </svg>
     </div>
@@ -171,7 +172,7 @@
         <tr><td><code>Product</code></td><td>Operations account, as owner of <code>ProxyDeployer</code></td><td>No</td><td>A live proxy administered by the main timelock. The operations account holds nothing on it.</td></tr>
         <tr><td><code>FundOpen</code></td><td>Operations account, as owner of the fund</td><td>No. From here a later class or a change to the fund waits for the delay.</td><td>The fund with its rule, cap and first classes, owned by the main timelock.</td></tr>
         <tr><td>Credentials</td><td>KYC attester, in <code>CredentialRegistry</code></td><td>No</td><td>Each holder's record. A vault needs none for its own shares, because <code>CredentialRule</code> does not judge a token's own address. A vault whose asset is a gated token needs one that token's policy accepts, and so does a third party that pays into a vault or receives its redemption cash, <a href="contracts/SignedEntry.html"><code>SignedEntry</code></a> included.</td></tr>
-        <tr><td><code>assertHandedOver</code></td><td>CI on a local chain; an operator on a live one (<a href="#check">details</a>)</td><td>No: it sends no transaction</td><td>Nothing. It throws on the first thing that is not as the profile says.</td></tr>
+        <tr><td>The post-deploy check</td><td>CI on a local chain; an operator on a live one, with <code>npm run check</code> (<a href="#check">details</a>)</td><td>No: it sends no transaction</td><td>Nothing. It names each part that is not as the profile says, and the command exits with 1.</td></tr>
       </tbody>
     </table>
   </div>
@@ -442,8 +443,20 @@
 <section id="check">
   <div class="prose">
     <h2>The post-deploy check</h2>
-    <p><code>assertHandedOver</code> is a function in <code>test/nodejs/fixtures.ts</code>. It makes read calls and <code>getCode</code> calls and sends no transaction, and it throws on the first thing that is not as the profile says.</p>
-    <p><b>Who runs it.</b> The fixture calls it at the end of every deployment, so every Node test that deploys a stack runs it on Hardhat's in-process chain, and CI's <code>test</code> job runs those tests with <code>npm test</code> on each pull request and each push to <code>main</code>. That shows the modules produce a stack that passes. It says nothing about a chain in production: no CI job, no <code>package.json</code> script and no module points it at a live network, and it has no command of its own. After a live deployment, and after each later product, an operator must run it, giving it the real addresses, the product list and the named accounts the way the fixture does.</p>
+    <p>The check is <code>handoverFailures</code> in <code>scripts/lib/check.ts</code>. It makes read calls and <code>getCode</code> calls and sends no transaction. It runs in parts, one for each row of the table below and one for each product's legos, and returns a line for each part that is not as the profile says. A part stops at its first fault, so a part with two faults names the first; a fault in one part does not hide a fault in another. One fault is the exception: if the recovery timelock is not the main timelock's code, nothing else can be read safely and the check stops there.</p>
+    <p><b>Who runs it.</b> Two callers run the same function. The test fixture's <code>assertHandedOver</code> calls it at the end of every deployment and fails the test unless it returns nothing, so every Node test that deploys a stack runs it on Hardhat's in-process chain, and CI's <code>test</code> job runs those tests on each pull request and each push. An operator runs it against a live network with <code>npm run check</code>, after a deployment and after each later product. No CI job runs it against a chain in production.</p>
+    <p><b>The command.</b> <code>STACK=stack.json npm run check -- --network &lt;name&gt;</code>. Its settings come from the environment, as <code>PROFILE</code>, <code>PRODUCT</code> and <code>FUND</code> do for the modules. <code>STACK</code> names the stack file. It prints one line for each part that failed, or with <code>JSON=1</code> one object <code>{ ok, failures }</code>. It exits with 0 when nothing failed, 1 when a part failed, and 2 when its input cannot be used: no file, a file that is not JSON, a profile or a product the repository does not have, a required name missing, a value that is not an address, or an address with no contract at it. It needs no key.</p>
+    <p><b>The stack file.</b> One JSON object the operator keeps for the deployment, holding addresses only, under the names the modules return and take as parameters:</p>
+    <ul class="plain">
+      <li><code>profile</code>: the profile's name in <code>ignition/profiles.ts</code>.</li>
+      <li><code>accounts</code>: the accounts the deployment names. <code>deployer</code>, <code>governance</code>, <code>guardian</code>, <code>operations</code> and <code>operator</code> are required, and <code>kyc</code> on a core with its own credential registry. Every account listed is one the check asks about.</li>
+      <li><code>core</code>: what <code>Core</code> and <code>CoreParts</code> returned. <code>timelock</code>, <code>recoveryTimelock</code>, <code>registry</code>, <code>hook</code> and <code>proxyDeployer</code> are required; the parts follow under their own names (<code>credentialRegistry</code>, <code>credentialRule</code>, <code>executor</code>, <code>signedExit</code> and so on).</li>
+      <li><code>products</code>: each product placed so far, by its key in the profile.</li>
+      <li><code>funds</code>: each fund's <code>fund</code>, <code>rule</code> and intended <code>cap</code>.</li>
+      <li><code>legos</code>: what <code>Legos</code> returned for each product that has any.</li>
+      <li><code>parameters</code>: what the product modules were given and the check reads, such as <code>asset</code>, <code>reporter</code>, <code>checker</code>, <code>allocator</code>, <code>distributionMaker</code>, <code>minter</code>, <code>burner</code>, <code>agent</code> and <code>settler</code>.</li>
+    </ul>
+    <p>A product the file does not list is not checked, and a fund whose class is missing from <code>products</code> fails the fund's part. Hardhat Ignition's own journal is not read: its entries are named after contracts and not after these keys.</p>
     <p><b>What "named" means.</b> The roles here keep no list of holders, so the check can only ask about accounts it is told about: the deployer, governance, the council, the guardian, the operations account and the operational accounts of the deployment. A role granted to any other address is not seen.</p>
   </div>
   <div class="table-wrap">
@@ -470,7 +483,7 @@
     </table>
   </div>
   <div class="prose">
-    <p>Tests pin that it refuses: a deployer left holding a role, a twin hook on the same registry ("runs another hook"), a recovery timelock running other code, <code>RECOVERY_ROLE</code> granted on the recovery timelock, a stray <code>EXECUTOR_ROLE</code>, a stray settler beside a desk, a desk that names another vault or does not hold the role, a reporter who is also the checker, a sensitive role on a single key, a Safe of one signer, a portfolio, fee model or validator whose attestation was revoked, a custodian's permission or a risk's caps not as the profile says, a timelock role held by the zero address, a proposer role held by a named account other than governance, a stack that lost its signed entry or its signed exit, a distributor that names another token, a distribution maker who is also the checker, and a stray maker. With an existing credential registry it refuses a named admin or guardian that does not hold its role, a registry or a rule other than the named one, a role on that registry granted to either timelock, a stack with no registry at all, a policy that trusts no attester, a missing one or a killed one, and a rule over a registry whose code is not the release's. It also throws when a delay is below 24 hours, although the contract accepts anything from 1 hour.</p>
+    <p>Tests pin that it refuses: a deployer left holding a role, a twin hook on the same registry ("runs another hook"), a recovery timelock running other code, <code>RECOVERY_ROLE</code> granted on the recovery timelock, a stray <code>EXECUTOR_ROLE</code>, a stray settler beside a desk, a desk that names another vault or does not hold the role, a reporter who is also the checker, a sensitive role on a single key, a Safe of one signer, a portfolio, fee model or validator whose attestation was revoked, a custodian's permission or a risk's caps not as the profile says, a timelock role held by the zero address, a proposer role held by a named account other than governance, a stack that lost its signed entry or its signed exit, a distributor that names another token, a distribution maker who is also the checker, and a stray maker. With an existing credential registry it refuses a named admin or guardian that does not hold its role, a registry or a rule other than the named one, a role on that registry granted to either timelock, a stack with no registry at all, a policy that trusts no attester, a missing one or a killed one, and a rule over a registry whose code is not the release's. It also fails when a delay is below 24 hours, although the contract accepts anything from 1 hour.</p>
     <h3>What it does not check</h3>
     <ul class="plain">
       <li>A role held by an address it was not told about, as above.</li>
@@ -482,6 +495,50 @@
       <li>Whether a profile that sets <code>orderSettlement</code> has one, and the code or the signing domain of the one it has. It reads its roles only. It does not read which allowances makers gave it.</li>
       <li>Whether the <code>SignedEntry</code> holds a credential. Until the KYC attester gives it one that a vault's policy accepts, that vault refuses it as a payer.</li>
     </ul>
+  </div>
+</section>
+
+<section id="operations">
+  <div class="prose">
+    <h2>Keepers and the reconciler</h2>
+    <p>Five jobs have to be done on a running stack by somebody, at the right moment, and none of them is a decision. A <b>keeper</b> is a command that does one of them. Each runs once and exits; what starts it, and how often, is the operator's scheduler. Each reads the chain first and sends only what is due, so a second run straight after the first sends nothing, and two copies running at once waste a transaction and break nothing.</p>
+    <p><code>STACK=stack.json KEEPER=&lt;name&gt; npm run keeper -- --network &lt;name&gt;</code>. It sends from the network's first configured account, which Hardhat reads from its keystore. Before it sends a call it tries it without sending, and a call that would revert is left out and named. With <code>JSON=1</code> it prints one object <code>{ sent, skipped }</code>. It exits with 0 when it ran, whatever it sent, and with 2 on input it cannot use.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>Keeper</th><th>Sends</th><th>When</th><th>Who may call that on-chain</th></tr></thead>
+      <tbody>
+        <tr><td><code>rekey</code></td><td><code>Fund.rekey(account)</code></td><td>The account holds a class of the fund, is not exempt, and is counted under a key that is no longer the one its credential gives. The candidates are the subjects of <code>CredentialSet</code> since <code>FROM_BLOCK</code>.</td><td>Anyone</td></tr>
+        <tr><td><code>dealing</code></td><td><code>NavDesk.closePeriod()</code>, <code>NavDesk.execute()</code></td><td>A close: the period's length has passed and no earlier period waits for its price. An execution: a proposal is accepted, its cooldown is over, its report is not older than <code>maxReportAge</code>, and the period it priced is still the closed one.</td><td>Anyone</td></tr>
+        <tr><td><code>fees</code></td><td><code>Gated4626Vault.collectFees()</code></td><td>The vault has a fee model and a portfolio, fees are counted as owed, and the portfolio holds idle money.</td><td>Anyone, while not paused</td></tr>
+        <tr><td><code>payout</code></td><td><code>Distributor.claimBatch</code>, in chunks</td><td>The distribution is approved and not expired. From the list <code>LIST</code> names, it takes the rows not paid yet, tries each alone without sending it, and batches those that would be paid.</td><td>Anyone</td></tr>
+        <tr><td><code>claims</code></td><td><code>SignedExit.claimFor(vault, controllers)</code>, in chunks</td><td>For each 7540: the controllers that filed a request since <code>FROM_BLOCK</code>, have something settled to claim, and made the <code>SignedExit</code> their operator. Each is tried alone first.</td><td>Anyone</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <p><b>The keeper's key holds no role.</b> Every function in the table is open to any caller, so the account that sends needs nothing granted to it, and the most a stolen key can do is send these same calls: a rekey moves the count to where the registry already says it is, a close or an execution happens when the desk's own conditions allow it, fees go to the recipient the attested fee model names, a payout goes to each holder, and a claim goes to its controller.</p>
+    <p><b>What no keeper does.</b> None proposes or accepts a price, approves a distribution, writes a credential, mints, burns or moves a holder's tokens. Those are people, two of them where the contract asks for two.</p>
+    <p><b>If a keeper stops,</b> nothing is lost. Every call can be sent late, and by anyone: a holder can still claim its own payout or its own shares, and a period that is not closed stays open and keeps taking requests.</p>
+    <p><b>Settings,</b> all in the environment. <code>FROM_BLOCK</code> is the first block <code>rekey</code> and <code>claims</code> read logs from, and <code>LOG_CHUNK</code> how many blocks one log query covers, 5,000 unless set: a node may refuse a wide range, so on a long-lived chain each run passes the block the last one stopped at. <code>CHUNK</code> is how many rows or controllers one transaction carries: 100 rows for a payout and 50 controllers for claims unless set, from the benchmark's 4.9 million gas for 100 rows and 0.66 million for ten controllers. <code>LIST</code> names a payout's list, one JSON object with the <code>distributor</code>, the distribution's <code>id</code> and <code>rows</code> of <code>{ holder, amount, proof }</code>, the same list the root was built from.</p>
+    <p><b>Two limits.</b> The <code>fees</code> keeper does not count the vault's value itself: fees become owed at the next deposit, withdrawal or <code>accrue()</code>, which anyone may call, and the keeper collects what has been counted. In <code>payout</code>, a row the share token or the cash token refuses, or whose proof does not match the root, is named on every run until it can be paid; it never reaches a transaction, so it cannot stop the others.</p>
+    <h3>The reconciler</h3>
+    <p><code>STACK=stack.json npm run reconcile -- --network &lt;name&gt;</code> sends nothing. It prints what does not add up, one line each, or with <code>JSON=1</code> one object <code>{ ok, mismatches }</code>, and exits with 1 when there is any line and 2 on input it cannot use.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="tight">
+      <thead><tr><th>About</th><th>It reports</th></tr></thead>
+      <tbody>
+        <tr><td>A token the ledger covers</td><td><code>totalSupply()</code> is not the figure in the file <code>LEDGER</code> names, one JSON object from each token's address to its supply. The ledger itself is outside this repository; with no <code>LEDGER</code> this line is not checked.</td></tr>
+        <tr><td>Each fund</td><td><code>holderCount()</code> is above <code>holderCap()</code>, which a rekey or a lowered cap can cause and which admits nobody new; or <code>firstBrokenClass()</code> is not the zero address.</td></tr>
+        <tr><td>Each 7540 vault</td><td>It holds less of its asset than the deposits still waiting for a price, read from <code>periodBook</code> for every period not settled.</td></tr>
+        <tr><td>Each 4626 vault with a portfolio</td><td><code>exitOnly()</code> is true, so it takes no deposit; or the portfolio's <code>priceFresh()</code> is false, so the vault has stopped dealing.</td></tr>
+        <tr><td>Each distributor</td><td>A distribution past its expiry with money still in it, which <code>sweep</code> returns to its funder. The distributions are found from <code>DistributionProposed</code> since <code>FROM_BLOCK</code>.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <p><b>What it cannot read.</b> What a 7540 owes on settled redemptions that are not claimed yet has no view, so the reconciler compares the vault's balance with pending deposits only. <code>settlePeriod</code> checks the whole sum on every settlement and reverts if the vault is short. It reads no off-chain system: the ledger's figures come to it in a file.</p>
   </div>
 </section>
 
@@ -744,7 +801,7 @@
       <li>Modules: <code>Core.ts</code>, <code>CoreHandover.ts</code>, <code>CoreParts.ts</code>, <code>PartsHandover.ts</code>, <code>Fund.ts</code>, <code>Legos.ts</code>, <code>Product.ts</code>, <code>FundOpen.ts</code>, <code>roles.ts</code></li>
       <li>The parts of a core and their hand-over: <code>ignition/parts.ts</code></li>
       <li>Profiles: <code>ignition/profiles.ts</code></li>
-      <li>Council step and post-deploy check: <code>stages</code> and <code>assertHandedOver</code> in <code>test/nodejs/fixtures.ts</code>; procedure in the README runbook; the CI job in <code>.github/workflows/ci.yml</code></li>
+      <li>Council step and post-deploy check: <code>stages</code> and <code>assertHandedOver</code> in <code>test/nodejs/fixtures.ts</code>, <code>handoverFailures</code> in <code>scripts/lib/check.ts</code> and the command in <code>scripts/check.ts</code>; procedure in the README runbook; the CI job in <code>.github/workflows/ci.yml</code></li>
       <li>Tests: <code>deployment.test.ts</code> (rule order, a twin hook, an unattested rule or implementation stopping a product), <code>products.test.ts</code> (one core and many products, an intent token alone, funds, a later class, adding parts to a running core, a signed entry, a signed exit, a distribution, an issuer on another issuer's credential registry), <code>legos.test.ts</code> (the legos by profile, what the hand-over check refuses, products that do not build), <code>governance.test.ts</code> (upgrades, hook and rule changes, pause and recovery)</li>
     </ul>
   </div>

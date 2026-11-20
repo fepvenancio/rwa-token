@@ -11,9 +11,9 @@ An issuer deploys one core, then each product on top of it. The core goes throug
 - per product: **Legos, Product**
 - a part a running core lacks: **CoreParts, PartsHandover**
 - delay: **24 hours** by default, floor 1 hour
-- post-deploy check: **assertHandedOver**
+- post-deploy check: **npm run check**
 
-[In one minute](#in-one-minute) · [Going live](#live) · [Core](#core) · [Council step](#council) · [Hand-over](#handover) · [Adding to a core](#adding) · [Existing KYC registry](#external) · [Funds and products](#products) · [Rule lists](#rule-order) · [Profiles](#profiles) · [Post-deploy check](#check) · [Changing policy](#changes) · [Watching](#watching) · [Incident runbook](#incident) · [Why](#why) · [Limits](#limits)
+[In one minute](#in-one-minute) · [Going live](#live) · [Core](#core) · [Council step](#council) · [Hand-over](#handover) · [Adding to a core](#adding) · [Existing KYC registry](#external) · [Funds and products](#products) · [Rule lists](#rule-order) · [Profiles](#profiles) · [Post-deploy check](#check) · [Keepers and reconciler](#operations) · [Changing policy](#changes) · [Watching](#watching) · [Incident runbook](#incident) · [Why](#why) · [Limits](#limits)
 
 <a id="in-one-minute"></a>
 
@@ -40,7 +40,7 @@ Six Ignition modules and three steps outside them. The test fixtures `deployProf
 | `Product` | Operations account, as owner of `ProxyDeployer` | No | A live proxy administered by the main timelock. The operations account holds nothing on it. |
 | `FundOpen` | Operations account, as owner of the fund | No. From here a later class or a change to the fund waits for the delay. | The fund with its rule, cap and first classes, owned by the main timelock. |
 | Credentials | KYC attester, in `CredentialRegistry` | No | Each holder's record. A vault needs none for its own shares, because `CredentialRule` does not judge a token's own address. A vault whose asset is a gated token needs one that token's policy accepts, and so does a third party that pays into a vault or receives its redemption cash, [`SignedEntry`](contracts/SignedEntry.md) included. |
-| `assertHandedOver` | CI on a local chain; an operator on a live one ([details](#check)) | No: it sends no transaction | Nothing. It throws on the first thing that is not as the profile says. |
+| The post-deploy check | CI on a local chain; an operator on a live one, with `npm run check` ([details](#check)) | No: it sends no transaction | Nothing. It names each part that is not as the profile says, and the command exits with 1. |
 
 <a id="core"></a>
 ## The core: `Core`
@@ -228,9 +228,23 @@ A product that makes no sense throws when its `Legos` or `Product` module is bui
 <a id="check"></a>
 ## The post-deploy check
 
-`assertHandedOver` is a function in `test/nodejs/fixtures.ts`. It makes read calls and `getCode` calls and sends no transaction, and it throws on the first thing that is not as the profile says.
+The check is `handoverFailures` in `scripts/lib/check.ts`. It makes read calls and `getCode` calls and sends no transaction. It runs in parts, one for each row of the table below and one for each product's legos, and returns a line for each part that is not as the profile says. A part stops at its first fault, so a part with two faults names the first; a fault in one part does not hide a fault in another. One fault is the exception: if the recovery timelock is not the main timelock's code, nothing else can be read safely and the check stops there.
 
-**Who runs it.** The fixture calls it at the end of every deployment, so every Node test that deploys a stack runs it on Hardhat's in-process chain, and CI's `test` job runs those tests with `npm test` on each pull request and each push to `main`. That shows the modules produce a stack that passes. It says nothing about a chain in production: no CI job, no `package.json` script and no module points it at a live network, and it has no command of its own. After a live deployment, and after each later product, an operator must run it, giving it the real addresses, the product list and the named accounts the way the fixture does.
+**Who runs it.** Two callers run the same function. The test fixture's `assertHandedOver` calls it at the end of every deployment and fails the test unless it returns nothing, so every Node test that deploys a stack runs it on Hardhat's in-process chain, and CI's `test` job runs those tests on each pull request and each push. An operator runs it against a live network with `npm run check`, after a deployment and after each later product. No CI job runs it against a chain in production.
+
+**The command.** `STACK=stack.json npm run check -- --network <name>`. Its settings come from the environment, as `PROFILE`, `PRODUCT` and `FUND` do for the modules. `STACK` names the stack file. It prints one line for each part that failed, or with `JSON=1` one object `{ ok, failures }`. It exits with 0 when nothing failed, 1 when a part failed, and 2 when its input cannot be used: no file, a file that is not JSON, a profile or a product the repository does not have, a required name missing, a value that is not an address, or an address with no contract at it. It needs no key.
+
+**The stack file.** One JSON object the operator keeps for the deployment, holding addresses only, under the names the modules return and take as parameters:
+
+- `profile`: the profile's name in `ignition/profiles.ts`.
+- `accounts`: the accounts the deployment names. `deployer`, `governance`, `guardian`, `operations` and `operator` are required, and `kyc` on a core with its own credential registry. Every account listed is one the check asks about.
+- `core`: what `Core` and `CoreParts` returned. `timelock`, `recoveryTimelock`, `registry`, `hook` and `proxyDeployer` are required; the parts follow under their own names (`credentialRegistry`, `credentialRule`, `executor`, `signedExit` and so on).
+- `products`: each product placed so far, by its key in the profile.
+- `funds`: each fund's `fund`, `rule` and intended `cap`.
+- `legos`: what `Legos` returned for each product that has any.
+- `parameters`: what the product modules were given and the check reads, such as `asset`, `reporter`, `checker`, `allocator`, `distributionMaker`, `minter`, `burner`, `agent` and `settler`.
+
+A product the file does not list is not checked, and a fund whose class is missing from `products` fails the fund's part. Hardhat Ignition's own journal is not read: its entries are named after contracts and not after these keys.
 
 **What "named" means.** The roles here keep no list of holders, so the check can only ask about accounts it is told about: the deployer, governance, the council, the guardian, the operations account and the operational accounts of the deployment. A role granted to any other address is not seen.
 
@@ -253,7 +267,7 @@ A product that makes no sense throws when its `Legos` or `Product` module is bui
 | Each product's distributor | Where the product sets `distributor`: its code is the `Distributor` artifact's, its immutables left out, and its `TOKEN()` is this product. The `distributionMaker` and the `checker` are different accounts, and each is the only named account with its role on the token. |
 | The single-key refusal | For `MINTER_ROLE`, `BURNER_ROLE`, `AGENT_ROLE` and `SETTLER_ROLE`: if the deployment's `minter`, `burner`, `agent` or `settler` account holds the role on a product, it must answer `getThreshold()` with 2 or more, as a Safe that requires at least two signatures does. An account with no such function fails. A profile can name a role in `singleSigners` to except it, for example for an MPC custody wallet whose policy engine does the same job. A product with a desk passes on the settler, because the `settler` account does not hold the role there. |
 
-Tests pin that it refuses: a deployer left holding a role, a twin hook on the same registry ("runs another hook"), a recovery timelock running other code, `RECOVERY_ROLE` granted on the recovery timelock, a stray `EXECUTOR_ROLE`, a stray settler beside a desk, a desk that names another vault or does not hold the role, a reporter who is also the checker, a sensitive role on a single key, a Safe of one signer, a portfolio, fee model or validator whose attestation was revoked, a custodian's permission or a risk's caps not as the profile says, a timelock role held by the zero address, a proposer role held by a named account other than governance, a stack that lost its signed entry or its signed exit, a distributor that names another token, a distribution maker who is also the checker, and a stray maker. With an existing credential registry it refuses a named admin or guardian that does not hold its role, a registry or a rule other than the named one, a role on that registry granted to either timelock, a stack with no registry at all, a policy that trusts no attester, a missing one or a killed one, and a rule over a registry whose code is not the release's. It also throws when a delay is below 24 hours, although the contract accepts anything from 1 hour.
+Tests pin that it refuses: a deployer left holding a role, a twin hook on the same registry ("runs another hook"), a recovery timelock running other code, `RECOVERY_ROLE` granted on the recovery timelock, a stray `EXECUTOR_ROLE`, a stray settler beside a desk, a desk that names another vault or does not hold the role, a reporter who is also the checker, a sensitive role on a single key, a Safe of one signer, a portfolio, fee model or validator whose attestation was revoked, a custodian's permission or a risk's caps not as the profile says, a timelock role held by the zero address, a proposer role held by a named account other than governance, a stack that lost its signed entry or its signed exit, a distributor that names another token, a distribution maker who is also the checker, and a stray maker. With an existing credential registry it refuses a named admin or guardian that does not hold its role, a registry or a rule other than the named one, a role on that registry granted to either timelock, a stack with no registry at all, a policy that trusts no attester, a missing one or a killed one, and a rule over a registry whose code is not the release's. It also fails when a delay is below 24 hours, although the contract accepts anything from 1 hour.
 
 ### What it does not check
 
@@ -265,6 +279,45 @@ Tests pin that it refuses: a deployer left holding a role, a twin hook on the sa
 - Settings beyond the legos'. It reads each custodian's one permission and every risk's caps, but not whether an account has any other permission (an account keeps no list of them), a custodian's address, a desk's schedule, a fee model's rates or a minimum position.
 - Whether a profile that sets `orderSettlement` has one, and the code or the signing domain of the one it has. It reads its roles only. It does not read which allowances makers gave it.
 - Whether the `SignedEntry` holds a credential. Until the KYC attester gives it one that a vault's policy accepts, that vault refuses it as a payer.
+
+<a id="operations"></a>
+## Keepers and the reconciler
+
+Five jobs have to be done on a running stack by somebody, at the right moment, and none of them is a decision. A **keeper** is a command that does one of them. Each runs once and exits; what starts it, and how often, is the operator's scheduler. Each reads the chain first and sends only what is due, so a second run straight after the first sends nothing, and two copies running at once waste a transaction and break nothing.
+
+`STACK=stack.json KEEPER=<name> npm run keeper -- --network <name>`. It sends from the network's first configured account, which Hardhat reads from its keystore. Before it sends a call it tries it without sending, and a call that would revert is left out and named. With `JSON=1` it prints one object `{ sent, skipped }`. It exits with 0 when it ran, whatever it sent, and with 2 on input it cannot use.
+
+| Keeper | Sends | When | Who may call that on-chain |
+|---|---|---|---|
+| `rekey` | `Fund.rekey(account)` | The account holds a class of the fund, is not exempt, and is counted under a key that is no longer the one its credential gives. The candidates are the subjects of `CredentialSet` since `FROM_BLOCK`. | Anyone |
+| `dealing` | `NavDesk.closePeriod()`, `NavDesk.execute()` | A close: the period's length has passed and no earlier period waits for its price. An execution: a proposal is accepted, its cooldown is over, its report is not older than `maxReportAge`, and the period it priced is still the closed one. | Anyone |
+| `fees` | `Gated4626Vault.collectFees()` | The vault has a fee model and a portfolio, fees are counted as owed, and the portfolio holds idle money. | Anyone, while not paused |
+| `payout` | `Distributor.claimBatch`, in chunks | The distribution is approved and not expired. From the list `LIST` names, it takes the rows not paid yet, tries each alone without sending it, and batches those that would be paid. | Anyone |
+| `claims` | `SignedExit.claimFor(vault, controllers)`, in chunks | For each 7540: the controllers that filed a request since `FROM_BLOCK`, have something settled to claim, and made the `SignedExit` their operator. Each is tried alone first. | Anyone |
+
+**The keeper's key holds no role.** Every function in the table is open to any caller, so the account that sends needs nothing granted to it, and the most a stolen key can do is send these same calls: a rekey moves the count to where the registry already says it is, a close or an execution happens when the desk's own conditions allow it, fees go to the recipient the attested fee model names, a payout goes to each holder, and a claim goes to its controller.
+
+**What no keeper does.** None proposes or accepts a price, approves a distribution, writes a credential, mints, burns or moves a holder's tokens. Those are people, two of them where the contract asks for two.
+
+**If a keeper stops,** nothing is lost. Every call can be sent late, and by anyone: a holder can still claim its own payout or its own shares, and a period that is not closed stays open and keeps taking requests.
+
+**Settings,** all in the environment. `FROM_BLOCK` is the first block `rekey` and `claims` read logs from, and `LOG_CHUNK` how many blocks one log query covers, 5,000 unless set: a node may refuse a wide range, so on a long-lived chain each run passes the block the last one stopped at. `CHUNK` is how many rows or controllers one transaction carries: 100 rows for a payout and 50 controllers for claims unless set, from the benchmark's 4.9 million gas for 100 rows and 0.66 million for ten controllers. `LIST` names a payout's list, one JSON object with the `distributor`, the distribution's `id` and `rows` of `{ holder, amount, proof }`, the same list the root was built from.
+
+**Two limits.** The `fees` keeper does not count the vault's value itself: fees become owed at the next deposit, withdrawal or `accrue()`, which anyone may call, and the keeper collects what has been counted. In `payout`, a row the share token or the cash token refuses, or whose proof does not match the root, is named on every run until it can be paid; it never reaches a transaction, so it cannot stop the others.
+
+### The reconciler
+
+`STACK=stack.json npm run reconcile -- --network <name>` sends nothing. It prints what does not add up, one line each, or with `JSON=1` one object `{ ok, mismatches }`, and exits with 1 when there is any line and 2 on input it cannot use.
+
+| About | It reports |
+|---|---|
+| A token the ledger covers | `totalSupply()` is not the figure in the file `LEDGER` names, one JSON object from each token's address to its supply. The ledger itself is outside this repository; with no `LEDGER` this line is not checked. |
+| Each fund | `holderCount()` is above `holderCap()`, which a rekey or a lowered cap can cause and which admits nobody new; or `firstBrokenClass()` is not the zero address. |
+| Each 7540 vault | It holds less of its asset than the deposits still waiting for a price, read from `periodBook` for every period not settled. |
+| Each 4626 vault with a portfolio | `exitOnly()` is true, so it takes no deposit; or the portfolio's `priceFresh()` is false, so the vault has stopped dealing. |
+| Each distributor | A distribution past its expiry with money still in it, which `sweep` returns to its funder. The distributions are found from `DistributionProposed` since `FROM_BLOCK`. |
+
+**What it cannot read.** What a 7540 owes on settled redemptions that are not claimed yet has no view, so the reconciler compares the vault's balance with pending deposits only. `settlePeriod` checks the whole sum on every settlement and reverts if the vault is short. It reads no off-chain system: the ledger's figures come to it in a file.
 
 <a id="changes"></a>
 ## Changing the policy later
@@ -386,5 +439,5 @@ A holder who is address-frozen can be emptied either way. `forcedTransfer` and t
 - Modules: `Core.ts`, `CoreHandover.ts`, `CoreParts.ts`, `PartsHandover.ts`, `Fund.ts`, `Legos.ts`, `Product.ts`, `FundOpen.ts`, `roles.ts`
 - The parts of a core and their hand-over: `ignition/parts.ts`
 - Profiles: `ignition/profiles.ts`
-- Council step and post-deploy check: `stages` and `assertHandedOver` in `test/nodejs/fixtures.ts`; procedure in the README runbook; the CI job in `.github/workflows/ci.yml`
+- Council step and post-deploy check: `stages` and `assertHandedOver` in `test/nodejs/fixtures.ts`, `handoverFailures` in `scripts/lib/check.ts` and the command in `scripts/check.ts`; procedure in the README runbook; the CI job in `.github/workflows/ci.yml`
 - Tests: `deployment.test.ts` (rule order, a twin hook, an unattested rule or implementation stopping a product), `products.test.ts` (one core and many products, an intent token alone, funds, a later class, adding parts to a running core, a signed entry, a signed exit, a distribution, an issuer on another issuer's credential registry), `legos.test.ts` (the legos by profile, what the hand-over check refuses, products that do not build), `governance.test.ts` (upgrades, hook and rule changes, pause and recovery)

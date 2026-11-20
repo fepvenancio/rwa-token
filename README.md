@@ -291,7 +291,9 @@ exact sequence on the local network, playing the council and the KYC attester, a
    vault needs no credential for its own shares, because `CredentialRule` does not judge a token's own address, but a
    vault whose asset is a gated token needs a credential that token's policy accepts. So does a custodian depositing for
    clients, anyone paid a client's redemption cash, and the `SignedEntry`, which pays for the investor.
-8. **Post-deploy checks** (the fixture's `assertHandedOver`):
+8. **Post-deploy checks** (`STACK=stack.json npm run check -- --network <name>`; the tests run the same function through
+   the fixture's `assertHandedOver`). The stack file, the exit codes, the keepers (`npm run keeper`) and the reconciler
+   (`npm run reconcile`) are described in [Deployment and governance](docs/deployment.html#check):
    - the deployer and the operations account hold no role on either timelock, the policy registry, the core's own credential registry, the products or the executors;
    - the timelock holds DEFAULT_ADMIN_ROLE everywhere and is the only UPGRADER;
    - every product's `policy()` is the hook the council attested, that hook's `REGISTRY()` is the registry, and its
