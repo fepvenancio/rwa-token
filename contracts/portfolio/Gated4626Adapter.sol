@@ -5,7 +5,6 @@ import {IERC4626} from '@openzeppelin/contracts/interfaces/IERC4626.sol';
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {Pausable} from '@openzeppelin/contracts/utils/Pausable.sol';
 
-import {IAdapter} from 'interfaces/IAdapter.sol';
 import {IGated4626Vault} from 'interfaces/IGated4626Vault.sol';
 import {IPortfolio} from 'interfaces/IPortfolio.sol';
 
@@ -40,7 +39,7 @@ contract Gated4626Adapter is ERC4626Adapter {
   ) ERC4626Adapter(_portfolio, _target, _sharedRiskId) {}
 
   /**
-   * @inheritdoc IAdapter
+   * @inheritdoc ERC4626Adapter
    * @dev Also false while the target does not deal, or cannot say
    */
   function fresh() public view override returns (bool _fresh) {
