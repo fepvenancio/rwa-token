@@ -183,6 +183,8 @@ exact sequence on the local network, playing the council and the KYC attester, a
      - the one `OrderSettlement`, if the profile sets `orderSettlement` (not attested; no role on any token);
      - the one `SignedEntry`, if the profile sets `signedEntry` (not attested; no role and no money).
      - the one `SignedExit`, if the profile sets `signedExit` (not attested; no role and no money).
+     - the one `LienVault`, if the profile sets `lienVault` (not attested; no role; it holds pledged tokens, so the attester
+       credentials it on each token that may be pledged).
 
    Parameters: `governance`, `council`, `guardian`, `minDelay`. These parts are `deployParts` in `ignition/parts.ts`, which
    also adds parts to a core that already runs (below).

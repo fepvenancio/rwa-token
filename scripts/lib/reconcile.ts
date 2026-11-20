@@ -17,6 +17,10 @@ export type Ledger = Record<string, string | number>;
  * - a 7540 vault that holds less of its asset than the deposits still waiting for a price. What it owes on settled
  *   redemptions is not readable from outside and is not counted here; `settlePeriod` checks both on every settlement;
  * - an instant vault with a portfolio that is exit-only, or whose portfolio gives no fresh price, so it has stopped dealing;
+ * - a token of which the lien vault holds less than its liens book, which a forced transfer straight out of the vault
+ *   causes: enforcement on pledged tokens goes through the vault's `recover`;
+ * - a fund with accounts that hold its classes only through the lien vault. The fund exempts the vault, so those owners
+ *   are not in its count, and the line gives the number with them;
  * - a distribution past its expiry with money still in it, which `sweep` returns to its funder. A distributor numbers
  *   its distributions from 1 and none has an empty root, so they are read one by one until the first that has, and no
  *   log is read: a first block set too late cannot hide one.
@@ -74,6 +78,39 @@ export async function reconcile(
           lines.push(`distribution ${id} of ${product.key} is past its expiry with ${d.total - d.claimed} unclaimed: sweep returns it to its funder`);
         }
       }
+    }
+  }
+  if (file.core.lienVault !== undefined) {
+    const liens = await viem.getContractAt("LienVault", file.core.lienVault);
+    const keyOf = (token: string) => placed.find(({ address }) => isAddressEqual(address, token as `0x${string}`))?.product.key ?? token;
+    // Every open lien, read by id: the vault numbers them from 1 and never reuses one.
+    const pledgors = new Map<string, Set<string>>();
+    const count = await liens.read.lienCount();
+    for (let id = 1n; id <= count; id++) {
+      const lien = await liens.read.lienOf([id]);
+      if (lien.amount === 0n) continue;
+      const token = lien.token.toLowerCase();
+      if (!pledgors.has(token)) pledgors.set(token, new Set());
+      pledgors.get(token)!.add(lien.pledgor.toLowerCase());
+    }
+    for (const token of pledgors.keys()) {
+      const address = token as `0x${string}`;
+      const [held, booked] = [await publicClient.readContract({ address, abi: erc20Abi, functionName: "balanceOf", args: [liens.address] }), await liens.read.totalPledged([address])];
+      if (held < booked) lines.push(`the lien vault holds ${held} of ${keyOf(token)} and its liens book ${booked}`);
+    }
+    for (const [key, { fund: fundAddress }] of Object.entries(file.funds ?? {})) {
+      const fund = await viem.getContractAt("Fund", fundAddress);
+      const hidden = new Set<string>();
+      for (const [token, accounts] of pledgors) {
+        if ((await fund.read.classIndexOf([token as `0x${string}`])) === 0n) continue;
+        for (const account of accounts) {
+          const who = account as `0x${string}`;
+          if ((await fund.read.heldClasses([who])) === 0n && !(await fund.read.isExempt([who]))) hidden.add(account);
+        }
+      }
+      if (hidden.size === 0) continue;
+      const counted = await fund.read.holderCount();
+      lines.push(`fund ${key}: ${hidden.size} account${hidden.size === 1 ? " holds" : "s hold"} its classes only through the lien vault, so ${counted + BigInt(hidden.size)} owners are counted as ${counted}`);
     }
   }
   return lines;

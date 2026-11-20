@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>LienVault · Gated Token Stack</title>
+<meta name="description" content="An escrow for pledged tokens: a holder moves tokens in under a lien, and the lien's beneficiary alone releases them or takes them.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<nav class="site-nav" aria-label="Site">
+  <a class="brand" href="../index.html">Gated Token Stack</a>
+  <a href="../index.html">Overview</a>
+  <a href="../index.html#contracts">Contracts</a>
+  <a href="../roles.html">Who can do what</a>
+  <a href="../movement.html">One movement</a>
+  <a href="../deployment.html">Deployment and governance</a>
+  <a href="../money.html">Where the money sits</a>
+</nav>
+<main class="page">
+
+<header class="top wrap-any">
+  <div class="crumbs"><a href="../index.html#contracts">Contracts</a> / Escrow</div>
+  <h1>LienVault</h1>
+  <p class="lede">Holds tokens a holder has pledged. Each amount sits under a lien that names a beneficiary, and only the beneficiary decides whether it goes back to the holder or to itself.</p>
+  <div class="facts">
+    <span class="fact"><b>contracts/escrow/LienVault.sol</b></span>
+    <span class="fact">immutable, <b>not a proxy</b></span>
+    <span class="fact"><b>not attested</b>: it is installed nowhere</span>
+    <span class="fact"><b>no roles</b>, and no role on any token</span>
+    <span class="fact">ERC-20 tokens only</span>
+  </div>
+</header>
+
+<section id="in-one-minute">
+  <div class="callout wrap-any">
+    <h3>In one minute</h3>
+    <p>A holder that borrows against its tokens gives the lender control over them without giving them away. Here it does that by moving them into this contract, under a <b>lien</b>: a record of the token, the holder (the pledgor), the lender (the beneficiary) and the amount. From then on the holder cannot move them, because they are not in its balance. The beneficiary can send them back (<code>release</code>), take them (<code>seize</code>) or hand the lien to someone else (<code>assign</code>). The contract cannot know whether a loan is in default, so it does not ask: the holder trusts the beneficiary with the pledged amount and with nothing else. The contract holds no role on any token, so a fault in it can lose only what was pledged into it.</p>
+  </div>
+</section>
+
+<section id="how">
+  <div class="prose wrap-any"><h2>How it works</h2></div>
+  <ol class="steps wrap-any">
+    <li><div><b>Pledge.</b> The holder approves the vault on the token, then calls <code>pledge(token, amount, beneficiary)</code>. The vault pulls the amount and opens a lien with the next id, from 1. It reverts unless its balance rose by exactly the amount, so a token that keeps a fee is refused (<code>test_ATokenThatKeepsAFeeIsRefused</code>). <code>increase(lienId, amount)</code> adds to a lien, and only its pledgor can.</div></li>
+    <li><div><b>While it is pledged.</b> The holder can move the rest of its balance and nothing of the pledged part (<code>test_TheHolderCannotMoveWhatItPledgedAndCanMoveTheRest</code>). Every pre-flight on the token is exact with no change to the token: pledged shares of a vault are not in <code>maxRedeem</code> (<code>test_PledgedSharesAreNotRedeemableAndMaxRedeemIsExact</code>). A payment from the holder to its lender leaves the lien as it was.</div></li>
+    <li><div><b>Release or seize.</b> The beneficiary calls <code>release(lienId, amount)</code>, which pays the pledgor, or <code>seize(lienId, amount)</code>, which pays the beneficiary. Either can be in parts and never past what the lien holds. A lien that holds nothing is closed: its id answers <code>LienVault_NoLien</code> from then on, and ids are never used again.</div></li>
+    <li><div><b>Several lenders.</b> A holder can have many liens, to one lender or to several. Each is touched only by its own beneficiary (<code>test_TwoLendersHoldLiensOnOneHolderAndNeitherTouchesTheOthers</code>).</div></li>
+  </ol>
+  <div class="prose wrap-any">
+    <p><b>Nothing here is forced.</b> Every movement in and out is a plain transfer, which the token's policy judges like any other. The vault is an ordinary holder of each token, so it needs whatever that token's policy asks of a holder: a credential, given by the attester.</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>When</th><th>What happens</th></tr></thead>
+      <tbody>
+        <tr><td>The token is paused</td><td>Nothing enters or leaves, <code>recover</code> included (<code>test_NothingLeavesWhileTheTokenIsPaused</code>).</td></tr>
+        <tr><td>The policy no longer admits the beneficiary</td><td>It cannot seize. It can <code>assign</code> the lien to an account the policy admits, which then can (<code>test_ABeneficiaryThePolicyRefusesCannotSeizeAndCanAfterAssigning</code>).</td></tr>
+        <tr><td>The pledgor is frozen or no longer admitted</td><td>A release to it reverts and the tokens stay under the lien (<code>test_AReleaseToAFrozenPledgorIsRefusedAndTheTokensStay</code>). The beneficiary can still seize.</td></tr>
+        <tr><td>The holder is inside a lockup</td><td>It cannot pledge: a pledge is a transfer, and <code>HolderRestrictionRule</code> refuses it (<code>test_AHolderInsideItsLockupCannotPledge</code>).</td></tr>
+        <tr><td>The token takes signed intents only (<code>ExecutedOnlyRule</code>)</td><td>It cannot be pledged. Not supported.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="enforcement">
+  <div class="prose wrap-any">
+    <h2>Enforcement on pledged tokens</h2>
+    <p>The vault's balance of a token is every pledgor's together. The token's own <code>forcedTransfer</code> out of the vault cannot say whose tokens it takes, and it leaves liens the balance no longer covers. So the vault has its own path: <code>recover(lienId, to)</code>, for an account that holds the token's <code>AGENT_ROLE</code>, which the vault asks the token at the moment of the call. It moves everything the lien holds to <code>to</code> and closes the lien.</p>
+    <ul class="plain">
+      <li><b>It is a plain transfer too.</b> The vault holds no role, so it cannot force anything. The token must be unpaused and its policy must admit <code>to</code> (<code>test_ARecoveryToAnAccountThePolicyRefusesIsRefused</code>).</li>
+      <li><b>It works when the pledgor and the beneficiary are both frozen or blocked.</b> Neither is a party to that transfer: the vault sends and <code>to</code> receives (<code>test_TheTokensAgentRecoversALienWhenThePledgorAndTheBeneficiaryAreBothRefused</code>).</li>
+      <li><b>On a token with no such role it does nothing.</b> The call to the token reverts (<code>test_OnATokenWithNoRolesNobodyRecovers</code>).</li>
+    </ul>
+    <p>An agent that uses <code>forcedTransfer</code> on the vault's address anyway is caught by the <a href="../deployment.html#operations">reconciler</a>, which names a token of which the vault holds less than its liens book.</p>
+  </div>
+</section>
+
+<section id="functions">
+  <div class="prose wrap-any"><h2>What it can do</h2></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Function</th><th>Who can call</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>pledge(token, amount, beneficiary)</code></td><td>Any holder, for its own tokens</td><td>Pulls the amount under the caller's allowance and opens a lien. Returns its id.</td></tr>
+        <tr><td><code>increase(lienId, amount)</code></td><td>The lien's pledgor</td><td>Adds to the lien.</td></tr>
+        <tr><td><code>release(lienId, amount)</code></td><td>The lien's beneficiary</td><td>Sends the amount back to the pledgor.</td></tr>
+        <tr><td><code>seize(lienId, amount)</code></td><td>The lien's beneficiary, at any time</td><td>Sends the amount to the beneficiary.</td></tr>
+        <tr><td><code>assign(lienId, newBeneficiary)</code></td><td>The lien's beneficiary</td><td>Hands the lien to another account.</td></tr>
+        <tr><td><code>recover(lienId, to)</code></td><td>A holder of the token's <code>AGENT_ROLE</code></td><td>Sends everything the lien holds to <code>to</code> and closes it.</td></tr>
+        <tr><td><code>lienOf(lienId)</code>, <code>lienCount()</code></td><td>Anyone (read-only)</td><td>One lien, all zero once closed; and how many were ever opened, so ids run from 1 to that.</td></tr>
+        <tr><td><code>pledgedOf(token, pledgor)</code>, <code>totalPledged(token)</code></td><td>Anyone (read-only)</td><td>What one holder has pledged of a token over all its liens, and what all liens on the token hold.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose wrap-any">
+    <p>Any other caller gets <code>LienVault_Unauthorized</code>. A zero address, a zero amount, or the vault itself named as a beneficiary or a recovery account gets <code>LienVault_InvalidValue</code>: none of those could ever act on a lien (<code>test_AZeroValueIsRefusedEverywhere</code>). An amount above what the lien holds gets <code>LienVault_ExceedsLien</code>. Each change emits one event: <code>LienOpened</code>, <code>LienIncreased</code>, <code>LienReleased</code>, <code>LienSeized</code>, <code>LienAssigned</code>, <code>LienRecovered</code>.</p>
+  </div>
+</section>
+
+<section id="why">
+  <div class="prose wrap-any">
+    <h2>Why it is built this way</h2>
+    <ul class="plain">
+      <li><b>An escrow, not a rule.</b> The other design keeps pledged tokens in the holder's balance and gives a contract <code>AGENT_ROLE</code> to seize them. Then a fault in that contract reaches every holder's tokens. Here it reaches only what was pledged.</li>
+      <li><b>The beneficiary alone, with no date and no proof.</b> A default is a fact off-chain. A date after which seizure opens would say nothing about one.</li>
+      <li><b>The books change before the tokens move,</b> and every function holds a reentrancy guard, so a token that calls back in the middle of a transfer finds the lien already lowered and the door shut (<code>test_ABeneficiaryCannotReenterFromTheTokensCallback</code>).</li>
+      <li><b>No pause of its own.</b> A token's pause already stops every movement in and out.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="prose wrap-any">
+    <h2>What it does not do</h2>
+    <ul class="plain">
+      <li><b>It does not keep the holder on the register.</b> The vault is the holder of record of what it holds. Whoever builds a distribution's list from balances reads the liens and credits each pledgor, or the vault would be paid. That look-through is a step in the operator's process and nothing on-chain enforces it.</li>
+      <li><b>It does not keep a fund's count true.</b> A fund exempts the vault, so a holder that pledges its whole position leaves the count while it still owns the position, and another investor can take its place. When the lien is then released at a full fund, the release is refused with <code>MAX_HOLDERS</code> until a slot is free. The count on-chain is of holders of record. The reconciler reports the number with the pledgors added. For a fund with a cap in law, that gap is a question for counsel before the fund lists the vault.</li>
+      <li><b>It does not let a locked holder pledge,</b> as above.</li>
+      <li><b>It does not promise a small lien can be taken.</b> The vault is exempt from a token's minimum position. A lender that holds nothing cannot seize a lien smaller than the minimum, and nobody can know that when the lien is made.</li>
+      <li><b>It does not judge a seizure.</b> A beneficiary can take what its lien holds at any time, for any reason.</li>
+      <li><b>It does not hold NFTs or multi-token series.</b> ERC-20 only in this version.</li>
+      <li><b>It has no signed path.</b> The holder sends its own <code>approve</code> and its own <code>pledge</code>.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="connected">
+  <div class="prose wrap-any"><h2>Connected to</h2></div>
+  <div class="cards">
+    <a class="card" href="PolicyGatedERC20Upgradeable.html"><span class="name">PolicyGatedERC20Upgradeable</span><p>The tokens it holds, whose policy judges every movement in and out and whose agent may recover a lien.</p></a>
+    <a class="card" href="Fund.html"><span class="name">Fund</span><p>Exempts the vault from its count, with the gap that leaves.</p></a>
+    <a class="card" href="MinPositionRule.html"><span class="name">MinPositionRule</span><p>Exempts the vault on each token, as any pooling account.</p></a>
+    <a class="card" href="Distributor.html"><span class="name">Distributor</span><p>Its list is built off-chain, and must look through the vault to the pledgors.</p></a>
+  </div>
+</section>
+
+<section id="source">
+  <div class="prose wrap-any">
+    <h2>Source and tests</h2>
+    <ul class="plain">
+      <li>Contract: <code>contracts/escrow/LienVault.sol</code>, interface <code>ILienVault.sol</code></li>
+      <li>Tests: <code>LienVault.t.sol</code> on a real token behind the credential registry, its rule, the holder restriction rule and the hook, with <code>invariant_TheBalanceCoversTheLiensAndTheSumsAgree</code>; <code>contracts/test/halmos/LienVaultHalmos.t.sol</code>; and <code>test/nodejs/lien.test.ts</code> for the part, the check, the fund's count, the minimum and the reconciler</li>
+    </ul>
+  </div>
+</section>
+
+</main>
+</body>
+</html>
