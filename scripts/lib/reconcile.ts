@@ -20,7 +20,8 @@ export type Ledger = Record<string, string | number>;
  * - a token of which the lien vault holds less than its liens book, which a forced transfer straight out of the vault
  *   causes: enforcement on pledged tokens goes through the vault's `recover`;
  * - a fund with accounts that hold its classes only through the lien vault. The fund exempts the vault, so those owners
- *   are not in its count, and the line gives the number with them;
+ *   are not in its count, and the line gives the number with them, counted as the fund counts: by the investor the
+ *   credential registry gives each address, and none for an investor another of whose addresses is still counted;
  * - a distribution past its expiry with money still in it, which `sweep` returns to its funder. A distributor numbers
  *   its distributions from 1 and none has an empty root, so they are read one by one until the first that has, and no
  *   log is read: a first block set too late cannot hide one.
@@ -108,9 +109,20 @@ export async function reconcile(
           if ((await fund.read.heldClasses([who])) === 0n && !(await fund.read.isExempt([who]))) hidden.add(account);
         }
       }
-      if (hidden.size === 0) continue;
+      // The fund counts investors, so the owners it misses are counted the same way: an account whose investor still has
+      // a counted address is no one new, and accounts the registry gives one key are one owner.
+      const credentials = await fund.read.CREDENTIALS();
+      const registry = isAddressEqual(credentials, zeroAddress) ? undefined : await viem.getContractAt("CredentialRegistry", credentials);
+      const missed = new Set<string>();
+      for (const account of hidden) {
+        const who = account as `0x${string}`;
+        if ((await fund.read.countedWith([who])) !== 0n) continue;
+        const entity = registry === undefined ? 0n : await registry.read.entityKeyOf([who]);
+        missed.add(entity === 0n ? account : entity.toString());
+      }
+      if (missed.size === 0) continue;
       const counted = await fund.read.holderCount();
-      lines.push(`fund ${key}: ${hidden.size} account${hidden.size === 1 ? " holds" : "s hold"} its classes only through the lien vault, so ${counted + BigInt(hidden.size)} owners are counted as ${counted}`);
+      lines.push(`fund ${key}: ${hidden.size} account${hidden.size === 1 ? " holds" : "s hold"} its classes only through the lien vault, so ${counted + BigInt(missed.size)} owners are counted as ${counted}`);
     }
   }
   return lines;
