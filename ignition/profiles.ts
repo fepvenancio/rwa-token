@@ -74,7 +74,9 @@ export type SensitiveRole = "minter" | "burner" | "agent" | "settler";
  * lets a single key hold, for example an MPC custody wallet whose policy engine does the same job. A real deployment states
  * each one on purpose. `signedEntry` adds the one `SignedEntry` the issuer's vaults can be entered through, and `signedExit`
  * the one `SignedExit` they can be left through and a 7540's settled claims delivered by. `orderSettlement` adds the one
- * `OrderSettlement`, which needs no role on any token: makers give it allowances and sign orders.
+ * `OrderSettlement`, which needs no role on any token: makers give it allowances and sign orders. `lienVault` adds the one
+ * `LienVault`, the escrow holders pledge tokens into: `FundOpen` exempts it from each fund's count and `Product` from each
+ * product's minimum position, and the attester credentials it on each token that may be pledged.
  *
  * `credentials` chooses the KYC registry: `"own"` (the default) deploys the core's own `CredentialRegistry` and
  * `CredentialRule`; `"external"` deploys neither, and the deployment's parameters name an existing `credentialRule` and the
@@ -87,6 +89,7 @@ export type Profile = {
   singleSigners?: readonly SensitiveRole[];
   signedEntry?: boolean;
   signedExit?: boolean;
+  lienVault?: boolean;
   orderSettlement?: boolean;
   credentials?: "own" | "external";
 };
@@ -176,14 +179,14 @@ export function assertUsable(product: Product) {
 const CORE_RULES: readonly RuleKey[] = ["credentialRule", "minPositionRule", "holderRestrictionRule", "windowRule", "supplyCapRule", "executedOnlyRule"];
 
 /** Every key a part of a core can have: the rules, the implementations, the executors, the signed entry and the signed exit. */
-export const PART_KEYS: readonly string[] = [...CORE_RULES, ...Object.values(IMPLEMENTATION_KEY), "executor", "dvpExecutor", "orderSettlement", "signedEntry", "signedExit"];
+export const PART_KEYS: readonly string[] = [...CORE_RULES, ...Object.values(IMPLEMENTATION_KEY), "executor", "dvpExecutor", "orderSettlement", "signedEntry", "signedExit", "lienVault"];
 
 /**
  * What a core needs for these products, by the key each part has in the core and in the parameters: the rules, one
  * implementation per template, the executors and the signed entry. `credentialRule` brings its `credentialRegistry`, unless
  * the profile reads an external one.
  */
-export function partsOf(profile: Pick<Profile, "products" | "signedEntry" | "signedExit" | "orderSettlement" | "credentials">): string[] {
+export function partsOf(profile: Pick<Profile, "products" | "signedEntry" | "signedExit" | "lienVault" | "orderSettlement" | "credentials">): string[] {
   const rules = new Set(profile.products.flatMap((product) => product.rules));
   if (profile.credentials === "external") rules.delete("credentialRule");
   const templates = new Set(profile.products.map((product) => product.template));
@@ -196,12 +199,13 @@ export function partsOf(profile: Pick<Profile, "products" | "signedEntry" | "sig
     ...(profile.orderSettlement ? ["orderSettlement"] : []),
     ...(profile.signedEntry ? ["signedEntry"] : []),
     ...(profile.signedExit ? ["signedExit"] : []),
+    ...(profile.lienVault ? ["lienVault"] : []),
   ];
 }
 
 /** The parts these products need that a running core, whose parts are `present`, does not have. */
 export const missingParts = (
-  profile: Pick<Profile, "products" | "signedEntry" | "signedExit" | "orderSettlement" | "credentials">,
+  profile: Pick<Profile, "products" | "signedEntry" | "signedExit" | "lienVault" | "orderSettlement" | "credentials">,
   present: readonly string[],
 ) =>
   partsOf(profile).filter((part) => !present.includes(part));

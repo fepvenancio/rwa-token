@@ -420,6 +420,15 @@ describe("the accrue keeper", async function () {
     assert.ok(!again.includes(master.address.toLowerCase()), "the master was counted twice");
     assert.ok(!again.includes(s.products.professionalClass.address.toLowerCase()));
 
+    // The outside vault loses everything: the master's value reads nothing although its holders have a value counted.
+    // A count then writes nothing, so the keeper sends none for the master; its classes read no fresh price from it.
+    const target = await viem.getContractAt("MockERC4626Target", await outside.read.TARGET());
+    await target.write.lose([await s.asset.read.balanceOf([target.address])]);
+    const stopped = await runKeeper(connection, "accrue", file, { account: keeper });
+    assert.deepEqual(stopped.sent, []);
+    assert.deepEqual(stopped.skipped, ["count master: its value reads nothing, so a count would write nothing", "count professionalClass: its portfolio gives no fresh price", "count retailClass: its portfolio gives no fresh price"]);
+    await s.asset.write.mint([target.address, usd(1050n)]);
+
     // A vault that has stopped dealing is left out, by name.
     await master.write.pause({ account: s.wallets.guardian.account });
     await networkHelpers.time.increase(YEAR);

@@ -398,6 +398,7 @@ The list is a claim, like a NAV report: the root proves which list two people ap
 - [DvPExecutor](contracts/DvPExecutor.md): Atomic settlement of a security against cash.
 - [SignedEntry](contracts/SignedEntry.md): Entering a vault with signatures.
 - [SignedExit](contracts/SignedExit.md): Leaving a vault with signatures, and delivering a 7540's settled claims.
+- [LienVault](contracts/LienVault.md): Where pledged tokens sit, under a lien.
 - [Distributor](contracts/Distributor.md): Pays a funded distribution to holders who claim.
 - [IntentToken](contracts/IntentToken.md): The token whose balances are the record.
 - [One movement](movement.md): What the rules do with each share movement.
