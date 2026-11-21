@@ -213,6 +213,7 @@ export async function loadStack(connection: NetworkConnection, file: StackFile, 
     orderSettlement: core.orderSettlement === undefined ? undefined : await viem.getContractAt("OrderSettlement", core.orderSettlement),
     signedEntry: core.signedEntry === undefined ? undefined : await viem.getContractAt("SignedEntry", core.signedEntry),
     signedExit: core.signedExit === undefined ? undefined : await viem.getContractAt("SignedExit", core.signedExit),
+    lienVault: core.lienVault === undefined ? undefined : await viem.getContractAt("LienVault", core.lienVault),
     rules: {
       credentialRule,
       minPositionRule: core.minPositionRule === undefined ? undefined : await viem.getContractAt("MinPositionRule", core.minPositionRule),

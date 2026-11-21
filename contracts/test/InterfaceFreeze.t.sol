@@ -38,6 +38,7 @@ import {IHolderRestrictionRule} from 'interfaces/IHolderRestrictionRule.sol';
 import {IIdentityRegistry} from 'interfaces/IIdentityRegistry.sol';
 import {IIntentExecutor} from 'interfaces/IIntentExecutor.sol';
 import {IIntentExecutorBatch} from 'interfaces/IIntentExecutorBatch.sol';
+import {ILienVault} from 'interfaces/ILienVault.sol';
 import {IMinPositionRule} from 'interfaces/IMinPositionRule.sol';
 import {INavDesk} from 'interfaces/INavDesk.sol';
 import {IOrderSettlement} from 'interfaces/IOrderSettlement.sol';
@@ -161,6 +162,7 @@ contract InterfaceFreezeTest is Test {
     assertEq(type(IGated7540Vault).interfaceId, bytes4(0xa61d9790), 'IGated7540Vault');
     // Re-pinned 2026-11-02 on owner instruction: the redemption gate, which adds a field to the struct `hashOf` takes
     // (was 0x6d2f4b62)
+    assertEq(type(ILienVault).interfaceId, bytes4(0xc6d42512), 'ILienVault');
     assertEq(type(INavDesk).interfaceId, bytes4(0x17066f0f), 'INavDesk');
     assertEq(type(IOrderSettlement).interfaceId, bytes4(0xb48f6d63), 'IOrderSettlement');
     assertEq(type(ISignedEntry).interfaceId, bytes4(0x05cc4f78), 'ISignedEntry');
@@ -279,6 +281,12 @@ contract InterfaceFreezeTest is Test {
     assertEq(ISignedExit.ExitExecuted.selector, 0x8b2329fbf60adbfc308eb570691f34d1b443248839347d2a331a57db9abbbee5);
     assertEq(ISignedExit.ClaimDelivered.selector, 0x4fab0c6687d4c04acba77523929cdbf7aeec6c266f3faff7b1b0ec904bbee0aa);
     assertEq(ISignedExit.ClaimSkipped.selector, 0x9377609760104fb36a6ec9be22df2fa6a1251cf1048efb47772890233ae92597);
+    assertEq(ILienVault.LienOpened.selector, 0xb3de9ba3d098527c34c717a35ce4acecb8d20a0a9450ffc547bf7db61409baeb);
+    assertEq(ILienVault.LienIncreased.selector, 0x3a113a62d8b2b483e3d8cef6129d042704ece8427c729a8654634b37291cde2e);
+    assertEq(ILienVault.LienReleased.selector, 0x826cf37d548a015e11e3e939759a7fa469e7e76c05ba4bffe6beb1747e79b85b);
+    assertEq(ILienVault.LienSeized.selector, 0x48992bf54bcdfb138089a2bf7dbed7c4a934240b164e551f7bb02b83b26a8a47);
+    assertEq(ILienVault.LienAssigned.selector, 0xe1ecb6bc3229bb6a037bcfa3154db985f11edff686485972fb36cea2c2b8dc68);
+    assertEq(ILienVault.LienRecovered.selector, 0x4d2445d0791d2fc9e9d78de8ffc0ee9772a2f06753faa111c3874b839b89e648);
     assertEq(IGuardedAccount.CallMade.selector, 0xf7069cb373783a30940dc185ef11ac49cdc063baa4035fbd6c914a9ab6975350);
     assertEq(
       IGuardedAccount.PermissionRevoked.selector, 0x9490008f9cc8bcb46b963024434fb1ff254b868936cc6c7614597b1b1a37c6a7

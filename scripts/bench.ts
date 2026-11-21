@@ -27,6 +27,9 @@ const FLOWS = [
   "distribution: claim",
   "distribution: 100 claims, one by one",
   "distribution: claimBatch, 100 holders",
+  "lien: pledge",
+  "lien: release",
+  "lien: seize",
 ];
 
 const run = spawnSync("npx", ["hardhat", "test", "solidity", "contracts/test/Bench.t.sol"], {

@@ -55,6 +55,7 @@ const DEPLOYED = {
   SignedExit: "intents",
   NavDesk: "nav",
   Distributor: "distribution",
+  LienVault: "escrow",
   ProxyDeployer: "deploy",
   Fund: "fund",
   TokenProxy: "deploy",

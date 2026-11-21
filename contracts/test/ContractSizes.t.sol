@@ -10,6 +10,7 @@ import {IPolicyRegistry} from 'interfaces/IPolicyRegistry.sol';
 
 import {ProxyDeployer} from 'contracts/deploy/ProxyDeployer.sol';
 import {Distributor} from 'contracts/distribution/Distributor.sol';
+import {LienVault} from 'contracts/escrow/LienVault.sol';
 import {Fund} from 'contracts/fund/Fund.sol';
 import {GovernanceTimelock} from 'contracts/governance/GovernanceTimelock.sol';
 import {PolicyRegistry} from 'contracts/governance/PolicyRegistry.sol';
@@ -87,6 +88,7 @@ contract ContractSizesTest is Test {
     _assertFits('FundHoldersRule', address(new FundHoldersRule(IFund(address(_fund)))));
     MockAsset _asset = new MockAsset(6);
     _assertFits('Portfolio', address(new Portfolio(address(this), IERC20(address(_asset)), true)));
+    _assertFits('LienVault', address(new LienVault()));
     _assertFits('NavDesk', address(new NavDesk(address(this), address(this), 1 days, 1 hours, 1 days)));
     _assertFits('OrderSettlement', address(new OrderSettlement(address(this), address(this))));
     _assertFits('SignedEntry', address(new SignedEntry()));

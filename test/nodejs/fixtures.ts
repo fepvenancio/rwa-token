@@ -235,6 +235,7 @@ async function stages(connection: NetworkConnection, profile: Profile) {
     orderSettlement: has("orderSettlement") ? await viem.getContractAt("OrderSettlement", components.orderSettlement.address) : undefined,
     signedEntry: has("signedEntry") ? await viem.getContractAt("SignedEntry", components.signedEntry.address) : undefined,
     signedExit: has("signedExit") ? await viem.getContractAt("SignedExit", components.signedExit.address) : undefined,
+    lienVault: has("lienVault") ? await viem.getContractAt("LienVault", components.lienVault.address) : undefined,
     rules: await attachRules(),
   });
   const attachRules = async () => ({
@@ -249,7 +250,7 @@ async function stages(connection: NetworkConnection, profile: Profile) {
     supplyCapRule: has("supplyCapRule") ? await viem.getContractAt("SupplyCapRule", components.supplyCapRule.address) : undefined,
     executedOnlyRule: has("executedOnlyRule") ? await viem.getContractAt("ExecutedOnlyRule", components.executedOnlyRule.address) : undefined,
   });
-  let { credentials, executor, dvpExecutor, orderSettlement, signedEntry, signedExit, rules } = await attachParts();
+  let { credentials, executor, dvpExecutor, orderSettlement, signedEntry, signedExit, lienVault, rules } = await attachParts();
 
   const attest = async (target: Address, kind: number, uri: string) => {
     const code = await publicClient.getCode({ address: target });
@@ -331,7 +332,7 @@ async function stages(connection: NetworkConnection, profile: Profile) {
       if (p.credentialRule === undefined) throw new Error("an external credential registry needs the credentialRule parameter");
       externalRule = p.credentialRule as Address;
       await attest(externalRule, ATTEST.RULE, `ipfs://rule-review/${externalRule}`);
-      ({ credentials, executor, dvpExecutor, orderSettlement, signedEntry, signedExit, rules } = await attachParts());
+      ({ credentials, executor, dvpExecutor, orderSettlement, signedEntry, signedExit, lienVault, rules } = await attachParts());
     }
 
     // Each fund, with the council attesting its rule: a class cannot list the rule before that.
@@ -404,7 +405,7 @@ async function stages(connection: NetworkConnection, profile: Profile) {
 
     /** Runs `Product` as the operations account, with the parameters that are specific to this product. */
     const place = async (product: Product) => {
-      const module = productModule(product);
+      const module = productModule(product, profile.lienVault === true);
       const assetAddress = (product.assetProduct === undefined ? p.asset : placed[product.assetProduct].address) as Address;
       const built = await buildLegos(product, assetAddress);
       const { token } = await ignition.deploy(module, {
@@ -445,7 +446,7 @@ async function stages(connection: NetworkConnection, profile: Profile) {
      * Adds to the running core what these products, or a signed entry, need and it lacks, as an issuer would: `CoreParts`,
      * the council's attestations, then `PartsHandover`. The stack then reads the new parts. Returns the parts added.
      */
-    const addParts = async (wanted: Pick<Profile, "products" | "signedEntry" | "signedExit" | "orderSettlement">) => {
+    const addParts = async (wanted: Pick<Profile, "products" | "signedEntry" | "signedExit" | "lienVault" | "orderSettlement">) => {
       const present = Object.keys(components);
       const parts = missingParts({ ...wanted, credentials: profile.credentials }, present);
       const module = corePartsModule(parts, present);
@@ -457,7 +458,7 @@ async function stages(connection: NetworkConnection, profile: Profile) {
       await attestParts(Object.keys(added));
       const partsHandover = partsHandoverModule(parts);
       await ignition.deploy(partsHandover, { parameters: { [partsHandover.id]: p } });
-      ({ credentials, executor, dvpExecutor, orderSettlement, signedEntry, signedExit, rules } = await attachParts());
+      ({ credentials, executor, dvpExecutor, orderSettlement, signedEntry, signedExit, lienVault, rules } = await attachParts());
       if (rules.windowRule !== undefined) p.windowDays = await rules.windowRule.read.MON_TO_FRI();
       Object.assign(stack, {
         credentials,
@@ -466,12 +467,14 @@ async function stages(connection: NetworkConnection, profile: Profile) {
         orderSettlement,
         signedEntry,
         signedExit,
+        lienVault,
         rules: { ...rules, fundHoldersRule: stack.rules.fundHoldersRule },
         profile: {
           ...stack.profile,
           orderSettlement: stack.profile.orderSettlement === true || wanted.orderSettlement === true,
           signedEntry: stack.profile.signedEntry === true || wanted.signedEntry === true,
           signedExit: stack.profile.signedExit === true || wanted.signedExit === true,
+          lienVault: stack.profile.lienVault === true || wanted.lienVault === true,
         },
       });
       return parts;
@@ -481,7 +484,7 @@ async function stages(connection: NetworkConnection, profile: Profile) {
     for (const product of profile.products) products.push({ product, contract: await place(product) });
 
     for (const [key, { fund, rule, cap, classes }] of Object.entries(funds)) {
-      const module = fundOpenModule(key, classes);
+      const module = fundOpenModule(key, classes, profile.lienVault === true);
       await ignition.deploy(module, {
         parameters: {
           [module.id]: {
@@ -489,6 +492,7 @@ async function stages(connection: NetworkConnection, profile: Profile) {
             fundHoldersRule: rule.address,
             holderCap: cap,
             timelock: timelock.address,
+            ...(lienVault === undefined ? {} : { lienVault: lienVault.address }),
             ...Object.fromEntries(classes.map((name) => [`class_${name}`, placed[name].address])),
           },
         },
@@ -514,6 +518,7 @@ async function stages(connection: NetworkConnection, profile: Profile) {
       orderSettlement,
       signedEntry,
       signedExit,
+      lienVault,
       rules: { ...rules, fundHoldersRule: firstFund?.rule },
       asset,
       deployed: products,
