@@ -105,6 +105,28 @@ describe("the lien vault as a part of a core", async function () {
     assert.deepEqual(await reconcile(connection, file, {}, WITH_LIENS), []);
   });
 
+  it("the reconciler counts owners behind the vault by investor: two addresses of one are one, and none when it is still counted", async function () {
+    const { s, liens, token, alice, bob, carol, file } = await networkHelpers.loadFixture(pledged);
+    // The attester links alice and carol as one investor, and the fund is brought into line.
+    for (const who of [alice, carol]) {
+      await verify(s, who, { entity: 7 });
+      await s.fund!.write.rekey([who.account.address], { account: bob.account });
+    }
+    assert.equal(await s.fund!.read.holderCount(), 2n);
+
+    // Alice pledges everything. Her investor still holds through carol, so the count misses nobody.
+    await liens.write.pledge([token.address, 100n, bob.account.address], { account: alice.account });
+    assert.equal(await s.fund!.read.holderCount(), 2n);
+    assert.deepEqual(await reconcile(connection, file, {}, WITH_LIENS), []);
+
+    // Carol pledges everything too: two accounts behind the vault, and one investor missing from the count.
+    await liens.write.pledge([token.address, 100n, bob.account.address], { account: carol.account });
+    assert.equal(await s.fund!.read.holderCount(), 1n);
+    const lines = await reconcile(connection, file, {}, WITH_LIENS);
+    assert.equal(lines.length, 1, lines.join("\n"));
+    assert.match(lines[0], /fund main: 2 accounts hold its classes only through the lien vault, so 2 owners are counted as 1/);
+  });
+
   it("a pledge may not leave the holder with dust, and a lien below the minimum cannot be taken by a lender that holds nothing", async function () {
     const { liens, token, alice, eve } = await networkHelpers.loadFixture(pledged);
     await viem.assertions.revertWithCustomErrorWithArgs(
